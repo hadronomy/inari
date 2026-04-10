@@ -1,7 +1,7 @@
 [project]
 name = "iot-agent"
-version = "1.0.0"
-description = "Local hardware bridge for Odoo Community POS"
+version = "1.2.0"
+description = "Extensible local hardware bridge for Odoo Community POS"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",

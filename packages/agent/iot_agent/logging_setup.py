@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def configure_logging(level: str = "INFO", *, log_dir: str = "./logs") -> None:
+def configure_logging(level: str = "INFO", *, log_dir: str | Path = "./logs") -> None:
     path = Path(log_dir)
     path.mkdir(parents=True, exist_ok=True)
 
@@ -24,6 +24,11 @@ def configure_logging(level: str = "INFO", *, log_dir: str = "./logs") -> None:
 
     root = logging.getLogger()
     root.setLevel(level.upper())
-    root.handlers.clear()
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:  # pragma: no cover - defensive cleanup
+            pass
     root.addHandler(file_handler)
     root.addHandler(console_handler)

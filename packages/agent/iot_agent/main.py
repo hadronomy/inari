@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .api import router
+from .container import AgentContainer, build_container, get_default_container
 from .config import AgentSettings, get_settings
 from .exceptions import AgentError
 from .logging_setup import configure_logging
@@ -15,19 +15,21 @@ from .models import ErrorResponse
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
-    settings = get_settings()
-    configure_logging(settings.log_level, log_dir=settings.log_dir)
+async def lifespan(app: FastAPI):
+    container: AgentContainer = app.state.container
+    configure_logging(container.settings.log_level, log_dir=container.settings.log_dir)
     yield
 
 
-def create_app(settings: AgentSettings | None = None) -> FastAPI:
-    app_settings = settings or get_settings()
+def create_app(settings: AgentSettings | None = None, *, container: AgentContainer | None = None) -> FastAPI:
+    app_container = container or (build_container(settings) if settings is not None else get_default_container())
+    app_settings = app_container.settings
     app = FastAPI(
         title="Odoo IoT Agent",
-        version="1.1.0",
+        version="1.2.0",
         lifespan=lifespan,
     )
+    app.state.container = app_container
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
@@ -63,6 +65,8 @@ app = create_app()
 
 
 def main() -> None:
+    import uvicorn
+
     settings = get_settings()
     uvicorn.run(
         "iot_agent.main:app",

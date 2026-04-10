@@ -1,15 +1,23 @@
-from functools import lru_cache
+from __future__ import annotations
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
 from .config import AgentSettings
+from .container import AgentContainer, get_default_container
 from .printer_service import PrinterService
 
 
-@lru_cache
-def get_settings() -> AgentSettings:
-    return AgentSettings()
+def get_container(request: Request) -> AgentContainer:
+    container = getattr(request.app.state, "container", None)
+    if container is None:
+        container = get_default_container()
+        request.app.state.container = container
+    return container
 
 
-def get_printer_service(settings: AgentSettings = Depends(get_settings)) -> PrinterService:
-    return PrinterService(settings=settings)
+def get_settings(container: AgentContainer = Depends(get_container)) -> AgentSettings:
+    return container.settings
+
+
+def get_printer_service(container: AgentContainer = Depends(get_container)) -> PrinterService:
+    return container.printer_service
