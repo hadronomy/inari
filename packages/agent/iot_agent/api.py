@@ -4,25 +4,24 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from .config import AgentSettings
-from .dependencies import get_printer_service, get_settings
-from .exceptions import PrinterServiceError
+from .dependencies import get_printer_service
 from .models import (
     ActionResponse,
     DrawerRequest,
     HealthResponse,
     PrintHtmlRequest,
+    PrintJobRequest,
     PrintReceiptRequest,
     PrinterInfoResponse,
     PrintersResponse,
     TestPrintRequest,
 )
 from .printer_service import PrinterService
+from .printers import PrintJobResult
 from .printers import PrinterTransport
 
 router = APIRouter(tags=["printing"])
 PrinterServiceDependency = Annotated[PrinterService, Depends(get_printer_service)]
-SettingsDependency = Annotated[AgentSettings, Depends(get_settings)]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -55,26 +54,24 @@ def printers(printer_service: PrinterServiceDependency) -> PrintersResponse:
     )
 
 
+@router.post("/print", response_model=ActionResponse)
+def print_job(
+    request: PrintJobRequest,
+    printer_service: PrinterServiceDependency,
+) -> ActionResponse:
+    return _to_action_response(
+        printer_service.print_job(request.to_domain()),
+        detail="Print job submitted.",
+    )
+
+
 @router.post("/print_receipt", response_model=ActionResponse)
 def print_receipt(
     request: PrintReceiptRequest,
     printer_service: PrinterServiceDependency,
 ) -> ActionResponse:
-    result = printer_service.print_odoo_receipt(
-        request.receipt,
-        printer_name=request.printer_name,
-        transport=request.mode,
-        document_name="Odoo Receipt",
-    )
-
-    if request.open_drawer:
-        printer_service.open_cash_drawer(printer_name=request.printer_name)
-
-    return ActionResponse(
-        printer_name=result.printer_name,
-        driver=result.printer.driver_key,
-        mode=result.transport,
-        bytes_written=result.bytes_written,
+    return _to_action_response(
+        printer_service.print_job(request.to_domain()),
         detail="Receipt sent successfully.",
     )
 
@@ -82,29 +79,10 @@ def print_receipt(
 @router.post("/print_html", response_model=ActionResponse)
 def print_html(
     request: PrintHtmlRequest,
-    settings: SettingsDependency,
     printer_service: PrinterServiceDependency,
 ) -> ActionResponse:
-    if not settings.html_print_enabled:
-        raise PrinterServiceError(
-            "HTML_MODE_DISABLED",
-            "HTML printing is disabled.",
-        )
-
-    result = printer_service.print_html_document(
-        request.html,
-        printer_name=request.printer_name,
-        title="Odoo HTML Document",
-    )
-
-    if request.open_drawer:
-        printer_service.open_cash_drawer(printer_name=request.printer_name)
-
-    return ActionResponse(
-        printer_name=result.printer_name,
-        driver=result.printer.driver_key,
-        mode=result.transport,
-        bytes_written=result.bytes_written,
+    return _to_action_response(
+        printer_service.print_job(request.to_domain()),
         detail="HTML print job submitted.",
     )
 
@@ -114,12 +92,8 @@ def open_drawer(
     request: DrawerRequest,
     printer_service: PrinterServiceDependency,
 ) -> ActionResponse:
-    result = printer_service.open_cash_drawer(printer_name=request.printer_name)
-    return ActionResponse(
-        printer_name=result.printer_name,
-        driver=result.printer.driver_key,
-        mode=result.transport,
-        bytes_written=result.bytes_written,
+    return _to_action_response(
+        printer_service.open_cash_drawer(printer_name=request.printer_name),
         detail="Drawer pulse sent.",
     )
 
@@ -134,14 +108,21 @@ def test_print(
         transport=request.mode,
     )
 
-    return ActionResponse(
-        printer_name=result.printer_name,
-        driver=result.printer.driver_key,
-        mode=result.transport,
-        bytes_written=result.bytes_written,
+    return _to_action_response(
+        result,
         detail=(
             "RAW receipt test sent."
             if result.transport is PrinterTransport.RAW
             else "Windows text/document print test submitted."
         ),
+    )
+
+
+def _to_action_response(result: PrintJobResult, *, detail: str) -> ActionResponse:
+    return ActionResponse(
+        printer_name=result.printer_name,
+        driver=result.printer.driver_key,
+        mode=result.transport,
+        bytes_written=result.bytes_written,
+        detail=detail,
     )

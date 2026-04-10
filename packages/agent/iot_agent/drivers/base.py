@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 
 class DeviceKind(StrEnum):
@@ -22,7 +22,7 @@ class DriverMetadata:
 
 @runtime_checkable
 class DeviceDriver(Protocol):
-    metadata: DriverMetadata
+    metadata: ClassVar[DriverMetadata]
 
     def is_available(self) -> bool:
         """Return whether the driver can operate on the current machine."""

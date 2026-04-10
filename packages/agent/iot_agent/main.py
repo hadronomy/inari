@@ -26,7 +26,7 @@ def create_app(settings: AgentSettings | None = None, *, container: AgentContain
     app_settings = app_container.settings
     app = FastAPI(
         title="Odoo IoT Agent",
-        version="1.2.0",
+        version="1.3.0",
         lifespan=lifespan,
     )
     app.state.container = app_container
