@@ -1,0 +1,24 @@
+[project]
+name = "iot-agent"
+version = "1.0.0"
+description = "Local hardware bridge for Odoo Community POS"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0,<1.0.0",
+  "uvicorn[standard]>=0.30.0,<1.0.0",
+  "pydantic>=2.8.0,<3.0.0",
+  "pydantic-settings>=2.4.0,<3.0.0",
+  "pywin32>=306; platform_system == 'Windows'",
+]
+
+[project.scripts]
+iot-agent = "iot_agent.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iot_agent*"]
+exclude = ["notebooks*", "tests*"]
