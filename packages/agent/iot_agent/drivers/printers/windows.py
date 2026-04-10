@@ -15,6 +15,7 @@ from ...printers.types import (
     RenderedDocument,
 )
 from ..base import DeviceKind, DriverMetadata
+from .base import PrinterDriver
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +173,7 @@ class WindowsSpooler:
 
 
 @dataclass(slots=True)
-class WindowsPrinterDriver:
+class WindowsPrinterDriver(PrinterDriver):
     spooler: WindowsSpooler
     default_transport: PrinterTransport = PrinterTransport.AUTO
     raw_name_hints: frozenset[str] = field(

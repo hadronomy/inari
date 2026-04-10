@@ -2,30 +2,51 @@
 
 Extensible local hardware bridge for Odoo Community POS.
 
-The current MVP is printer-focused on Windows, but the internals now use a driver registry and explicit device contracts so new device families can be added without rewriting the HTTP API or core application service.
+The current MVP is printer-focused on Windows, but the internals now use a driver registry, typed print-job content models, and explicit device contracts so new device families and new print pipelines can be added without rewriting the HTTP API or core application service.
 
 ## Highlights
 
 - loopback-first FastAPI service with explicit CORS allowlist
 - driver registry that can grow from Windows printers into broader IoT device support
 - Windows spooler driver isolated from the application layer
-- ESC/POS receipt renderer with configurable layout and paper control
+- generic print-job endpoint with typed content kinds
+- receipt image pipeline that converts base64 images to monochrome ESC/POS raster commands
+- structured ESC/POS receipt renderer with configurable layout and paper control
 - cash drawer pulse support for RAW-capable receipt printers
 - optional HTML printing hook through an injected renderer
+- explicit extension points for future PDF and document renderers
 
 ## Layout
 
 ```text
 iot_agent/
   api.py
+  binary_payloads.py
   container.py
   drivers/
     printers/
       windows.py
+  print_jobs.py
   printer_service.py
   printers/
   receipt_renderers/
 ```
+
+## Print Content Kinds
+
+The generic `/print` endpoint accepts typed content kinds so the agent can route work without guessing from arbitrary JSON:
+
+- `structured_receipt`
+- `receipt_image`
+- `text`
+- `html`
+- `pdf`
+- `raw`
+
+The compatibility `/print_receipt` endpoint still accepts either:
+
+- structured receipt data
+- a base64-encoded receipt image, matching the documented Odoo hardware-printer flow
 
 ## Run
 

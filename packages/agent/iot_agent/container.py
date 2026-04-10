@@ -8,7 +8,7 @@ from .drivers import DriverRegistry
 from .drivers.printers import WindowsPrinterDriver, WindowsSpooler
 from .printers import PrinterTransport
 from .printer_service import PrinterService
-from .receipt_renderers import EscPosRenderer
+from .receipt_renderers import EscPosImageReceiptRenderer, EscPosRenderer
 
 
 @dataclass(slots=True, frozen=True)
@@ -30,7 +30,8 @@ def build_container(settings: AgentSettings) -> AgentContainer:
     printer_service = PrinterService(
         settings=settings,
         driver_registry=driver_registry,
-        escpos_renderer=EscPosRenderer(),
+        structured_receipt_renderer=EscPosRenderer(),
+        image_receipt_renderer=EscPosImageReceiptRenderer(),
     )
     return AgentContainer(
         settings=settings,

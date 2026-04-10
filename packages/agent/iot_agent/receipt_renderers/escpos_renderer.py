@@ -37,7 +37,7 @@ class EscPosRenderer:
 
         header = self._mapping(receipt.get("headerData"))
         company = (
-            (header.get("company") or self._mapping(receipt.get("company")).get("name") or "Odoo POS")
+            (header.get("company") or self._mapping(receipt.get("company")).get("name") or "Receipt")
             .strip()
         )
         append(self._center(company, emphasized=True))
