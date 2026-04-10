@@ -4,11 +4,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .printer_service import PrinterTransport
+from .printers import PrinterTransport
 
 
 class APIModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 class ErrorResponse(APIModel):
@@ -27,10 +27,12 @@ class HealthResponse(APIModel):
 
 class PrinterInfoResponse(APIModel):
     name: str
+    driver: str
     is_default: bool = False
     mode: PrinterTransport
     supports_raw: bool
     supports_documents: bool
+    supports_cash_drawer: bool
 
 
 class PrintersResponse(APIModel):
@@ -41,6 +43,7 @@ class PrintersResponse(APIModel):
 class ActionResponse(APIModel):
     ok: Literal[True] = True
     printer_name: str | None = None
+    driver: str | None = None
     mode: PrinterTransport | None = None
     bytes_written: int | None = None
     detail: str | None = None

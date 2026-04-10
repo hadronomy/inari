@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
-PrinterMode = Literal["auto", "raw", "shell"]
+PrinterMode = Literal["auto", "raw", "text", "document"]
 
 
 class AgentSettings(BaseSettings):
@@ -29,14 +30,21 @@ class AgentSettings(BaseSettings):
     log_level: LogLevel = "INFO"
     html_print_enabled: bool = True
     default_printer_mode: PrinterMode = "auto"
-    temp_dir: str = "./tmp"
-    log_dir: str = "./logs"
+    temp_dir: Path = Path("./tmp")
+    log_dir: Path = Path("./logs")
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def normalize_allowed_origins(cls, value: object) -> object:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("temp_dir", "log_dir", mode="before")
+    @classmethod
+    def normalize_paths(cls, value: object) -> object:
+        if isinstance(value, str):
+            return Path(value)
         return value
 
 
