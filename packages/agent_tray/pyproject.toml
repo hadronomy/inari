@@ -1,0 +1,29 @@
+[project]
+name = "iot-agent-tray"
+version = "0.1.0a1"
+description = "Windows tray companion for the IoT Agent"
+requires-python = ">=3.12"
+dependencies = [
+  "httpx>=0.28.1",
+  "iot-agent",
+  "pillow>=11.3.0",
+  "pydantic-settings>=2.13.1",
+  "pystray>=0.19.5",
+  "pywin32>=306 ; sys_platform == 'win32'",
+  "websockets>=16.0",
+]
+
+[project.scripts]
+iot-agent-tray = "iot_agent_tray.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iot_agent_tray*"]
+exclude = ["tests*"]
+
+[tool.uv.sources]
+iot-agent = { workspace = true }
