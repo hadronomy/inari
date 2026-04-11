@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .binary_payloads import coerce_image_payload, coerce_pdf_payload, coerce_raw_payload
+from .drivers import DeviceKind
 from .print_jobs import (
     HtmlDocumentContent,
     PdfDocumentContent,
@@ -16,17 +18,25 @@ from .print_jobs import (
     StructuredReceiptContent,
     TextDocumentContent,
 )
-from .printers import CutMode, PrintJobResult, PrinterDevice, PrinterTransport
+from .printers import CutMode, PrinterDevice, PrinterTransport
+from .runtime.models import (
+    DeviceConnectionState,
+    DeviceEventRecord,
+    DeviceRecord,
+    JobAttemptRecord,
+    JobEventRecord,
+    JobKind,
+    JobRecord,
+    JobState,
+    RuntimeEvent,
+)
 
 
 class APIModel(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-    )
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
-class PrinterCommandKind(StrEnum):
+class DeviceCommandKind(StrEnum):
     OPEN_CASH_DRAWER = "open_cash_drawer"
     PRINT_TEST_PAGE = "print_test_page"
     FEED_LINES = "feed_lines"
@@ -64,6 +74,45 @@ class ServiceDescriptorResponse(APIModel):
     version: str
 
 
+class QueueSummaryResponse(APIModel):
+    total: int
+    queued: int = 0
+    dispatched: int = 0
+    running: int = 0
+    retry_scheduled: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    cancelled: int = 0
+
+    @classmethod
+    def from_counts(cls, counts: dict[str, int]) -> QueueSummaryResponse:
+        payload = {key: int(value) for key, value in counts.items()}
+        payload["total"] = sum(payload.values())
+        return cls(**payload)
+
+
+class DeviceDirectorySummaryResponse(APIModel):
+    count: int
+    online_count: int
+    offline_count: int
+    kind_counts: dict[str, int]
+    default_device_id: str | None = None
+
+    @classmethod
+    def from_devices(cls, devices: list[DeviceRecord]) -> DeviceDirectorySummaryResponse:
+        kind_counts: dict[str, int] = {}
+        for device in devices:
+            kind_counts[device.kind.value] = kind_counts.get(device.kind.value, 0) + 1
+        default_device = next((device for device in devices if device.is_default), None)
+        return cls(
+            count=len(devices),
+            online_count=sum(1 for device in devices if device.connection_state is DeviceConnectionState.ONLINE),
+            offline_count=sum(1 for device in devices if device.connection_state is DeviceConnectionState.OFFLINE),
+            kind_counts=kind_counts,
+            default_device_id=default_device.id if default_device is not None else None,
+        )
+
+
 class PrinterCapabilitiesResponse(APIModel):
     raw: bool
     text: bool
@@ -71,82 +120,112 @@ class PrinterCapabilitiesResponse(APIModel):
     cash_drawer: bool
 
 
-class PrinterResponse(APIModel):
-    name: str
-    driver: str
-    is_default: bool = False
-    preferred_transport: PrinterTransport
+class PrinterDetailsResponse(APIModel):
+    is_default: bool
+    preferred_transport: PrinterTransport | None = None
     capabilities: PrinterCapabilitiesResponse
 
+
+class DeviceResponse(APIModel):
+    id: str
+    kind: DeviceKind
+    name: str
+    driver: str
+    connection_state: DeviceConnectionState
+    first_seen_at: datetime
+    last_seen_at: datetime
+    updated_at: datetime
+    printer: PrinterDetailsResponse | None = None
+
     @classmethod
-    def from_domain(cls, printer: PrinterDevice) -> PrinterResponse:
+    def from_domain(cls, device: DeviceRecord) -> DeviceResponse:
+        printer_details: PrinterDetailsResponse | None = None
+        if device.kind is DeviceKind.PRINTER:
+            printer_details = PrinterDetailsResponse(
+                is_default=device.is_default,
+                preferred_transport=device.preferred_transport,
+                capabilities=PrinterCapabilitiesResponse(
+                    raw=bool(device.capabilities.get("raw", False)),
+                    text=bool(device.capabilities.get("text", False)),
+                    documents=bool(device.capabilities.get("documents", False)),
+                    cash_drawer=bool(device.capabilities.get("cash_drawer", False)),
+                ),
+            )
         return cls(
-            name=printer.name,
-            driver=printer.driver_key,
-            is_default=printer.is_default,
-            preferred_transport=printer.preferred_transport,
-            capabilities=PrinterCapabilitiesResponse(
-                raw=printer.supports_raw,
-                text=printer.supports_text,
-                documents=printer.supports_documents,
-                cash_drawer=printer.supports_cash_drawer,
-            ),
+            id=device.id,
+            kind=device.kind,
+            name=device.name,
+            driver=device.driver_key,
+            connection_state=device.connection_state,
+            first_seen_at=device.first_seen_at,
+            last_seen_at=device.last_seen_at,
+            updated_at=device.updated_at,
+            printer=printer_details,
         )
 
 
-class PrinterDirectorySummaryResponse(APIModel):
-    count: int
-    default_printer_name: str | None = None
-    raw_capable_count: int
-    document_capable_count: int
-    drawer_capable_count: int
+class DeviceDirectoryResponse(APIModel):
+    ok: Literal[True] = True
+    devices: list[DeviceResponse]
+    summary: DeviceDirectorySummaryResponse
+
+
+class DeviceResourceResponse(APIModel):
+    ok: Literal[True] = True
+    device: DeviceResponse
+
+
+class RuntimeEventResponse(APIModel):
+    sequence: int
+    resource_kind: str
+    resource_id: str
+    event_type: str
+    occurred_at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def from_printers(cls, printers: list[PrinterDevice]) -> PrinterDirectorySummaryResponse:
+    def from_domain(cls, event: RuntimeEvent) -> RuntimeEventResponse:
         return cls(
-            count=len(printers),
-            default_printer_name=next((printer.name for printer in printers if printer.is_default), None),
-            raw_capable_count=sum(1 for printer in printers if printer.supports_raw),
-            document_capable_count=sum(1 for printer in printers if printer.supports_documents),
-            drawer_capable_count=sum(1 for printer in printers if printer.supports_cash_drawer),
+            sequence=event.sequence,
+            resource_kind=event.resource_kind,
+            resource_id=event.resource_id,
+            event_type=event.event_type,
+            occurred_at=event.occurred_at,
+            payload=dict(event.payload),
         )
 
 
-class PrinterDirectoryResponse(APIModel):
+class DeviceEventCollectionResponse(APIModel):
     ok: Literal[True] = True
-    printers: list[PrinterResponse]
-    summary: PrinterDirectorySummaryResponse
-
-
-class PrinterResourceResponse(APIModel):
-    ok: Literal[True] = True
-    printer: PrinterResponse
+    events: list[RuntimeEventResponse]
 
 
 class SystemStatusResponse(APIModel):
     ok: Literal[True] = True
     status: Literal["healthy"] = "healthy"
     service: ServiceDescriptorResponse
-    printers: PrinterDirectorySummaryResponse
+    devices: DeviceDirectorySummaryResponse
+    queue: QueueSummaryResponse
     supported_content_kinds: tuple[PrintContentKind, ...]
-    supported_printer_commands: tuple[PrinterCommandKind, ...]
+    supported_device_commands: tuple[DeviceCommandKind, ...]
 
 
-class PrinterTargetInput(APIModel):
+class DeviceTargetInput(APIModel):
+    device_id: str | None = None
     printer_name: str | None = None
 
 
-class PrinterTargetResponse(APIModel):
-    printer_name: str
-    driver: str
-    is_default: bool
+class JobTargetResponse(APIModel):
+    device_id: str
+    device_kind: DeviceKind
+    device_name: str
 
     @classmethod
-    def from_domain(cls, printer: PrinterDevice) -> PrinterTargetResponse:
+    def from_job(cls, job: JobRecord) -> JobTargetResponse:
         return cls(
-            printer_name=printer.name,
-            driver=printer.driver_key,
-            is_default=printer.is_default,
+            device_id=job.device_id,
+            device_kind=job.device_kind,
+            device_name=job.device_name,
         )
 
 
@@ -166,10 +245,7 @@ class StructuredReceiptContentInput(APIModel):
     document_name: str = "Receipt"
 
     def to_domain(self) -> StructuredReceiptContent:
-        return StructuredReceiptContent(
-            payload=self.data,
-            document_name=self.document_name,
-        )
+        return StructuredReceiptContent(payload=self.data, document_name=self.document_name)
 
 
 class ReceiptImageContentInput(APIModel):
@@ -194,10 +270,7 @@ class TextDocumentContentInput(APIModel):
     document_name: str = "Text Document"
 
     def to_domain(self) -> TextDocumentContent:
-        return TextDocumentContent(
-            text=self.text,
-            document_name=self.document_name,
-        )
+        return TextDocumentContent(text=self.text, document_name=self.document_name)
 
 
 class HtmlDocumentContentInput(APIModel):
@@ -206,10 +279,7 @@ class HtmlDocumentContentInput(APIModel):
     document_name: str = "HTML Document"
 
     def to_domain(self) -> HtmlDocumentContent:
-        return HtmlDocumentContent(
-            html=self.html,
-            document_name=self.document_name,
-        )
+        return HtmlDocumentContent(html=self.html, document_name=self.document_name)
 
 
 class PdfDocumentContentInput(APIModel):
@@ -259,7 +329,7 @@ PrintContentInput = Annotated[
 
 class PrintJobRequest(APIModel):
     content: PrintContentInput
-    target: PrinterTargetInput = Field(default_factory=PrinterTargetInput)
+    target: DeviceTargetInput = Field(default_factory=DeviceTargetInput)
     options: PrintExecutionOptionsInput = Field(default_factory=PrintExecutionOptionsInput)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -297,7 +367,7 @@ class CutPaperCommandInput(APIModel):
     mode: CutMode = CutMode.PARTIAL
 
 
-PrinterCommandInput = Annotated[
+DeviceCommandInput = Annotated[
     OpenCashDrawerCommandInput
     | PrintTestPageCommandInput
     | FeedLinesCommandInput
@@ -307,44 +377,140 @@ PrinterCommandInput = Annotated[
 ]
 
 
-class PrinterCommandRequest(APIModel):
-    target: PrinterTargetInput = Field(default_factory=PrinterTargetInput)
-    command: PrinterCommandInput
+class DeviceCommandRequest(APIModel):
+    target: DeviceTargetInput = Field(default_factory=DeviceTargetInput)
+    command: DeviceCommandInput
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class OperationResultResponse(APIModel):
-    printer: PrinterTargetResponse
+class JobExecutionTargetResponse(APIModel):
+    device_id: str | None = None
+    printer_name: str
+    driver: str
+    is_default: bool
+
+
+class JobExecutionResultResponse(APIModel):
+    target: JobExecutionTargetResponse
     transport: PrinterTransport
     bytes_written: int
-    job_id: int | None = None
+    device_job_id: int | None = None
 
     @classmethod
-    def from_domain(cls, result: PrintJobResult) -> OperationResultResponse:
+    def from_payload(cls, payload: Mapping[str, Any]) -> JobExecutionResultResponse:
+        target = payload.get("printer", {})
+        if not isinstance(target, Mapping):
+            target = {}
         return cls(
-            printer=PrinterTargetResponse.from_domain(result.printer),
-            transport=result.transport,
-            bytes_written=result.bytes_written,
-            job_id=result.job_id,
+            target=JobExecutionTargetResponse(
+                device_id=str(target["device_id"]) if target.get("device_id") is not None else None,
+                printer_name=str(target.get("printer_name", "")),
+                driver=str(target.get("driver", "")),
+                is_default=bool(target.get("is_default", False)),
+            ),
+            transport=PrinterTransport(str(payload.get("transport", PrinterTransport.AUTO.value))),
+            bytes_written=int(payload.get("bytes_written", 0)),
+            device_job_id=int(payload["device_job_id"]) if payload.get("device_job_id") is not None else None,
         )
 
 
-class OperationResponse(APIModel):
-    ok: Literal[True] = True
+class JobErrorResponse(APIModel):
+    code: str
+    detail: str
+
+
+class JobResponse(APIModel):
+    id: str
+    kind: JobKind
     operation: str
-    result: OperationResultResponse
-    message: str | None = None
+    state: JobState
+    target: JobTargetResponse
+    content_kind: str | None = None
+    command_kind: str | None = None
+    attempt_count: int
+    max_attempts: int
+    created_at: datetime
+    updated_at: datetime
+    queued_at: datetime
+    next_run_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result: JobExecutionResultResponse | None = None
+    error: JobErrorResponse | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def from_domain(
-        cls,
-        *,
-        operation: str,
-        result: PrintJobResult,
-        message: str | None = None,
-    ) -> OperationResponse:
-        return cls(
-            operation=operation,
-            result=OperationResultResponse.from_domain(result),
-            message=message,
+    def from_domain(cls, job: JobRecord) -> JobResponse:
+        result = (
+            JobExecutionResultResponse.from_payload(job.result_payload)
+            if job.result_payload is not None
+            else None
         )
+        error = None
+        if job.last_error_code is not None and job.last_error_detail is not None:
+            error = JobErrorResponse(code=job.last_error_code, detail=job.last_error_detail)
+        return cls(
+            id=job.id,
+            kind=job.kind,
+            operation=job.operation,
+            state=job.state,
+            target=JobTargetResponse.from_job(job),
+            content_kind=job.content_kind,
+            command_kind=job.command_kind,
+            attempt_count=job.attempt_count,
+            max_attempts=job.max_attempts,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            queued_at=job.queued_at,
+            next_run_at=job.next_run_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            result=result,
+            error=error,
+            metadata=dict(job.request_metadata),
+        )
+
+
+class JobResourceResponse(APIModel):
+    ok: Literal[True] = True
+    job: JobResponse
+
+
+class JobCollectionResponse(APIModel):
+    ok: Literal[True] = True
+    jobs: list[JobResponse]
+    queue: QueueSummaryResponse
+
+
+class JobAttemptResponse(APIModel):
+    id: int
+    attempt_number: int
+    state: JobState
+    started_at: datetime
+    finished_at: datetime | None = None
+    error: JobErrorResponse | None = None
+
+    @classmethod
+    def from_domain(cls, attempt: JobAttemptRecord) -> JobAttemptResponse:
+        error = None
+        if attempt.error_code is not None and attempt.error_detail is not None:
+            error = JobErrorResponse(code=attempt.error_code, detail=attempt.error_detail)
+        return cls(
+            id=attempt.id,
+            attempt_number=attempt.attempt_number,
+            state=attempt.state,
+            started_at=attempt.started_at,
+            finished_at=attempt.finished_at,
+            error=error,
+        )
+
+
+class JobHistoryResponse(APIModel):
+    ok: Literal[True] = True
+    job: JobResponse
+    attempts: list[JobAttemptResponse]
+    events: list[RuntimeEventResponse]
+
+
+def device_response_from_printer(printer: PrinterDevice) -> DeviceResponse:
+    return DeviceResponse.from_domain(DeviceRecord.from_printer(printer))

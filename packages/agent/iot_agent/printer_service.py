@@ -91,6 +91,9 @@ class PrinterService:
     def get_printer_info(self, printer_name: str) -> PrinterDevice:
         return self._select_printer(printer_name).printer
 
+    def resolve_printer(self, printer_name: str | None = None) -> PrinterDevice:
+        return self._select_printer(printer_name).printer
+
     def print_job(self, job: PrintJob) -> PrintJobResult:
         content = job.content
 

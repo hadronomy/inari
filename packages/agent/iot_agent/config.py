@@ -32,6 +32,18 @@ class AgentSettings(BaseSettings):
     default_printer_mode: PrinterMode = "auto"
     temp_dir: Path = Path("./tmp")
     log_dir: Path = Path("./logs")
+    runtime_database_path: Path = Path("./data/iot-agent.sqlite3")
+    discovery_poll_interval_seconds: float = 3.0
+    scheduler_poll_interval_seconds: float = 0.5
+    scheduler_batch_size: int = 32
+    job_max_attempts: int = 3
+    job_retry_base_delay_seconds: int = 2
+    job_retry_max_delay_seconds: int = 30
+    job_dispatch_lease_seconds: int = 15
+    job_execution_lease_seconds: int = 30
+    job_heartbeat_interval_seconds: float = 5.0
+    job_execution_timeout_seconds: float = 60.0
+    job_lease_recovery_interval_seconds: float = 5.0
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -40,7 +52,7 @@ class AgentSettings(BaseSettings):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
-    @field_validator("temp_dir", "log_dir", mode="before")
+    @field_validator("temp_dir", "log_dir", "runtime_database_path", mode="before")
     @classmethod
     def normalize_paths(cls, value: object) -> object:
         if isinstance(value, str):

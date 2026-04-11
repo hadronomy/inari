@@ -5,6 +5,7 @@ from fastapi import Depends, Request
 from .config import AgentSettings
 from .container import AgentContainer, get_default_container
 from .printer_service import PrinterService
+from .runtime.manager import AgentRuntime
 
 
 def get_container(request: Request) -> AgentContainer:
@@ -21,3 +22,7 @@ def get_settings(container: AgentContainer = Depends(get_container)) -> AgentSet
 
 def get_printer_service(container: AgentContainer = Depends(get_container)) -> PrinterService:
     return container.printer_service
+
+
+def get_runtime(container: AgentContainer = Depends(get_container)) -> AgentRuntime:
+    return container.runtime
