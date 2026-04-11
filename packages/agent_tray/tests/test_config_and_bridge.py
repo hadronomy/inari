@@ -30,7 +30,7 @@ class TrayApplicationTests(unittest.TestCase):
         bridge = FakeControlBridge()
         application = AgentTrayApplication(
             TraySettings(control_mode="spawn", auto_start_agent=True),
-            client=FakeTrayClient(),
+            client=FakeFailingTrayClient(),
             bridge=bridge,
         )
 
@@ -157,6 +157,11 @@ class FakeTrayClient:
 
     def iter_events(self, stop_event):
         return iter(())
+
+
+class FakeFailingTrayClient(FakeTrayClient):
+    def get_status(self) -> SystemStatusResponse:
+        raise TimeoutError("timed out")
 
 
 class FakeControlBridge:

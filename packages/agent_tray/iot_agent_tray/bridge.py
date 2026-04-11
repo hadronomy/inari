@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from .config import TraySettings
 from .models import ControlMode, ControlSnapshot, LifecycleState
@@ -50,13 +51,17 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         settings: TraySettings,
         *,
         process_factory: Callable[..., Any] | None = None,
+        launch_command: Sequence[str] | None = None,
         working_directory: Path | None = None,
     ) -> None:
         self.settings = settings
         self._process_factory = process_factory or subprocess.Popen
-        self._working_directory = working_directory or Path.cwd()
+        self._launch_command = tuple(launch_command) if launch_command is not None else None
+        self._working_directory = working_directory or _default_working_directory()
+        self._launch_log_path = settings.log_dir / "agent-launch.log"
         self._lock = threading.Lock()
         self._process: Any | None = None
+        self._process_output_handle: Any | None = None
 
     def query_state(self) -> ControlSnapshot:
         process = self._process
@@ -86,7 +91,8 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
                 managed_by_tray=True,
             )
 
-        detail = f"Last managed process exited with code {exit_code}."
+        self._close_process_output_handle()
+        detail = f"Last managed process exited with code {exit_code}. See {self._launch_log_path}."
         return ControlSnapshot(
             mode=self.mode,
             lifecycle=LifecycleState.STOPPED,
@@ -102,19 +108,33 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
             if self._is_running():
                 return "The local agent process is already running."
             self._process = None
+            self._close_process_output_handle()
+            self.settings.log_dir.mkdir(parents=True, exist_ok=True)
             creation_flags = 0
             if sys.platform == "win32":
                 creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 creation_flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            command = self._resolve_launch_command()
+            output_handle = self._launch_log_path.open("a", encoding="utf-8")
+            output_handle.write(f"\n=== Starting IoT Agent at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            output_handle.write(f"Command: {' '.join(command)}\n")
+            output_handle.flush()
+            self._process_output_handle = output_handle
             self._process = self._process_factory(
-                [sys.executable, "-m", "iot_agent.main"],
+                list(command),
                 cwd=str(self._working_directory),
                 env=os.environ.copy(),
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=output_handle,
+                stderr=subprocess.STDOUT,
                 creationflags=creation_flags,
             )
+            time.sleep(0.5)
+            exit_code = self._process.poll()
+            if exit_code is not None:
+                raise RuntimeError(
+                    f"The local agent exited immediately with code {exit_code}. See {self._launch_log_path}."
+                )
         return "Started the local agent process."
 
     def stop(self) -> str:
@@ -130,6 +150,7 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
                 process.kill()
                 process.wait(timeout=5)
             self._process = None
+            self._close_process_output_handle()
         return "Stopped the local agent process."
 
     def restart(self) -> str:
@@ -148,6 +169,29 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
     def _is_running(self) -> bool:
         process = self._process
         return process is not None and process.poll() is None
+
+    def _resolve_launch_command(self) -> tuple[str, ...]:
+        if self._launch_command is not None:
+            return self._launch_command
+        agent_workspace = _detect_agent_workspace(self._working_directory)
+        uv_executable = shutil.which("uv")
+        if agent_workspace is not None and uv_executable is not None:
+            return (uv_executable, "run", "--directory", str(agent_workspace), "iot-agent")
+        console_script = shutil.which("iot-agent")
+        if console_script is not None:
+            return (console_script,)
+        return (sys.executable, "-m", "iot_agent.main")
+
+    def _close_process_output_handle(self) -> None:
+        handle = self._process_output_handle
+        if handle is None:
+            return
+        try:
+            handle.close()
+        except Exception:
+            return
+        finally:
+            self._process_output_handle = None
 
 
 class WindowsServiceAgentBridge(AgentControlBridge):
@@ -237,3 +281,20 @@ def build_control_bridge(settings: TraySettings) -> AgentControlBridge:
     if settings.control_mode == "service":
         return WindowsServiceAgentBridge(settings)
     return MonitorAgentBridge()
+
+
+def _default_working_directory() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "pyproject.toml").exists() and (parent / "packages").exists():
+            return parent
+    return Path.cwd()
+
+
+def _detect_agent_workspace(working_directory: Path) -> Path | None:
+    candidates = [working_directory, *working_directory.parents]
+    for candidate in candidates:
+        agent_workspace = candidate / "packages" / "agent"
+        if (agent_workspace / "pyproject.toml").exists():
+            return agent_workspace
+    return None
