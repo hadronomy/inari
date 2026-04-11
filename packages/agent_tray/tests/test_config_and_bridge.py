@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from iot_agent.models import SystemStatusResponse
 from iot_agent_tray.app import AgentTrayApplication
@@ -90,6 +92,63 @@ class SpawnedProcessBridgeTests(unittest.TestCase):
         self.assertEqual(stopped.lifecycle, LifecycleState.STOPPED)
         self.assertEqual(len(created), 1)
         self.assertTrue(created[0].terminated)
+
+    def test_spawned_process_bridge_shutdown_stops_managed_process_by_default(self) -> None:
+        created: list[FakeProcess] = []
+
+        def process_factory(*args, **kwargs):
+            process = FakeProcess()
+            created.append(process)
+            return process
+
+        bridge = SpawnedProcessAgentBridge(
+            TraySettings(control_mode="spawn"),
+            process_factory=process_factory,
+        )
+
+        bridge.start()
+        bridge.shutdown()
+
+        self.assertEqual(len(created), 1)
+        self.assertTrue(created[0].terminated)
+        self.assertEqual(bridge.query_state().lifecycle, LifecycleState.STOPPED)
+
+    def test_spawned_process_bridge_prefers_same_interpreter_module_launch(self) -> None:
+        bridge = SpawnedProcessAgentBridge(TraySettings(control_mode="spawn"))
+
+        with patch("iot_agent_tray.bridge._supports_module_launch", return_value=True):
+            command = bridge._resolve_launch_command()
+
+        self.assertEqual(command, (bridge_module_sys_executable(), "-m", "iot_agent.main"))
+
+    def test_spawned_process_bridge_falls_back_to_console_script(self) -> None:
+        bridge = SpawnedProcessAgentBridge(TraySettings(control_mode="spawn"))
+
+        with (
+            patch("iot_agent_tray.bridge._supports_module_launch", return_value=False),
+            patch("iot_agent_tray.bridge.shutil.which", side_effect=lambda name: "C:/bin/iot-agent.exe" if name == "iot-agent" else None),
+        ):
+            command = bridge._resolve_launch_command()
+
+        self.assertEqual(command, ("C:/bin/iot-agent.exe",))
+
+    def test_spawned_process_bridge_uses_uv_workspace_fallback(self) -> None:
+        bridge = SpawnedProcessAgentBridge(
+            TraySettings(control_mode="spawn"),
+            working_directory=Path("C:/repo"),
+        )
+
+        with (
+            patch("iot_agent_tray.bridge._supports_module_launch", return_value=False),
+            patch("iot_agent_tray.bridge.shutil.which", side_effect=lambda name: "C:/bin/uv.exe" if name == "uv" else None),
+            patch("iot_agent_tray.bridge._detect_agent_workspace", return_value=Path("C:/repo/packages/agent")),
+        ):
+            command = bridge._resolve_launch_command()
+
+        self.assertEqual(
+            command,
+            ("C:/bin/uv.exe", "run", "--directory", "C:\\repo\\packages\\agent", "iot-agent"),
+        )
 
     def test_build_control_bridge_uses_monitor_fallback(self) -> None:
         bridge = build_control_bridge(TraySettings(control_mode="monitor"))
@@ -184,6 +243,12 @@ class FakeControlBridge:
 
     def shutdown(self) -> None:
         return None
+
+
+def bridge_module_sys_executable() -> str:
+    import sys
+
+    return sys.executable
 
 
 if __name__ == "__main__":

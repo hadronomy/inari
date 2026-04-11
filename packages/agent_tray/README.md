@@ -34,3 +34,5 @@ Control modes:
 - `monitor`: the tray only observes an already-running agent
 
 When `spawn` mode cannot boot the local agent, the tray writes the launcher output to `logs/agent-launch.log` so early startup failures are visible even before the agent itself configures logging.
+
+By default, quitting the tray also stops the tray-managed local agent process in `spawn` mode.
