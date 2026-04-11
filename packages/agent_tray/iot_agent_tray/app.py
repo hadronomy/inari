@@ -62,6 +62,7 @@ class AgentTrayApplication:
 
         self._pystray = pystray
         snapshot = self.snapshot
+        logger.info("Starting tray icon for %s", self.settings.title)
         icon = pystray.Icon(
             "iot-agent-tray",
             icon=build_tray_icon(snapshot),
@@ -73,6 +74,8 @@ class AgentTrayApplication:
 
     def _setup_background(self, icon: Any) -> None:
         self._icon = icon
+        self._icon.visible = True
+        logger.info("Tray icon is now visible")
         self._refresh_snapshot(notify_connection=False)
         self._threads = [
             threading.Thread(target=self._poll_loop, name="iot-agent-tray-poll", daemon=True),
@@ -80,6 +83,7 @@ class AgentTrayApplication:
         ]
         for thread in self._threads:
             thread.start()
+        logger.info("Started %d tray background threads", len(self._threads))
 
     def _poll_loop(self) -> None:
         while not self._stop_event.wait(self.settings.poll_interval_seconds):

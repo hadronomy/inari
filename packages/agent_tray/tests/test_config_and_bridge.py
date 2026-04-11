@@ -2,9 +2,29 @@ from __future__ import annotations
 
 import unittest
 
-from iot_agent_tray.bridge import SpawnedProcessAgentBridge, build_control_bridge
+from iot_agent.models import SystemStatusResponse
+from iot_agent_tray.app import AgentTrayApplication
+from iot_agent_tray.bridge import MonitorAgentBridge, SpawnedProcessAgentBridge, build_control_bridge
 from iot_agent_tray.config import TraySettings
 from iot_agent_tray.models import ControlMode, LifecycleState
+
+
+class TrayApplicationTests(unittest.TestCase):
+    def test_setup_background_marks_icon_visible(self) -> None:
+        application = AgentTrayApplication(
+            TraySettings(),
+            client=FakeTrayClient(),
+            bridge=MonitorAgentBridge(),
+        )
+
+        icon = FakeIcon()
+        application._setup_background(icon)
+
+        self.assertTrue(icon.visible)
+        self.assertEqual(len(application._threads), 2)
+        application._stop_event.set()
+        for thread in application._threads:
+            thread.join(timeout=1.0)
 
 
 class TraySettingsTests(unittest.TestCase):
@@ -74,6 +94,44 @@ class FakeProcess:
     def kill(self) -> None:
         self.killed = True
         self.returncode = -9
+
+
+class FakeIcon:
+    def __init__(self) -> None:
+        self.visible = False
+
+
+class FakeTrayClient:
+    def get_status(self) -> SystemStatusResponse:
+        return SystemStatusResponse.model_validate(
+            {
+                "ok": True,
+                "status": "healthy",
+                "service": {"name": "IoT Agent", "version": "1.7.0a2"},
+                "devices": {
+                    "count": 0,
+                    "online_count": 0,
+                    "offline_count": 0,
+                    "kind_counts": {},
+                    "default_device_id": None,
+                },
+                "queue": {
+                    "total": 0,
+                    "queued": 0,
+                    "dispatched": 0,
+                    "running": 0,
+                    "retry_scheduled": 0,
+                    "succeeded": 0,
+                    "failed": 0,
+                    "cancelled": 0,
+                },
+                "supported_content_kinds": ["text"],
+                "supported_device_commands": ["print_test_page"],
+            }
+        )
+
+    def iter_events(self, stop_event):
+        return iter(())
 
 
 if __name__ == "__main__":
