@@ -44,6 +44,29 @@ class TrayApplicationTests(unittest.TestCase):
         for thread in application._threads:
             thread.join(timeout=1.0)
 
+    def test_apply_snapshot_swallow_tray_backend_update_errors(self) -> None:
+        application = AgentTrayApplication(
+            TraySettings(),
+            client=FakeTrayClient(),
+            bridge=MonitorAgentBridge(),
+        )
+        application._icon = FailingTitleIcon()
+        application._pystray = object()
+        application._build_menu = lambda _: None  # type: ignore[method-assign]
+        snapshot = application.snapshot.with_error(
+            control=ControlSnapshot(mode=ControlMode.MONITOR),
+            message="x" * 256,
+        )
+
+        with (
+            patch("iot_agent_tray.app.build_tray_icon", return_value=None),
+            self.assertLogs("iot_agent_tray.app", level="ERROR") as captured,
+        ):
+            application._apply_snapshot(snapshot)
+
+        self.assertEqual(application.snapshot.last_error, "x" * 256)
+        self.assertTrue(any("Failed to apply tray snapshot" in message for message in captured.output))
+
 
 class TraySettingsTests(unittest.TestCase):
     def test_settings_derive_related_agent_urls(self) -> None:
@@ -183,6 +206,24 @@ class FakeProcess:
 class FakeIcon:
     def __init__(self) -> None:
         self.visible = False
+
+
+class FailingTitleIcon(FakeIcon):
+    def __init__(self) -> None:
+        super().__init__()
+        self.icon = None
+        self.menu = None
+
+    @property
+    def title(self) -> str:
+        return ""
+
+    @title.setter
+    def title(self, value: str) -> None:
+        raise ValueError("string too long (169, maximum length 128)")
+
+    def update_menu(self) -> None:
+        return None
 
 
 class FakeTrayClient:

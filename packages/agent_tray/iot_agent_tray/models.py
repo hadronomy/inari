@@ -31,6 +31,9 @@ class TrayStatusLevel(StrEnum):
     STOPPED = "stopped"
 
 
+WINDOWS_TRAY_TOOLTIP_MAX_LENGTH = 128
+
+
 @dataclass(slots=True, frozen=True)
 class TrayLinks:
     api_base_url: str
@@ -202,7 +205,7 @@ class TraySnapshot:
         ]
         if self.last_error:
             lines.append(_truncate(self.last_error, 96))
-        return "\n".join(lines)
+        return _truncate("\n".join(lines), WINDOWS_TRAY_TOOLTIP_MAX_LENGTH)
 
 
 def _level_for_status(status: SystemStatusResponse) -> TrayStatusLevel:
@@ -243,7 +246,9 @@ def _describe_event(event: RuntimeEventResponse) -> str:
 def _truncate(value: str, length: int) -> str:
     if len(value) <= length:
         return value
-    return value[: max(0, length - 1)].rstrip() + "..."
+    if length <= 3:
+        return "." * max(length, 0)
+    return value[: max(0, length - 3)].rstrip() + "..."
 
 
 def utc_now() -> datetime:

@@ -119,6 +119,19 @@ class TraySnapshotTests(unittest.TestCase):
         self.assertEqual(updated.last_event_type, "job.failed")
         self.assertEqual(updated.last_event_detail, "Printer offline")
 
+    def test_tooltip_is_capped_to_windows_limit(self) -> None:
+        snapshot = TraySnapshot.initial(
+            title="IoT Agent",
+            links=_links(),
+            control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        ).with_error(
+            control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+            message="The local agent reported a very long startup failure message that should never overflow the Windows tray tooltip limit even when debugging information is present.",
+        )
+
+        self.assertLessEqual(len(snapshot.tooltip), 128)
+        self.assertTrue(snapshot.tooltip.endswith("..."))
+
 
 def _links() -> TrayLinks:
     return TrayLinks(

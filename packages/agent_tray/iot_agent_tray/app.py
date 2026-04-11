@@ -152,13 +152,13 @@ class AgentTrayApplication:
             self._snapshot = snapshot
         if self._icon is None or self._pystray is None:
             return
-        self._icon.icon = build_tray_icon(snapshot)
-        self._icon.title = snapshot.tooltip
-        self._icon.menu = self._build_menu(self._pystray)
         try:
+            self._icon.icon = build_tray_icon(snapshot)
+            self._icon.title = snapshot.tooltip
+            self._icon.menu = self._build_menu(self._pystray)
             self._icon.update_menu()
         except Exception:
-            logger.debug("Failed to update tray menu", exc_info=True)
+            logger.exception("Failed to apply tray snapshot")
 
     def _build_menu(self, pystray_module: Any) -> Any:
         Menu = pystray_module.Menu
