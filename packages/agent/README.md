@@ -9,7 +9,7 @@ The current MVP is printer-focused on Windows, but the internals now use a drive
 - loopback-first FastAPI service with explicit CORS allowlist
 - driver registry that can grow from Windows printers into broader IoT device support
 - Windows spooler driver isolated from the application layer
-- coherent HTTP API split into `system`, `devices`, `printing`, and `legacy` route groups
+- coherent HTTP API split into `system`, `devices`, and `printing` route groups
 - generic print-job endpoint with typed content kinds and nested target/options objects
 - receipt image pipeline that converts base64 images to monochrome ESC/POS raster commands
 - structured ESC/POS receipt renderer with configurable layout and paper control
@@ -44,16 +44,6 @@ Primary endpoints:
 - `POST /print-jobs`
 - `POST /printer-commands`
 
-Compatibility endpoints are still available and marked deprecated:
-
-- `GET /health`
-- `GET /printers`
-- `POST /print`
-- `POST /print_receipt`
-- `POST /print_html`
-- `POST /open_drawer`
-- `POST /test_print`
-
 ## Error Format
 
 Failures now use a single problem-details-style envelope across service errors, request validation errors, and framework HTTP errors:
@@ -73,7 +63,7 @@ Validation failures add an `errors` array with field-level pointers such as `/co
 
 ## Print Content Kinds
 
-The canonical `POST /print-jobs` endpoint accepts typed content kinds so the agent can route work without guessing from arbitrary JSON:
+`POST /print-jobs` accepts typed content kinds so the agent can route work without guessing from arbitrary JSON:
 
 - `structured_receipt`
 - `receipt_image`
@@ -115,11 +105,6 @@ Print jobs use nested printer selection and execution options:
   }
 }
 ```
-
-The compatibility `POST /print_receipt` endpoint still accepts either:
-
-- structured receipt data
-- a base64-encoded receipt image, matching the documented hardware-printer flow
 
 ## Runtime
 

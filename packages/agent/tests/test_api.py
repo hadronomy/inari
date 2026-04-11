@@ -28,7 +28,7 @@ class ApiShapeTests(unittest.TestCase):
 
         response = system_status(printer_service=printer_service)
 
-        self.assertEqual(response.service.version, "1.6.0a1")
+        self.assertEqual(response.service.version, "1.6.0a2")
         self.assertEqual(response.printers.default_printer_name, printer.name)
         self.assertIn("receipt_image", response.supported_content_kinds)
         self.assertIn("cut_paper", response.supported_printer_commands)
@@ -150,6 +150,21 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(payload["status"], 404)
         self.assertEqual(payload["type"], "urn:iot-agent:error:http-404")
         self.assertEqual(payload["details"]["path"], "/missing-route")
+
+    def test_legacy_endpoints_are_not_exposed(self) -> None:
+        client = make_test_client(Mock())
+
+        for method, path in (
+            ("get", "/health"),
+            ("get", "/printers"),
+            ("post", "/print"),
+            ("post", "/print_receipt"),
+            ("post", "/print_html"),
+            ("post", "/open_drawer"),
+            ("post", "/test_print"),
+        ):
+            response = getattr(client, method)(path)
+            self.assertEqual(response.status_code, 404, path)
 
 
 def make_test_client(printer_service: Mock) -> TestClient:

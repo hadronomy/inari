@@ -6,38 +6,28 @@ from fastapi import APIRouter, Depends
 
 from .dependencies import get_printer_service
 from .models import (
-    ActionResponse,
-    DrawerRequest,
-    HealthResponse,
-    LegacyPrintJobRequest,
     OperationResponse,
-    PrintHtmlRequest,
     PrintJobRequest,
-    PrintReceiptRequest,
     PrinterCommandKind,
     PrinterCommandRequest,
     PrinterDirectoryResponse,
     PrinterDirectorySummaryResponse,
-    PrinterInfoResponse,
     PrinterResourceResponse,
     PrinterResponse,
-    PrintersResponse,
     ServiceDescriptorResponse,
     SystemStatusResponse,
-    TestPrintRequest,
 )
 from .print_jobs import PrintContentKind
 from .printer_service import PrinterService
 from .printers import PrintJobResult, PrinterTransport
 
 SERVICE_NAME = "IoT Agent"
-API_VERSION = "1.6.0a1"
+API_VERSION = "1.6.0a2"
 
 router = APIRouter()
 system_router = APIRouter(prefix="/system", tags=["system"])
 devices_router = APIRouter(prefix="/devices", tags=["devices"])
 printing_router = APIRouter(tags=["printing"])
-legacy_router = APIRouter(tags=["legacy"])
 
 PrinterServiceDependency = Annotated[PrinterService, Depends(get_printer_service)]
 
@@ -136,102 +126,9 @@ def execute_printer_command(
     )
 
 
-@legacy_router.get("/health", response_model=HealthResponse, deprecated=True)
-def legacy_health(printer_service: PrinterServiceDependency) -> HealthResponse:
-    printers = list(printer_service.list_printers())
-    return HealthResponse(
-        default_printer=next((printer.name for printer in printers if printer.is_default), None),
-        printer_count=len(printers),
-        drawer_supported=any(printer.supports_cash_drawer for printer in printers),
-    )
-
-
-@legacy_router.get("/printers", response_model=PrintersResponse, deprecated=True)
-def legacy_printers(printer_service: PrinterServiceDependency) -> PrintersResponse:
-    printers = list(printer_service.list_printers())
-    return PrintersResponse(
-        printers=[
-            PrinterInfoResponse(
-                name=printer.name,
-                driver=printer.driver_key,
-                is_default=printer.is_default,
-                mode=printer.preferred_transport,
-                supports_raw=printer.supports_raw,
-                supports_documents=printer.supports_documents,
-                supports_cash_drawer=printer.supports_cash_drawer,
-            )
-            for printer in printers
-        ]
-    )
-
-
-@legacy_router.post("/print", response_model=ActionResponse, deprecated=True)
-def legacy_print_job(
-    request: LegacyPrintJobRequest,
-    printer_service: PrinterServiceDependency,
-) -> ActionResponse:
-    return _to_action_response(
-        printer_service.print_job(request.to_domain()),
-        detail="Print job submitted.",
-    )
-
-
-@legacy_router.post("/print_receipt", response_model=ActionResponse, deprecated=True)
-def legacy_print_receipt(
-    request: PrintReceiptRequest,
-    printer_service: PrinterServiceDependency,
-) -> ActionResponse:
-    return _to_action_response(
-        printer_service.print_job(request.to_domain()),
-        detail="Receipt sent successfully.",
-    )
-
-
-@legacy_router.post("/print_html", response_model=ActionResponse, deprecated=True)
-def legacy_print_html(
-    request: PrintHtmlRequest,
-    printer_service: PrinterServiceDependency,
-) -> ActionResponse:
-    return _to_action_response(
-        printer_service.print_job(request.to_domain()),
-        detail="HTML print job submitted.",
-    )
-
-
-@legacy_router.post("/open_drawer", response_model=ActionResponse, deprecated=True)
-def legacy_open_drawer(
-    request: DrawerRequest,
-    printer_service: PrinterServiceDependency,
-) -> ActionResponse:
-    return _to_action_response(
-        printer_service.open_cash_drawer(printer_name=request.printer_name),
-        detail="Drawer pulse sent.",
-    )
-
-
-@legacy_router.post("/test_print", response_model=ActionResponse, deprecated=True)
-def legacy_test_print(
-    request: TestPrintRequest,
-    printer_service: PrinterServiceDependency,
-) -> ActionResponse:
-    result = printer_service.print_test_ticket(
-        printer_name=request.printer_name,
-        transport=request.mode,
-    )
-    return _to_action_response(
-        result,
-        detail=(
-            "RAW receipt test sent."
-            if result.transport is PrinterTransport.RAW
-            else "Windows text/document print test submitted."
-        ),
-    )
-
-
 router.include_router(system_router)
 router.include_router(devices_router)
 router.include_router(printing_router)
-router.include_router(legacy_router)
 
 
 def _to_operation_response(
@@ -244,14 +141,4 @@ def _to_operation_response(
         operation=operation,
         result=result,
         message=message,
-    )
-
-
-def _to_action_response(result: PrintJobResult, *, detail: str) -> ActionResponse:
-    return ActionResponse(
-        printer_name=result.printer_name,
-        driver=result.printer.driver_key,
-        mode=result.transport,
-        bytes_written=result.bytes_written,
-        detail=detail,
     )
