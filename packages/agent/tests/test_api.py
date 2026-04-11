@@ -169,6 +169,40 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(payload["attempts"][0]["attempt_number"], 1)
         self.assertEqual(payload["events"][0]["event_type"], "job.queued")
 
+    def test_list_jobs_serializes_job_execution_results(self) -> None:
+        container = make_test_container()
+        job_id = next(iter(container.job_service.jobs))
+        completed = replace(
+            container.job_service.jobs[job_id],
+            state=JobState.SUCCEEDED,
+            result_payload={
+                "printer": {
+                    "device_id": "dev_test",
+                    "printer_name": "Kitchen Printer",
+                    "driver": "tests.fake-printers",
+                    "is_default": True,
+                },
+                "transport": "raw",
+                "bytes_written": 128,
+                "device_job_id": 42,
+            },
+        )
+        container.job_service.jobs[job_id] = completed
+        client = TestClient(create_app(container=container))
+
+        response = client.get("/jobs")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["jobs"][0]["result"]["target"]["printer_name"], "Kitchen Printer")
+        self.assertEqual(payload["jobs"][0]["result"]["bytes_written"], 128)
+
+    def test_events_websocket_connects_successfully(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+
+        with client.websocket_connect("/events"):
+            pass
+
     def test_validation_errors_use_unified_problem_details_shape(self) -> None:
         client = TestClient(create_app(container=make_test_container()))
 
