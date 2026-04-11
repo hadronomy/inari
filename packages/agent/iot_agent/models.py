@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .binary_payloads import coerce_image_payload, coerce_pdf_payload, coerce_raw_payload
 from .print_jobs import (
@@ -23,7 +23,6 @@ class APIModel(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         str_strip_whitespace=True,
-        populate_by_name=True,
     )
 
 
@@ -153,18 +152,12 @@ class PrinterTargetResponse(APIModel):
 
 class PrintExecutionOptionsInput(APIModel):
     transport: PrinterTransport = PrinterTransport.AUTO
-    open_cash_drawer: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("open_cash_drawer", "open_drawer"),
-    )
+    open_cash_drawer: bool = False
 
 
 class BinaryContentInput(APIModel):
     base64: str
-    declared_mime_type: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("declared_mime_type", "mime_type"),
-    )
+    declared_mime_type: str | None = None
 
 
 class StructuredReceiptContentInput(APIModel):
@@ -210,10 +203,7 @@ class TextDocumentContentInput(APIModel):
 class HtmlDocumentContentInput(APIModel):
     kind: Literal["html"] = "html"
     html: str
-    document_name: str = Field(
-        default="HTML Document",
-        validation_alias=AliasChoices("document_name", "title"),
-    )
+    document_name: str = "HTML Document"
 
     def to_domain(self) -> HtmlDocumentContent:
         return HtmlDocumentContent(
@@ -225,10 +215,7 @@ class HtmlDocumentContentInput(APIModel):
 class PdfDocumentContentInput(APIModel):
     kind: Literal["pdf"] = "pdf"
     binary: BinaryContentInput
-    document_name: str = Field(
-        default="PDF Document",
-        validation_alias=AliasChoices("document_name", "title"),
-    )
+    document_name: str = "PDF Document"
 
     def to_domain(self) -> PdfDocumentContent:
         return PdfDocumentContent(
@@ -361,107 +348,3 @@ class OperationResponse(APIModel):
             result=OperationResultResponse.from_domain(result),
             message=message,
         )
-
-
-class HealthResponse(APIModel):
-    ok: Literal[True] = True
-    status: Literal["healthy"] = "healthy"
-    default_printer: str | None = None
-    printer_count: int
-    drawer_supported: bool
-
-
-class PrinterInfoResponse(APIModel):
-    name: str
-    driver: str
-    is_default: bool = False
-    mode: PrinterTransport
-    supports_raw: bool
-    supports_documents: bool
-    supports_cash_drawer: bool
-
-
-class PrintersResponse(APIModel):
-    ok: Literal[True] = True
-    printers: list[PrinterInfoResponse]
-
-
-class ActionResponse(APIModel):
-    ok: Literal[True] = True
-    printer_name: str | None = None
-    driver: str | None = None
-    mode: PrinterTransport | None = None
-    bytes_written: int | None = None
-    detail: str | None = None
-
-
-class LegacyPrintJobRequest(APIModel):
-    content: PrintContentInput
-    printer_name: str | None = None
-    open_drawer: bool = False
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    mode: PrinterTransport = PrinterTransport.AUTO
-
-    def to_domain(self) -> PrintJob:
-        return PrintJob(
-            content=self.content.to_domain(),
-            printer_name=self.printer_name,
-            transport=self.mode,
-            open_drawer=self.open_drawer,
-            metadata=self.metadata,
-        )
-
-
-class PrintReceiptRequest(APIModel):
-    source: str = "receipt"
-    receipt: dict[str, Any] | str
-    printer_name: str | None = None
-    open_drawer: bool = False
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    mode: PrinterTransport = PrinterTransport.AUTO
-    mime_type: str | None = None
-
-    def to_domain(self) -> PrintJob:
-        if isinstance(self.receipt, str):
-            content = ReceiptImageContent(
-                binary_payload=coerce_image_payload(
-                    self.receipt,
-                    label="receipt image",
-                    declared_mime_type=self.mime_type,
-                )
-            )
-        else:
-            content = StructuredReceiptContent(payload=self.receipt)
-
-        return PrintJob(
-            content=content,
-            printer_name=self.printer_name,
-            transport=self.mode,
-            open_drawer=self.open_drawer,
-            metadata=self.metadata,
-        )
-
-
-class PrintHtmlRequest(APIModel):
-    html: str
-    printer_name: str | None = None
-    open_drawer: bool = False
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    title: str = "HTML Document"
-
-    def to_domain(self) -> PrintJob:
-        return PrintJob(
-            content=HtmlDocumentContent(html=self.html, document_name=self.title),
-            printer_name=self.printer_name,
-            open_drawer=self.open_drawer,
-            metadata=self.metadata,
-        )
-
-
-class DrawerRequest(APIModel):
-    printer_name: str | None = None
-
-
-class TestPrintRequest(APIModel):
-    printer_name: str | None = None
-    mode: PrinterTransport = PrinterTransport.AUTO

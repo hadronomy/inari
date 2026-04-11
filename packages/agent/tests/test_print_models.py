@@ -3,10 +3,11 @@ from __future__ import annotations
 import base64
 import unittest
 
-from iot_agent.binary_payloads import BinaryPayload, coerce_image_payload, coerce_pdf_payload
+from iot_agent.binary_payloads import coerce_image_payload, coerce_pdf_payload
 from iot_agent.exceptions import PrinterServiceError
-from iot_agent.models import PrintJobRequest, PrintReceiptRequest, PrinterCommandRequest
+from iot_agent.models import PrintJobRequest, PrinterCommandRequest
 from iot_agent.print_jobs import ReceiptImageContent, TextDocumentContent
+from pydantic import ValidationError
 
 
 class BinaryPayloadTests(unittest.TestCase):
@@ -43,19 +44,6 @@ class BinaryPayloadTests(unittest.TestCase):
 
 
 class PrintModelTests(unittest.TestCase):
-    def test_legacy_receipt_request_accepts_base64_image(self) -> None:
-        png_base64 = (
-            "data:image/png;base64,"
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-        )
-        request = PrintReceiptRequest(receipt=png_base64)
-
-        job = request.to_domain()
-
-        self.assertIsInstance(job.content, ReceiptImageContent)
-        self.assertIsInstance(job.content.binary_payload, BinaryPayload)
-        self.assertEqual(job.content.mime_type, "image/png")
-
     def test_generic_print_request_accepts_nested_target_and_options(self) -> None:
         request = PrintJobRequest.model_validate(
             {
@@ -100,6 +88,35 @@ class PrintModelTests(unittest.TestCase):
         self.assertIsInstance(job.content, ReceiptImageContent)
         self.assertEqual(job.content.document_name, "POS Ticket")
         self.assertEqual(job.content.mime_type, "image/png")
+
+    def test_generic_print_request_rejects_legacy_option_alias(self) -> None:
+        with self.assertRaises(ValidationError):
+            PrintJobRequest.model_validate(
+                {
+                    "content": {
+                        "kind": "text",
+                        "text": "Hello printer",
+                    },
+                    "options": {"open_drawer": True},
+                }
+            )
+
+    def test_generic_print_request_rejects_legacy_binary_alias(self) -> None:
+        with self.assertRaises(ValidationError):
+            PrintJobRequest.model_validate(
+                {
+                    "content": {
+                        "kind": "receipt_image",
+                        "binary": {
+                            "base64": (
+                                "data:image/png;base64,"
+                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
+                            ),
+                            "mime_type": "image/png",
+                        },
+                    }
+                }
+            )
 
     def test_printer_command_request_accepts_typed_command(self) -> None:
         request = PrinterCommandRequest.model_validate(
