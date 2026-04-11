@@ -4,6 +4,7 @@ import unittest
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Mapping
 
+from iot_agent.binary_payloads import BinaryPayload
 from iot_agent.config import AgentSettings
 from iot_agent.drivers import DeviceKind, DriverMetadata, DriverRegistry
 from iot_agent.drivers.printers.base import PrinterDriver
@@ -149,7 +150,12 @@ class PrinterServiceTests(unittest.TestCase):
 
         result = service.print_job(
             PrintJob(
-                content=ReceiptImageContent(image_bytes=b"image-bytes", mime_type="image/png"),
+                content=ReceiptImageContent(
+                    binary_payload=BinaryPayload(
+                        content=b"image-bytes",
+                        declared_mime_types=("image/png",),
+                    )
+                ),
                 printer_name=printer.name,
             )
         )

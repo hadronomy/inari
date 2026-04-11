@@ -34,12 +34,12 @@ class ReceiptImageRenderer(Protocol):
 
 
 class HtmlDocumentRenderer(Protocol):
-    def render_html(self, html: str, *, title: str) -> RenderedDocument:
+    def render_html(self, html: str, *, document_name: str) -> RenderedDocument:
         """Convert HTML into a spooler-ready document."""
 
 
 class PdfDocumentRenderer(Protocol):
-    def render_pdf(self, pdf_bytes: bytes, *, title: str) -> RenderedDocument:
+    def render_pdf(self, pdf_bytes: bytes, *, document_name: str) -> RenderedDocument:
         """Convert PDF bytes into a spooler-ready document."""
 
 
@@ -119,13 +119,13 @@ class PrinterService:
             result = self.print_html_document(
                 content.html,
                 printer_name=job.printer_name,
-                title=content.title,
+                document_name=content.document_name,
             )
         elif isinstance(content, PdfDocumentContent):
             result = self.print_pdf_document(
                 content.pdf_bytes,
                 printer_name=job.printer_name,
-                title=content.title,
+                document_name=content.document_name,
             )
         elif isinstance(content, RawDocumentContent):
             result = self.print_raw_document(
@@ -272,7 +272,7 @@ class PrinterService:
         html: str,
         *,
         printer_name: str | None = None,
-        title: str = "HTML Document",
+        document_name: str = "HTML Document",
     ) -> PrintJobResult:
         if not self.settings.html_print_enabled:
             raise PrinterServiceError(
@@ -286,7 +286,7 @@ class PrinterService:
                 "Configure an HTML renderer that converts HTML to printer-ready bytes.",
             )
 
-        rendered = self.html_renderer.render_html(html, title=title)
+        rendered = self.html_renderer.render_html(html, document_name=document_name)
         return self.print_rendered_document(rendered, printer_name=printer_name)
 
     def print_pdf_document(
@@ -294,7 +294,7 @@ class PrinterService:
         pdf_bytes: bytes,
         *,
         printer_name: str | None = None,
-        title: str = "PDF Document",
+        document_name: str = "PDF Document",
     ) -> PrintJobResult:
         if self.pdf_renderer is None:
             raise PrinterServiceError(
@@ -302,7 +302,7 @@ class PrinterService:
                 "PDF printing requires a renderer or external print pipeline to turn PDF bytes into a printable job.",
             )
 
-        rendered = self.pdf_renderer.render_pdf(pdf_bytes, title=title)
+        rendered = self.pdf_renderer.render_pdf(pdf_bytes, document_name=document_name)
         return self.print_rendered_document(rendered, printer_name=printer_name)
 
     def feed_lines(self, count: int, *, printer_name: str | None = None) -> PrintJobResult:
@@ -350,7 +350,7 @@ class PrinterService:
         if resolved_transport is PrinterTransport.RAW:
             payload = (
                 EscPosCommands.INITIALIZE
-                + b"\x1b!\x38Odoo IoT Agent\n"
+                + b"\x1b!\x38IoT Agent\n"
                 + b"\x1b!\x00Connectivity check\n"
                 + b"------------------------------------------\n"
                 + b"The agent can reach the receipt printer.\n"
@@ -367,7 +367,7 @@ class PrinterService:
 
         return selection.driver.submit_text_job(
             selection.printer,
-            "Odoo IoT Agent\n"
+            "IoT Agent\n"
             "Connectivity check\n"
             "------------------------------------------\n"
             "The agent can reach the printer.\n",
