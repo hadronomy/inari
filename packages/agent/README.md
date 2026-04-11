@@ -2,21 +2,29 @@
 
 Extensible local hardware bridge for POS and local devices.
 
-The current MVP is printer-focused on Windows, but the internals now use a driver registry, typed print-job content models, and explicit device contracts so new device families and new print pipelines can be added without rewriting the HTTP API or core application service.
+The current MVP is still Windows-printer focused, but the agent now runs on top of a proper runtime layer with:
+
+- durable job queueing
+- background device discovery
+- per-device worker ordering
+- retry and lease recovery
+- live event streaming
+- persisted job and device history
 
 ## Highlights
 
 - loopback-first FastAPI service with explicit CORS allowlist
 - driver registry that can grow from Windows printers into broader IoT device support
 - Windows spooler driver isolated from the application layer
-- coherent HTTP API split into `system`, `devices`, and `printing` route groups
-- generic print-job endpoint with typed content kinds and nested target/options objects
+- coherent HTTP API split into `system`, `devices`, `jobs`, and live `events`
+- generic print-job endpoint with typed content kinds and nested device targeting
 - receipt image pipeline that converts base64 images to monochrome ESC/POS raster commands
 - structured ESC/POS receipt renderer with configurable layout and paper control
 - MIME detection and binary payload inspection powered by `puremagic`
 - cash drawer pulse support for RAW-capable receipt printers
 - optional HTML printing hook through an injected renderer
 - explicit extension points for future PDF and document renderers
+- SQLite-backed runtime state for queued jobs, attempts, and event history
 
 ## Layout
 
@@ -32,6 +40,7 @@ iot_agent/
   printer_service.py
   printers/
   receipt_renderers/
+  runtime/
 ```
 
 ## HTTP API
@@ -39,10 +48,16 @@ iot_agent/
 Primary endpoints:
 
 - `GET /system/status`
-- `GET /devices/printers`
-- `GET /devices/printers/{printer_name}`
+- `GET /devices`
+- `GET /devices/{device_id}`
+- `GET /devices/{device_id}/events`
 - `POST /print-jobs`
-- `POST /printer-commands`
+- `POST /device-commands`
+- `GET /jobs`
+- `GET /jobs/{job_id}`
+- `GET /jobs/{job_id}/history`
+- `POST /jobs/{job_id}/cancel`
+- `WS /events`
 
 ## Error Format
 
@@ -81,7 +96,7 @@ Binary content uses a shared wrapper:
 }
 ```
 
-Print jobs use nested printer selection and execution options:
+Print jobs use nested device targeting and execution options:
 
 ```json
 {
@@ -94,6 +109,7 @@ Print jobs use nested printer selection and execution options:
     "document_name": "POS Ticket"
   },
   "target": {
+    "device_id": "dev_...",
     "printer_name": "EPSON TM-T20III"
   },
   "options": {
@@ -106,11 +122,15 @@ Print jobs use nested printer selection and execution options:
 }
 ```
 
+Queued job responses expose the agent-managed job resource immediately, and the frontend can follow its lifecycle through `GET /jobs/{job_id}` or `WS /events`.
+
 ## Runtime
 
 - Python 3.12+
 - `puremagic` for MIME detection from decoded bytes
 - Pillow for receipt image normalization and raster rendering
+- SQLite-backed runtime store for devices, jobs, attempts, and events
+- background discovery polling plus lease-based job recovery
 
 ## Run
 
@@ -140,4 +160,5 @@ IOT_AGENT_DEFAULT_PRINTER_NAME=EPSON TM-T20III
 IOT_AGENT_DEFAULT_PRINTER_MODE=auto
 IOT_AGENT_HTML_PRINT_ENABLED=true
 IOT_AGENT_LOG_LEVEL=INFO
+IOT_AGENT_RUNTIME_DATABASE_PATH=./data/iot-agent.sqlite3
 ```

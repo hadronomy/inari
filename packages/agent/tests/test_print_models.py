@@ -5,7 +5,7 @@ import unittest
 
 from iot_agent.binary_payloads import coerce_image_payload, coerce_pdf_payload
 from iot_agent.exceptions import PrinterServiceError
-from iot_agent.models import PrintJobRequest, PrinterCommandRequest
+from iot_agent.models import DeviceCommandRequest, PrintJobRequest
 from iot_agent.print_jobs import ReceiptImageContent, TextDocumentContent
 from pydantic import ValidationError
 
@@ -118,10 +118,10 @@ class PrintModelTests(unittest.TestCase):
                 }
             )
 
-    def test_printer_command_request_accepts_typed_command(self) -> None:
-        request = PrinterCommandRequest.model_validate(
+    def test_device_command_request_accepts_typed_command(self) -> None:
+        request = DeviceCommandRequest.model_validate(
             {
-                "target": {"printer_name": "Kitchen Printer"},
+                "target": {"device_id": "dev_test", "printer_name": "Kitchen Printer"},
                 "command": {
                     "kind": "cut_paper",
                     "mode": "full",
@@ -129,6 +129,7 @@ class PrintModelTests(unittest.TestCase):
             }
         )
 
+        self.assertEqual(request.target.device_id, "dev_test")
         self.assertEqual(request.target.printer_name, "Kitchen Printer")
         self.assertEqual(request.command.kind, "cut_paper")
         self.assertEqual(request.command.mode, "full")

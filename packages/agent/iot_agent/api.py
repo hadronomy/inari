@@ -2,143 +2,157 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
-from .dependencies import get_printer_service
+from .dependencies import get_runtime
+from .exceptions import AgentError
 from .models import (
-    OperationResponse,
+    DeviceCommandKind,
+    DeviceCommandRequest,
+    DeviceDirectoryResponse,
+    DeviceDirectorySummaryResponse,
+    DeviceEventCollectionResponse,
+    DeviceResourceResponse,
+    DeviceResponse,
+    JobAttemptResponse,
+    JobCollectionResponse,
+    JobHistoryResponse,
+    JobResourceResponse,
+    JobResponse,
     PrintJobRequest,
-    PrinterCommandKind,
-    PrinterCommandRequest,
-    PrinterDirectoryResponse,
-    PrinterDirectorySummaryResponse,
-    PrinterResourceResponse,
-    PrinterResponse,
+    QueueSummaryResponse,
+    RuntimeEventResponse,
     ServiceDescriptorResponse,
     SystemStatusResponse,
 )
 from .print_jobs import PrintContentKind
-from .printer_service import PrinterService
-from .printers import PrintJobResult, PrinterTransport
+from .runtime.manager import AgentRuntime
+from .runtime.models import JobState
 
 SERVICE_NAME = "IoT Agent"
-API_VERSION = "1.6.0a2"
+API_VERSION = "1.7.0a1"
 
 router = APIRouter()
 system_router = APIRouter(prefix="/system", tags=["system"])
 devices_router = APIRouter(prefix="/devices", tags=["devices"])
-printing_router = APIRouter(tags=["printing"])
+jobs_router = APIRouter(tags=["jobs"])
+events_router = APIRouter(tags=["events"])
 
-PrinterServiceDependency = Annotated[PrinterService, Depends(get_printer_service)]
+RuntimeDependency = Annotated[AgentRuntime, Depends(get_runtime)]
 
 
 @system_router.get("/status", response_model=SystemStatusResponse)
-def system_status(printer_service: PrinterServiceDependency) -> SystemStatusResponse:
-    printers = list(printer_service.list_printers())
+async def system_status(runtime: RuntimeDependency) -> SystemStatusResponse:
+    devices = list(runtime.list_devices())
     return SystemStatusResponse(
         service=ServiceDescriptorResponse(name=SERVICE_NAME, version=API_VERSION),
-        printers=PrinterDirectorySummaryResponse.from_printers(printers),
+        devices=DeviceDirectorySummaryResponse.from_devices(devices),
+        queue=QueueSummaryResponse.from_counts(dict(runtime.queue_counts())),
         supported_content_kinds=tuple(PrintContentKind),
-        supported_printer_commands=tuple(PrinterCommandKind),
+        supported_device_commands=tuple(DeviceCommandKind),
     )
 
 
-@devices_router.get("/printers", response_model=PrinterDirectoryResponse)
-def list_printers(printer_service: PrinterServiceDependency) -> PrinterDirectoryResponse:
-    printers = list(printer_service.list_printers())
-    return PrinterDirectoryResponse(
-        printers=[PrinterResponse.from_domain(printer) for printer in printers],
-        summary=PrinterDirectorySummaryResponse.from_printers(printers),
+@devices_router.get("", response_model=DeviceDirectoryResponse)
+async def list_devices(runtime: RuntimeDependency) -> DeviceDirectoryResponse:
+    devices = list(runtime.list_devices())
+    return DeviceDirectoryResponse(
+        devices=[DeviceResponse.from_domain(device) for device in devices],
+        summary=DeviceDirectorySummaryResponse.from_devices(devices),
     )
 
 
-@devices_router.get("/printers/{printer_name}", response_model=PrinterResourceResponse)
-def get_printer(printer_name: str, printer_service: PrinterServiceDependency) -> PrinterResourceResponse:
-    return PrinterResourceResponse(
-        printer=PrinterResponse.from_domain(printer_service.get_printer_info(printer_name))
+@devices_router.get("/{device_id}", response_model=DeviceResourceResponse)
+async def get_device(device_id: str, runtime: RuntimeDependency) -> DeviceResourceResponse:
+    device = runtime.get_device(device_id)
+    if device is None:
+        raise AgentError("DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404)
+    return DeviceResourceResponse(device=DeviceResponse.from_domain(device))
+
+
+@devices_router.get("/{device_id}/events", response_model=DeviceEventCollectionResponse)
+async def list_device_events(
+    device_id: str,
+    runtime: RuntimeDependency,
+    limit: int = Query(default=50, ge=1, le=500),
+) -> DeviceEventCollectionResponse:
+    device = runtime.get_device(device_id)
+    if device is None:
+        raise AgentError("DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404)
+    events = runtime.list_device_events(device_id, limit=limit)
+    return DeviceEventCollectionResponse(events=[RuntimeEventResponse.from_domain(event) for event in events])
+
+
+@jobs_router.post("/print-jobs", response_model=JobResourceResponse, status_code=202)
+async def submit_print_job(
+    request: "PrintJobRequest",
+    runtime: RuntimeDependency,
+) -> JobResourceResponse:
+    job = await runtime.submit_print_job(request)
+    return JobResourceResponse(job=JobResponse.from_domain(job))
+
+
+@jobs_router.post("/device-commands", response_model=JobResourceResponse, status_code=202)
+async def submit_device_command(
+    request: DeviceCommandRequest,
+    runtime: RuntimeDependency,
+) -> JobResourceResponse:
+    job = await runtime.submit_command(request)
+    return JobResourceResponse(job=JobResponse.from_domain(job))
+
+
+@jobs_router.get("/jobs", response_model=JobCollectionResponse)
+async def list_jobs(
+    runtime: RuntimeDependency,
+    state: JobState | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> JobCollectionResponse:
+    jobs = list(runtime.list_jobs(state=state, limit=limit))
+    return JobCollectionResponse(
+        jobs=[JobResponse.from_domain(job) for job in jobs],
+        queue=QueueSummaryResponse.from_counts(dict(runtime.queue_counts())),
     )
 
 
-@printing_router.post("/print-jobs", response_model=OperationResponse)
-def submit_print_job(
-    request: PrintJobRequest,
-    printer_service: PrinterServiceDependency,
-) -> OperationResponse:
-    return _to_operation_response(
-        operation="print_job",
-        result=printer_service.print_job(request.to_domain()),
-        message="Print job submitted.",
+@jobs_router.get("/jobs/{job_id}", response_model=JobResourceResponse)
+async def get_job(job_id: str, runtime: RuntimeDependency) -> JobResourceResponse:
+    job = runtime.get_job(job_id)
+    if job is None:
+        raise AgentError("JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404)
+    return JobResourceResponse(job=JobResponse.from_domain(job))
+
+
+@jobs_router.get("/jobs/{job_id}/history", response_model=JobHistoryResponse)
+async def get_job_history(job_id: str, runtime: RuntimeDependency) -> JobHistoryResponse:
+    job = runtime.get_job(job_id)
+    if job is None:
+        raise AgentError("JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404)
+    attempts = runtime.list_job_attempts(job_id)
+    events = runtime.list_job_history(job_id)
+    return JobHistoryResponse(
+        job=JobResponse.from_domain(job),
+        attempts=[JobAttemptResponse.from_domain(attempt) for attempt in attempts],
+        events=[RuntimeEventResponse.from_domain(event) for event in events],
     )
 
 
-@printing_router.post("/printer-commands", response_model=OperationResponse)
-def execute_printer_command(
-    request: PrinterCommandRequest,
-    printer_service: PrinterServiceDependency,
-) -> OperationResponse:
-    printer_name = request.target.printer_name
-    command = request.command
+@jobs_router.post("/jobs/{job_id}/cancel", response_model=JobResourceResponse)
+async def cancel_job(job_id: str, runtime: RuntimeDependency) -> JobResourceResponse:
+    job = await runtime.cancel_job(job_id)
+    return JobResourceResponse(job=JobResponse.from_domain(job))
 
-    if command.kind == PrinterCommandKind.OPEN_CASH_DRAWER:
-        result = printer_service.open_cash_drawer(printer_name=printer_name)
-        return _to_operation_response(
-            operation=command.kind,
-            result=result,
-            message="Cash drawer pulse sent.",
-        )
 
-    if command.kind == PrinterCommandKind.PRINT_TEST_PAGE:
-        result = printer_service.print_test_ticket(
-            printer_name=printer_name,
-            transport=command.transport,
-        )
-        return _to_operation_response(
-            operation=command.kind,
-            result=result,
-            message=(
-                "RAW receipt test sent."
-                if result.transport is PrinterTransport.RAW
-                else "Windows text/document print test submitted."
-            ),
-        )
-
-    if command.kind == PrinterCommandKind.FEED_LINES:
-        return _to_operation_response(
-            operation=command.kind,
-            result=printer_service.feed_lines(command.count, printer_name=printer_name),
-            message="Paper feed command sent.",
-        )
-
-    if command.kind == PrinterCommandKind.FEED_DOTS:
-        return _to_operation_response(
-            operation=command.kind,
-            result=printer_service.feed_dots(command.count, printer_name=printer_name),
-            message="Fine paper feed command sent.",
-        )
-
-    return _to_operation_response(
-        operation=command.kind,
-        result=printer_service.cut_paper(
-            printer_name=printer_name,
-            mode=command.mode,
-        ),
-        message="Paper cut command sent.",
-    )
+@events_router.websocket("/events")
+async def stream_events(websocket: WebSocket, runtime: RuntimeDependency) -> None:
+    await websocket.accept()
+    try:
+        async for event in runtime.event_hub.iter_events():
+            await websocket.send_json(RuntimeEventResponse.from_domain(event).model_dump(mode="json"))
+    except WebSocketDisconnect:
+        return
 
 
 router.include_router(system_router)
 router.include_router(devices_router)
-router.include_router(printing_router)
-
-
-def _to_operation_response(
-    *,
-    operation: str,
-    result: PrintJobResult,
-    message: str | None = None,
-) -> OperationResponse:
-    return OperationResponse.from_domain(
-        operation=operation,
-        result=result,
-        message=message,
-    )
+router.include_router(jobs_router)
+router.include_router(events_router)
