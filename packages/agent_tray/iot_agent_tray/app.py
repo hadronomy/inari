@@ -76,6 +76,7 @@ class AgentTrayApplication:
         self._icon = icon
         self._icon.visible = True
         logger.info("Tray icon is now visible")
+        self._ensure_local_agent_started()
         self._refresh_snapshot(notify_connection=False)
         self._threads = [
             threading.Thread(target=self._poll_loop, name="iot-agent-tray-poll", daemon=True),
@@ -84,6 +85,19 @@ class AgentTrayApplication:
         for thread in self._threads:
             thread.start()
         logger.info("Started %d tray background threads", len(self._threads))
+
+    def _ensure_local_agent_started(self) -> None:
+        if self.settings.control_mode != "spawn" or not self.settings.auto_start_agent:
+            return
+        control = self.bridge.query_state()
+        if not control.can_start:
+            return
+        try:
+            message = self.bridge.start()
+        except Exception:
+            logger.exception("Failed to auto-start the local agent process")
+            return
+        logger.info("%s", message)
 
     def _poll_loop(self) -> None:
         while not self._stop_event.wait(self.settings.poll_interval_seconds):
