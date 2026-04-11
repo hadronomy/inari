@@ -22,12 +22,13 @@ uv run --directory packages/agent_tray iot-agent-tray
 IOT_AGENT_TRAY_AGENT_API_BASE_URL=http://127.0.0.1:7310
 IOT_AGENT_TRAY_CONTROL_MODE=spawn
 IOT_AGENT_TRAY_SERVICE_NAME=IoT Agent
+IOT_AGENT_TRAY_AUTO_START_AGENT=true
 IOT_AGENT_TRAY_LOG_LEVEL=INFO
 IOT_AGENT_TRAY_LOG_DIR=./logs
 ```
 
 Control modes:
 
-- `spawn`: the tray starts and stops a local `iot-agent` background process
+- `spawn`: the tray starts and stops a local `iot-agent` background process, and auto-starts it on tray launch by default
 - `service`: the tray controls a Windows service through the Service Control Manager
 - `monitor`: the tray only observes an already-running agent

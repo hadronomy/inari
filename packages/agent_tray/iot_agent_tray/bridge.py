@@ -59,23 +59,49 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         self._process: Any | None = None
 
     def query_state(self) -> ControlSnapshot:
-        running = self._is_running()
-        lifecycle = LifecycleState.RUNNING if running else LifecycleState.UNKNOWN
-        detail = "Managing a local background agent process." if running else "Ready to launch a local agent process."
+        process = self._process
+        if process is None:
+            return ControlSnapshot(
+                mode=self.mode,
+                lifecycle=LifecycleState.STOPPED,
+                detail="Ready to launch a local agent process.",
+                can_start=True,
+                can_stop=False,
+                can_restart=False,
+                managed_by_tray=False,
+            )
+
+        exit_code = process.poll()
+        if exit_code is None:
+            detail = "Managing a local background agent process."
+            if getattr(process, "pid", None) is not None:
+                detail = f"Managing local agent process PID {process.pid}."
+            return ControlSnapshot(
+                mode=self.mode,
+                lifecycle=LifecycleState.RUNNING,
+                detail=detail,
+                can_start=False,
+                can_stop=True,
+                can_restart=True,
+                managed_by_tray=True,
+            )
+
+        detail = f"Last managed process exited with code {exit_code}."
         return ControlSnapshot(
             mode=self.mode,
-            lifecycle=lifecycle,
+            lifecycle=LifecycleState.STOPPED,
             detail=detail,
-            can_start=not running,
-            can_stop=running,
-            can_restart=running,
-            managed_by_tray=running,
+            can_start=True,
+            can_stop=False,
+            can_restart=True,
+            managed_by_tray=False,
         )
 
     def start(self) -> str:
         with self._lock:
             if self._is_running():
                 return "The local agent process is already running."
+            self._process = None
             creation_flags = 0
             if sys.platform == "win32":
                 creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)

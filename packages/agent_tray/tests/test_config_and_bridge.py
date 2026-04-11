@@ -6,7 +6,7 @@ from iot_agent.models import SystemStatusResponse
 from iot_agent_tray.app import AgentTrayApplication
 from iot_agent_tray.bridge import MonitorAgentBridge, SpawnedProcessAgentBridge, build_control_bridge
 from iot_agent_tray.config import TraySettings
-from iot_agent_tray.models import ControlMode, LifecycleState
+from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState
 
 
 class TrayApplicationTests(unittest.TestCase):
@@ -26,6 +26,22 @@ class TrayApplicationTests(unittest.TestCase):
         for thread in application._threads:
             thread.join(timeout=1.0)
 
+    def test_setup_background_auto_starts_spawn_mode_when_enabled(self) -> None:
+        bridge = FakeControlBridge()
+        application = AgentTrayApplication(
+            TraySettings(control_mode="spawn", auto_start_agent=True),
+            client=FakeTrayClient(),
+            bridge=bridge,
+        )
+
+        icon = FakeIcon()
+        application._setup_background(icon)
+
+        self.assertEqual(bridge.start_calls, 1)
+        application._stop_event.set()
+        for thread in application._threads:
+            thread.join(timeout=1.0)
+
 
 class TraySettingsTests(unittest.TestCase):
     def test_settings_derive_related_agent_urls(self) -> None:
@@ -39,6 +55,15 @@ class TraySettingsTests(unittest.TestCase):
 
 
 class SpawnedProcessBridgeTests(unittest.TestCase):
+    def test_spawned_process_bridge_reports_stopped_before_first_launch(self) -> None:
+        bridge = SpawnedProcessAgentBridge(TraySettings(control_mode="spawn"))
+
+        state = bridge.query_state()
+
+        self.assertEqual(state.mode, ControlMode.SPAWN)
+        self.assertEqual(state.lifecycle, LifecycleState.STOPPED)
+        self.assertTrue(state.can_start)
+
     def test_spawned_process_bridge_manages_process_lifecycle(self) -> None:
         created: list[FakeProcess] = []
 
@@ -62,7 +87,7 @@ class SpawnedProcessBridgeTests(unittest.TestCase):
         self.assertEqual(running.lifecycle, LifecycleState.RUNNING)
         self.assertTrue(running.can_stop)
         self.assertEqual(stop_message, "Stopped the local agent process.")
-        self.assertEqual(stopped.lifecycle, LifecycleState.UNKNOWN)
+        self.assertEqual(stopped.lifecycle, LifecycleState.STOPPED)
         self.assertEqual(len(created), 1)
         self.assertTrue(created[0].terminated)
 
@@ -132,6 +157,28 @@ class FakeTrayClient:
 
     def iter_events(self, stop_event):
         return iter(())
+
+
+class FakeControlBridge:
+    mode = ControlMode.SPAWN
+
+    def __init__(self) -> None:
+        self.start_calls = 0
+
+    def query_state(self):
+        return ControlSnapshot(
+            mode=ControlMode.SPAWN,
+            lifecycle=LifecycleState.STOPPED,
+            detail="Ready to launch a local agent process.",
+            can_start=True,
+        )
+
+    def start(self) -> str:
+        self.start_calls += 1
+        return "Started the local agent process."
+
+    def shutdown(self) -> None:
+        return None
 
 
 if __name__ == "__main__":
