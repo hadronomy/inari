@@ -57,7 +57,8 @@ class PrintModelTests(unittest.TestCase):
             }
         )
 
-        job = request.to_domain()
+        operation = request.to_operation()
+        job = operation.job
 
         self.assertIsInstance(job.content, TextDocumentContent)
         self.assertEqual(job.content.text, "Hello printer")
@@ -65,6 +66,7 @@ class PrintModelTests(unittest.TestCase):
         self.assertEqual(job.printer_name, "Office Printer")
         self.assertEqual(job.transport, "text")
         self.assertTrue(job.open_drawer)
+        self.assertEqual(operation.target.printer_name, "Office Printer")
 
     def test_generic_print_request_accepts_binary_wrapper(self) -> None:
         request = PrintJobRequest.model_validate(
@@ -83,7 +85,8 @@ class PrintModelTests(unittest.TestCase):
             }
         )
 
-        job = request.to_domain()
+        operation = request.to_operation()
+        job = operation.job
 
         self.assertIsInstance(job.content, ReceiptImageContent)
         self.assertEqual(job.content.document_name, "POS Ticket")
@@ -129,10 +132,12 @@ class PrintModelTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(request.target.device_id, "dev_test")
-        self.assertEqual(request.target.printer_name, "Kitchen Printer")
-        self.assertEqual(request.command.kind, "cut_paper")
-        self.assertEqual(request.command.mode, "full")
+        operation = request.to_operation()
+
+        self.assertEqual(operation.target.device_id, "dev_test")
+        self.assertEqual(operation.target.printer_name, "Kitchen Printer")
+        self.assertEqual(operation.command.kind, "cut_paper")
+        self.assertEqual(operation.command.mode, "full")
 
 
 if __name__ == "__main__":

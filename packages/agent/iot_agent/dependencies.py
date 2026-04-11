@@ -4,8 +4,8 @@ from fastapi import Depends, Request
 
 from .config import AgentSettings
 from .container import AgentContainer, get_default_container
-from .printer_service import PrinterService
-from .runtime.manager import AgentRuntime
+from .runtime.events import EventHub
+from .runtime.services import DeviceCatalog, JobService
 
 
 def get_container(request: Request) -> AgentContainer:
@@ -20,9 +20,13 @@ def get_settings(container: AgentContainer = Depends(get_container)) -> AgentSet
     return container.settings
 
 
-def get_printer_service(container: AgentContainer = Depends(get_container)) -> PrinterService:
-    return container.printer_service
+def get_device_catalog(container: AgentContainer = Depends(get_container)) -> DeviceCatalog:
+    return container.device_catalog
 
 
-def get_runtime(container: AgentContainer = Depends(get_container)) -> AgentRuntime:
-    return container.runtime
+def get_job_service(container: AgentContainer = Depends(get_container)) -> JobService:
+    return container.job_service
+
+
+def get_event_hub(container: AgentContainer = Depends(get_container)) -> EventHub:
+    return container.event_hub

@@ -20,11 +20,11 @@ from .logging_setup import configure_logging
 async def lifespan(app: FastAPI):
     container: AgentContainer = app.state.container
     configure_logging(container.settings.log_level, log_dir=container.settings.log_dir)
-    await container.runtime.start()
+    await container.runtime_supervisor.start()
     try:
         yield
     finally:
-        await container.runtime.stop()
+        await container.runtime_supervisor.stop()
 
 
 def create_app(settings: AgentSettings | None = None, *, container: AgentContainer | None = None) -> FastAPI:
