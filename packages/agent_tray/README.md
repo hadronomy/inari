@@ -32,3 +32,5 @@ Control modes:
 - `spawn`: the tray starts and stops a local `iot-agent` background process, and auto-starts it on tray launch by default
 - `service`: the tray controls a Windows service through the Service Control Manager
 - `monitor`: the tray only observes an already-running agent
+
+When `spawn` mode cannot boot the local agent, the tray writes the launcher output to `logs/agent-launch.log` so early startup failures are visible even before the agent itself configures logging.

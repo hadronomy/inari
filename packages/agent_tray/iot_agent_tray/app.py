@@ -89,6 +89,13 @@ class AgentTrayApplication:
     def _ensure_local_agent_started(self) -> None:
         if self.settings.control_mode != "spawn" or not self.settings.auto_start_agent:
             return
+        try:
+            self.client.get_status()
+        except Exception:
+            pass
+        else:
+            logger.info("Agent API is already reachable; skipping auto-start")
+            return
         control = self.bridge.query_state()
         if not control.can_start:
             return
@@ -124,7 +131,10 @@ class AgentTrayApplication:
             try:
                 status = self.client.get_status()
             except Exception as exc:
-                snapshot = previous.with_error(control=control, message=_humanize_exception(exc))
+                snapshot = previous.with_error(
+                    control=control,
+                    message=_connection_failure_message(control, exc),
+                )
             else:
                 snapshot = TraySnapshot.from_status(
                     title=self.settings.title,
@@ -333,3 +343,10 @@ def _humanize_exception(exc: Exception) -> str:
     if message:
         return message
     return type(exc).__name__
+
+
+def _connection_failure_message(control, exc: Exception) -> str:
+    if control.mode is ControlMode.SPAWN and control.lifecycle is not None and control.detail:
+        if control.lifecycle is not None and "exited with code" in control.detail:
+            return control.detail
+    return _humanize_exception(exc)
