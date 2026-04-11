@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Mapping, TypeAlias
 
+from .binary_payloads import BinaryPayload
 from .printers import PrinterTransport
 
 
@@ -25,10 +26,17 @@ class StructuredReceiptContent:
 
 @dataclass(slots=True, frozen=True)
 class ReceiptImageContent:
-    image_bytes: bytes
-    mime_type: str = "image/jpeg"
+    binary_payload: BinaryPayload
     document_name: str = "Receipt"
     kind: ClassVar[PrintContentKind] = PrintContentKind.RECEIPT_IMAGE
+
+    @property
+    def image_bytes(self) -> bytes:
+        return self.binary_payload.content
+
+    @property
+    def mime_type(self) -> str | None:
+        return self.binary_payload.mime_type
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,23 +49,39 @@ class TextDocumentContent:
 @dataclass(slots=True, frozen=True)
 class HtmlDocumentContent:
     html: str
-    title: str = "HTML Document"
+    document_name: str = "HTML Document"
     kind: ClassVar[PrintContentKind] = PrintContentKind.HTML
 
 
 @dataclass(slots=True, frozen=True)
 class PdfDocumentContent:
-    pdf_bytes: bytes
-    title: str = "PDF Document"
+    binary_payload: BinaryPayload
+    document_name: str = "PDF Document"
     kind: ClassVar[PrintContentKind] = PrintContentKind.PDF
+
+    @property
+    def pdf_bytes(self) -> bytes:
+        return self.binary_payload.content
+
+    @property
+    def mime_type(self) -> str | None:
+        return self.binary_payload.mime_type
 
 
 @dataclass(slots=True, frozen=True)
 class RawDocumentContent:
-    payload: bytes
+    binary_payload: BinaryPayload
     data_type: str = "RAW"
     document_name: str = "Raw Document"
     kind: ClassVar[PrintContentKind] = PrintContentKind.RAW
+
+    @property
+    def payload(self) -> bytes:
+        return self.binary_payload.content
+
+    @property
+    def mime_type(self) -> str | None:
+        return self.binary_payload.mime_type
 
 
 PrintContent: TypeAlias = (

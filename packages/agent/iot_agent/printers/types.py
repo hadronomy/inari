@@ -53,7 +53,7 @@ class PrinterDevice:
 class RenderedDocument:
     content: bytes
     data_type: str = "RAW"
-    document_name: str = "Odoo Document"
+    document_name: str = "Document"
 
 
 @dataclass(slots=True, frozen=True)

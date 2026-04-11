@@ -302,7 +302,7 @@ class WindowsPrinterDriver(PrinterDriver):
             printer_name=printer.name,
             payload=EscPosCommands.DRAWER_PULSE,
             data_type="RAW",
-            document_name="Odoo Open Drawer",
+            document_name="Open Drawer",
             use_page_calls=True,
         )
         return PrintJobResult(

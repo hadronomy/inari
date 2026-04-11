@@ -13,7 +13,7 @@ PrinterMode = Literal["auto", "raw", "text", "document"]
 
 class AgentSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="ODOO_IOT_",
+        env_prefix="IOT_AGENT_",
         env_file=".env",
         extra="ignore",
     )
