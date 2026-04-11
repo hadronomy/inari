@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .binary_payloads import coerce_image_payload, coerce_pdf_payload, coerce_raw_payload
+from .device_commands import (
+    CutPaper as CutPaperDomain,
+    DeviceCommandKind,
+    FeedDots as FeedDotsDomain,
+    FeedLines as FeedLinesDomain,
+    OpenCashDrawer as OpenCashDrawerDomain,
+    PrintTestPage as PrintTestPageDomain,
+)
 from .drivers import DeviceKind
 from .print_jobs import (
     HtmlDocumentContent,
@@ -18,13 +25,12 @@ from .print_jobs import (
     StructuredReceiptContent,
     TextDocumentContent,
 )
-from .printers import CutMode, PrinterDevice, PrinterTransport
+from .printers import CutMode, PrinterTransport
+from .runtime.operations import DeviceTargetRef, QueuedDeviceCommandOperation, QueuedPrintOperation
 from .runtime.models import (
     DeviceConnectionState,
-    DeviceEventRecord,
     DeviceRecord,
     JobAttemptRecord,
-    JobEventRecord,
     JobKind,
     JobRecord,
     JobState,
@@ -34,14 +40,6 @@ from .runtime.models import (
 
 class APIModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-
-class DeviceCommandKind(StrEnum):
-    OPEN_CASH_DRAWER = "open_cash_drawer"
-    PRINT_TEST_PAGE = "print_test_page"
-    FEED_LINES = "feed_lines"
-    FEED_DOTS = "feed_dots"
-    CUT_PAPER = "cut_paper"
 
 
 class ErrorSourceResponse(APIModel):
@@ -214,6 +212,12 @@ class DeviceTargetInput(APIModel):
     device_id: str | None = None
     printer_name: str | None = None
 
+    def to_domain(self) -> DeviceTargetRef:
+        return DeviceTargetRef(
+            device_id=self.device_id,
+            printer_name=self.printer_name,
+        )
+
 
 class JobTargetResponse(APIModel):
     device_id: str
@@ -333,38 +337,56 @@ class PrintJobRequest(APIModel):
     options: PrintExecutionOptionsInput = Field(default_factory=PrintExecutionOptionsInput)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    def to_domain(self) -> PrintJob:
-        return PrintJob(
-            content=self.content.to_domain(),
-            printer_name=self.target.printer_name,
-            transport=self.options.transport,
-            open_drawer=self.options.open_cash_drawer,
-            metadata=self.metadata,
+    def to_operation(self) -> QueuedPrintOperation:
+        return QueuedPrintOperation(
+            target=self.target.to_domain(),
+            job=PrintJob(
+                content=self.content.to_domain(),
+                printer_name=self.target.printer_name,
+                transport=self.options.transport,
+                open_drawer=self.options.open_cash_drawer,
+                metadata=self.metadata,
+            ),
         )
 
 
 class OpenCashDrawerCommandInput(APIModel):
     kind: Literal["open_cash_drawer"] = "open_cash_drawer"
 
+    def to_domain(self) -> OpenCashDrawerDomain:
+        return OpenCashDrawerDomain()
+
 
 class PrintTestPageCommandInput(APIModel):
     kind: Literal["print_test_page"] = "print_test_page"
     transport: PrinterTransport = PrinterTransport.AUTO
+
+    def to_domain(self) -> PrintTestPageDomain:
+        return PrintTestPageDomain(transport=self.transport)
 
 
 class FeedLinesCommandInput(APIModel):
     kind: Literal["feed_lines"] = "feed_lines"
     count: int = Field(gt=0, le=24)
 
+    def to_domain(self) -> FeedLinesDomain:
+        return FeedLinesDomain(count=self.count)
+
 
 class FeedDotsCommandInput(APIModel):
     kind: Literal["feed_dots"] = "feed_dots"
     count: int = Field(gt=0, le=255)
 
+    def to_domain(self) -> FeedDotsDomain:
+        return FeedDotsDomain(count=self.count)
+
 
 class CutPaperCommandInput(APIModel):
     kind: Literal["cut_paper"] = "cut_paper"
     mode: CutMode = CutMode.PARTIAL
+
+    def to_domain(self) -> CutPaperDomain:
+        return CutPaperDomain(mode=self.mode)
 
 
 DeviceCommandInput = Annotated[
@@ -381,6 +403,13 @@ class DeviceCommandRequest(APIModel):
     target: DeviceTargetInput = Field(default_factory=DeviceTargetInput)
     command: DeviceCommandInput
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def to_operation(self) -> QueuedDeviceCommandOperation:
+        return QueuedDeviceCommandOperation(
+            target=self.target.to_domain(),
+            command=self.command.to_domain(),
+            metadata=self.metadata,
+        )
 
 
 class JobExecutionTargetResponse(APIModel):
@@ -510,7 +539,3 @@ class JobHistoryResponse(APIModel):
     job: JobResponse
     attempts: list[JobAttemptResponse]
     events: list[RuntimeEventResponse]
-
-
-def device_response_from_printer(printer: PrinterDevice) -> DeviceResponse:
-    return DeviceResponse.from_domain(DeviceRecord.from_printer(printer))

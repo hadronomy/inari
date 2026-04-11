@@ -1,3 +1,3 @@
-"""Runtime orchestration layer for discovery, queueing, and live events."""
+"""Runtime orchestration package for discovery, queueing, and execution."""
 
 __all__ = []

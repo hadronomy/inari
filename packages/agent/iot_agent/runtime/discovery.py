@@ -7,7 +7,7 @@ from ..drivers import DeviceKind, DriverRegistry
 from ..exceptions import AgentError
 from .events import EventHub
 from .models import DeviceConnectionState, DeviceRecord, utc_now
-from .store import RuntimeStore
+from .repositories import DeviceRepository
 
 logger = logging.getLogger(__name__)
 
@@ -17,21 +17,21 @@ class DiscoveryCoordinator:
         self,
         *,
         driver_registry: DriverRegistry,
-        store: RuntimeStore,
+        device_repository: DeviceRepository,
         event_hub: EventHub,
     ) -> None:
         self.driver_registry = driver_registry
-        self.store = store
+        self.device_repository = device_repository
         self.event_hub = event_hub
 
     async def sync_once(self) -> tuple[DeviceRecord, ...]:
         observed_at = utc_now()
-        previous = {device.id: device for device in self.store.list_devices()}
+        previous = {device.id: device for device in self.device_repository.list()}
         current = {device.id: device for device in self._discover_devices(observed_at=observed_at)}
 
         for device in current.values():
             prior = previous.get(device.id)
-            saved = self.store.upsert_device(device)
+            saved = self.device_repository.upsert(device)
             if prior is None:
                 await self._publish_device_event("device.connected", saved)
                 continue
@@ -45,10 +45,10 @@ class DiscoveryCoordinator:
             if device_id in current or prior.connection_state is DeviceConnectionState.OFFLINE:
                 continue
             offline = prior.with_connection_state(DeviceConnectionState.OFFLINE, observed_at=observed_at)
-            saved = self.store.upsert_device(offline)
+            saved = self.device_repository.upsert(offline)
             await self._publish_device_event("device.disconnected", saved)
 
-        return tuple(self.store.list_devices())
+        return tuple(self.device_repository.list())
 
     def _discover_devices(self, *, observed_at) -> Iterable[DeviceRecord]:
         yield from self._discover_printers(observed_at=observed_at)
@@ -71,7 +71,7 @@ class DiscoveryCoordinator:
                 yield DeviceRecord.from_printer(printer, observed_at=observed_at)
 
     async def _publish_device_event(self, event_type: str, device: DeviceRecord) -> None:
-        event = self.store.create_device_event(
+        event = self.device_repository.append_event(
             device_id=device.id,
             event_type=event_type,
             payload=_device_event_payload(device),

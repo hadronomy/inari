@@ -15,9 +15,12 @@ from iot_agent.printer_service import PrinterService
 from iot_agent.printers import PrintJobResult, PrinterCapabilities, PrinterDevice, PrinterTransport, RenderedDocument
 from iot_agent.runtime.discovery import DiscoveryCoordinator
 from iot_agent.runtime.events import EventHub
-from iot_agent.runtime.manager import AgentRuntime
+from iot_agent.runtime.execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator, PrinterOperationExecutor, RuntimeJobExecutor
 from iot_agent.runtime.models import JobRecord, JobState
+from iot_agent.runtime.repositories import DeviceRepository, JobRepository
+from iot_agent.runtime.services import DeviceCatalog, JobService
 from iot_agent.runtime.store import RuntimeStore
+from iot_agent.runtime.supervisor import RuntimeSupervisor
 
 
 @dataclass(slots=True)
@@ -70,8 +73,8 @@ class FakePrinterDriver(PrinterDriver):
         return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4)
 
 
-class AgentRuntimeTests(unittest.TestCase):
-    def test_runtime_executes_queued_print_jobs_asynchronously(self) -> None:
+class RuntimeArchitectureTests(unittest.TestCase):
+    def test_supervisor_executes_queued_print_jobs_asynchronously(self) -> None:
         async def scenario() -> None:
             printer = PrinterDevice(
                 name="Kitchen Printer",
@@ -98,33 +101,63 @@ class AgentRuntimeTests(unittest.TestCase):
                 printer_service = PrinterService(settings=settings, driver_registry=registry)
                 store = RuntimeStore(settings.runtime_database_path)
                 event_hub = EventHub()
-                runtime = AgentRuntime(
-                    settings=settings,
-                    printer_service=printer_service,
-                    store=store,
-                    discovery=DiscoveryCoordinator(
-                        driver_registry=registry,
-                        store=store,
-                        event_hub=event_hub,
-                    ),
+                device_repository = DeviceRepository(store)
+                job_repository = JobRepository(store)
+                discovery = DiscoveryCoordinator(
+                    driver_registry=registry,
+                    device_repository=device_repository,
                     event_hub=event_hub,
                 )
+                device_catalog = DeviceCatalog(
+                    device_repository=device_repository,
+                    discovery=discovery,
+                    printer_service=printer_service,
+                )
+                job_service = JobService(
+                    settings=settings,
+                    job_repository=job_repository,
+                    device_catalog=device_catalog,
+                    event_hub=event_hub,
+                )
+                worker_pool = DeviceWorkerPool(
+                    settings=settings,
+                    job_repository=job_repository,
+                    job_service=job_service,
+                    executor=RuntimeJobExecutor(PrinterOperationExecutor(printer_service)),
+                )
+                supervisor = RuntimeSupervisor(
+                    settings=settings,
+                    store=store,
+                    device_catalog=device_catalog,
+                    job_service=job_service,
+                    job_scheduler=JobScheduler(
+                        settings=settings,
+                        job_repository=job_repository,
+                        job_service=job_service,
+                        worker_pool=worker_pool,
+                    ),
+                    lease_recovery=LeaseRecoveryCoordinator(
+                        settings=settings,
+                        job_repository=job_repository,
+                        job_service=job_service,
+                    ),
+                    worker_pool=worker_pool,
+                )
 
-                await runtime.start()
+                await supervisor.start()
                 try:
-                    job = await runtime.submit_print_job(
+                    job = await job_service.enqueue_print(
                         PrintJobRequest.model_validate(
                             {
                                 "content": {"kind": "text", "text": "Hello queue"},
                                 "target": {"printer_name": printer.name},
                                 "options": {"transport": "text"},
                             }
-                        )
+                        ).to_operation()
                     )
-
-                    completed = await wait_for_job(runtime, job.id)
+                    completed = await wait_for_job(job_service, job.id)
                 finally:
-                    await runtime.stop()
+                    await supervisor.stop()
 
                 self.assertEqual(job.state, JobState.QUEUED)
                 self.assertEqual(completed.state, JobState.SUCCEEDED)
@@ -133,10 +166,10 @@ class AgentRuntimeTests(unittest.TestCase):
         asyncio.run(scenario())
 
 
-async def wait_for_job(runtime: AgentRuntime, job_id: str) -> JobRecord:
+async def wait_for_job(job_service: JobService, job_id: str) -> JobRecord:
     deadline = asyncio.get_running_loop().time() + 2.0
     while True:
-        job = runtime.get_job(job_id)
+        job = job_service.get_job(job_id)
         if job is not None and job.state is JobState.SUCCEEDED:
             return job
         if asyncio.get_running_loop().time() >= deadline:
