@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import Depends, Request
+from fastapi import Depends
+from starlette.requests import HTTPConnection
 
 from .config import AgentSettings
 from .container import AgentContainer, get_default_container
@@ -8,11 +9,11 @@ from .runtime.events import EventHub
 from .runtime.services import DeviceCatalog, JobService
 
 
-def get_container(request: Request) -> AgentContainer:
-    container = getattr(request.app.state, "container", None)
+def get_container(connection: HTTPConnection) -> AgentContainer:
+    container = getattr(connection.app.state, "container", None)
     if container is None:
         container = get_default_container()
-        request.app.state.container = container
+        connection.app.state.container = container
     return container
 
 
