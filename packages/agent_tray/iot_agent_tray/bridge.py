@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -173,13 +174,15 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
     def _resolve_launch_command(self) -> tuple[str, ...]:
         if self._launch_command is not None:
             return self._launch_command
+        if _supports_module_launch():
+            return (sys.executable, "-m", "iot_agent.main")
+        console_script = shutil.which("iot-agent")
+        if console_script is not None:
+            return (console_script,)
         agent_workspace = _detect_agent_workspace(self._working_directory)
         uv_executable = shutil.which("uv")
         if agent_workspace is not None and uv_executable is not None:
             return (uv_executable, "run", "--directory", str(agent_workspace), "iot-agent")
-        console_script = shutil.which("iot-agent")
-        if console_script is not None:
-            return (console_script,)
         return (sys.executable, "-m", "iot_agent.main")
 
     def _close_process_output_handle(self) -> None:
@@ -298,3 +301,7 @@ def _detect_agent_workspace(working_directory: Path) -> Path | None:
         if (agent_workspace / "pyproject.toml").exists():
             return agent_workspace
     return None
+
+
+def _supports_module_launch() -> bool:
+    return importlib.util.find_spec("iot_agent.main") is not None

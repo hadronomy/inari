@@ -28,7 +28,7 @@ class TraySettings(BaseSettings):
     poll_interval_seconds: float = 5.0
     connect_timeout_seconds: float = 2.0
     event_timeout_seconds: float = 1.0
-    shutdown_started_process_on_exit: bool = False
+    shutdown_started_process_on_exit: bool = True
     log_dir: Path = Path("./logs")
 
     @field_validator("agent_api_base_url", mode="before")
