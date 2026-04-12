@@ -255,7 +255,7 @@ class FakeTrayClient:
             }
         )
 
-    def iter_events(self, stop_event):
+    def iter_live_updates(self, stop_event):
         return iter(())
 
 

@@ -59,6 +59,8 @@ Primary endpoints:
 - `POST /jobs/{job_id}/cancel`
 - `WS /events`
 
+The live events stream is snapshot-backed: the socket sends an initial `snapshot` message on connect, then `event_update` messages containing both the runtime event and a refreshed `SystemStatusResponse`. That lets local clients stay push-first without repeatedly polling `/system/status` for every queue or device change.
+
 ## Error Format
 
 Failures now use a single problem-details-style envelope across service errors, request validation errors, and framework HTTP errors:
@@ -122,7 +124,7 @@ Print jobs use nested device targeting and execution options:
 }
 ```
 
-Queued job responses expose the agent-managed job resource immediately, and the frontend can follow its lifecycle through `GET /jobs/{job_id}` or `WS /events`.
+Queued job responses expose the agent-managed job resource immediately, and the frontend can follow its lifecycle through `GET /jobs/{job_id}` or the snapshot-backed `WS /events` stream.
 
 ## Runtime
 

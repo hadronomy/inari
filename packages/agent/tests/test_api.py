@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
@@ -200,8 +201,33 @@ class ApiShapeTests(unittest.TestCase):
     def test_events_websocket_connects_successfully(self) -> None:
         client = TestClient(create_app(container=make_test_container()))
 
-        with client.websocket_connect("/events"):
-            pass
+        with client.websocket_connect("/events") as websocket:
+            payload = websocket.receive_json()
+
+        self.assertEqual(payload["kind"], "snapshot")
+        self.assertEqual(payload["status"]["service"]["name"], "IoT Agent")
+        self.assertEqual(payload["status"]["queue"]["queued"], 1)
+
+    def test_events_websocket_streams_snapshot_backed_updates(self) -> None:
+        container = make_test_container()
+        client = TestClient(create_app(container=container))
+        event = JobEventRecord(
+            sequence=2,
+            resource_id="job_123",
+            event_type="job.failed",
+            occurred_at=utc_now(),
+            payload={"job_id": "job_123", "error_detail": "Printer offline"},
+        )
+
+        with client.websocket_connect("/events") as websocket:
+            websocket.receive_json()
+            asyncio.run(container.event_hub.publish(event))
+            payload = websocket.receive_json()
+
+        self.assertEqual(payload["kind"], "event_update")
+        self.assertEqual(payload["event"]["event_type"], "job.failed")
+        self.assertEqual(payload["event"]["payload"]["error_detail"], "Printer offline")
+        self.assertEqual(payload["status"]["queue"]["queued"], 1)
 
     def test_validation_errors_use_unified_problem_details_shape(self) -> None:
         client = TestClient(create_app(container=make_test_container()))

@@ -5,11 +5,14 @@ from threading import Event
 from typing import Any, Callable
 
 import httpx
-from iot_agent.models import JobResourceResponse, RuntimeEventResponse, SystemStatusResponse
+from pydantic import TypeAdapter
+from iot_agent.models import JobResourceResponse, LiveUpdateMessage, SystemStatusResponse
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
 from .config import TraySettings
+
+LIVE_UPDATE_MESSAGE_ADAPTER = TypeAdapter(LiveUpdateMessage)
 
 
 class AgentApiClient:
@@ -39,7 +42,7 @@ class AgentApiClient:
             response.raise_for_status()
         return JobResourceResponse.model_validate(response.json())
 
-    def iter_events(self, stop_event: Event) -> Iterator[RuntimeEventResponse]:
+    def iter_live_updates(self, stop_event: Event) -> Iterator[LiveUpdateMessage]:
         with self._websocket_connect(
             self.settings.agent_events_url,
             open_timeout=self.settings.connect_timeout_seconds,
@@ -54,7 +57,7 @@ class AgentApiClient:
                     return
                 if isinstance(raw_message, bytes):
                     raw_message = raw_message.decode("utf-8")
-                yield RuntimeEventResponse.model_validate_json(raw_message)
+                yield LIVE_UPDATE_MESSAGE_ADAPTER.validate_json(raw_message)
 
     def _default_http_client(self) -> httpx.Client:
         return httpx.Client(

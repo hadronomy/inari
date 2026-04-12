@@ -7,13 +7,13 @@ import time
 import webbrowser
 from typing import Any, Callable
 
-from iot_agent.models import RuntimeEventResponse
+from iot_agent.models import LiveEventUpdateResponse, LiveSnapshotResponse, RuntimeEventResponse, SystemStatusResponse
 
 from .bridge import AgentControlBridge, build_control_bridge
 from .client import AgentApiClient
 from .config import TraySettings
 from .icons import build_tray_icon
-from .models import ControlMode, TrayLinks, TraySnapshot
+from .models import ControlMode, ControlSnapshot, TrayLinks, TraySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class AgentTrayApplication:
         self._ensure_local_agent_started()
         self._refresh_snapshot(notify_connection=False)
         self._threads = [
-            threading.Thread(target=self._poll_loop, name="iot-agent-tray-poll", daemon=True),
+            threading.Thread(target=self._reconcile_loop, name="iot-agent-tray-reconcile", daemon=True),
             threading.Thread(target=self._event_loop, name="iot-agent-tray-events", daemon=True),
         ]
         for thread in self._threads:
@@ -106,46 +106,83 @@ class AgentTrayApplication:
             return
         logger.info("%s", message)
 
-    def _poll_loop(self) -> None:
-        while not self._stop_event.wait(self.settings.poll_interval_seconds):
+    def _reconcile_loop(self) -> None:
+        while not self._stop_event.wait(self.settings.status_reconcile_interval_seconds):
             self._refresh_snapshot()
 
     def _event_loop(self) -> None:
         while not self._stop_event.is_set():
             try:
-                for event in self.client.iter_events(self._stop_event):
-                    self._apply_snapshot(self.snapshot.with_event(event))
-                    self._notify_for_event(event)
-                    self._refresh_snapshot(notify_connection=False)
+                for message in self.client.iter_live_updates(self._stop_event):
+                    control = self.bridge.query_state()
+                    if isinstance(message, LiveSnapshotResponse):
+                        self._apply_status_snapshot(
+                            message.status,
+                            control=control,
+                            notify_connection=True,
+                        )
+                        continue
+                    if isinstance(message, LiveEventUpdateResponse):
+                        self._apply_status_snapshot(
+                            message.status,
+                            control=control,
+                            event=message.event,
+                            notify_connection=True,
+                        )
+                        self._notify_for_event(message.event)
+                        if self._stop_event.is_set():
+                            return
+                        continue
                     if self._stop_event.is_set():
                         return
             except Exception as exc:
                 logger.debug("Tray event stream disconnected: %s", exc)
-                if self._stop_event.wait(min(3.0, self.settings.poll_interval_seconds)):
+                self._refresh_snapshot(notify_connection=False)
+                if self._stop_event.wait(self.settings.event_reconnect_delay_seconds):
                     return
 
     def _refresh_snapshot(self, *, notify_connection: bool = True) -> None:
         with self._refresh_lock:
-            previous = self.snapshot
             control = self.bridge.query_state()
             try:
                 status = self.client.get_status()
             except Exception as exc:
+                previous = self.snapshot
                 snapshot = previous.with_error(
                     control=control,
                     message=_connection_failure_message(control, exc),
                 )
+                self._apply_snapshot(snapshot)
+                if notify_connection and previous.connected != snapshot.connected:
+                    self._notify_connection_change(snapshot)
             else:
-                snapshot = TraySnapshot.from_status(
-                    title=self.settings.title,
-                    links=self.links,
+                self._apply_status_snapshot(
+                    status,
                     control=control,
-                    status=status,
-                    previous=previous,
+                    notify_connection=notify_connection,
                 )
-            self._apply_snapshot(snapshot)
-            if notify_connection and previous.connected != snapshot.connected:
-                self._notify_connection_change(snapshot)
+
+    def _apply_status_snapshot(
+        self,
+        status: SystemStatusResponse,
+        *,
+        control: ControlSnapshot,
+        event: RuntimeEventResponse | None = None,
+        notify_connection: bool,
+    ) -> None:
+        previous = self.snapshot
+        snapshot = TraySnapshot.from_status(
+            title=self.settings.title,
+            links=self.links,
+            control=control,
+            status=status,
+            previous=previous,
+        )
+        if event is not None:
+            snapshot = snapshot.with_event(event)
+        self._apply_snapshot(snapshot)
+        if notify_connection and previous.connected != snapshot.connected:
+            self._notify_connection_change(snapshot)
 
     def _apply_snapshot(self, snapshot: TraySnapshot) -> None:
         with self._snapshot_lock:

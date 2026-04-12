@@ -8,6 +8,12 @@ The tray app is intentionally separate from the headless agent service:
 - it talks to the agent over the existing local HTTP and WebSocket API
 - it can either monitor an external agent, manage a local background process, or control a Windows service
 
+The tray is now WebSocket-first for live state:
+
+- it bootstraps and reconciles with HTTP
+- it keeps queue and device state fresh from the snapshot-backed `WS /events` stream
+- it only falls back to slower HTTP reconciliation instead of polling `/system/status` after every runtime event
+
 ## Run
 
 From the repository root:
@@ -23,6 +29,8 @@ IOT_AGENT_TRAY_AGENT_API_BASE_URL=http://127.0.0.1:7310
 IOT_AGENT_TRAY_CONTROL_MODE=spawn
 IOT_AGENT_TRAY_SERVICE_NAME=IoT Agent
 IOT_AGENT_TRAY_AUTO_START_AGENT=true
+IOT_AGENT_TRAY_STATUS_RECONCILE_INTERVAL_SECONDS=30
+IOT_AGENT_TRAY_EVENT_RECONNECT_DELAY_SECONDS=3
 IOT_AGENT_TRAY_LOG_LEVEL=INFO
 IOT_AGENT_TRAY_LOG_DIR=./logs
 ```
