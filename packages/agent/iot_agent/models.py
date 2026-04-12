@@ -208,6 +208,23 @@ class SystemStatusResponse(APIModel):
     supported_device_commands: tuple[DeviceCommandKind, ...]
 
 
+class LiveSnapshotResponse(APIModel):
+    kind: Literal["snapshot"] = "snapshot"
+    status: SystemStatusResponse
+
+
+class LiveEventUpdateResponse(APIModel):
+    kind: Literal["event_update"] = "event_update"
+    status: SystemStatusResponse
+    event: RuntimeEventResponse
+
+
+LiveUpdateMessage = Annotated[
+    LiveSnapshotResponse | LiveEventUpdateResponse,
+    Field(discriminator="kind"),
+]
+
+
 class DeviceTargetInput(APIModel):
     device_id: str | None = None
     printer_name: str | None = None

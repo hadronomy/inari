@@ -17,6 +17,8 @@ from .models import (
     JobAttemptResponse,
     JobCollectionResponse,
     JobHistoryResponse,
+    LiveEventUpdateResponse,
+    LiveSnapshotResponse,
     JobResourceResponse,
     JobResponse,
     PrintJobRequest,
@@ -44,10 +46,9 @@ JobServiceDependency = Annotated[JobService, Depends(get_job_service)]
 EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
 
 
-@system_router.get("/status", response_model=SystemStatusResponse)
-async def system_status(
-    device_catalog: DeviceCatalogDependency,
-    job_service: JobServiceDependency,
+def build_system_status_response(
+    device_catalog: DeviceCatalog,
+    job_service: JobService,
 ) -> SystemStatusResponse:
     devices = list(device_catalog.list_devices())
     return SystemStatusResponse(
@@ -57,6 +58,14 @@ async def system_status(
         supported_content_kinds=tuple(PrintContentKind),
         supported_device_commands=tuple(DeviceCommandKind),
     )
+
+
+@system_router.get("/status", response_model=SystemStatusResponse)
+async def system_status(
+    device_catalog: DeviceCatalogDependency,
+    job_service: JobServiceDependency,
+) -> SystemStatusResponse:
+    return build_system_status_response(device_catalog, job_service)
 
 
 @devices_router.get("", response_model=DeviceDirectoryResponse)
@@ -149,11 +158,26 @@ async def cancel_job(job_id: str, job_service: JobServiceDependency) -> JobResou
 
 
 @events_router.websocket("/events")
-async def stream_events(websocket: WebSocket, event_hub: EventHubDependency) -> None:
+async def stream_events(
+    websocket: WebSocket,
+    device_catalog: DeviceCatalogDependency,
+    job_service: JobServiceDependency,
+    event_hub: EventHubDependency,
+) -> None:
     await websocket.accept()
+    await websocket.send_json(
+        LiveSnapshotResponse(
+            status=build_system_status_response(device_catalog, job_service),
+        ).model_dump(mode="json")
+    )
     try:
         async for event in event_hub.iter_events():
-            await websocket.send_json(RuntimeEventResponse.from_domain(event).model_dump(mode="json"))
+            await websocket.send_json(
+                LiveEventUpdateResponse(
+                    status=build_system_status_response(device_catalog, job_service),
+                    event=RuntimeEventResponse.from_domain(event),
+                ).model_dump(mode="json")
+            )
     except WebSocketDisconnect:
         return
 
