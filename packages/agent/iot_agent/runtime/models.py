@@ -41,6 +41,11 @@ class DeviceConnectionState(StrEnum):
     OFFLINE = "offline"
 
 
+class DeviceClass(StrEnum):
+    PHYSICAL = "physical"
+    VIRTUAL = "virtual"
+
+
 class JobKind(StrEnum):
     PRINT = "print_job"
     COMMAND = "device_command"
@@ -59,6 +64,28 @@ class JobState(StrEnum):
 def build_device_id(*, kind: DeviceKind, driver_key: str, name: str) -> str:
     digest = sha1(f"{kind.value}:{driver_key}:{name.casefold()}".encode("utf-8")).hexdigest()
     return f"dev_{digest[:24]}"
+
+
+VIRTUAL_PRINTER_NAMES = {
+    "fax",
+    "microsoft print to pdf",
+    "microsoft xps document writer",
+}
+VIRTUAL_PRINTER_NAME_HINTS = (
+    "onenote",
+    "virtual printer",
+    "impresora virtual",
+)
+
+
+def infer_device_class(*, kind: DeviceKind, name: str) -> DeviceClass:
+    normalized_name = name.casefold().strip()
+    if kind is DeviceKind.PRINTER and (
+        normalized_name in VIRTUAL_PRINTER_NAMES
+        or any(hint in normalized_name for hint in VIRTUAL_PRINTER_NAME_HINTS)
+    ):
+        return DeviceClass.VIRTUAL
+    return DeviceClass.PHYSICAL
 
 
 @dataclass(slots=True, frozen=True)
@@ -106,7 +133,9 @@ class DeviceRecord:
                 "documents": printer.supports_documents,
                 "cash_drawer": printer.supports_cash_drawer,
             },
-            metadata={},
+            metadata={
+                "device_class": infer_device_class(kind=DeviceKind.PRINTER, name=printer.name).value,
+            },
         )
 
     def to_printer_device(self) -> PrinterDevice:
@@ -124,6 +153,53 @@ class DeviceRecord:
                 cash_drawer=bool(self.capabilities.get("cash_drawer", False)),
             ),
         )
+
+    @property
+    def observed_at(self) -> datetime:
+        return self.updated_at
+
+    @property
+    def device_class(self) -> DeviceClass:
+        raw_device_class = self.metadata.get("device_class")
+        if isinstance(raw_device_class, str):
+            try:
+                return DeviceClass(raw_device_class)
+            except ValueError:
+                pass
+        return infer_device_class(kind=self.kind, name=self.name)
+
+    @property
+    def supported_transports(self) -> tuple[PrinterTransport, ...]:
+        if self.kind is not DeviceKind.PRINTER:
+            return ()
+
+        supported: list[PrinterTransport] = []
+        transport_flags = {
+            PrinterTransport.RAW: bool(self.capabilities.get("raw", False)),
+            PrinterTransport.TEXT: bool(self.capabilities.get("text", False)),
+            PrinterTransport.DOCUMENT: bool(self.capabilities.get("documents", False)),
+        }
+        preferred = self.preferred_transport
+        if (
+            preferred is not None
+            and preferred is not PrinterTransport.AUTO
+            and transport_flags.get(preferred, False)
+        ):
+            supported.append(preferred)
+        for transport in (PrinterTransport.RAW, PrinterTransport.TEXT, PrinterTransport.DOCUMENT):
+            if transport_flags[transport] and transport not in supported:
+                supported.append(transport)
+        return tuple(supported)
+
+    @property
+    def capability_keys(self) -> tuple[str, ...]:
+        if self.kind is not DeviceKind.PRINTER:
+            return ()
+
+        capability_names: list[str] = []
+        if self.capabilities.get("cash_drawer", False):
+            capability_names.append("cash_drawer")
+        return tuple(capability_names)
 
     def with_connection_state(
         self,

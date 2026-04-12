@@ -65,7 +65,7 @@ class DiscoveryCoordinator:
                     "DEVICE_DISCOVERY_FAILED",
                     f"Printer discovery failed for driver {driver.metadata.key!r}.",
                     status_code=503,
-                    details={"driver": driver.metadata.key, "cause": type(exc).__name__},
+                    details={"driver_key": driver.metadata.key, "cause": type(exc).__name__},
                 ) from exc
             for printer in printers:
                 yield DeviceRecord.from_printer(printer, observed_at=observed_at)
@@ -80,13 +80,24 @@ class DiscoveryCoordinator:
 
 
 def _device_event_payload(device: DeviceRecord) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "device_id": device.id,
         "kind": device.kind.value,
+        "device_class": device.device_class.value,
         "name": device.name,
-        "driver": device.driver_key,
-        "connection_state": device.connection_state.value,
-        "is_default": device.is_default,
-        "preferred_transport": device.preferred_transport.value if device.preferred_transport is not None else None,
-        "capabilities": dict(device.capabilities),
+        "driver_key": device.driver_key,
+        "connection": {
+            "state": device.connection_state.value,
+            "first_seen_at": device.first_seen_at.isoformat(),
+            "last_seen_at": device.last_seen_at.isoformat(),
+            "observed_at": device.observed_at.isoformat(),
+        },
     }
+    if device.kind is DeviceKind.PRINTER:
+        payload["printer"] = {
+            "is_default": device.is_default,
+            "preferred_transport": device.preferred_transport.value if device.preferred_transport is not None else None,
+            "supported_transports": [transport.value for transport in device.supported_transports],
+            "capabilities": list(device.capability_keys),
+        }
+    return payload

@@ -293,7 +293,7 @@ def _serialize_execution_result(result: PrintJobResult) -> dict[str, object]:
         "printer": {
             "device_id": DeviceRecord.from_printer(result.printer).id,
             "printer_name": result.printer.name,
-            "driver": result.printer.driver_key,
+            "driver_key": result.printer.driver_key,
             "is_default": result.printer.is_default,
         },
         "transport": result.transport.value,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +29,7 @@ from .print_jobs import (
 from .printers import CutMode, PrinterTransport
 from .runtime.operations import DeviceTargetRef, QueuedDeviceCommandOperation, QueuedPrintOperation
 from .runtime.models import (
+    DeviceClass,
     DeviceConnectionState,
     DeviceRecord,
     JobAttemptRecord,
@@ -89,12 +91,17 @@ class QueueSummaryResponse(APIModel):
         return cls(**payload)
 
 
+class DefaultDeviceSummaryResponse(APIModel):
+    id: str
+    name: str
+
+
 class DeviceDirectorySummaryResponse(APIModel):
     count: int
     online_count: int
     offline_count: int
     kind_counts: dict[str, int]
-    default_device_id: str | None = None
+    default_device: DefaultDeviceSummaryResponse | None = None
 
     @classmethod
     def from_devices(cls, devices: list[DeviceRecord]) -> DeviceDirectorySummaryResponse:
@@ -107,32 +114,39 @@ class DeviceDirectorySummaryResponse(APIModel):
             online_count=sum(1 for device in devices if device.connection_state is DeviceConnectionState.ONLINE),
             offline_count=sum(1 for device in devices if device.connection_state is DeviceConnectionState.OFFLINE),
             kind_counts=kind_counts,
-            default_device_id=default_device.id if default_device is not None else None,
+            default_device=(
+                DefaultDeviceSummaryResponse(id=default_device.id, name=default_device.name)
+                if default_device is not None
+                else None
+            ),
         )
 
 
-class PrinterCapabilitiesResponse(APIModel):
-    raw: bool
-    text: bool
-    documents: bool
-    cash_drawer: bool
+class PrinterCapability(StrEnum):
+    CASH_DRAWER = "cash_drawer"
+
+
+class DeviceConnectionResponse(APIModel):
+    state: DeviceConnectionState
+    first_seen_at: datetime
+    last_seen_at: datetime
+    observed_at: datetime
 
 
 class PrinterDetailsResponse(APIModel):
     is_default: bool
     preferred_transport: PrinterTransport | None = None
-    capabilities: PrinterCapabilitiesResponse
+    supported_transports: tuple[PrinterTransport, ...] = ()
+    capabilities: tuple[PrinterCapability, ...] = ()
 
 
 class DeviceResponse(APIModel):
     id: str
     kind: DeviceKind
+    device_class: DeviceClass
     name: str
-    driver: str
-    connection_state: DeviceConnectionState
-    first_seen_at: datetime
-    last_seen_at: datetime
-    updated_at: datetime
+    driver_key: str
+    connection: DeviceConnectionResponse
     printer: PrinterDetailsResponse | None = None
 
     @classmethod
@@ -142,34 +156,31 @@ class DeviceResponse(APIModel):
             printer_details = PrinterDetailsResponse(
                 is_default=device.is_default,
                 preferred_transport=device.preferred_transport,
-                capabilities=PrinterCapabilitiesResponse(
-                    raw=bool(device.capabilities.get("raw", False)),
-                    text=bool(device.capabilities.get("text", False)),
-                    documents=bool(device.capabilities.get("documents", False)),
-                    cash_drawer=bool(device.capabilities.get("cash_drawer", False)),
-                ),
+                supported_transports=device.supported_transports,
+                capabilities=tuple(PrinterCapability(value) for value in device.capability_keys),
             )
         return cls(
             id=device.id,
             kind=device.kind,
+            device_class=device.device_class,
             name=device.name,
-            driver=device.driver_key,
-            connection_state=device.connection_state,
-            first_seen_at=device.first_seen_at,
-            last_seen_at=device.last_seen_at,
-            updated_at=device.updated_at,
+            driver_key=device.driver_key,
+            connection=DeviceConnectionResponse(
+                state=device.connection_state,
+                first_seen_at=device.first_seen_at,
+                last_seen_at=device.last_seen_at,
+                observed_at=device.observed_at,
+            ),
             printer=printer_details,
         )
 
 
 class DeviceDirectoryResponse(APIModel):
-    ok: Literal[True] = True
     devices: list[DeviceResponse]
     summary: DeviceDirectorySummaryResponse
 
 
 class DeviceResourceResponse(APIModel):
-    ok: Literal[True] = True
     device: DeviceResponse
 
 
@@ -432,7 +443,7 @@ class DeviceCommandRequest(APIModel):
 class JobExecutionTargetResponse(APIModel):
     device_id: str | None = None
     printer_name: str
-    driver: str
+    driver_key: str
     is_default: bool
 
 
@@ -451,7 +462,7 @@ class JobExecutionResultResponse(APIModel):
             target=JobExecutionTargetResponse(
                 device_id=str(target["device_id"]) if target.get("device_id") is not None else None,
                 printer_name=str(target.get("printer_name", "")),
-                driver=str(target.get("driver", "")),
+                driver_key=str(target.get("driver_key") or target.get("driver") or ""),
                 is_default=bool(target.get("is_default", False)),
             ),
             transport=PrinterTransport(str(payload.get("transport", PrinterTransport.AUTO.value))),
