@@ -175,7 +175,7 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         if self._launch_command is not None:
             return self._launch_command
         if _supports_module_launch():
-            return (sys.executable, "-m", "iot_agent.main")
+            return (sys.executable, "-m", "iot_agent")
         console_script = shutil.which("iot-agent")
         if console_script is not None:
             return (console_script,)
@@ -183,7 +183,7 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         uv_executable = shutil.which("uv")
         if agent_workspace is not None and uv_executable is not None:
             return (uv_executable, "run", "--directory", str(agent_workspace), "iot-agent")
-        return (sys.executable, "-m", "iot_agent.main")
+        return (sys.executable, "-m", "iot_agent")
 
     def _close_process_output_handle(self) -> None:
         handle = self._process_output_handle
@@ -304,4 +304,4 @@ def _detect_agent_workspace(working_directory: Path) -> Path | None:
 
 
 def _supports_module_launch() -> bool:
-    return importlib.util.find_spec("iot_agent.main") is not None
+    return importlib.util.find_spec("iot_agent.__main__") is not None
