@@ -185,3 +185,7 @@ def main() -> None:
         log_level=settings.log_level.lower(),
         reload=False,
     )
+
+
+if __name__ == "__main__":
+    main()

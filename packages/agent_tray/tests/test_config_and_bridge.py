@@ -142,7 +142,7 @@ class SpawnedProcessBridgeTests(unittest.TestCase):
         with patch("iot_agent_tray.bridge._supports_module_launch", return_value=True):
             command = bridge._resolve_launch_command()
 
-        self.assertEqual(command, (bridge_module_sys_executable(), "-m", "iot_agent.main"))
+        self.assertEqual(command, (bridge_module_sys_executable(), "-m", "iot_agent"))
 
     def test_spawned_process_bridge_falls_back_to_console_script(self) -> None:
         bridge = SpawnedProcessAgentBridge(TraySettings(control_mode="spawn"))
