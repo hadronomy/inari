@@ -12,6 +12,7 @@ dependencies = [
   "puremagic>=2.0.0,<3.0.0",
   "pywin32>=306; platform_system == 'Windows'",
   "httpx>=0.28.1",
+  "scalar-fastapi>=1.8.2",
 ]
 
 [project.scripts]

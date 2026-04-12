@@ -114,6 +114,22 @@ class ApiShapeTests(unittest.TestCase):
         self.assertIn("receipt_image", payload["supported_content_kinds"])
         self.assertIn("cut_paper", payload["supported_device_commands"])
 
+    def test_docs_route_serves_scalar_reference(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+
+        response = client.get("/docs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("scalar", response.text.lower())
+        self.assertNotIn("swagger ui", response.text.lower())
+
+    def test_redoc_route_is_disabled(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+
+        response = client.get("/redoc")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_submit_print_job_returns_queued_job_resource(self) -> None:
         container = make_test_container()
         client = TestClient(create_app(container=container))
