@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import unittest
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from tempfile import mkdtemp
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from iot_agent.config import AgentSettings
 from iot_agent.container import AgentContainer
 from iot_agent.drivers import DriverRegistry
 from iot_agent.exceptions import AgentError
+from iot_agent.gateway.models import UpstreamConnectionState, UpstreamStatus
 from iot_agent.main import create_app
 from iot_agent.runtime.events import EventHub
 from iot_agent.runtime.models import (
@@ -24,11 +26,29 @@ from iot_agent.runtime.models import (
     JobState,
     utc_now,
 )
+from iot_agent.security.models import (
+    AccessScope,
+    AgentIdentity,
+    AuthenticatedPrincipal,
+    GatewayExposure,
+    GatewayMode,
+    IssuedToken,
+    PrincipalKind,
+)
 from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
 
 
 @dataclass(slots=True)
 class StubRuntimeSupervisor:
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+
+@dataclass(slots=True)
+class StubApplicationSupervisor:
     async def start(self) -> None:
         return None
 
@@ -99,16 +119,85 @@ class StubJobService:
         return cancelled
 
 
+@dataclass(slots=True)
+class StubAuthorizationService:
+    issued_tokens: dict[str, AuthenticatedPrincipal] = field(default_factory=dict)
+
+    def issue_loopback_token(self, connection, *, client_name: str, requested_scopes=None):
+        scopes = tuple(requested_scopes or tuple(AccessScope))
+        expires_at = datetime.now(tz=UTC) + timedelta(hours=1)
+        token_value = f"token::{client_name}::{len(self.issued_tokens) + 1}"
+        principal = AuthenticatedPrincipal(
+            subject=f"local:{client_name}",
+            principal_kind=PrincipalKind.LOCAL_CLIENT,
+            scopes=frozenset(scopes),
+            issuer="urn:test:issuer",
+            audience="iot-agent.local",
+            token_id=token_value,
+            expires_at=expires_at,
+        )
+        self.issued_tokens[token_value] = principal
+        return IssuedToken(
+            access_token=token_value,
+            expires_at=expires_at,
+            scopes=scopes,
+            subject=principal.subject,
+            principal_kind=principal.principal_kind,
+        )
+
+    def authenticate_connection(self, connection):
+        authorization = connection.headers.get("authorization")
+        if not authorization:
+            raise AgentError("AUTHENTICATION_REQUIRED", "A bearer access token is required for this endpoint.", status_code=401)
+        _, _, token = authorization.partition(" ")
+        principal = self.issued_tokens.get(token.strip())
+        if principal is None:
+            raise AgentError("INVALID_ACCESS_TOKEN", "The supplied access token is invalid.", status_code=401)
+        return principal
+
+    def require_scopes(self, principal: AuthenticatedPrincipal, scopes):
+        required = tuple(scopes)
+        if not principal.has_scopes(required):
+            raise AgentError("INSUFFICIENT_SCOPE", "The access token does not include the required scopes for this endpoint.", status_code=403)
+        return principal
+
+
+@dataclass(slots=True)
+class StubGatewayService:
+    settings: AgentSettings
+
+    def get_identity(self):
+        return AgentIdentity(
+            agent_id="agt_test",
+            key_id="kid_test",
+            algorithm="Ed25519",
+            public_jwk={"kty": "OKP", "crv": "Ed25519", "kid": "kid_test", "x": "abc"},
+            created_at=utc_now(),
+        )
+
+    def get_upstream_status(self):
+        return UpstreamStatus(
+            mode=self.settings.gateway_mode,
+            state=(
+                UpstreamConnectionState.DISCONNECTED
+                if self.settings.gateway_mode is GatewayMode.MANAGED
+                else UpstreamConnectionState.DISABLED
+            ),
+            base_url=self.settings.upstream_base_url,
+            detail="Local gateway mode is active.",
+        )
+
+
 class ApiShapeTests(unittest.TestCase):
     def test_system_status_reports_device_and_queue_summary(self) -> None:
         container = make_test_container()
         client = TestClient(create_app(container=container))
 
-        response = client.get("/system/status")
+        response = client.get("/system/status", headers=auth_headers(client))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["service"]["version"], "1.8.0a1")
+        self.assertEqual(payload["service"]["version"], "1.9.0a1")
         self.assertEqual(payload["devices"]["count"], 1)
         self.assertEqual(
             payload["devices"]["default_device"],
@@ -122,7 +211,7 @@ class ApiShapeTests(unittest.TestCase):
         container = make_test_container()
         client = TestClient(create_app(container=container))
 
-        response = client.get("/devices")
+        response = client.get("/devices", headers=auth_headers(client))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -150,7 +239,7 @@ class ApiShapeTests(unittest.TestCase):
         )
         client = TestClient(create_app(container=make_test_container(devices=(device,))))
 
-        response = client.get("/devices")
+        response = client.get("/devices", headers=auth_headers(client))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["devices"][0]["device_class"], "virtual")
@@ -186,6 +275,7 @@ class ApiShapeTests(unittest.TestCase):
                 "target": {"printer_name": "Kitchen Printer"},
                 "options": {"transport": "text"},
             },
+            headers=auth_headers(client),
         )
 
         self.assertEqual(response.status_code, 202)
@@ -206,6 +296,7 @@ class ApiShapeTests(unittest.TestCase):
                 "target": {"printer_name": "Kitchen Printer"},
                 "command": {"kind": "cut_paper", "mode": "full"},
             },
+            headers=auth_headers(client),
         )
 
         self.assertEqual(response.status_code, 202)
@@ -219,7 +310,7 @@ class ApiShapeTests(unittest.TestCase):
         client = TestClient(create_app(container=container))
         job_id = next(iter(container.job_service.jobs))
 
-        response = client.get(f"/jobs/{job_id}/history")
+        response = client.get(f"/jobs/{job_id}/history", headers=auth_headers(client))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -248,7 +339,7 @@ class ApiShapeTests(unittest.TestCase):
         container.job_service.jobs[job_id] = completed
         client = TestClient(create_app(container=container))
 
-        response = client.get("/jobs")
+        response = client.get("/jobs", headers=auth_headers(client))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -259,7 +350,7 @@ class ApiShapeTests(unittest.TestCase):
     def test_events_websocket_connects_successfully(self) -> None:
         client = TestClient(create_app(container=make_test_container()))
 
-        with client.websocket_connect("/events") as websocket:
+        with client.websocket_connect("/events", headers=auth_headers(client)) as websocket:
             payload = websocket.receive_json()
 
         self.assertEqual(payload["kind"], "snapshot")
@@ -277,7 +368,7 @@ class ApiShapeTests(unittest.TestCase):
             payload={"job_id": "job_123", "error_detail": "Printer offline"},
         )
 
-        with client.websocket_connect("/events") as websocket:
+        with client.websocket_connect("/events", headers=auth_headers(client)) as websocket:
             websocket.receive_json()
             asyncio.run(container.event_hub.publish(event))
             payload = websocket.receive_json()
@@ -311,6 +402,7 @@ class ApiShapeTests(unittest.TestCase):
         response = client.post(
             "/print-jobs",
             json={"content": {"kind": "text", "text": "Hello printer"}},
+            headers=auth_headers(client),
         )
 
         self.assertEqual(response.status_code, 404)
@@ -341,8 +433,62 @@ class ApiShapeTests(unittest.TestCase):
             ("post", "/print"),
             ("post", "/print_receipt"),
         ):
-            response = getattr(client, method)(path)
+            response = getattr(client, method)(path, headers=auth_headers(client))
             self.assertEqual(response.status_code, 404, path)
+
+    def test_local_token_endpoint_issues_scoped_token(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+
+        response = client.post(
+            "/auth/local-token",
+            json={
+                "client_name": "tray",
+                "requested_scopes": ["system:read", "events:read"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["subject"], "local:tray")
+        self.assertEqual(payload["scopes"], ["system:read", "events:read"])
+
+    def test_protected_routes_require_bearer_token(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+
+        response = client.get("/devices")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "AUTHENTICATION_REQUIRED")
+
+    def test_insufficient_scope_returns_forbidden(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+        headers = auth_headers(client, requested_scopes=("system:read",))
+
+        response = client.get("/devices", headers=headers)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "INSUFFICIENT_SCOPE")
+
+    def test_gateway_routes_surface_identity_and_status(self) -> None:
+        client = TestClient(create_app(container=make_test_container()))
+        headers = auth_headers(client, requested_scopes=("admin:read",))
+
+        identity = client.get("/gateway/identity", headers=headers)
+        upstream = client.get("/gateway/upstream/status", headers=headers)
+
+        self.assertEqual(identity.status_code, 200)
+        self.assertEqual(identity.json()["agent_id"], "agt_test")
+        self.assertEqual(upstream.status_code, 200)
+        self.assertEqual(upstream.json()["state"], "disabled")
+
+    def test_lan_exposure_requires_tls_material(self) -> None:
+        with self.assertRaises(RuntimeError):
+            create_app(
+                settings=AgentSettings(
+                    host="0.0.0.0",
+                    gateway_exposure=GatewayExposure.LAN,
+                )
+            )
 
 
 def make_test_container(
@@ -352,6 +498,10 @@ def make_test_container(
     command_kind: str | None = None,
     devices: tuple[DeviceRecord, ...] | None = None,
 ) -> AgentContainer:
+    settings = AgentSettings(
+        security_state_dir=mkdtemp(prefix="iot-agent-security-"),
+        runtime_database_path=mkdtemp(prefix="iot-agent-runtime-") + "\\runtime.sqlite3",
+    )
     default_device = DeviceRecord.from_printer(
         PrinterDevice(
             name="Kitchen Printer",
@@ -399,11 +549,11 @@ def make_test_container(
         payload={"job_id": job.id},
     )
     return AgentContainer(
-        settings=AgentSettings(),
+        settings=settings,
         driver_registry=DriverRegistry(drivers=()),
         printer_service=Mock(),
         event_hub=EventHub(),
-        device_catalog=StubDeviceCatalog(devices=(device,)),
+        device_catalog=StubDeviceCatalog(devices=devices),
         job_service=StubJobService(
             jobs={job.id: job},
             queue_counts_payload={"queued": 1},
@@ -411,7 +561,20 @@ def make_test_container(
             job_events=(event,),
         ),
         runtime_supervisor=StubRuntimeSupervisor(),
+        authorization_service=StubAuthorizationService(),
+        gateway_service=StubGatewayService(settings=settings),
+        application_supervisor=StubApplicationSupervisor(),
     )
+
+
+def auth_headers(client: TestClient, *, requested_scopes: tuple[str, ...] | None = None) -> dict[str, str]:
+    payload: dict[str, object] = {"client_name": "test-client"}
+    if requested_scopes is not None:
+        payload["requested_scopes"] = list(requested_scopes)
+    response = client.post("/auth/local-token", json=payload)
+    response.raise_for_status()
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 if __name__ == "__main__":

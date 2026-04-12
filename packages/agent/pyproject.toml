@@ -1,6 +1,6 @@
 [project]
 name = "iot-agent"
-version = "1.8.0a1"
+version = "1.9.0a1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,7 +12,11 @@ dependencies = [
   "puremagic>=2.0.0,<3.0.0",
   "pywin32>=306; platform_system == 'Windows'",
   "httpx>=0.28.1",
+  "cryptography>=46.0.5",
+  "joserfc>=1.6.3",
+  "keyring>=25.7.0",
   "scalar-fastapi>=1.8.2",
+  "websockets>=16.0",
 ]
 
 [project.scripts]

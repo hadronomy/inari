@@ -25,6 +25,7 @@ class TraySettings(BaseSettings):
     service_name: str = "IoT Agent"
     log_level: LogLevel = "INFO"
     auto_start_agent: bool = True
+    auth_client_name: str = "iot-agent-tray"
     status_reconcile_interval_seconds: float = 30.0
     event_reconnect_delay_seconds: float = 3.0
     connect_timeout_seconds: float = 2.0
