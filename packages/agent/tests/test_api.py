@@ -108,11 +108,52 @@ class ApiShapeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["service"]["version"], "1.7.0a2")
+        self.assertEqual(payload["service"]["version"], "1.8.0a1")
         self.assertEqual(payload["devices"]["count"], 1)
+        self.assertEqual(
+            payload["devices"]["default_device"],
+            {"id": next(iter(container.device_catalog.devices)).id, "name": "Kitchen Printer"},
+        )
         self.assertEqual(payload["queue"]["queued"], 1)
         self.assertIn("receipt_image", payload["supported_content_kinds"])
         self.assertIn("cut_paper", payload["supported_device_commands"])
+
+    def test_list_devices_uses_semantically_refined_shape(self) -> None:
+        container = make_test_container()
+        client = TestClient(create_app(container=container))
+
+        response = client.get("/devices")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotIn("ok", payload)
+        self.assertEqual(
+            payload["summary"]["default_device"],
+            {"id": next(iter(container.device_catalog.devices)).id, "name": "Kitchen Printer"},
+        )
+        device = payload["devices"][0]
+        self.assertEqual(device["driver_key"], "tests.fake-printers")
+        self.assertEqual(device["device_class"], "physical")
+        self.assertEqual(device["connection"]["state"], "online")
+        self.assertIn("observed_at", device["connection"])
+        self.assertEqual(device["printer"]["supported_transports"], ["raw", "text", "document"])
+        self.assertEqual(device["printer"]["capabilities"], ["cash_drawer"])
+
+    def test_list_devices_marks_virtual_windows_printers(self) -> None:
+        device = DeviceRecord.from_printer(
+            PrinterDevice(
+                name="Microsoft Print to PDF",
+                driver_key="windows.printers",
+                capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+            ),
+            connection_state=DeviceConnectionState.ONLINE,
+        )
+        client = TestClient(create_app(container=make_test_container(devices=(device,))))
+
+        response = client.get("/devices")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["devices"][0]["device_class"], "virtual")
 
     def test_docs_route_serves_scalar_reference(self) -> None:
         client = TestClient(create_app(container=make_test_container()))
@@ -196,7 +237,7 @@ class ApiShapeTests(unittest.TestCase):
                 "printer": {
                     "device_id": "dev_test",
                     "printer_name": "Kitchen Printer",
-                    "driver": "tests.fake-printers",
+                    "driver_key": "tests.fake-printers",
                     "is_default": True,
                 },
                 "transport": "raw",
@@ -212,6 +253,7 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["jobs"][0]["result"]["target"]["printer_name"], "Kitchen Printer")
+        self.assertEqual(payload["jobs"][0]["result"]["target"]["driver_key"], "tests.fake-printers")
         self.assertEqual(payload["jobs"][0]["result"]["bytes_written"], 128)
 
     def test_events_websocket_connects_successfully(self) -> None:
@@ -308,8 +350,9 @@ def make_test_container(
     job_kind: JobKind = JobKind.PRINT,
     operation: str = "print_job",
     command_kind: str | None = None,
+    devices: tuple[DeviceRecord, ...] | None = None,
 ) -> AgentContainer:
-    device = DeviceRecord.from_printer(
+    default_device = DeviceRecord.from_printer(
         PrinterDevice(
             name="Kitchen Printer",
             driver_key="tests.fake-printers",
@@ -319,6 +362,8 @@ def make_test_container(
         ),
         connection_state=DeviceConnectionState.ONLINE,
     )
+    devices = devices or (default_device,)
+    device = devices[0]
     now = utc_now()
     job = JobRecord(
         id="job_123",

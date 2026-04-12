@@ -63,6 +63,14 @@ Interactive API docs are served with Scalar at `GET /docs`.
 
 The live events stream is snapshot-backed: the socket sends an initial `snapshot` message on connect, then `event_update` messages containing both the runtime event and a refreshed `SystemStatusResponse`. That lets local clients stay push-first without repeatedly polling `/system/status` for every queue or device change.
 
+Device directory responses are intentionally semantic rather than driver-internal. Devices expose:
+
+- `driver_key` instead of a generic `driver` label
+- `device_class` to distinguish physical and virtual devices
+- a nested `connection` object with `state`, `first_seen_at`, `last_seen_at`, and `observed_at`
+- printer transport support through `supported_transports`
+- printer feature flags as a sparse `capabilities` array, for example `["cash_drawer"]`
+
 ## Error Format
 
 Failures now use a single problem-details-style envelope across service errors, request validation errors, and framework HTTP errors:

@@ -232,13 +232,13 @@ class FakeTrayClient:
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": "1.7.0a2"},
+                "service": {"name": "IoT Agent", "version": "1.8.0a1"},
                 "devices": {
                     "count": 0,
                     "online_count": 0,
                     "offline_count": 0,
                     "kind_counts": {},
-                    "default_device_id": None,
+                    "default_device": None,
                 },
                 "queue": {
                     "total": 0,

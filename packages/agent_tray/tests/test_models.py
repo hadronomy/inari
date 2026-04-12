@@ -14,13 +14,13 @@ class TraySnapshotTests(unittest.TestCase):
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": "1.7.0a2"},
+                "service": {"name": "IoT Agent", "version": "1.8.0a1"},
                 "devices": {
                     "count": 2,
                     "online_count": 2,
                     "offline_count": 0,
                     "kind_counts": {"printer": 2},
-                    "default_device_id": "dev_default",
+                    "default_device": {"id": "dev_default", "name": "Kitchen Printer"},
                 },
                 "queue": {
                     "total": 3,
@@ -63,13 +63,13 @@ class TraySnapshotTests(unittest.TestCase):
                 {
                     "ok": True,
                     "status": "healthy",
-                    "service": {"name": "IoT Agent", "version": "1.7.0a2"},
+                    "service": {"name": "IoT Agent", "version": "1.8.0a1"},
                     "devices": {
                         "count": 1,
                         "online_count": 1,
                         "offline_count": 0,
                         "kind_counts": {"printer": 1},
-                        "default_device_id": "dev_default",
+                        "default_device": {"id": "dev_default", "name": "Kitchen Printer"},
                     },
                     "queue": {
                         "total": 0,

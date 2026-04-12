@@ -168,7 +168,7 @@ wheels = [
 
 [[package]]
 name = "iot-agent"
-version = "1.7.0a2"
+version = "1.8.0a1"
 source = { editable = "packages/agent" }
 dependencies = [
     { name = "fastapi" },

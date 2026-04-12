@@ -33,7 +33,7 @@ from .runtime.models import JobState
 from .runtime.services import DeviceCatalog, JobService
 
 SERVICE_NAME = "IoT Agent"
-API_VERSION = "1.7.0a2"
+API_VERSION = "1.8.0a1"
 
 router = APIRouter()
 system_router = APIRouter(prefix="/system", tags=["system"])
