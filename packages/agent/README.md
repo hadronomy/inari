@@ -59,6 +59,8 @@ Primary endpoints:
 - `POST /jobs/{job_id}/cancel`
 - `WS /events`
 
+Interactive API docs are served with Scalar at `GET /docs`.
+
 The live events stream is snapshot-backed: the socket sends an initial `snapshot` message on connect, then `event_update` messages containing both the runtime event and a refreshed `SystemStatusResponse`. That lets local clients stay push-first without repeatedly polling `/system/status` for every queue or device change.
 
 ## Error Format

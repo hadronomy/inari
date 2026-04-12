@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from scalar_fastapi import AgentScalarConfig, Layout, Theme, get_scalar_api_reference
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import API_VERSION, SERVICE_NAME, router
@@ -34,6 +35,8 @@ def create_app(settings: AgentSettings | None = None, *, container: AgentContain
         title=SERVICE_NAME,
         version=API_VERSION,
         lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
     )
     app.state.container = app_container
     app.add_middleware(
@@ -44,6 +47,19 @@ def create_app(settings: AgentSettings | None = None, *, container: AgentContain
         allow_headers=["*"],
     )
     app.include_router(router)
+
+    @app.get("/docs", include_in_schema=False)
+    async def scalar_docs():
+        return get_scalar_api_reference(
+            openapi_url=app.openapi_url,
+            title=f"{SERVICE_NAME} API Reference",
+            theme=Theme.DEFAULT,
+            layout=Layout.MODERN,
+            show_sidebar=True,
+            hide_dark_mode_toggle=False,
+            telemetry=False,
+            agent=AgentScalarConfig(disabled=True),
+        )
 
     @app.exception_handler(AgentError)
     async def agent_error_handler(_: Request, exc: AgentError):

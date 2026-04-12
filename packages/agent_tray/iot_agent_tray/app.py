@@ -207,8 +207,6 @@ class AgentTrayApplication:
             MenuItem(snapshot.device_line, None, enabled=False),
             MenuItem(snapshot.queue_line, None, enabled=False),
         ]
-        if snapshot.last_event_detail:
-            items.append(MenuItem(f"Last event: {snapshot.last_event_detail}", None, enabled=False))
         if snapshot.error_line:
             items.append(MenuItem(snapshot.error_line, None, enabled=False))
         items.extend(
