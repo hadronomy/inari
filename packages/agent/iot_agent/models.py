@@ -27,6 +27,8 @@ from .print_jobs import (
     TextDocumentContent,
 )
 from .printers import CutMode, PrinterTransport
+from .security.models import AccessScope, AgentIdentity, AuthenticatedPrincipal, GatewayExposure, GatewayMode, IssuedToken, PrincipalKind
+from .gateway.models import UpstreamConnectionState, UpstreamStatus
 from .runtime.operations import DeviceTargetRef, QueuedDeviceCommandOperation, QueuedPrintOperation
 from .runtime.models import (
     DeviceClass,
@@ -72,6 +74,115 @@ class ErrorResponse(APIModel):
 class ServiceDescriptorResponse(APIModel):
     name: str
     version: str
+
+
+class LocalTokenRequest(APIModel):
+    client_name: str = "local-client"
+    requested_scopes: tuple[AccessScope, ...] | None = None
+
+
+class TokenResponse(APIModel):
+    access_token: str
+    token_type: str
+    expires_at: datetime
+    scopes: tuple[AccessScope, ...]
+    subject: str
+    principal_kind: PrincipalKind
+
+    @classmethod
+    def from_issued_token(cls, token: IssuedToken) -> TokenResponse:
+        return cls(
+            access_token=token.access_token,
+            token_type=token.token_type,
+            expires_at=token.expires_at,
+            scopes=token.scopes,
+            subject=token.subject,
+            principal_kind=token.principal_kind,
+        )
+
+
+class PrincipalResponse(APIModel):
+    subject: str
+    principal_kind: PrincipalKind
+    scopes: tuple[AccessScope, ...]
+    issuer: str
+    audience: str
+    token_id: str | None = None
+    expires_at: datetime | None = None
+
+    @classmethod
+    def from_principal(cls, principal: AuthenticatedPrincipal) -> PrincipalResponse:
+        return cls(
+            subject=principal.subject,
+            principal_kind=principal.principal_kind,
+            scopes=tuple(sorted(principal.scopes, key=lambda item: item.value)),
+            issuer=principal.issuer,
+            audience=principal.audience,
+            token_id=principal.token_id,
+            expires_at=principal.expires_at,
+        )
+
+
+class AuthenticatedPrincipalResponse(APIModel):
+    principal: PrincipalResponse
+
+
+class GatewayIdentityResponse(APIModel):
+    agent_id: str
+    key_id: str
+    algorithm: str
+    public_jwk: dict[str, Any]
+    created_at: datetime
+    certificate_pem: str | None = None
+    mode: GatewayMode
+    exposure: GatewayExposure
+
+    @classmethod
+    def from_identity(
+        cls,
+        identity: AgentIdentity,
+        *,
+        mode: GatewayMode,
+        exposure: GatewayExposure,
+    ) -> GatewayIdentityResponse:
+        return cls(
+            agent_id=identity.agent_id,
+            key_id=identity.key_id,
+            algorithm=identity.algorithm,
+            public_jwk=dict(identity.public_jwk),
+            created_at=identity.created_at,
+            certificate_pem=identity.certificate_pem,
+            mode=mode,
+            exposure=exposure,
+        )
+
+
+class GatewayUpstreamStatusResponse(APIModel):
+    mode: GatewayMode
+    state: UpstreamConnectionState
+    base_url: str | None = None
+    status_url: str | None = None
+    events_url: str | None = None
+    enrolled_at: datetime | None = None
+    last_sync_at: datetime | None = None
+    last_event_at: datetime | None = None
+    detail: str | None = None
+    last_error: str | None = None
+
+    @classmethod
+    def from_status(cls, status: UpstreamStatus) -> GatewayUpstreamStatusResponse:
+        return cls(
+            mode=status.mode,
+            state=status.state,
+            base_url=status.base_url,
+            status_url=status.status_url,
+            events_url=status.events_url,
+            enrolled_at=status.enrolled_at,
+            last_sync_at=status.last_sync_at,
+            last_event_at=status.last_event_at,
+            detail=status.detail,
+            last_error=status.last_error,
+        )
 
 
 class QueueSummaryResponse(APIModel):

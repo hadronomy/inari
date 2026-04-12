@@ -14,7 +14,7 @@ class TraySnapshotTests(unittest.TestCase):
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": "1.8.0a1"},
+                "service": {"name": "IoT Agent", "version": "1.9.0a1"},
                 "devices": {
                     "count": 2,
                     "online_count": 2,
@@ -63,7 +63,7 @@ class TraySnapshotTests(unittest.TestCase):
                 {
                     "ok": True,
                     "status": "healthy",
-                    "service": {"name": "IoT Agent", "version": "1.8.0a1"},
+                    "service": {"name": "IoT Agent", "version": "1.9.0a1"},
                     "devices": {
                         "count": 1,
                         "online_count": 1,

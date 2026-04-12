@@ -15,22 +15,26 @@ from .container import AgentContainer, build_container, get_default_container
 from .config import AgentSettings, get_settings
 from .exceptions import AgentError, ErrorItemPayload, ErrorPayload, ErrorSourcePayload
 from .logging_setup import configure_logging
+from .security.middleware import install_security_middleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     container: AgentContainer = app.state.container
     configure_logging(container.settings.log_level, log_dir=container.settings.log_dir)
-    await container.runtime_supervisor.start()
+    supervisor = container.application_supervisor or container.runtime_supervisor
+    await supervisor.start()
     try:
         yield
     finally:
-        await container.runtime_supervisor.stop()
+        await supervisor.stop()
 
 
 def create_app(settings: AgentSettings | None = None, *, container: AgentContainer | None = None) -> FastAPI:
     app_container = container or (build_container(settings) if settings is not None else get_default_container())
     app_settings = app_container.settings
+    if app_container.security_policy_service is not None:
+        app_container.security_policy_service.validate_startup()
     app = FastAPI(
         title=SERVICE_NAME,
         version=API_VERSION,
@@ -46,6 +50,8 @@ def create_app(settings: AgentSettings | None = None, *, container: AgentContain
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if app_container.security_policy_service is not None:
+        install_security_middleware(app, policy_service=app_container.security_policy_service)
     app.include_router(router)
 
     @app.get("/docs", include_in_schema=False)
@@ -194,12 +200,14 @@ def main() -> None:
     import uvicorn
 
     settings = get_settings()
+    container = get_default_container()
     uvicorn.run(
-        "iot_agent.main:app",
+        create_app(settings=settings, container=container),
         host=settings.host,
         port=settings.port,
         log_level=settings.log_level.lower(),
         reload=False,
+        **(container.tls_context_factory.server_options() if container.tls_context_factory is not None else {}),
     )
 
 

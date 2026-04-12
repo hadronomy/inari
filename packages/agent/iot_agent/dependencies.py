@@ -5,8 +5,11 @@ from starlette.requests import HTTPConnection
 
 from .config import AgentSettings
 from .container import AgentContainer, get_default_container
+from .gateway import GatewayService
 from .runtime.events import EventHub
 from .runtime.services import DeviceCatalog, JobService
+from .security.auth import AuthorizationService
+from .security.policies import SecurityPolicyService
 
 
 def get_container(connection: HTTPConnection) -> AgentContainer:
@@ -31,3 +34,21 @@ def get_job_service(container: AgentContainer = Depends(get_container)) -> JobSe
 
 def get_event_hub(container: AgentContainer = Depends(get_container)) -> EventHub:
     return container.event_hub
+
+
+def get_authorization_service(container: AgentContainer = Depends(get_container)) -> AuthorizationService:
+    if container.authorization_service is None:
+        raise RuntimeError("AuthorizationService is not configured.")
+    return container.authorization_service
+
+
+def get_security_policy_service(container: AgentContainer = Depends(get_container)) -> SecurityPolicyService:
+    if container.security_policy_service is None:
+        raise RuntimeError("SecurityPolicyService is not configured.")
+    return container.security_policy_service
+
+
+def get_gateway_service(container: AgentContainer = Depends(get_container)) -> GatewayService:
+    if container.gateway_service is None:
+        raise RuntimeError("GatewayService is not configured.")
+    return container.gateway_service
