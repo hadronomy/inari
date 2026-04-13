@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 from contextlib import asynccontextmanager
 from http import HTTPStatus
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -12,7 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api import API_VERSION, SERVICE_NAME, router
 from .container import AgentContainer, build_container, get_default_container
-from .config import AgentSettings, get_settings
+from .config import AgentSettings, load_settings
 from .exceptions import AgentError, ErrorItemPayload, ErrorPayload, ErrorSourcePayload
 from .logging_setup import configure_logging
 from .security.middleware import install_security_middleware
@@ -196,11 +198,19 @@ def _unhandled_error_payload(request: Request, exc: Exception) -> ErrorPayload:
 app = create_app()
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
-    settings = get_settings()
-    container = get_default_container()
+    parser = argparse.ArgumentParser(description="Run the IoT Agent service.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Path to the primary TOML config file.",
+    )
+    args = parser.parse_args(argv)
+
+    settings = load_settings(config_path=args.config)
+    container = build_container(settings)
     uvicorn.run(
         create_app(settings=settings, container=container),
         host=settings.host,

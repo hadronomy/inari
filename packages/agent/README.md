@@ -196,37 +196,120 @@ Or from inside `packages/agent`:
 uv run iot-agent
 ```
 
+To run with an explicit TOML config:
+
+```powershell
+uv run --directory packages/agent iot-agent --config .\config\iot-agent.toml
+```
+
 ## Test
 
 ```powershell
 uv run --directory packages/agent python -m unittest discover -s tests -v
 ```
 
-## Environment
+## Config
+
+The agent now supports a TOML-first configuration flow. The recommended setup is:
+
+1. generate the schema and example config
+2. copy or adapt `config.example.toml`
+3. run the agent with `--config`
+4. use `IOT_AGENT_*` environment variables only for overrides and secrets
+
+Config resolution order is:
+
+1. built-in defaults
+2. the selected TOML file
+3. a sibling `*.local.toml` override file
+4. `.env`
+5. `IOT_AGENT_*` environment variables
+
+You can also point the agent at a config file with `IOT_AGENT_CONFIG` when passing `--config` is not convenient.
+
+Generate the schema and example file from the package directory:
+
+```powershell
+uv run --directory packages/agent iot-agent-generate-config
+```
+
+That writes:
+
+- [schemas/iot-agent-config.schema.json](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/packages/agent/schemas/iot-agent-config.schema.json)
+- [config.example.toml](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/packages/agent/config.example.toml)
+
+`config.example.toml` includes a Taplo schema reference, so editors that support Taplo can validate and autocomplete the file directly.
+
+Example config:
+
+```toml
+#:schema ./schemas/iot-agent-config.schema.json
+
+config_version = 1
+
+[server]
+host = "127.0.0.1"
+port = 7310
+trusted_hosts = ["127.0.0.1", "localhost"]
+
+[cors]
+allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
+
+[logging]
+level = "INFO"
+directory = "./logs"
+
+[paths]
+temp_dir = "./tmp"
+runtime_database = "./data/iot-agent.sqlite3"
+security_state_dir = "./data/security"
+
+[printing]
+default_transport = "auto"
+html_enabled = true
+
+[security]
+gateway_mode = "standalone"
+gateway_exposure = "loopback"
+allow_loopback_bootstrap = true
+https_redirect_enabled = true
+secret_store_service_name = "iot-agent"
+
+[security.local_tokens]
+ttl_seconds = 3600
+audience = "iot-agent.local"
+
+[gateway]
+auth_mode = "controller"
+certificate_mode = "controller"
+edge_provider = "direct"
+mutual_tls_mode = "disabled"
+trust_client_ca = true
+
+[gateway.zitadel]
+assertion_algorithm = "RS256"
+requested_scopes = ["openid"]
+
+[gateway.step_ca]
+requested_sans = []
+```
+
+## Environment Overrides
+
+Flat `IOT_AGENT_*` environment variables still work as the final override layer on top of TOML. That is especially useful for:
+
+- secrets
+- CI
+- one-off debugging
+- containerized deployments
 
 ```env
 IOT_AGENT_ALLOWED_ORIGINS=http://127.0.0.1:8069,http://localhost:8069
-IOT_AGENT_GATEWAY_MODE=standalone
-IOT_AGENT_GATEWAY_EXPOSURE=loopback
-IOT_AGENT_TRUSTED_HOSTS=127.0.0.1,localhost
-IOT_AGENT_DEFAULT_PRINTER_NAME=EPSON TM-T20III
-IOT_AGENT_DEFAULT_PRINTER_MODE=auto
-IOT_AGENT_HTML_PRINT_ENABLED=true
 IOT_AGENT_LOG_LEVEL=INFO
-IOT_AGENT_RUNTIME_DATABASE_PATH=./data/iot-agent.sqlite3
-IOT_AGENT_SECURITY_STATE_DIR=./data/security
-IOT_AGENT_TLS_CERT_PATH=./certs/agent.crt
-IOT_AGENT_TLS_KEY_PATH=./certs/agent.key
-IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example
-IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
-IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=required
-IOT_AGENT_UPSTREAM_AUTH_MODE=zitadel_service_account
+IOT_AGENT_DEFAULT_PRINTER_NAME=EPSON TM-T20III
 IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
 IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
 IOT_AGENT_UPSTREAM_BOOTSTRAP_TOKEN=replace-me
-IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example/api/iot-agent/enroll
-IOT_AGENT_UPSTREAM_ENROLLMENT_CODE=SITE-A-4F7K-92LM
-IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
 ```
 
 For controller-issued step-ca bootstrap, the controller can return the CA URL, fingerprint, sign URL, and renew URL dynamically, so those values do not need to be preconfigured on every agent. `IOT_AGENT_STEP_CA_URL`, `IOT_AGENT_STEP_CA_SIGN_URL`, `IOT_AGENT_STEP_CA_RENEW_URL`, and `IOT_AGENT_STEP_CA_ROOT_FINGERPRINT` remain available as explicit overrides when you want local fallback knowledge of the CA.

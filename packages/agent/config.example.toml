@@ -1,0 +1,81 @@
+#:schema ./schemas/iot-agent-config.schema.json
+
+# Generated example configuration for iot-agent.
+# Environment variables with the IOT_AGENT_ prefix still override these values.
+
+config_version = 1
+
+[server]
+host = "127.0.0.1"
+port = 7310
+trusted_hosts = ["127.0.0.1", "localhost"]
+
+[cors]
+allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
+
+[logging]
+level = "INFO"
+directory = "./logs"
+
+[paths]
+temp_dir = "./tmp"
+runtime_database = "./data/iot-agent.sqlite3"
+security_state_dir = "./data/security"
+
+[printing]
+default_transport = "auto"
+html_enabled = true
+
+[runtime.discovery]
+poll_interval_seconds = 3.0
+
+[runtime.scheduler]
+poll_interval_seconds = 0.5
+batch_size = 32
+
+[runtime.jobs]
+max_attempts = 3
+retry_base_delay_seconds = 2
+retry_max_delay_seconds = 30
+dispatch_lease_seconds = 15
+execution_lease_seconds = 30
+heartbeat_interval_seconds = 5.0
+execution_timeout_seconds = 60.0
+lease_recovery_interval_seconds = 5.0
+
+[security]
+gateway_mode = "standalone"
+gateway_exposure = "loopback"
+allow_loopback_bootstrap = true
+https_redirect_enabled = true
+secret_store_service_name = "iot-agent"
+
+[security.local_tokens]
+ttl_seconds = 3600
+audience = "iot-agent.local"
+
+[gateway]
+auth_mode = "controller"
+certificate_mode = "controller"
+edge_provider = "direct"
+mutual_tls_mode = "disabled"
+trust_client_ca = true
+
+[gateway.sync]
+interval_seconds = 30.0
+reconnect_delay_seconds = 5.0
+event_timeout_seconds = 30.0
+control_poll_interval_seconds = 0.5
+outbox_batch_size = 128
+backoff_base_seconds = 1.0
+backoff_max_seconds = 60.0
+token_refresh_skew_seconds = 300
+
+[gateway.zitadel]
+assertion_algorithm = "RS256"
+requested_scopes = ["openid"]
+token_refresh_skew_seconds = 120
+
+[gateway.step_ca]
+requested_sans = []
+certificate_renewal_skew_seconds = 3600
