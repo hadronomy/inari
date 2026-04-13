@@ -257,12 +257,9 @@ allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
 
 [logging]
 level = "INFO"
-directory = "./logs"
 
 [paths]
-temp_dir = "./tmp"
-runtime_database = "./data/iot-agent.sqlite3"
-security_state_dir = "./data/security"
+profile = "auto"
 
 [printing]
 default_transport = "auto"
@@ -294,6 +291,30 @@ requested_scopes = ["openid"]
 requested_sans = []
 ```
 
+`[paths] profile` controls how unset storage paths are derived:
+
+- `auto`: use development paths inside a source checkout, otherwise use production OS defaults
+- `development`: force repo-local paths like `./logs`, `./tmp`, and `./data`
+- `production`: force OS-specific service paths
+
+Production defaults are:
+
+- Windows: `C:\ProgramData\IoT Agent\config.toml` plus `data`, `logs`, and `tmp` directories under `C:\ProgramData\IoT Agent`
+- Linux: `/etc/iot-agent/config.toml`, `/var/lib/iot-agent/data`, `/var/log/iot-agent`, and `/var/cache/iot-agent`
+- macOS: `/Library/Application Support/IoT Agent/config.toml`, `/Library/Application Support/IoT Agent/data`, `/Library/Logs/IoT Agent`, and `/Library/Application Support/IoT Agent/tmp`
+
+You can still override any specific path explicitly with:
+
+```toml
+[logging]
+directory = "/custom/logs"
+
+[paths]
+profile = "production"
+data_dir = "/srv/iot-agent"
+temp_dir = "/srv/iot-agent/tmp"
+```
+
 ## Environment Overrides
 
 Flat `IOT_AGENT_*` environment variables still work as the final override layer on top of TOML. That is especially useful for:
@@ -306,6 +327,7 @@ Flat `IOT_AGENT_*` environment variables still work as the final override layer 
 ```env
 IOT_AGENT_ALLOWED_ORIGINS=http://127.0.0.1:8069,http://localhost:8069
 IOT_AGENT_LOG_LEVEL=INFO
+IOT_AGENT_PATH_PROFILE=production
 IOT_AGENT_DEFAULT_PRINTER_NAME=EPSON TM-T20III
 IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
 IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json

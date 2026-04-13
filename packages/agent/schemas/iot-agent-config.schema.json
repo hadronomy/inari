@@ -379,10 +379,17 @@
       "additionalProperties": false,
       "properties": {
         "directory": {
-          "default": "./logs",
-          "format": "path",
-          "title": "Directory",
-          "type": "string"
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Directory"
         },
         "level": {
           "default": "INFO",
@@ -412,23 +419,67 @@
     "PathsConfig": {
       "additionalProperties": false,
       "properties": {
-        "runtime_database": {
-          "default": "./data/iot-agent.sqlite3",
-          "format": "path",
-          "title": "Runtime Database",
+        "data_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data Dir"
+        },
+        "profile": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "development",
+            "production"
+          ],
+          "title": "Profile",
           "type": "string"
+        },
+        "runtime_database": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Database"
         },
         "security_state_dir": {
-          "default": "./data/security",
-          "format": "path",
-          "title": "Security State Dir",
-          "type": "string"
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Security State Dir"
         },
         "temp_dir": {
-          "default": "./tmp",
-          "format": "path",
-          "title": "Temp Dir",
-          "type": "string"
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temp Dir"
         }
       },
       "title": "PathsConfig",
