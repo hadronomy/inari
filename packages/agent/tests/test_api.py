@@ -36,6 +36,7 @@ from iot_agent.security.models import (
     PrincipalKind,
 )
 from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from iot_agent.version import API_VERSION
 
 
 @dataclass(slots=True)
@@ -197,7 +198,7 @@ class ApiShapeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["service"]["version"], "1.9.0a1")
+        self.assertEqual(payload["service"]["version"], API_VERSION)
         self.assertEqual(payload["devices"]["count"], 1)
         self.assertEqual(
             payload["devices"]["default_device"],

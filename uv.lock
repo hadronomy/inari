@@ -278,7 +278,7 @@ wheels = [
 
 [[package]]
 name = "iot-agent"
-version = "1.9.0a1"
+version = "1.12.0a1"
 source = { editable = "packages/agent" }
 dependencies = [
     { name = "cryptography" },

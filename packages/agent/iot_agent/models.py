@@ -28,7 +28,14 @@ from .print_jobs import (
 )
 from .printers import CutMode, PrinterTransport
 from .security.models import AccessScope, AgentIdentity, AuthenticatedPrincipal, GatewayExposure, GatewayMode, IssuedToken, PrincipalKind
-from .gateway.models import UpstreamConnectionState, UpstreamStatus
+from .gateway.models import (
+    MutualTlsMode,
+    UpstreamAuthMode,
+    UpstreamCertificateMode,
+    UpstreamConnectionState,
+    UpstreamEdgeProvider,
+    UpstreamStatus,
+)
 from .runtime.operations import DeviceTargetRef, QueuedDeviceCommandOperation, QueuedPrintOperation
 from .runtime.models import (
     DeviceClass,
@@ -166,8 +173,24 @@ class GatewayUpstreamStatusResponse(APIModel):
     enrolled_at: datetime | None = None
     last_sync_at: datetime | None = None
     last_event_at: datetime | None = None
+    last_command_at: datetime | None = None
+    last_command_id: str | None = None
     detail: str | None = None
     last_error: str | None = None
+    protocol_version: str | None = None
+    controller_name: str | None = None
+    controller_instance_id: str | None = None
+    auth_mode: UpstreamAuthMode
+    certificate_mode: UpstreamCertificateMode
+    edge_provider: UpstreamEdgeProvider
+    mutual_tls_mode: MutualTlsMode
+    client_certificate_present: bool = False
+    certificate_bootstrap_pending: bool = False
+    retry_delay_seconds: float | None = None
+    failed_sync_count: int = 0
+    successful_sync_count: int = 0
+    failed_event_stream_count: int = 0
+    successful_event_stream_count: int = 0
 
     @classmethod
     def from_status(cls, status: UpstreamStatus) -> GatewayUpstreamStatusResponse:
@@ -180,8 +203,24 @@ class GatewayUpstreamStatusResponse(APIModel):
             enrolled_at=status.enrolled_at,
             last_sync_at=status.last_sync_at,
             last_event_at=status.last_event_at,
+            last_command_at=status.last_command_at,
+            last_command_id=status.last_command_id,
             detail=status.detail,
             last_error=status.last_error,
+            protocol_version=status.protocol_version,
+            controller_name=status.controller_name,
+            controller_instance_id=status.controller_instance_id,
+            auth_mode=status.auth_mode,
+            certificate_mode=status.certificate_mode,
+            edge_provider=status.edge_provider,
+            mutual_tls_mode=status.mutual_tls_mode,
+            client_certificate_present=status.client_certificate_present,
+            certificate_bootstrap_pending=status.certificate_bootstrap_pending,
+            retry_delay_seconds=status.retry_delay_seconds,
+            failed_sync_count=status.failed_sync_count,
+            successful_sync_count=status.successful_sync_count,
+            failed_event_stream_count=status.failed_event_stream_count,
+            successful_event_stream_count=status.successful_event_stream_count,
         )
 
 

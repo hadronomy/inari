@@ -5,7 +5,7 @@ from starlette.requests import HTTPConnection
 
 from .config import AgentSettings
 from .container import AgentContainer, get_default_container
-from .gateway import GatewayService
+from .gateway.service import GatewayService
 from .runtime.events import EventHub
 from .runtime.services import DeviceCatalog, JobService
 from .security.auth import AuthorizationService

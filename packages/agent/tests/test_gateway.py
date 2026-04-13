@@ -1,64 +1,182 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from iot_agent.config import AgentSettings
 from iot_agent.gateway.connector import GatewayConnector
 from iot_agent.gateway.models import GatewayEnrollmentRecord, UpstreamConnectionState
+from iot_agent.gateway.repositories import GatewayRepository
+from iot_agent.gateway.runtime_bridge import GatewayCommandDispatcher, GatewayRuntimeEventForwarder
+from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from iot_agent.runtime.events import EventHub
+from iot_agent.runtime.models import DeviceConnectionState, DeviceRecord, JobEventRecord, JobKind, JobRecord, JobState, utc_now
+from iot_agent.runtime.store import RuntimeStore
+from iot_agent.security.models import AccessScope
 from iot_agent.security.tls import TlsContextFactory
-from iot_agent.runtime.models import utc_now
+from iot_agent.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
 class GatewayConnectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_connector_stays_disconnected_without_enrollment(self) -> None:
-        connector = GatewayConnector(
-            settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
-            enrollment_service=FakeEnrollmentService(None),
-            tls_context_factory=TlsContextFactory(AgentSettings()),
-            snapshot_provider=lambda: {"status": "ok"},
-            http_client_factory=lambda **kwargs: FakeAsyncHttpClient(),
-        )
+        with TemporaryDirectory() as temp_dir:
+            store = RuntimeStore(_database_path(temp_dir))
+            store.initialize()
+            connector = GatewayConnector(
+                settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
+                enrollment_service=FakeEnrollmentService(None),
+                tls_context_factory=TlsContextFactory(AgentSettings()),
+                snapshot_provider=_snapshot_provider,
+                gateway_repository=GatewayRepository(store),
+                command_dispatcher=FakeCommandDispatcher(),
+                http_client_factory=lambda **kwargs: FakeAsyncHttpClient(),
+            )
 
-        await connector.sync_once()
+            await connector.sync_once()
 
-        self.assertEqual(connector.current_status().state, UpstreamConnectionState.DISCONNECTED)
+            self.assertEqual(connector.current_status().state, UpstreamConnectionState.DISCONNECTED)
 
     async def test_connector_marks_online_after_successful_status_sync(self) -> None:
-        enrollment = GatewayEnrollmentRecord(
-            access_token="upstream-token",
-            enrolled_at=utc_now(),
-            status_url="https://controller.example/status",
-            events_url="wss://controller.example/events",
-        )
-        http_client = FakeAsyncHttpClient()
-        connector = GatewayConnector(
-            settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
-            enrollment_service=FakeEnrollmentService(enrollment),
-            tls_context_factory=TlsContextFactory(AgentSettings()),
-            snapshot_provider=lambda: {"status": "ok"},
-            http_client_factory=lambda **kwargs: http_client,
-        )
+        with TemporaryDirectory() as temp_dir:
+            enrollment = GatewayEnrollmentRecord(
+                access_token="upstream-token",
+                enrolled_at=utc_now(),
+                status_url="https://controller.example/status",
+                events_url="wss://controller.example/events",
+                protocol_version=GATEWAY_PROTOCOL_VERSION,
+            )
+            http_client = FakeAsyncHttpClient(
+                response_payload={
+                    "protocol_version": GATEWAY_PROTOCOL_VERSION,
+                    "controller_name": "Controller",
+                    "controller_instance_id": "controller-1",
+                }
+            )
+            store = RuntimeStore(_database_path(temp_dir))
+            store.initialize()
+            connector = GatewayConnector(
+                settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
+                enrollment_service=FakeEnrollmentService(enrollment),
+                tls_context_factory=TlsContextFactory(AgentSettings()),
+                snapshot_provider=_snapshot_provider,
+                gateway_repository=GatewayRepository(store),
+                command_dispatcher=FakeCommandDispatcher(),
+                http_client_factory=lambda **kwargs: http_client,
+            )
 
-        await connector.sync_once()
+            await connector.sync_once()
 
-        self.assertEqual(connector.current_status().state, UpstreamConnectionState.ONLINE)
-        self.assertEqual(http_client.requests[0][0], "https://controller.example/status")
+            self.assertEqual(connector.current_status().state, UpstreamConnectionState.ONLINE)
+            self.assertEqual(http_client.requests[0][0], "https://controller.example/status")
+            self.assertEqual(connector.current_status().controller_name, "Controller")
+
+
+class GatewayCommandDispatcherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dispatcher_accepts_remote_print_job_and_persists_response(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = RuntimeStore(_database_path(temp_dir))
+            store.initialize()
+            repository = GatewayRepository(store)
+            dispatcher = GatewayCommandDispatcher(
+                job_service=StubJobService(),
+                gateway_repository=repository,
+            )
+            enrollment = GatewayEnrollmentRecord(
+                access_token="token",
+                enrolled_at=utc_now(),
+                granted_scopes=(AccessScope.JOBS_SUBMIT,),
+            )
+            from iot_agent.gateway.protocol import ControllerSubmitPrintJobMessage
+
+            message = ControllerSubmitPrintJobMessage.model_validate(
+                {
+                    "type": "controller.command.submit_print_job",
+                    "message_id": "msg_1",
+                    "command_id": "cmd_1",
+                    "payload": {
+                        "content": {"kind": "text", "text": "Hello gateway"},
+                        "target": {"printer_name": "Kitchen Printer"},
+                    },
+                }
+            )
+
+            await dispatcher.handle_submit_print_job(message, enrollment=enrollment)
+
+            record = repository.get_inbound_command("cmd_1")
+            self.assertIsNotNone(record)
+            self.assertEqual(record.state.value, "accepted")
+            outbox = repository.list_pending_outbox()
+            self.assertEqual(len(outbox), 1)
+            self.assertEqual(outbox[0].message_type, "agent.command.accepted")
+
+    async def test_runtime_event_forwarder_enqueues_runtime_event_messages(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = RuntimeStore(_database_path(temp_dir))
+            store.initialize()
+            repository = GatewayRepository(store)
+            event_hub = EventHub()
+            forwarder = GatewayRuntimeEventForwarder(
+                event_hub=event_hub,
+                gateway_repository=repository,
+            )
+            worker = asyncio.create_task(forwarder.run_forever())
+            try:
+                await asyncio.sleep(0)
+                await event_hub.publish(
+                    JobEventRecord(
+                        sequence=7,
+                        resource_id="job_123",
+                        event_type="job.succeeded",
+                        occurred_at=utc_now(),
+                        payload={"job_id": "job_123"},
+                    )
+                )
+                await asyncio.sleep(0)
+            finally:
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+
+            outbox = repository.list_pending_outbox()
+            self.assertEqual(len(outbox), 1)
+            self.assertEqual(outbox[0].message_type, "agent.runtime.event")
 
 
 class FakeEnrollmentService:
     def __init__(self, record: GatewayEnrollmentRecord | None) -> None:
         self.record = record
+        self.invalidations = 0
 
     async def ensure_enrolled(self):
         return self.record
 
+    async def upstream_headers(self, enrollment):
+        if enrollment is None or enrollment.access_token is None:
+            return {}
+        return {"Authorization": f"Bearer {enrollment.access_token}"}
+
+    async def handle_auth_failure(self, enrollment) -> None:
+        self.invalidations += 1
+
+
+class FakeCommandDispatcher:
+    async def handle_submit_print_job(self, message, *, enrollment) -> None:
+        return None
+
+    async def handle_execute_device_command(self, message, *, enrollment) -> None:
+        return None
+
+    async def handle_cancel_job(self, message, *, enrollment) -> None:
+        return None
+
 
 class FakeAsyncHttpClient:
-    def __init__(self) -> None:
+    def __init__(self, response_payload: dict[str, object] | None = None) -> None:
         self.requests: list[tuple[str, dict[str, object], dict[str, str]]] = []
+        self.response_payload = response_payload or {}
 
     async def __aenter__(self) -> FakeAsyncHttpClient:
         return self
@@ -68,12 +186,108 @@ class FakeAsyncHttpClient:
 
     async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]):
         self.requests.append((url, json, headers))
-        return FakeAsyncResponse()
+        return FakeAsyncResponse(self.response_payload)
 
 
 class FakeAsyncResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.status_code = 200
+        self.content = json.dumps(payload).encode("utf-8") if payload else b""
+
     def raise_for_status(self) -> None:
         return None
+
+    def json(self) -> dict[str, object]:
+        return dict(self.payload)
+
+
+class StubJobService:
+    def __init__(self) -> None:
+        device = DeviceRecord.from_printer(
+            PrinterDevice(
+                name="Kitchen Printer",
+                driver_key="tests.fake-printers",
+                is_default=True,
+                preferred_transport=PrinterTransport.RAW,
+                capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+            ),
+            connection_state=DeviceConnectionState.ONLINE,
+        )
+        now = utc_now()
+        self.job = JobRecord(
+            id="job_remote_1",
+            kind=JobKind.PRINT,
+            operation="print_job",
+            device_id=device.id,
+            device_kind=device.kind,
+            device_name=device.name,
+            state=JobState.QUEUED,
+            request_payload={"content": {"kind": "text", "text": "Hello gateway"}},
+            request_metadata={"source": "remote"},
+            content_kind="text",
+            command_kind=None,
+            attempt_count=0,
+            max_attempts=3,
+            created_at=now,
+            updated_at=now,
+            queued_at=now,
+            next_run_at=now + timedelta(seconds=1),
+        )
+
+    async def enqueue_print(self, operation):
+        return self.job
+
+    async def enqueue_command(self, operation):
+        return self.job
+
+    async def cancel(self, job_id: str) -> JobRecord:
+        return self.job
+
+
+def _database_path(temp_dir: str) -> Path:
+    return Path(temp_dir) / "runtime.sqlite3"
+
+
+def _snapshot_provider() -> dict[str, object]:
+    return {
+        "protocol": {
+            "version": GATEWAY_PROTOCOL_VERSION,
+            "supported_versions": [GATEWAY_PROTOCOL_VERSION],
+        },
+        "service": {"name": "IoT Agent", "version": API_VERSION},
+        "security": {
+            "mode": "managed",
+            "exposure": "loopback",
+            "tls_required": False,
+            "edge_provider": "direct",
+            "auth_mode": "controller",
+            "certificate_mode": "controller",
+            "mutual_tls_mode": "disabled",
+            "mutual_tls_enabled": False,
+            "certificate_expires_at": None,
+        },
+        "runtime": {
+            "queue": {"total": 0},
+            "devices": {
+                "count": 0,
+                "online_count": 0,
+                "offline_count": 0,
+                "kind_counts": {},
+                "default_device_id": None,
+                "default_device_name": None,
+            },
+        },
+        "capabilities": {
+            "supported_content_kinds": ["text"],
+            "supported_device_commands": ["cut_paper"],
+            "granted_scopes": ["jobs:submit"],
+            "features": ["status_sync"],
+            "transport": "https+wss",
+            "client_certificate_present": False,
+        },
+        "observability": {},
+    }
 
 
 if __name__ == "__main__":

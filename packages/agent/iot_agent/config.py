@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .gateway.models import MutualTlsMode, UpstreamAuthMode, UpstreamCertificateMode, UpstreamEdgeProvider
 from .security.models import GatewayExposure, GatewayMode
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
@@ -24,6 +25,10 @@ class AgentSettings(BaseSettings):
     port: int = 7310
     gateway_mode: GatewayMode = GatewayMode.STANDALONE
     gateway_exposure: GatewayExposure = GatewayExposure.LOOPBACK
+    upstream_auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
+    upstream_certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
+    upstream_edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
+    upstream_mutual_tls_mode: MutualTlsMode = MutualTlsMode.DISABLED
     allowed_origins: list[str] = Field(
         default_factory=lambda: [
             "http://127.0.0.1:8069",
@@ -64,9 +69,32 @@ class AgentSettings(BaseSettings):
     upstream_status_url: str | None = None
     upstream_events_url: str | None = None
     upstream_bootstrap_token: str | None = None
+    upstream_enrollment_code: str | None = None
+    upstream_trust_client_ca: bool = True
+    zitadel_base_url: str | None = None
+    zitadel_token_url: str | None = None
+    zitadel_audience: str | None = None
+    zitadel_service_account_key_path: Path | None = None
+    zitadel_service_user_id: str | None = None
+    zitadel_key_id: str | None = None
+    zitadel_private_key_path: Path | None = None
+    zitadel_assertion_algorithm: str = "RS256"
+    zitadel_requested_scopes: list[str] = Field(default_factory=lambda: ["openid"])
+    zitadel_token_refresh_skew_seconds: int = 120
+    step_ca_url: str | None = None
+    step_ca_sign_url: str | None = None
+    step_ca_renew_url: str | None = None
+    step_ca_root_fingerprint: str | None = None
+    step_ca_requested_sans: list[str] = Field(default_factory=list)
+    step_ca_certificate_renewal_skew_seconds: int = 3600
     gateway_sync_interval_seconds: float = 30.0
     gateway_reconnect_delay_seconds: float = 5.0
     gateway_event_timeout_seconds: float = 30.0
+    gateway_control_poll_interval_seconds: float = 0.5
+    gateway_outbox_batch_size: int = 128
+    gateway_backoff_base_seconds: float = 1.0
+    gateway_backoff_max_seconds: float = 60.0
+    gateway_token_refresh_skew_seconds: int = 300
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -93,6 +121,8 @@ class AgentSettings(BaseSettings):
         "tls_cert_path",
         "tls_key_path",
         "tls_ca_path",
+        "zitadel_service_account_key_path",
+        "zitadel_private_key_path",
         mode="before",
     )
     @classmethod
@@ -101,12 +131,30 @@ class AgentSettings(BaseSettings):
             return Path(value)
         return value
 
-    @field_validator("upstream_base_url", "upstream_enrollment_url", "upstream_status_url", "upstream_events_url", mode="before")
+    @field_validator(
+        "upstream_base_url",
+        "upstream_enrollment_url",
+        "upstream_status_url",
+        "upstream_events_url",
+        "zitadel_base_url",
+        "zitadel_token_url",
+        "step_ca_url",
+        "step_ca_sign_url",
+        "step_ca_renew_url",
+        mode="before",
+    )
     @classmethod
     def normalize_urls(cls, value: object) -> object:
         if isinstance(value, str):
             normalized = value.strip().rstrip("/")
             return normalized or None
+        return value
+
+    @field_validator("zitadel_requested_scopes", "step_ca_requested_sans", mode="before")
+    @classmethod
+    def normalize_list_values(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
 
