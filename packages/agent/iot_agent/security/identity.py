@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -27,21 +28,35 @@ class AgentIdentityService:
         self._cached_identity = self._build_identity(private_key)
         return self._cached_identity
 
-    def build_csr_pem(self) -> str:
+    def build_csr_pem(
+        self,
+        *,
+        common_name: str | None = None,
+        uri_sans: tuple[str, ...] = (),
+    ) -> str:
         identity = self.get_or_create_identity()
         private_key = self._load_or_create_private_key()
-        csr = (
-            x509.CertificateSigningRequestBuilder()
-            .subject_name(
-                x509.Name(
-                    [
-                        x509.NameAttribute(NameOID.COMMON_NAME, identity.agent_id),
-                    ]
-                )
+        subject_common_name = common_name or identity.agent_id
+        builder = x509.CertificateSigningRequestBuilder().subject_name(
+            x509.Name(
+                [
+                    x509.NameAttribute(NameOID.COMMON_NAME, subject_common_name),
+                ]
             )
-            .sign(private_key, algorithm=None)
         )
+        requested_uri_sans = uri_sans or (self.default_uri_san(identity.agent_id),)
+        builder = builder.add_extension(
+            x509.SubjectAlternativeName(
+                [x509.UniformResourceIdentifier(value) for value in requested_uri_sans]
+            ),
+            critical=False,
+        )
+        csr = builder.sign(private_key, algorithm=None)
         return csr.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+    @staticmethod
+    def default_uri_san(agent_id: str) -> str:
+        return f"urn:iot-agent:{quote(agent_id, safe='')}"
 
     def _load_or_create_private_key(self) -> Ed25519PrivateKey:
         if self.identity_path.exists():

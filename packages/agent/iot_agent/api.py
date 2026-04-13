@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisc
 from .dependencies import get_authorization_service, get_device_catalog, get_event_hub, get_gateway_service, get_job_service
 from .device_commands import DeviceCommandKind
 from .exceptions import AgentError
-from .gateway import GatewayService
+from .gateway.service import GatewayService
 from .models import (
     AuthenticatedPrincipalResponse,
     DeviceCommandRequest,
@@ -40,9 +40,7 @@ from .runtime.models import JobState
 from .runtime.services import DeviceCatalog, JobService
 from .security.auth import AuthorizationService
 from .security.models import AccessScope, AuthenticatedPrincipal
-
-SERVICE_NAME = "IoT Agent"
-API_VERSION = "1.9.0a1"
+from .version import API_VERSION, SERVICE_NAME
 
 router = APIRouter()
 auth_router = APIRouter(prefix="/auth", tags=["auth"])

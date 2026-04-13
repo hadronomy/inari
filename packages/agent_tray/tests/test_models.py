@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from iot_agent.models import RuntimeEventResponse, SystemStatusResponse
+from iot_agent.version import API_VERSION
 
 from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot, TrayStatusLevel
 
@@ -14,7 +15,7 @@ class TraySnapshotTests(unittest.TestCase):
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": "1.9.0a1"},
+                "service": {"name": "IoT Agent", "version": API_VERSION},
                 "devices": {
                     "count": 2,
                     "online_count": 2,
@@ -63,7 +64,7 @@ class TraySnapshotTests(unittest.TestCase):
                 {
                     "ok": True,
                     "status": "healthy",
-                    "service": {"name": "IoT Agent", "version": "1.9.0a1"},
+                    "service": {"name": "IoT Agent", "version": API_VERSION},
                     "devices": {
                         "count": 1,
                         "online_count": 1,

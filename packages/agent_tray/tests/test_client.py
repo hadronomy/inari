@@ -4,6 +4,7 @@ import json
 import unittest
 from threading import Event
 
+from iot_agent.version import API_VERSION
 from iot_agent_tray.client import AgentApiClient
 from iot_agent_tray.config import TraySettings
 
@@ -19,7 +20,7 @@ class AgentApiClientTests(unittest.TestCase):
 
         status = client.get_status()
 
-        self.assertEqual(status.service.version, "1.9.0a1")
+        self.assertEqual(status.service.version, API_VERSION)
         self.assertEqual(http_client.requests[0][1], "/auth/local-token")
         self.assertEqual(http_client.requests[1][1], "/system/status")
         self.assertEqual(http_client.requests[1][2]["Authorization"], "Bearer local-token")
@@ -63,7 +64,7 @@ class FakeHttpClient:
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": "1.9.0a1"},
+                "service": {"name": "IoT Agent", "version": API_VERSION},
                 "devices": {
                     "count": 0,
                     "online_count": 0,
@@ -136,7 +137,7 @@ class FakeWebSocketConnection:
                 "status": {
                     "ok": True,
                     "status": "healthy",
-                    "service": {"name": "IoT Agent", "version": "1.9.0a1"},
+                    "service": {"name": "IoT Agent", "version": API_VERSION},
                     "devices": {
                         "count": 0,
                         "online_count": 0,

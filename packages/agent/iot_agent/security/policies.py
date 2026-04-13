@@ -6,6 +6,8 @@ from starlette.requests import HTTPConnection
 
 from ..config import AgentSettings
 from ..exceptions import AgentError
+from ..gateway.caddy import validate_caddy_profile
+from ..gateway.models import UpstreamAuthMode, UpstreamCertificateMode
 from .models import GatewayExposure, GatewaySecurityPolicy, GatewayMode
 
 TEST_LOOPBACK_HOSTS = {"testclient", "testserver"}
@@ -32,6 +34,21 @@ class SecurityPolicyService:
                 raise RuntimeError("LAN exposure requires TLS certificate and key paths.")
         if self.policy.mode is GatewayMode.MANAGED and not self.settings.upstream_base_url:
             raise RuntimeError("Managed gateway mode requires an upstream base URL.")
+        validate_caddy_profile(self.settings)
+        if self.settings.upstream_auth_mode is UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT:
+            if self.settings.zitadel_service_account_key_path is None and (
+                self.settings.zitadel_service_user_id is None
+                or self.settings.zitadel_key_id is None
+                or self.settings.zitadel_private_key_path is None
+            ):
+                raise RuntimeError(
+                    "ZITADEL auth mode requires either a service-account key file or explicit service user, key id, and private key settings."
+                )
+            if self.settings.zitadel_base_url is None and self.settings.zitadel_token_url is None:
+                raise RuntimeError("ZITADEL auth mode requires a base URL or explicit token URL.")
+        if self.settings.upstream_certificate_mode is UpstreamCertificateMode.STEP_CA:
+            if self.policy.mode is not GatewayMode.MANAGED:
+                raise RuntimeError("step-ca certificate mode requires managed gateway mode.")
 
     def assert_loopback_client(self, connection: HTTPConnection) -> None:
         client = connection.client

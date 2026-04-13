@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from iot_agent.models import SystemStatusResponse
+from iot_agent.version import API_VERSION
 from iot_agent_tray.app import AgentTrayApplication
 from iot_agent_tray.bridge import MonitorAgentBridge, SpawnedProcessAgentBridge, build_control_bridge
 from iot_agent_tray.config import TraySettings
@@ -232,7 +233,7 @@ class FakeTrayClient:
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": "1.9.0a1"},
+                "service": {"name": "IoT Agent", "version": API_VERSION},
                 "devices": {
                     "count": 0,
                     "online_count": 0,

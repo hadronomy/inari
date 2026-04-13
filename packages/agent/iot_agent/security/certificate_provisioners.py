@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+import asyncio
+import ssl
+from hashlib import sha256
+from typing import Callable, Protocol
+
+import httpx
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+
+from ..config import AgentSettings
+from ..exceptions import AgentError
+from ..gateway.models import GatewayEnrollmentRecord, StepCaOttBootstrap, UpstreamCertificateMode
+from .certificates import CertificateLifecycleService, ManagedCertificate
+from .identity import AgentIdentityService
+
+
+class ClientCertificateProvisioner(Protocol):
+    mode: UpstreamCertificateMode
+
+    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None: ...
+
+
+class DisabledCertificateProvisioner:
+    mode = UpstreamCertificateMode.NONE
+
+    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None:
+        return None
+
+
+class ControllerCertificateProvisioner:
+    mode = UpstreamCertificateMode.CONTROLLER
+
+    def __init__(self, *, certificate_service: CertificateLifecycleService) -> None:
+        self.certificate_service = certificate_service
+
+    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None:
+        return self.certificate_service.current_certificate()
+
+
+class StepCaOttCertificateProvisioner:
+    mode = UpstreamCertificateMode.STEP_CA
+
+    def __init__(
+        self,
+        *,
+        settings: AgentSettings,
+        identity_service: AgentIdentityService,
+        certificate_service: CertificateLifecycleService,
+        http_client_factory: Callable[..., httpx.AsyncClient] | None = None,
+    ) -> None:
+        self.settings = settings
+        self.identity_service = identity_service
+        self.certificate_service = certificate_service
+        self._http_client_factory = http_client_factory or httpx.AsyncClient
+        self._lock = asyncio.Lock()
+
+    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None:
+        async with self._lock:
+            bootstrap = enrollment.certificate_bootstrap if enrollment is not None else None
+            if bootstrap is not None:
+                await self._bootstrap_root_if_needed(bootstrap)
+            current = self.certificate_service.current_certificate()
+            if not self.certificate_service.certificate_needs_renewal(
+                skew_seconds=self.settings.step_ca_certificate_renewal_skew_seconds
+            ):
+                return current
+            if current is not None:
+                renewed = await self._renew_certificate(bootstrap)
+                if renewed is not None:
+                    return renewed
+            if bootstrap is None or not bootstrap.ott:
+                return current
+            return await self._issue_certificate(bootstrap)
+
+    async def _bootstrap_root_if_needed(self, bootstrap: StepCaOttBootstrap) -> None:
+        ca_path = self.certificate_service.ca_path
+        if ca_path is not None and ca_path.exists():
+            actual_fingerprint = _certificate_fingerprint(ca_path.read_text(encoding="utf-8"))
+            if actual_fingerprint != _normalize_fingerprint(bootstrap.root_fingerprint):
+                raise AgentError(
+                    "STEP_CA_ROOT_FINGERPRINT_MISMATCH",
+                    "The installed step-ca root certificate does not match the controller-provided fingerprint.",
+                    status_code=502,
+                )
+            return
+        root_url = f"{bootstrap.ca_url.rstrip('/')}/1.0/root/{bootstrap.root_fingerprint}"
+        async with self._http_client_factory(verify=False, timeout=self.settings.gateway_reconnect_delay_seconds) as client:
+            response = await client.get(root_url)
+            response.raise_for_status()
+            root_pem = response.text
+        actual_fingerprint = _certificate_fingerprint(root_pem)
+        if actual_fingerprint != _normalize_fingerprint(bootstrap.root_fingerprint):
+            raise AgentError(
+                "STEP_CA_ROOT_FINGERPRINT_MISMATCH",
+                "step-ca root certificate fingerprint did not match the controller-provided fingerprint.",
+                status_code=502,
+            )
+        self.certificate_service.install_certificate_authority(root_pem)
+
+    async def _issue_certificate(self, bootstrap: StepCaOttBootstrap) -> ManagedCertificate:
+        identity = self.identity_service.get_or_create_identity()
+        subject = bootstrap.subject or identity.agent_id
+        uri_sans = bootstrap.authorized_sans or self._requested_sans(identity.agent_id)
+        csr_pem = self.identity_service.build_csr_pem(
+            common_name=subject,
+            uri_sans=uri_sans,
+        )
+        sign_url = bootstrap.sign_url or self._sign_url(bootstrap)
+        async with self._http_client_factory(
+            verify=self._verify_context(),
+            timeout=self.settings.gateway_reconnect_delay_seconds,
+        ) as client:
+            response = await client.post(
+                sign_url,
+                json={"csr": csr_pem, "ott": bootstrap.ott},
+                headers={"Content-Type": "application/json"},
+            )
+            response.raise_for_status()
+            certificate_pem, ca_pem = _parse_certificate_response(response)
+        installed = self.certificate_service.install(
+            certificate_pem=certificate_pem,
+            ca_certificate_pem=ca_pem,
+        )
+        if installed is None:
+            raise AgentError(
+                "STEP_CA_CERTIFICATE_MISSING",
+                "step-ca did not return a usable client certificate.",
+                status_code=502,
+            )
+        return installed
+
+    async def _renew_certificate(self, bootstrap: StepCaOttBootstrap | None) -> ManagedCertificate | None:
+        certificate_path, key_path, _ = self.certificate_service.current_cert_chain()
+        renew_url = self._renew_url(bootstrap)
+        if certificate_path is None or key_path is None or renew_url is None:
+            return None
+        async with self._http_client_factory(
+            verify=self._verify_context(),
+            cert=(certificate_path, key_path),
+            timeout=self.settings.gateway_reconnect_delay_seconds,
+        ) as client:
+            response = await client.post(renew_url)
+            if response.status_code in {401, 403}:
+                return None
+            response.raise_for_status()
+            certificate_pem, ca_pem = _parse_certificate_response(response)
+        return self.certificate_service.install(
+            certificate_pem=certificate_pem,
+            ca_certificate_pem=ca_pem,
+        )
+
+    def _requested_sans(self, agent_id: str) -> tuple[str, ...]:
+        if self.settings.step_ca_requested_sans:
+            return tuple(self.settings.step_ca_requested_sans)
+        return (self.identity_service.default_uri_san(agent_id),)
+
+    def _sign_url(self, bootstrap: StepCaOttBootstrap) -> str:
+        if bootstrap.sign_url:
+            return bootstrap.sign_url
+        if self.settings.step_ca_sign_url:
+            return self.settings.step_ca_sign_url
+        return f"{bootstrap.ca_url.rstrip('/')}/1.0/sign"
+
+    def _renew_url(self, bootstrap: StepCaOttBootstrap | None) -> str | None:
+        if bootstrap is not None and bootstrap.renew_url:
+            return bootstrap.renew_url
+        if self.settings.step_ca_renew_url:
+            return self.settings.step_ca_renew_url
+        if bootstrap is not None:
+            return f"{bootstrap.ca_url.rstrip('/')}/1.0/renew"
+        if self.settings.step_ca_url:
+            return f"{self.settings.step_ca_url.rstrip('/')}/1.0/renew"
+        return None
+
+    def _verify_context(self) -> ssl.SSLContext:
+        context = ssl.create_default_context()
+        if self.certificate_service.ca_path is not None and self.certificate_service.ca_path.exists():
+            context.load_verify_locations(cafile=str(self.certificate_service.ca_path))
+        return context
+
+
+def build_certificate_provisioner(
+    settings: AgentSettings,
+    *,
+    identity_service: AgentIdentityService,
+    certificate_service: CertificateLifecycleService,
+    http_client_factory: Callable[..., httpx.AsyncClient] | None = None,
+) -> ClientCertificateProvisioner:
+    if settings.upstream_certificate_mode is UpstreamCertificateMode.NONE:
+        return DisabledCertificateProvisioner()
+    if settings.upstream_certificate_mode is UpstreamCertificateMode.STEP_CA:
+        return StepCaOttCertificateProvisioner(
+            settings=settings,
+            identity_service=identity_service,
+            certificate_service=certificate_service,
+            http_client_factory=http_client_factory,
+        )
+    return ControllerCertificateProvisioner(certificate_service=certificate_service)
+
+
+def _parse_certificate_response(response: httpx.Response) -> tuple[str, str | None]:
+    try:
+        payload = response.json()
+    except ValueError:
+        text = response.text.strip()
+        if "BEGIN CERTIFICATE" not in text:
+            raise AgentError(
+                "STEP_CA_INVALID_RESPONSE",
+                "step-ca returned an unsupported certificate response payload.",
+                status_code=502,
+            ) from None
+        return text, None
+
+    certificate_pem = (
+        payload.get("crt")
+        or payload.get("cert")
+        or payload.get("certificate")
+        or payload.get("certificate_pem")
+    )
+    cert_chain = payload.get("certChain") or payload.get("cert_chain")
+    if not certificate_pem and isinstance(cert_chain, list) and cert_chain:
+        certificate_pem = cert_chain[0]
+        remaining = cert_chain[1:]
+        ca_pem = "\n".join(str(item).strip() for item in remaining if item)
+        return str(certificate_pem), ca_pem or None
+    if not certificate_pem:
+        raise AgentError(
+            "STEP_CA_CERTIFICATE_MISSING",
+            "step-ca did not return a signed certificate in its response payload.",
+            status_code=502,
+        )
+    ca_pem = (
+        payload.get("ca")
+        or payload.get("ca_bundle")
+        or payload.get("ca_certificate")
+        or payload.get("ca_certificate_pem")
+    )
+    if not ca_pem and isinstance(cert_chain, list) and len(cert_chain) > 1:
+        ca_pem = "\n".join(str(item).strip() for item in cert_chain[1:] if item)
+    return str(certificate_pem), str(ca_pem) if ca_pem else None
+
+
+def _certificate_fingerprint(certificate_pem: str) -> str:
+    certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
+    return sha256(certificate.public_bytes(encoding=serialization.Encoding.DER)).hexdigest()
+
+
+def _normalize_fingerprint(value: str) -> str:
+    return value.replace(":", "").replace(" ", "").casefold()

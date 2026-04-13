@@ -107,6 +107,44 @@ class RuntimeStore:
 
                 CREATE INDEX IF NOT EXISTS idx_job_events_job_id
                 ON job_events(job_id, sequence DESC);
+
+                CREATE TABLE IF NOT EXISTS gateway_inbound_commands (
+                    command_id TEXT PRIMARY KEY,
+                    message_id TEXT NOT NULL,
+                    message_type TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    response_json TEXT,
+                    error_code TEXT,
+                    error_detail TEXT,
+                    job_id TEXT,
+                    received_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_gateway_inbound_job_id
+                ON gateway_inbound_commands(job_id, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS gateway_outbox (
+                    message_id TEXT PRIMARY KEY,
+                    message_type TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    correlation_id TEXT,
+                    dedupe_key TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    sent_at TEXT,
+                    acknowledged_at TEXT,
+                    last_error TEXT
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_outbox_dedupe_key
+                ON gateway_outbox(dedupe_key)
+                WHERE dedupe_key IS NOT NULL;
+
+                CREATE INDEX IF NOT EXISTS idx_gateway_outbox_state_created_at
+                ON gateway_outbox(state, created_at);
                 """
             )
 

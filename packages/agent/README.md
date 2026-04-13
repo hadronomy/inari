@@ -12,6 +12,8 @@ The current MVP is still Windows-printer focused, but the agent now runs on top 
 - persisted job and device history
 - built-in gateway identity, scoped local auth, and optional managed upstream mode
 
+For the current external controller contract, see [docs/gateway_protocol.md](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/docs/gateway_protocol.md). For supported deployment stacks with Caddy, ZITADEL, and step-ca, see [docs/managed_gateway_stacks.md](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/docs/managed_gateway_stacks.md).
+
 ## Highlights
 
 - loopback-first FastAPI service with explicit CORS allowlist
@@ -21,7 +23,14 @@ The current MVP is still Windows-printer focused, but the agent now runs on top 
 - built-in gateway mode so the agent can operate as its own secure local edge node
 - scoped bearer-token auth for HTTP and WebSocket endpoints
 - local loopback token bootstrap for desktop companions such as the tray app
-- managed upstream enrollment and outbound status sync over HTTPS/WSS
+- managed upstream enrollment, token refresh, and outbound status sync over HTTPS/WSS
+- controller protocol version negotiation plus durable upstream inbox/outbox persistence
+- upstream command acknowledgement, replay-safe deduplication, and runtime event forwarding
+- optional managed client-certificate installation for outbound mTLS
+- ZITADEL service-account auth with private-key JWT for managed controller access
+- controller-issued enrollment-code bootstrap for seamless managed installs
+- step-ca-backed client-certificate bootstrap, issuance, and renewal through controller-issued one-time tokens
+- Caddy-compatible controller edge profile with optional or required mTLS
 - generic print-job endpoint with typed content kinds and nested device targeting
 - receipt image pipeline that converts base64 images to monochrome ESC/POS raster commands
 - structured ESC/POS receipt renderer with configurable layout and paper control
@@ -157,6 +166,7 @@ Queued job responses expose the agent-managed job resource immediately, and the 
 - `keyring` with resilient local fallback for secret storage
 - `websockets` for the managed upstream control stream
 - SQLite-backed runtime store for devices, jobs, attempts, and events
+- SQLite-backed gateway inbox/outbox for upstream command audit and replay
 - background discovery polling plus lease-based job recovery
 
 ## Security And Gateway
@@ -165,7 +175,12 @@ Queued job responses expose the agent-managed job resource immediately, and the 
 - LAN exposure requires TLS certificate and key material at startup
 - protected routes are scope-based rather than all-or-nothing
 - the tray and other local clients use short-lived local bearer tokens
-- managed mode adds outbound enrollment, status sync, and optional control-stream connectivity without changing the local runtime model
+- managed mode adds outbound enrollment, token refresh, status sync, and a controller protocol without changing the local runtime model
+- the upstream boundary now persists inbound commands and outbound event messages for replay-safe delivery
+- negotiated controller protocol versions and optional client certificates harden the managed control plane
+- managed auth can come from controller-issued tokens or ZITADEL service accounts
+- managed client certificates can come from controller enrollment or controller-issued step-ca OTT bootstrap
+- Caddy edge mode validates HTTPS/WSS and mTLS expectations early at startup
 
 ## Run
 
@@ -203,5 +218,15 @@ IOT_AGENT_SECURITY_STATE_DIR=./data/security
 IOT_AGENT_TLS_CERT_PATH=./certs/agent.crt
 IOT_AGENT_TLS_KEY_PATH=./certs/agent.key
 IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example
+IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
+IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=required
+IOT_AGENT_UPSTREAM_AUTH_MODE=zitadel_service_account
+IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
+IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
 IOT_AGENT_UPSTREAM_BOOTSTRAP_TOKEN=replace-me
+IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example/api/iot-agent/enroll
+IOT_AGENT_UPSTREAM_ENROLLMENT_CODE=SITE-A-4F7K-92LM
+IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
 ```
+
+For controller-issued step-ca bootstrap, the controller can return the CA URL, fingerprint, sign URL, and renew URL dynamically, so those values do not need to be preconfigured on every agent. `IOT_AGENT_STEP_CA_URL`, `IOT_AGENT_STEP_CA_SIGN_URL`, `IOT_AGENT_STEP_CA_RENEW_URL`, and `IOT_AGENT_STEP_CA_ROOT_FINGERPRINT` remain available as explicit overrides when you want local fallback knowledge of the CA.

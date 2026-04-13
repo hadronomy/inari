@@ -6,7 +6,13 @@ from functools import lru_cache
 from .config import AgentSettings, get_settings
 from .drivers import DriverRegistry
 from .drivers.printers import WindowsPrinterDriver, WindowsSpooler
-from .gateway import GatewayConnector, GatewayEnrollmentService, GatewayService, GatewaySupervisor
+from .gateway.auth_providers import build_upstream_auth_provider
+from .gateway.connector import GatewayConnector
+from .gateway.enrollment import GatewayEnrollmentService
+from .gateway.repositories import GatewayRepository
+from .gateway.runtime_bridge import GatewayCommandDispatcher, GatewayRuntimeEventForwarder
+from .gateway.service import GatewayService, GatewaySnapshotBuilder
+from .gateway.supervisor import GatewaySupervisor
 from .printers import PrinterTransport
 from .printer_service import PrinterService
 from .receipt_renderers import EscPosImageReceiptRenderer, EscPosRenderer
@@ -18,6 +24,8 @@ from .runtime.services import DeviceCatalog, JobService
 from .runtime.store import RuntimeStore
 from .runtime.supervisor import RuntimeSupervisor
 from .security.auth import AuthorizationService
+from .security.certificate_provisioners import build_certificate_provisioner
+from .security.certificates import CertificateLifecycleService
 from .security.identity import AgentIdentityService
 from .security.policies import SecurityPolicyService
 from .security.secrets import FileSecretStore, KeyringSecretStore, ResilientSecretStore
@@ -63,6 +71,7 @@ def build_container(settings: AgentSettings) -> AgentContainer:
     event_hub = EventHub()
     device_repository = DeviceRepository(store)
     job_repository = JobRepository(store)
+    gateway_repository = GatewayRepository(store)
     discovery = DiscoveryCoordinator(
         driver_registry=driver_registry,
         device_repository=device_repository,
@@ -105,16 +114,33 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         worker_pool=worker_pool,
     )
     security_state_dir = settings.security_state_dir
+    identity_path = security_state_dir / "agent-identity.pem"
+    upstream_certificate_path = security_state_dir / "upstream-client-cert.pem"
+    upstream_ca_path = security_state_dir / "upstream-ca.pem"
     identity_service = AgentIdentityService(
-        identity_path=security_state_dir / "agent-identity.pem",
-        certificate_path=settings.tls_cert_path,
+        identity_path=identity_path,
+        certificate_path=upstream_certificate_path,
+    )
+    certificate_service = CertificateLifecycleService(
+        certificate_path=upstream_certificate_path,
+        private_key_path=identity_path,
+        ca_path=upstream_ca_path,
     )
     secret_store = ResilientSecretStore(
         primary=KeyringSecretStore(service_name=settings.secret_store_service_name),
         fallback=FileSecretStore(security_state_dir / "secrets.json"),
     )
     security_policy_service = SecurityPolicyService(settings)
-    tls_context_factory = TlsContextFactory(settings)
+    tls_context_factory = TlsContextFactory(
+        settings,
+        certificate_service=certificate_service,
+    )
+    upstream_auth_provider = build_upstream_auth_provider(settings)
+    certificate_provisioner = build_certificate_provisioner(
+        settings,
+        identity_service=identity_service,
+        certificate_service=certificate_service,
+    )
     token_service = TokenService(
         secret_store=secret_store,
         identity_service=identity_service,
@@ -126,6 +152,15 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         token_service=token_service,
         policy_service=security_policy_service,
     )
+    snapshot_builder = GatewaySnapshotBuilder(
+        settings=settings,
+        identity_service=identity_service,
+        device_catalog=device_catalog,
+        job_service=job_service,
+        gateway_repository=gateway_repository,
+        security_policy_service=security_policy_service,
+        certificate_service=certificate_service,
+    )
     gateway_connector = GatewayConnector(
         settings=settings,
         enrollment_service=GatewayEnrollmentService(
@@ -133,23 +168,33 @@ def build_container(settings: AgentSettings) -> AgentContainer:
             identity_service=identity_service,
             secret_store=secret_store,
             tls_context_factory=tls_context_factory,
+            certificate_service=certificate_service,
+            auth_provider=upstream_auth_provider,
+            certificate_provisioner=certificate_provisioner,
             metadata_path=security_state_dir / "upstream-enrollment.json",
+            snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
         ),
         tls_context_factory=tls_context_factory,
-        snapshot_provider=lambda: {
-            "service": {"name": "IoT Agent"},
-            "devices": {"count": len(device_catalog.list_devices())},
-            "queue": dict(job_service.queue_counts()),
-        },
+        snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
+        gateway_repository=gateway_repository,
+        command_dispatcher=GatewayCommandDispatcher(
+            job_service=job_service,
+            gateway_repository=gateway_repository,
+        ),
     )
     gateway_service = GatewayService(
         settings=settings,
         identity_service=identity_service,
         connector=gateway_connector,
+        snapshot_builder=snapshot_builder,
     )
     gateway_supervisor = GatewaySupervisor(
         settings=settings,
         connector=gateway_connector,
+        runtime_event_forwarder=GatewayRuntimeEventForwarder(
+            event_hub=event_hub,
+            gateway_repository=gateway_repository,
+        ),
     )
     application_supervisor = ApplicationSupervisor(
         runtime_supervisor=runtime_supervisor,

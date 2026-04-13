@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -10,11 +11,28 @@ import httpx
 from websockets.asyncio.client import connect as websocket_connect
 
 from ..config import AgentSettings
+from ..exceptions import AgentError
 from ..runtime.models import utc_now
 from ..security.models import GatewayMode
 from ..security.tls import TlsContextFactory
 from .enrollment import GatewayEnrollmentService
-from .models import UpstreamConnectionState, UpstreamStatus
+from .models import GatewayEnrollmentRecord, UpstreamCertificateMode, UpstreamConnectionState, UpstreamStatus
+from .protocol import (
+    AgentAcknowledgeMessage,
+    AgentHelloMessage,
+    AgentPongMessage,
+    CONTROLLER_STREAM_ADAPTER,
+    ControllerAcknowledgeMessage,
+    ControllerCancelJobMessage,
+    ControllerExecuteDeviceCommandMessage,
+    ControllerHelloMessage,
+    ControllerPingMessage,
+    ControllerSubmitPrintJobMessage,
+)
+from .repositories import GatewayRepository
+from .runtime_bridge import GatewayCommandDispatcher
+
+logger = logging.getLogger(__name__)
 
 
 class GatewayConnector:
@@ -25,13 +43,19 @@ class GatewayConnector:
         enrollment_service: GatewayEnrollmentService,
         tls_context_factory: TlsContextFactory,
         snapshot_provider: Callable[[], dict[str, Any]],
+        gateway_repository: GatewayRepository,
+        command_dispatcher: GatewayCommandDispatcher,
         http_client_factory: Callable[..., httpx.AsyncClient] | None = None,
+        websocket_connect_factory: Callable[..., Any] | None = None,
     ) -> None:
         self.settings = settings
         self.enrollment_service = enrollment_service
         self.tls_context_factory = tls_context_factory
         self.snapshot_provider = snapshot_provider
+        self.gateway_repository = gateway_repository
+        self.command_dispatcher = command_dispatcher
         self._http_client_factory = http_client_factory or httpx.AsyncClient
+        self._websocket_connect_factory = websocket_connect_factory or websocket_connect
         self._status = UpstreamStatus(
             mode=settings.gateway_mode,
             state=(
@@ -41,13 +65,21 @@ class GatewayConnector:
             ),
             base_url=settings.upstream_base_url,
             detail="Gateway operates locally by default." if settings.gateway_mode is GatewayMode.STANDALONE else None,
+            auth_mode=settings.upstream_auth_mode,
+            certificate_mode=settings.upstream_certificate_mode,
+            edge_provider=settings.upstream_edge_provider,
+            mutual_tls_mode=settings.upstream_mutual_tls_mode,
         )
         self._lock = asyncio.Lock()
 
     async def sync_once(self) -> None:
         if self.settings.gateway_mode is not GatewayMode.MANAGED:
-            await self._update_status(state=UpstreamConnectionState.DISABLED, detail="Managed upstream mode is disabled.")
+            await self._update_status(
+                state=UpstreamConnectionState.DISABLED,
+                detail="Managed upstream mode is disabled.",
+            )
             return
+
         await self._update_status(state=UpstreamConnectionState.ENROLLING, detail="Ensuring upstream enrollment.")
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None:
@@ -63,18 +95,56 @@ class GatewayConnector:
                 detail="Upstream enrollment succeeded without a status endpoint.",
                 enrolled_at=enrollment.enrolled_at,
                 events_url=enrollment.events_url,
+                protocol_version=enrollment.protocol_version,
+                controller_name=enrollment.controller_name,
+                controller_instance_id=enrollment.controller_instance_id,
             )
             return
-        async with self._http_client_factory(
-            verify=self.tls_context_factory.create_outbound_context(),
-            timeout=self.settings.gateway_reconnect_delay_seconds,
-        ) as client:
-            response = await client.post(
-                enrollment.status_url,
-                json=self.snapshot_provider(),
-                headers={"Authorization": f"Bearer {enrollment.access_token}"},
+
+        snapshot = self.snapshot_provider()
+        headers = await self.enrollment_service.upstream_headers(enrollment)
+        client_certificate_present = (
+            self.tls_context_factory.certificate_service.current_certificate() is not None
+            if self.tls_context_factory.certificate_service is not None
+            else False
+        )
+        certificate_bootstrap_pending = self._certificate_bootstrap_pending(
+            enrollment,
+            client_certificate_present=client_certificate_present,
+        )
+        try:
+            async with self._http_client_factory(
+                verify=self.tls_context_factory.create_outbound_context(),
+                timeout=self.settings.gateway_reconnect_delay_seconds,
+            ) as client:
+                response = await client.post(
+                    enrollment.status_url,
+                    json=snapshot,
+                    headers={
+                        **headers,
+                        "X-IoT-Agent-Protocol-Version": str(snapshot.get("protocol", {}).get("version", "")),
+                    },
+                )
+                if response.status_code in {401, 403}:
+                    await self.enrollment_service.handle_auth_failure(enrollment)
+                    await self._update_status(
+                        state=UpstreamConnectionState.AUTH_FAILED,
+                        detail="Upstream authentication failed during status sync.",
+                        last_error=f"Controller rejected gateway credentials with HTTP {response.status_code}.",
+                        failed_sync_count=self._status.failed_sync_count + 1,
+                    )
+                    return
+                response.raise_for_status()
+                response_payload = response.json() if response.content else {}
+        except Exception as exc:
+            await self._update_status(
+                state=UpstreamConnectionState.RECOVERING,
+                detail="Retrying upstream status synchronization.",
+                last_error=str(exc),
+                failed_sync_count=self._status.failed_sync_count + 1,
             )
-            response.raise_for_status()
+            return
+
         await self._update_status(
             state=UpstreamConnectionState.ONLINE,
             detail="Synchronized the latest gateway snapshot upstream.",
@@ -83,6 +153,12 @@ class GatewayConnector:
             status_url=enrollment.status_url,
             events_url=enrollment.events_url,
             last_error=None,
+            protocol_version=str(response_payload.get("protocol_version") or enrollment.protocol_version or ""),
+            controller_name=str(response_payload.get("controller_name") or enrollment.controller_name or ""),
+            controller_instance_id=str(response_payload.get("controller_instance_id") or enrollment.controller_instance_id or ""),
+            client_certificate_present=client_certificate_present,
+            certificate_bootstrap_pending=certificate_bootstrap_pending,
+            successful_sync_count=self._status.successful_sync_count + 1,
         )
 
     async def listen_once(self) -> None:
@@ -91,47 +167,206 @@ class GatewayConnector:
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None or not enrollment.events_url:
             return
+
+        client_certificate_present = (
+            self.tls_context_factory.certificate_service.current_certificate() is not None
+            if self.tls_context_factory.certificate_service is not None
+            else False
+        )
+        certificate_bootstrap_pending = self._certificate_bootstrap_pending(
+            enrollment,
+            client_certificate_present=client_certificate_present,
+        )
         await self._update_status(
             state=UpstreamConnectionState.CONNECTING,
             detail="Connecting to the upstream control stream.",
             enrolled_at=enrollment.enrolled_at,
             status_url=enrollment.status_url,
             events_url=enrollment.events_url,
+            protocol_version=enrollment.protocol_version,
+            controller_name=enrollment.controller_name,
+            controller_instance_id=enrollment.controller_instance_id,
+            client_certificate_present=client_certificate_present,
+            certificate_bootstrap_pending=certificate_bootstrap_pending,
         )
-        async with websocket_connect(
-            enrollment.events_url,
-            additional_headers={"Authorization": f"Bearer {enrollment.access_token}"},
-            ssl=self.tls_context_factory.create_outbound_context(),
-            open_timeout=self.settings.gateway_reconnect_delay_seconds,
-            close_timeout=self.settings.gateway_reconnect_delay_seconds,
-        ) as websocket:
+        headers = await self.enrollment_service.upstream_headers(enrollment)
+        try:
+            async with self._websocket_connect_factory(
+                enrollment.events_url,
+                additional_headers=headers,
+                ssl=self.tls_context_factory.create_outbound_context(),
+                open_timeout=self.settings.gateway_reconnect_delay_seconds,
+                close_timeout=self.settings.gateway_reconnect_delay_seconds,
+            ) as websocket:
+                await websocket.send(
+                    json.dumps(
+                        AgentHelloMessage(
+                            message_id=_message_id("ghello"),
+                            snapshot=self.snapshot_provider(),
+                        ).model_dump(mode="json")
+                    )
+                )
+                await self._update_status(
+                    state=UpstreamConnectionState.ONLINE,
+                    detail="Connected to the upstream control stream.",
+                    enrolled_at=enrollment.enrolled_at,
+                    status_url=enrollment.status_url,
+                    events_url=enrollment.events_url,
+                    last_error=None,
+                    client_certificate_present=client_certificate_present,
+                    certificate_bootstrap_pending=certificate_bootstrap_pending,
+                    successful_event_stream_count=self._status.successful_event_stream_count + 1,
+                )
+                sender = asyncio.create_task(self._send_outbox_loop(websocket), name="iot-agent-gateway-outbox")
+                receiver = asyncio.create_task(
+                    self._receive_loop(websocket, enrollment),
+                    name="iot-agent-gateway-receiver",
+                )
+                done, pending = await asyncio.wait(
+                    {sender, receiver},
+                    return_when=asyncio.FIRST_EXCEPTION,
+                )
+                for task in pending:
+                    task.cancel()
+                for task in pending:
+                    await asyncio.gather(task, return_exceptions=True)
+                for task in done:
+                    task.result()
+        except Exception as exc:
+            if isinstance(exc, AgentError) and exc.code == "UPSTREAM_PROTOCOL_MISMATCH":
+                await self._update_status(
+                    state=UpstreamConnectionState.PROTOCOL_MISMATCH,
+                    detail=exc.message,
+                    last_error=exc.message,
+                    failed_event_stream_count=self._status.failed_event_stream_count + 1,
+                )
+                return
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {401, 403}:
+                await self.enrollment_service.handle_auth_failure(enrollment)
+                await self._update_status(
+                    state=UpstreamConnectionState.AUTH_FAILED,
+                    detail="Upstream authentication failed during control-stream connection.",
+                    last_error=f"Controller rejected gateway credentials with HTTP {exc.response.status_code}.",
+                    failed_event_stream_count=self._status.failed_event_stream_count + 1,
+                )
+                return
             await self._update_status(
-                state=UpstreamConnectionState.ONLINE,
-                detail="Connected to the upstream control stream.",
-                enrolled_at=enrollment.enrolled_at,
-                status_url=enrollment.status_url,
-                events_url=enrollment.events_url,
-                last_error=None,
+                state=UpstreamConnectionState.RECOVERING,
+                detail="Reconnecting to the upstream control stream.",
+                last_error=str(exc),
+                failed_event_stream_count=self._status.failed_event_stream_count + 1,
             )
-            while True:
-                raw_message = await asyncio.wait_for(websocket.recv(), timeout=self.settings.gateway_event_timeout_seconds)
-                if isinstance(raw_message, bytes):
-                    raw_message = raw_message.decode("utf-8")
-                self._handle_upstream_message(raw_message)
-                await self._update_status(last_event_at=utc_now())
 
     def current_status(self) -> UpstreamStatus:
         return self._status
 
-    def _handle_upstream_message(self, raw_message: str) -> None:
-        try:
+    async def _receive_loop(self, websocket, enrollment: GatewayEnrollmentRecord) -> None:
+        while True:
+            try:
+                raw_message = await asyncio.wait_for(
+                    websocket.recv(),
+                    timeout=self.settings.gateway_event_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                await self._send_snapshot(websocket)
+                continue
+            if isinstance(raw_message, bytes):
+                raw_message = raw_message.decode("utf-8")
             payload = json.loads(raw_message)
-        except json.JSONDecodeError:
+            message = CONTROLLER_STREAM_ADAPTER.validate_python(payload)
+            await self._handle_message(message, websocket, enrollment)
+
+    async def _handle_message(self, message, websocket, enrollment: GatewayEnrollmentRecord) -> None:
+        if isinstance(message, ControllerAcknowledgeMessage):
+            self.gateway_repository.mark_outbox_acked(message.acknowledged_message_id)
             return
-        message_type = str(payload.get("type", "message"))
-        detail = str(payload.get("detail", "Received an upstream control-plane message."))
-        self._status = replace(self._status, detail=f"{message_type}: {detail}")
+        if isinstance(message, ControllerPingMessage):
+            await websocket.send(
+                json.dumps(
+                    AgentPongMessage(
+                        message_id=_message_id("gpong"),
+                        acknowledged_message_id=message.message_id,
+                        detail=message.detail,
+                    ).model_dump(mode="json")
+                )
+            )
+            return
+        if isinstance(message, ControllerHelloMessage):
+            if message.protocol_version not in self.snapshot_provider()["protocol"]["supported_versions"]:
+                raise AgentError(
+                    "UPSTREAM_PROTOCOL_MISMATCH",
+                    f"Controller protocol version {message.protocol_version!r} is not supported.",
+                    status_code=409,
+                )
+            await websocket.send(
+                json.dumps(
+                    AgentAcknowledgeMessage(
+                        message_id=_message_id("gack"),
+                        acknowledged_message_id=message.message_id,
+                    ).model_dump(mode="json")
+                )
+            )
+            await self._update_status(
+                protocol_version=message.protocol_version,
+                controller_name=message.controller_name,
+                controller_instance_id=message.controller_instance_id,
+            )
+            return
+        if isinstance(message, ControllerSubmitPrintJobMessage):
+            await self.command_dispatcher.handle_submit_print_job(message, enrollment=enrollment)
+        elif isinstance(message, ControllerExecuteDeviceCommandMessage):
+            await self.command_dispatcher.handle_execute_device_command(message, enrollment=enrollment)
+        elif isinstance(message, ControllerCancelJobMessage):
+            await self.command_dispatcher.handle_cancel_job(message, enrollment=enrollment)
+        await self._update_status(
+            last_command_at=utc_now(),
+            last_command_id=getattr(message, "command_id", None),
+        )
+
+    async def _send_outbox_loop(self, websocket) -> None:
+        while True:
+            pending = self.gateway_repository.list_pending_outbox(limit=self.settings.gateway_outbox_batch_size)
+            if not pending:
+                await asyncio.sleep(self.settings.gateway_control_poll_interval_seconds)
+                continue
+            for record in pending:
+                try:
+                    await websocket.send(json.dumps(record.payload))
+                    self.gateway_repository.mark_outbox_sent(record.message_id)
+                except Exception as exc:
+                    self.gateway_repository.mark_outbox_failed(record.message_id, detail=str(exc))
+                    raise
+
+    async def _send_snapshot(self, websocket) -> None:
+        snapshot = self.snapshot_provider()
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "agent.status.snapshot",
+                    "message_id": _message_id("gsnap"),
+                    "snapshot": snapshot,
+                }
+            )
+        )
 
     async def _update_status(self, **changes: object) -> None:
         async with self._lock:
             self._status = replace(self._status, **changes)
+
+    def _certificate_bootstrap_pending(
+        self,
+        enrollment: GatewayEnrollmentRecord | None,
+        *,
+        client_certificate_present: bool,
+    ) -> bool:
+        if self.settings.upstream_certificate_mode is not UpstreamCertificateMode.STEP_CA:
+            return False
+        if client_certificate_present:
+            return False
+        return enrollment is not None
+
+
+def _message_id(prefix: str) -> str:
+    from uuid import uuid4
+
+    return f"{prefix}_{uuid4().hex}"
