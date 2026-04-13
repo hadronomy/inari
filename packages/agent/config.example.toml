@@ -15,12 +15,9 @@ allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
 
 [logging]
 level = "INFO"
-directory = "./logs"
 
 [paths]
-temp_dir = "./tmp"
-runtime_database = "./data/iot-agent.sqlite3"
-security_state_dir = "./data/security"
+profile = "auto"
 
 [printing]
 default_transport = "auto"

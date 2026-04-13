@@ -8,16 +8,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .config_paths import (
+    PathProfile,
+    PlatformPathBundle,
+    default_config_candidates,
+    resolve_default_path_bundle,
+    resolve_effective_path_profile,
+)
 from .gateway.models import MutualTlsMode, UpstreamAuthMode, UpstreamCertificateMode, UpstreamEdgeProvider
 from .security.models import GatewayExposure, GatewayMode
 
 ENV_PREFIX = "IOT_AGENT_"
 CONFIG_ENV_VAR = f"{ENV_PREFIX}CONFIG"
-DEFAULT_CONFIG_RELATIVE_PATH = Path("config") / "iot-agent.toml"
-DEFAULT_CONFIG_FILENAME = "config.toml"
-SCHEMA_RELATIVE_PATH = Path("schemas") / "iot-agent-config.schema.json"
 EXAMPLE_CONFIG_FILENAME = "config.example.toml"
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
@@ -50,15 +54,17 @@ class LoggingConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     level: LogLevel = "INFO"
-    directory: Path = Field(default="./logs")
+    directory: Path | None = None
 
 
 class PathsConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
-    temp_dir: Path = Field(default="./tmp")
-    runtime_database: Path = Field(default="./data/iot-agent.sqlite3")
-    security_state_dir: Path = Field(default="./data/security")
+    profile: PathProfile = "auto"
+    data_dir: Path | None = None
+    temp_dir: Path | None = None
+    runtime_database: Path | None = None
+    security_state_dir: Path | None = None
 
 
 class PrintingConfig(BaseModel):
@@ -208,17 +214,22 @@ class AgentConfigFile(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
 
-    def to_settings_payload(self, *, base_dir: Path) -> dict[str, object]:
+    def to_settings_payload(self, *, base_dir: Path, path_defaults: PlatformPathBundle) -> dict[str, object]:
+        data_dir = _resolve_relative_path(self.paths.data_dir, base_dir) or path_defaults.data_dir
+        runtime_database_path = _resolve_relative_path(self.paths.runtime_database, base_dir) or (data_dir / "iot-agent.sqlite3")
+        security_state_dir = _resolve_relative_path(self.paths.security_state_dir, base_dir) or (data_dir / "security")
         return {
             "host": self.server.host,
             "port": self.server.port,
+            "path_profile": path_defaults.profile,
             "trusted_hosts": list(self.server.trusted_hosts),
             "allowed_origins": list(self.cors.allowed_origins),
             "log_level": self.logging.level,
-            "log_dir": _resolve_relative_path(self.logging.directory, base_dir),
-            "temp_dir": _resolve_relative_path(self.paths.temp_dir, base_dir),
-            "runtime_database_path": _resolve_relative_path(self.paths.runtime_database, base_dir),
-            "security_state_dir": _resolve_relative_path(self.paths.security_state_dir, base_dir),
+            "data_dir": data_dir,
+            "log_dir": _resolve_relative_path(self.logging.directory, base_dir) or path_defaults.log_dir,
+            "temp_dir": _resolve_relative_path(self.paths.temp_dir, base_dir) or path_defaults.temp_dir,
+            "runtime_database_path": runtime_database_path,
+            "security_state_dir": security_state_dir,
             "default_printer_name": self.printing.default_printer_name,
             "default_printer_mode": self.printing.default_transport,
             "html_print_enabled": self.printing.html_enabled,
@@ -293,6 +304,7 @@ class AgentSettings(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 7310
+    path_profile: PathProfile = "auto"
     gateway_mode: GatewayMode = GatewayMode.STANDALONE
     gateway_exposure: GatewayExposure = GatewayExposure.LOOPBACK
     upstream_auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
@@ -310,10 +322,11 @@ class AgentSettings(BaseModel):
     log_level: LogLevel = "INFO"
     html_print_enabled: bool = True
     default_printer_mode: PrinterMode = "auto"
-    temp_dir: Path = Path("./tmp")
-    log_dir: Path = Path("./logs")
-    runtime_database_path: Path = Path("./data/iot-agent.sqlite3")
-    security_state_dir: Path = Path("./data/security")
+    data_dir: Path | None = None
+    temp_dir: Path | None = None
+    log_dir: Path | None = None
+    runtime_database_path: Path | None = None
+    security_state_dir: Path | None = None
     tls_cert_path: Path | None = None
     tls_key_path: Path | None = None
     tls_ca_path: Path | None = None
@@ -377,6 +390,7 @@ class AgentSettings(BaseModel):
         return _normalize_list_like(value)
 
     @field_validator(
+        "data_dir",
         "temp_dir",
         "log_dir",
         "runtime_database_path",
@@ -391,7 +405,9 @@ class AgentSettings(BaseModel):
     @classmethod
     def normalize_paths(cls, value: object) -> object:
         if isinstance(value, str):
-            return Path(value)
+            value = Path(value)
+        if isinstance(value, Path) and not value.is_absolute():
+            return value.resolve()
         return value
 
     @field_validator(
@@ -418,6 +434,23 @@ class AgentSettings(BaseModel):
     def normalize_list_values(cls, value: object) -> object:
         return _normalize_list_like(value)
 
+    @model_validator(mode="after")
+    def apply_path_defaults(self) -> AgentSettings:
+        defaults = resolve_default_path_bundle(
+            profile=self.path_profile,
+            working_directory=Path.cwd(),
+        )
+        self.path_profile = resolve_effective_path_profile(
+            profile=self.path_profile,
+            working_directory=Path.cwd(),
+        )
+        self.data_dir = self.data_dir or defaults.data_dir
+        self.log_dir = self.log_dir or defaults.log_dir
+        self.temp_dir = self.temp_dir or defaults.temp_dir
+        self.runtime_database_path = self.runtime_database_path or (self.data_dir / "iot-agent.sqlite3")
+        self.security_state_dir = self.security_state_dir or (self.data_dir / "security")
+        return self
+
 
 def load_settings(
     config_path: Path | str | None = None,
@@ -438,11 +471,18 @@ def load_settings(
         dotenv_path = resolved_config_path.parent / ".env"
 
     file_config = AgentConfigFile.model_validate(config_payload or {})
-    settings_payload = file_config.to_settings_payload(base_dir=base_dir)
     env_payload = _build_env_override_payload(
         environment=env,
         dotenv_values=_read_dotenv(dotenv_path),
     )
+    requested_path_profile = env_payload.get("path_profile") or file_config.paths.profile
+    resolved_path_defaults = resolve_default_path_bundle(
+        profile=requested_path_profile,
+        working_directory=working_directory,
+        config_path=resolved_config_path,
+    )
+    env_payload["path_profile"] = resolved_path_defaults.profile
+    settings_payload = file_config.to_settings_payload(base_dir=base_dir, path_defaults=resolved_path_defaults)
     merged_payload = {
         **settings_payload,
         **env_payload,
@@ -482,7 +522,11 @@ def resolve_config_path(
             raise FileNotFoundError(f"Config file not found: {candidate}")
         return candidate
 
-    for candidate in _default_config_candidates(working_directory):
+    requested_profile = env.get(f"{ENV_PREFIX}PATH_PROFILE", "auto")
+    for candidate in default_config_candidates(
+        working_directory=working_directory,
+        profile=requested_profile,
+    ):
         if candidate.exists():
             return candidate
     return None
@@ -599,17 +643,6 @@ def _resolve_relative_path(value: Path | str | None, base_dir: Path) -> Path | N
     if value.is_absolute():
         return value
     return (base_dir / value).resolve()
-
-
-def _default_config_candidates(working_directory: Path) -> tuple[Path, ...]:
-    candidates = [
-        (working_directory / DEFAULT_CONFIG_RELATIVE_PATH).resolve(),
-        (working_directory / DEFAULT_CONFIG_FILENAME).resolve(),
-    ]
-    programdata = os.environ.get("PROGRAMDATA")
-    if programdata:
-        candidates.append((Path(programdata) / "IoT Agent" / "config.toml").resolve())
-    return tuple(candidates)
 
 
 def _resolve_config_candidate(candidate: Path, working_directory: Path) -> Path:
@@ -734,6 +767,7 @@ def _render_toml_table(lines: list[str], path: tuple[str, ...], value: dict[str,
 
 def _build_example_config() -> AgentConfigFile:
     document = AgentConfigFile()
+    document.paths.profile = "auto"
     document.server.trusted_hosts = [
         host
         for host in document.server.trusted_hosts
