@@ -1,25 +1,295 @@
 from __future__ import annotations
 
+import argparse
+import json
+import os
+import tomllib
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .gateway.models import MutualTlsMode, UpstreamAuthMode, UpstreamCertificateMode, UpstreamEdgeProvider
 from .security.models import GatewayExposure, GatewayMode
 
+ENV_PREFIX = "IOT_AGENT_"
+CONFIG_ENV_VAR = f"{ENV_PREFIX}CONFIG"
+DEFAULT_CONFIG_RELATIVE_PATH = Path("config") / "iot-agent.toml"
+DEFAULT_CONFIG_FILENAME = "config.toml"
+SCHEMA_RELATIVE_PATH = Path("schemas") / "iot-agent-config.schema.json"
+EXAMPLE_CONFIG_FILENAME = "config.example.toml"
+
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 PrinterMode = Literal["auto", "raw", "text", "document"]
 
+_NESTED_MODEL_CONFIG = ConfigDict(extra="forbid", str_strip_whitespace=True)
+_SETTINGS_MODEL_CONFIG = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
-class AgentSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="IOT_AGENT_",
-        env_file=".env",
-        extra="ignore",
+
+class ServerConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    host: str = "127.0.0.1"
+    port: int = 7310
+    trusted_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost", "testserver"])
+
+
+class CorsConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    allowed_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://127.0.0.1:8069",
+            "http://localhost:8069",
+        ]
     )
+
+
+class LoggingConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    level: LogLevel = "INFO"
+    directory: Path = Field(default="./logs")
+
+
+class PathsConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    temp_dir: Path = Field(default="./tmp")
+    runtime_database: Path = Field(default="./data/iot-agent.sqlite3")
+    security_state_dir: Path = Field(default="./data/security")
+
+
+class PrintingConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    default_printer_name: str | None = None
+    default_transport: PrinterMode = "auto"
+    html_enabled: bool = True
+
+
+class RuntimeDiscoveryConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    poll_interval_seconds: float = 3.0
+
+
+class RuntimeSchedulerConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    poll_interval_seconds: float = 0.5
+    batch_size: int = 32
+
+
+class RuntimeJobsConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    max_attempts: int = 3
+    retry_base_delay_seconds: int = 2
+    retry_max_delay_seconds: int = 30
+    dispatch_lease_seconds: int = 15
+    execution_lease_seconds: int = 30
+    heartbeat_interval_seconds: float = 5.0
+    execution_timeout_seconds: float = 60.0
+    lease_recovery_interval_seconds: float = 5.0
+
+
+class RuntimeConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    discovery: RuntimeDiscoveryConfig = Field(default_factory=RuntimeDiscoveryConfig)
+    scheduler: RuntimeSchedulerConfig = Field(default_factory=RuntimeSchedulerConfig)
+    jobs: RuntimeJobsConfig = Field(default_factory=RuntimeJobsConfig)
+
+
+class SecurityLocalTokenConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    ttl_seconds: int = 3600
+    audience: str = "iot-agent.local"
+    issuer: str | None = None
+
+
+class SecurityTlsConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    cert_path: Path | None = None
+    key_path: Path | None = None
+    ca_path: Path | None = None
+
+
+class SecurityConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    gateway_mode: GatewayMode = GatewayMode.STANDALONE
+    gateway_exposure: GatewayExposure = GatewayExposure.LOOPBACK
+    allow_loopback_bootstrap: bool = True
+    https_redirect_enabled: bool = True
+    secret_store_service_name: str = "iot-agent"
+    local_tokens: SecurityLocalTokenConfig = Field(default_factory=SecurityLocalTokenConfig)
+    tls: SecurityTlsConfig = Field(default_factory=SecurityTlsConfig)
+
+
+class GatewaySyncConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    interval_seconds: float = 30.0
+    reconnect_delay_seconds: float = 5.0
+    event_timeout_seconds: float = 30.0
+    control_poll_interval_seconds: float = 0.5
+    outbox_batch_size: int = 128
+    backoff_base_seconds: float = 1.0
+    backoff_max_seconds: float = 60.0
+    token_refresh_skew_seconds: int = 300
+
+
+class GatewayBootstrapConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    bootstrap_token: str | None = None
+    enrollment_code: str | None = None
+
+
+class GatewayZitadelConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    base_url: str | None = None
+    token_url: str | None = None
+    audience: str | None = None
+    service_account_key_path: Path | None = None
+    service_user_id: str | None = None
+    key_id: str | None = None
+    private_key_path: Path | None = None
+    assertion_algorithm: str = "RS256"
+    requested_scopes: list[str] = Field(default_factory=lambda: ["openid"])
+    token_refresh_skew_seconds: int = 120
+
+
+class GatewayStepCaConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    url: str | None = None
+    sign_url: str | None = None
+    renew_url: str | None = None
+    root_fingerprint: str | None = None
+    requested_sans: list[str] = Field(default_factory=list)
+    certificate_renewal_skew_seconds: int = 3600
+
+
+class GatewayConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    base_url: str | None = None
+    enrollment_url: str | None = None
+    status_url: str | None = None
+    events_url: str | None = None
+    auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
+    certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
+    edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
+    mutual_tls_mode: MutualTlsMode = MutualTlsMode.DISABLED
+    trust_client_ca: bool = True
+    bootstrap: GatewayBootstrapConfig = Field(default_factory=GatewayBootstrapConfig)
+    sync: GatewaySyncConfig = Field(default_factory=GatewaySyncConfig)
+    zitadel: GatewayZitadelConfig = Field(default_factory=GatewayZitadelConfig)
+    step_ca: GatewayStepCaConfig = Field(default_factory=GatewayStepCaConfig)
+
+
+class AgentConfigFile(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    config_version: int = 1
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    cors: CorsConfig = Field(default_factory=CorsConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    paths: PathsConfig = Field(default_factory=PathsConfig)
+    printing: PrintingConfig = Field(default_factory=PrintingConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    gateway: GatewayConfig = Field(default_factory=GatewayConfig)
+
+    def to_settings_payload(self, *, base_dir: Path) -> dict[str, object]:
+        return {
+            "host": self.server.host,
+            "port": self.server.port,
+            "trusted_hosts": list(self.server.trusted_hosts),
+            "allowed_origins": list(self.cors.allowed_origins),
+            "log_level": self.logging.level,
+            "log_dir": _resolve_relative_path(self.logging.directory, base_dir),
+            "temp_dir": _resolve_relative_path(self.paths.temp_dir, base_dir),
+            "runtime_database_path": _resolve_relative_path(self.paths.runtime_database, base_dir),
+            "security_state_dir": _resolve_relative_path(self.paths.security_state_dir, base_dir),
+            "default_printer_name": self.printing.default_printer_name,
+            "default_printer_mode": self.printing.default_transport,
+            "html_print_enabled": self.printing.html_enabled,
+            "discovery_poll_interval_seconds": self.runtime.discovery.poll_interval_seconds,
+            "scheduler_poll_interval_seconds": self.runtime.scheduler.poll_interval_seconds,
+            "scheduler_batch_size": self.runtime.scheduler.batch_size,
+            "job_max_attempts": self.runtime.jobs.max_attempts,
+            "job_retry_base_delay_seconds": self.runtime.jobs.retry_base_delay_seconds,
+            "job_retry_max_delay_seconds": self.runtime.jobs.retry_max_delay_seconds,
+            "job_dispatch_lease_seconds": self.runtime.jobs.dispatch_lease_seconds,
+            "job_execution_lease_seconds": self.runtime.jobs.execution_lease_seconds,
+            "job_heartbeat_interval_seconds": self.runtime.jobs.heartbeat_interval_seconds,
+            "job_execution_timeout_seconds": self.runtime.jobs.execution_timeout_seconds,
+            "job_lease_recovery_interval_seconds": self.runtime.jobs.lease_recovery_interval_seconds,
+            "gateway_mode": self.security.gateway_mode,
+            "gateway_exposure": self.security.gateway_exposure,
+            "allow_loopback_bootstrap": self.security.allow_loopback_bootstrap,
+            "https_redirect_enabled": self.security.https_redirect_enabled,
+            "secret_store_service_name": self.security.secret_store_service_name,
+            "local_token_ttl_seconds": self.security.local_tokens.ttl_seconds,
+            "token_audience": self.security.local_tokens.audience,
+            "token_issuer": self.security.local_tokens.issuer,
+            "tls_cert_path": _resolve_relative_path(self.security.tls.cert_path, base_dir),
+            "tls_key_path": _resolve_relative_path(self.security.tls.key_path, base_dir),
+            "tls_ca_path": _resolve_relative_path(self.security.tls.ca_path, base_dir),
+            "upstream_base_url": self.gateway.base_url,
+            "upstream_enrollment_url": self.gateway.enrollment_url,
+            "upstream_status_url": self.gateway.status_url,
+            "upstream_events_url": self.gateway.events_url,
+            "upstream_auth_mode": self.gateway.auth_mode,
+            "upstream_certificate_mode": self.gateway.certificate_mode,
+            "upstream_edge_provider": self.gateway.edge_provider,
+            "upstream_mutual_tls_mode": self.gateway.mutual_tls_mode,
+            "upstream_trust_client_ca": self.gateway.trust_client_ca,
+            "upstream_bootstrap_token": self.gateway.bootstrap.bootstrap_token,
+            "upstream_enrollment_code": self.gateway.bootstrap.enrollment_code,
+            "gateway_sync_interval_seconds": self.gateway.sync.interval_seconds,
+            "gateway_reconnect_delay_seconds": self.gateway.sync.reconnect_delay_seconds,
+            "gateway_event_timeout_seconds": self.gateway.sync.event_timeout_seconds,
+            "gateway_control_poll_interval_seconds": self.gateway.sync.control_poll_interval_seconds,
+            "gateway_outbox_batch_size": self.gateway.sync.outbox_batch_size,
+            "gateway_backoff_base_seconds": self.gateway.sync.backoff_base_seconds,
+            "gateway_backoff_max_seconds": self.gateway.sync.backoff_max_seconds,
+            "gateway_token_refresh_skew_seconds": self.gateway.sync.token_refresh_skew_seconds,
+            "zitadel_base_url": self.gateway.zitadel.base_url,
+            "zitadel_token_url": self.gateway.zitadel.token_url,
+            "zitadel_audience": self.gateway.zitadel.audience,
+            "zitadel_service_account_key_path": _resolve_relative_path(
+                self.gateway.zitadel.service_account_key_path,
+                base_dir,
+            ),
+            "zitadel_service_user_id": self.gateway.zitadel.service_user_id,
+            "zitadel_key_id": self.gateway.zitadel.key_id,
+            "zitadel_private_key_path": _resolve_relative_path(
+                self.gateway.zitadel.private_key_path,
+                base_dir,
+            ),
+            "zitadel_assertion_algorithm": self.gateway.zitadel.assertion_algorithm,
+            "zitadel_requested_scopes": list(self.gateway.zitadel.requested_scopes),
+            "zitadel_token_refresh_skew_seconds": self.gateway.zitadel.token_refresh_skew_seconds,
+            "step_ca_url": self.gateway.step_ca.url,
+            "step_ca_sign_url": self.gateway.step_ca.sign_url,
+            "step_ca_renew_url": self.gateway.step_ca.renew_url,
+            "step_ca_root_fingerprint": self.gateway.step_ca.root_fingerprint,
+            "step_ca_requested_sans": list(self.gateway.step_ca.requested_sans),
+            "step_ca_certificate_renewal_skew_seconds": self.gateway.step_ca.certificate_renewal_skew_seconds,
+        }
+
+
+class AgentSettings(BaseModel):
+    model_config = _SETTINGS_MODEL_CONFIG
 
     host: str = "127.0.0.1"
     port: int = 7310
@@ -99,19 +369,12 @@ class AgentSettings(BaseSettings):
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def normalize_allowed_origins(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return value
+        return _normalize_list_like(value)
 
-    @field_validator(
-        "trusted_hosts",
-        mode="before",
-    )
+    @field_validator("trusted_hosts", mode="before")
     @classmethod
     def normalize_string_lists(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return value
+        return _normalize_list_like(value)
 
     @field_validator(
         "temp_dir",
@@ -153,11 +416,352 @@ class AgentSettings(BaseSettings):
     @field_validator("zitadel_requested_scopes", "step_ca_requested_sans", mode="before")
     @classmethod
     def normalize_list_values(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+        return _normalize_list_like(value)
+
+
+def load_settings(
+    config_path: Path | str | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+) -> AgentSettings:
+    env = dict(environ or os.environ)
+    working_directory = Path(cwd) if cwd is not None else Path.cwd()
+    resolved_config_path = resolve_config_path(config_path=config_path, environ=env, cwd=working_directory)
+    config_payload: dict[str, Any] = {}
+    base_dir = working_directory
+    dotenv_path = working_directory / ".env"
+
+    if resolved_config_path is not None:
+        config_payload = _load_config_payload(resolved_config_path)
+        base_dir = resolved_config_path.parent
+        dotenv_path = resolved_config_path.parent / ".env"
+
+    file_config = AgentConfigFile.model_validate(config_payload or {})
+    settings_payload = file_config.to_settings_payload(base_dir=base_dir)
+    env_payload = _build_env_override_payload(
+        environment=env,
+        dotenv_values=_read_dotenv(dotenv_path),
+    )
+    merged_payload = {
+        **settings_payload,
+        **env_payload,
+    }
+    return AgentSettings.model_validate(merged_payload)
+
+
+@lru_cache(maxsize=8)
+def _get_settings_cached(config_key: str | None) -> AgentSettings:
+    config_path = Path(config_key) if config_key is not None else None
+    return load_settings(config_path=config_path)
+
+
+def get_settings(config_path: Path | str | None = None) -> AgentSettings:
+    key = None
+    if config_path is not None:
+        key = str(Path(config_path).resolve())
+    return _get_settings_cached(key)
+
+
+def clear_settings_cache() -> None:
+    _get_settings_cached.cache_clear()
+
+
+def resolve_config_path(
+    config_path: Path | str | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+) -> Path | None:
+    env = dict(environ or os.environ)
+    working_directory = Path(cwd) if cwd is not None else Path.cwd()
+    requested_path = config_path or env.get(CONFIG_ENV_VAR)
+    if requested_path is not None:
+        candidate = _resolve_config_candidate(Path(requested_path), working_directory)
+        if not candidate.exists():
+            raise FileNotFoundError(f"Config file not found: {candidate}")
+        return candidate
+
+    for candidate in _default_config_candidates(working_directory):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def generate_taplo_schema() -> dict[str, Any]:
+    schema = AgentConfigFile.model_json_schema()
+    converted = _convert_schema_for_taplo(schema)
+    converted["$schema"] = "http://json-schema.org/draft-04/schema#"
+    converted.setdefault("title", "IoT Agent Config")
+    converted.setdefault("description", "Schema for the IoT Agent TOML configuration file.")
+    return converted
+
+
+def render_example_toml(
+    *,
+    schema_path: str = "./schemas/iot-agent-config.schema.json",
+    config: AgentConfigFile | None = None,
+) -> str:
+    document = config.model_copy(deep=True) if config is not None else _build_example_config()
+    payload = _serialize_for_toml(document.model_dump(mode="python", exclude_none=True))
+    root_scalars = {key: value for key, value in payload.items() if not isinstance(value, dict)}
+    root_tables = {
+        key: value
+        for key, value in payload.items()
+        if isinstance(value, dict) and not _is_empty_toml_table(value)
+    }
+    lines = [
+        f"#:schema {schema_path}",
+        "",
+        "# Generated example configuration for iot-agent.",
+        "# Environment variables with the IOT_AGENT_ prefix still override these values.",
+        "",
+    ]
+    for key, value in root_scalars.items():
+        lines.append(f"{key} = {_toml_literal(value)}")
+    if root_scalars:
+        lines.append("")
+    for table_name, table_value in root_tables.items():
+        _render_toml_table(lines, (table_name,), table_value)
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines) + "\n"
+
+
+def write_generated_config_artifacts(
+    *,
+    schema_output_path: Path,
+    example_output_path: Path,
+    schema_reference: str = "./schemas/iot-agent-config.schema.json",
+) -> tuple[Path, Path]:
+    schema_output_path.parent.mkdir(parents=True, exist_ok=True)
+    example_output_path.parent.mkdir(parents=True, exist_ok=True)
+    schema_output_path.write_text(
+        json.dumps(generate_taplo_schema(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    example_output_path.write_text(
+        render_example_toml(schema_path=schema_reference),
+        encoding="utf-8",
+    )
+    return schema_output_path, example_output_path
+
+
+def generate_schema_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Generate the IoT Agent TOML schema and example config.")
+    parser.add_argument(
+        "--schema-output",
+        type=Path,
+        default=Path("schemas") / "iot-agent-config.schema.json",
+        help="Where to write the generated JSON Schema.",
+    )
+    parser.add_argument(
+        "--example-output",
+        type=Path,
+        default=Path(EXAMPLE_CONFIG_FILENAME),
+        help="Where to write the generated example TOML file.",
+    )
+    parser.add_argument(
+        "--schema-reference",
+        default="./schemas/iot-agent-config.schema.json",
+        help="Schema reference inserted at the top of the generated example TOML.",
+    )
+    args = parser.parse_args(argv)
+    write_generated_config_artifacts(
+        schema_output_path=args.schema_output,
+        example_output_path=args.example_output,
+        schema_reference=args.schema_reference,
+    )
+    return 0
+
+
+def _normalize_list_like(value: object) -> object:
+    if not isinstance(value, str):
         return value
+    stripped = value.strip()
+    if not stripped:
+        return []
+    if stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+    return [item.strip() for item in stripped.split(",") if item.strip()]
 
 
-@lru_cache(maxsize=1)
-def get_settings() -> AgentSettings:
-    return AgentSettings()
+def _resolve_relative_path(value: Path | str | None, base_dir: Path) -> Path | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = Path(value)
+    if value.is_absolute():
+        return value
+    return (base_dir / value).resolve()
+
+
+def _default_config_candidates(working_directory: Path) -> tuple[Path, ...]:
+    candidates = [
+        (working_directory / DEFAULT_CONFIG_RELATIVE_PATH).resolve(),
+        (working_directory / DEFAULT_CONFIG_FILENAME).resolve(),
+    ]
+    programdata = os.environ.get("PROGRAMDATA")
+    if programdata:
+        candidates.append((Path(programdata) / "IoT Agent" / "config.toml").resolve())
+    return tuple(candidates)
+
+
+def _resolve_config_candidate(candidate: Path, working_directory: Path) -> Path:
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (working_directory / candidate).resolve()
+
+
+def _load_config_payload(path: Path) -> dict[str, Any]:
+    base_payload = _read_toml(path)
+    local_path = path.with_name(f"{path.stem}.local{path.suffix}")
+    if local_path.exists():
+        base_payload = _deep_merge_dicts(base_payload, _read_toml(local_path))
+    return base_payload
+
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def _read_dotenv(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        value = raw_value.strip()
+        if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def _build_env_override_payload(
+    *,
+    environment: Mapping[str, str],
+    dotenv_values: Mapping[str, str],
+) -> dict[str, str]:
+    combined = {
+        **dotenv_values,
+        **environment,
+    }
+    payload: dict[str, str] = {}
+    for field_name in AgentSettings.model_fields:
+        env_name = f"{ENV_PREFIX}{field_name.upper()}"
+        if env_name in combined:
+            payload[field_name] = combined[env_name]
+    return payload
+
+
+def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, Mapping):
+            merged[key] = _deep_merge_dicts(current, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _convert_schema_for_taplo(value: Any) -> Any:
+    if isinstance(value, dict):
+        converted: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = "definitions" if key == "$defs" else key
+            if normalized_key in {"$id", "$anchor", "$dynamicAnchor", "$dynamicRef", "unevaluatedProperties"}:
+                continue
+            if normalized_key == "const":
+                converted["enum"] = [_convert_schema_for_taplo(item)]
+                continue
+            converted[normalized_key] = _convert_schema_for_taplo(item)
+        if "$ref" in converted and isinstance(converted["$ref"], str):
+            converted["$ref"] = converted["$ref"].replace("#/$defs/", "#/definitions/")
+        return converted
+    if isinstance(value, list):
+        return [_convert_schema_for_taplo(item) for item in value]
+    return value
+
+
+def _serialize_for_toml(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _serialize_for_toml(value.model_dump(mode="python", exclude_none=True))
+    if isinstance(value, dict):
+        return {
+            str(key): _serialize_for_toml(item)
+            for key, item in value.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_serialize_for_toml(item) for item in value]
+    if isinstance(value, Path):
+        return value.as_posix() if value.drive == "" else str(value)
+    if hasattr(value, "value"):
+        return getattr(value, "value")
+    return value
+
+
+def _render_toml_table(lines: list[str], path: tuple[str, ...], value: dict[str, Any]) -> None:
+    scalar_items = [(key, item) for key, item in value.items() if not isinstance(item, dict)]
+    nested_items = [
+        (key, item)
+        for key, item in value.items()
+        if isinstance(item, dict) and not _is_empty_toml_table(item)
+    ]
+    if not scalar_items and not nested_items:
+        return
+    if scalar_items:
+        lines.append(f"[{'.'.join(path)}]")
+    for key, item in scalar_items:
+        lines.append(f"{key} = {_toml_literal(item)}")
+    if scalar_items:
+        lines.append("")
+    for key, item in nested_items:
+        _render_toml_table(lines, (*path, key), item)
+
+
+def _build_example_config() -> AgentConfigFile:
+    document = AgentConfigFile()
+    document.server.trusted_hosts = [
+        host
+        for host in document.server.trusted_hosts
+        if host != "testserver"
+    ]
+    return document
+
+
+def _is_empty_toml_table(value: dict[str, Any]) -> bool:
+    if not value:
+        return True
+    for item in value.values():
+        if isinstance(item, dict):
+            if not _is_empty_toml_table(item):
+                return False
+            continue
+        return False
+    return True
+
+
+def _toml_literal(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_literal(item) for item in value) + "]"
+    if value is None:
+        return '""'
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'

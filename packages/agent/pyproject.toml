@@ -1,13 +1,12 @@
 [project]
 name = "iot-agent"
-version = "1.12.0a1"
+version = "1.13.0a1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
   "pydantic>=2.8.0,<3.0.0",
-  "pydantic-settings>=2.4.0,<3.0.0",
   "pillow>=10.4.0,<12.0.0",
   "puremagic>=2.0.0,<3.0.0",
   "pywin32>=306; platform_system == 'Windows'",
@@ -21,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 iot-agent = "iot_agent.main:main"
+iot-agent-generate-config = "iot_agent.config:generate_schema_main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
