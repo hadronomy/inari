@@ -196,3 +196,7 @@ if sys.platform == "win32":  # pragma: no branch - Windows-only integration path
         create_windows_service_class()
     except Exception:
         pass
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via Windows service/module entrypoint.
+    main()

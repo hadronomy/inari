@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import runpy
+import sys
 from pathlib import Path
 from types import SimpleNamespace
+from types import ModuleType
 
 from iot_agent.config import AgentSettings
 
@@ -199,3 +202,37 @@ def test_load_service_settings_falls_back_to_production_defaults_when_config_mis
     settings = _load_service_settings()
 
     assert settings.path_profile == "production"
+
+
+def test_module_entrypoint_invokes_main_when_run_as_script(mocker, monkeypatch, tmp_path) -> None:
+    fake_servicemanager = ModuleType("servicemanager")
+    fake_servicemanager.Initialize = mocker.Mock()
+    fake_servicemanager.PrepareToHostSingle = mocker.Mock()
+    fake_servicemanager.StartServiceCtrlDispatcher = mocker.Mock()
+    fake_servicemanager.LogInfoMsg = mocker.Mock()
+    fake_servicemanager.LogErrorMsg = mocker.Mock()
+
+    fake_win32event = ModuleType("win32event")
+    fake_win32event.CreateEvent = mocker.Mock(return_value="event")
+    fake_win32event.SetEvent = mocker.Mock()
+
+    fake_win32service = ModuleType("win32service")
+    fake_win32service.SERVICE_STOP_PENDING = 3
+
+    fake_win32serviceutil = ModuleType("win32serviceutil")
+    fake_win32serviceutil.ServiceFramework = type("FakeServiceFramework", (), {"__init__": lambda self, args: None})
+    fake_win32serviceutil.HandleCommandLine = mocker.Mock()
+    fake_win32serviceutil.SetServiceCustomOption = mocker.Mock()
+    fake_win32serviceutil.GetServiceCustomOption = mocker.Mock(return_value=None)
+
+    monkeypatch.setitem(sys.modules, "servicemanager", fake_servicemanager)
+    monkeypatch.setitem(sys.modules, "win32event", fake_win32event)
+    monkeypatch.setitem(sys.modules, "win32service", fake_win32service)
+    monkeypatch.setitem(sys.modules, "win32serviceutil", fake_win32serviceutil)
+    monkeypatch.delitem(sys.modules, "iot_agent.windows_service", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "argv", ["iot_agent.windows_service", "--config", str(tmp_path / "agent.toml"), "install"])
+
+    runpy.run_module("iot_agent.windows_service", run_name="__main__")
+
+    fake_win32serviceutil.HandleCommandLine.assert_called_once()
