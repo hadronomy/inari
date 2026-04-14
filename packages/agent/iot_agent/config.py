@@ -158,6 +158,7 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("gateway", "step_ca", "root_fingerprint"): ("Expected fingerprint of the step-ca root certificate. The controller normally provides this during enrollment.",),
     ("gateway", "step_ca", "requested_sans"): ("Additional SANs requested for the managed client certificate beyond the agent's default identity.",),
     ("gateway", "step_ca", "certificate_renewal_skew_seconds"): ("How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.",),
+    ("gateway", "step_ca", "lifecycle_poll_interval_seconds"): ("How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.",),
 }
 
 _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
@@ -385,6 +386,7 @@ class GatewayStepCaConfig(BaseModel):
     root_fingerprint: str | None = None
     requested_sans: list[str] = Field(default_factory=list)
     certificate_renewal_skew_seconds: int = 3600
+    lifecycle_poll_interval_seconds: float = 60.0
 
 
 class GatewayConfig(BaseModel):
@@ -500,6 +502,7 @@ class AgentConfigFile(BaseModel):
             "step_ca_root_fingerprint": self.gateway.step_ca.root_fingerprint,
             "step_ca_requested_sans": list(self.gateway.step_ca.requested_sans),
             "step_ca_certificate_renewal_skew_seconds": self.gateway.step_ca.certificate_renewal_skew_seconds,
+            "step_ca_lifecycle_poll_interval_seconds": self.gateway.step_ca.lifecycle_poll_interval_seconds,
         }
 
 
@@ -574,6 +577,7 @@ class AgentSettings(BaseModel):
     step_ca_root_fingerprint: str | None = None
     step_ca_requested_sans: list[str] = Field(default_factory=list)
     step_ca_certificate_renewal_skew_seconds: int = 3600
+    step_ca_lifecycle_poll_interval_seconds: float = 60.0
     gateway_sync_interval_seconds: float = 30.0
     gateway_reconnect_delay_seconds: float = 5.0
     gateway_event_timeout_seconds: float = 30.0

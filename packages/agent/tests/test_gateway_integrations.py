@@ -16,6 +16,7 @@ from iot_agent.gateway.auth_providers import ZitadelServiceAccountAuthProvider
 from iot_agent.gateway.caddy import CaddyControllerProfile
 from iot_agent.gateway.enrollment import GatewayEnrollmentService, UPSTREAM_STEP_CA_OTT_KEY
 from iot_agent.gateway.models import CertificateBootstrapMode, GatewayEnrollmentRecord, MutualTlsMode, StepCaOttBootstrap
+from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
 from iot_agent.security.certificates import CertificateLifecycleService
 from iot_agent.security.identity import AgentIdentityService
@@ -99,7 +100,6 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
         auth_provider=StaticAuthProvider({"Authorization": "Bearer zitadel-token"}),
-        certificate_provisioner=NoopCertificateProvisioner(),
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
         http_client_factory=lambda **kwargs: http_client,
@@ -145,7 +145,6 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
             },
         }
     )
-    provisioner = NoopCertificateProvisioner()
     service = GatewayEnrollmentService(
         settings=AgentSettings(
             gateway_mode="managed",
@@ -158,7 +157,6 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
         auth_provider=StaticAuthProvider({}),
-        certificate_provisioner=provisioner,
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
         http_client_factory=lambda **kwargs: http_client,
@@ -181,6 +179,101 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     assert reloaded is not None
     assert reloaded.certificate_bootstrap is not None
     assert reloaded.certificate_bootstrap.ott == "ott_bootstrap_token"
+
+
+@pytest.mark.anyio
+async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(tmp_path: Path) -> None:
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_cert = _issue_certificate(
+        subject_name="Example Step CA",
+        issuer_name="Example Step CA",
+        subject_key=ca_key.public_key(),
+        issuer_key=ca_key,
+        not_valid_after=datetime.now(tz=UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    ca_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    certificate_service = CertificateLifecycleService(
+        certificate_path=tmp_path / "upstream-client-cert.pem",
+        private_key_path=tmp_path / "identity.pem",
+        ca_path=tmp_path / "upstream-ca.pem",
+    )
+    secret_store = MemorySecretStore()
+    http_client = FakeAsyncHttpClient(
+        response_payload={
+            "protocol_version": GATEWAY_PROTOCOL_VERSION,
+            "controller_name": "Controller",
+            "access_token": "controller-token",
+            "enrolled_at": "2026-04-13T00:00:00Z",
+            "status_url": "https://controller.example.com/status",
+            "events_url": "wss://controller.example.com/events",
+            "granted_scopes": ["jobs:submit"],
+            "certificate_bootstrap": {
+                "mode": "step_ca_ott",
+                "ca_url": "https://step-ca.example.com",
+                "root_fingerprint": _fingerprint(ca_cert),
+                "ott": "ott_bootstrap_token",
+                "sign_url": "https://step-ca.example.com/1.0/sign",
+                "renew_url": "https://step-ca.example.com/1.0/renew",
+            },
+        }
+    )
+    provisioner = StepCaOttCertificateProvisioner(
+        settings=AgentSettings(
+            gateway_mode="managed",
+            upstream_base_url="https://controller.example.com",
+            upstream_certificate_mode="step_ca",
+            upstream_enrollment_token="bootstrap-token",
+            step_ca_url="https://step-ca.example.com",
+            step_ca_root_fingerprint=_fingerprint(ca_cert),
+        ),
+        identity_service=identity_service,
+        certificate_service=certificate_service,
+        http_client_factory=lambda **kwargs: StepCaHttpClient(
+            root_pem=ca_pem,
+            ca_key=ca_key,
+            certificate_service=certificate_service,
+        ),
+    )
+    enrollment_service = GatewayEnrollmentService(
+        settings=AgentSettings(
+            gateway_mode="managed",
+            upstream_base_url="https://controller.example.com",
+            upstream_certificate_mode="step_ca",
+            upstream_enrollment_token="bootstrap-token",
+        ),
+        identity_service=identity_service,
+        secret_store=secret_store,
+        tls_context_factory=TlsContextFactory(AgentSettings()),
+        certificate_service=certificate_service,
+        auth_provider=StaticAuthProvider({}),
+        metadata_path=tmp_path / "upstream-enrollment.json",
+        snapshot_provider=_gateway_snapshot_payload,
+        http_client_factory=lambda **kwargs: http_client,
+    )
+    lifecycle = ManagedCertificateLifecycleManager(
+        settings=AgentSettings(
+            gateway_mode="managed",
+            upstream_base_url="https://controller.example.com",
+            upstream_certificate_mode="step_ca",
+            step_ca_url="https://step-ca.example.com",
+            step_ca_root_fingerprint=_fingerprint(ca_cert),
+        ),
+        enrollment_service=enrollment_service,
+        certificate_service=certificate_service,
+        certificate_provisioner=provisioner,
+    )
+
+    await enrollment_service.ensure_enrolled()
+    certificate = await lifecycle.ensure_current(trigger="test")
+
+    assert certificate is not None
+    assert lifecycle.current_status().state.value == "valid"
+    reloaded = enrollment_service.load_enrollment()
+    assert reloaded is not None
+    assert reloaded.certificate_bootstrap is not None
+    assert reloaded.certificate_bootstrap.ott is None
 
 
 @pytest.mark.anyio
@@ -239,6 +332,68 @@ async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(tm
     assert sign_client.sign_calls == 1
 
 
+@pytest.mark.anyio
+async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(tmp_path: Path) -> None:
+    old_ca_key = ec.generate_private_key(ec.SECP256R1())
+    old_ca_cert = _issue_certificate(
+        subject_name="Old Step CA",
+        issuer_name="Old Step CA",
+        subject_key=old_ca_key.public_key(),
+        issuer_key=old_ca_key,
+        not_valid_after=datetime.now(tz=UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    new_ca_key = ec.generate_private_key(ec.SECP256R1())
+    new_ca_cert = _issue_certificate(
+        subject_name="New Step CA",
+        issuer_name="New Step CA",
+        subject_key=new_ca_key.public_key(),
+        issuer_key=new_ca_key,
+        not_valid_after=datetime.now(tz=UTC) + timedelta(days=365),
+        is_ca=True,
+        )
+    identity_path = tmp_path / "identity.pem"
+    certificate_service = CertificateLifecycleService(
+        certificate_path=tmp_path / "upstream-client-cert.pem",
+        private_key_path=identity_path,
+        ca_path=tmp_path / "upstream-ca.pem",
+    )
+    certificate_service.install_certificate_authority(
+        old_ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    )
+    provisioner = StepCaOttCertificateProvisioner(
+        settings=AgentSettings(
+            upstream_certificate_mode="step_ca",
+            step_ca_url="https://step-ca.example.com",
+            step_ca_root_fingerprint=_fingerprint(new_ca_cert),
+        ),
+        identity_service=AgentIdentityService(identity_path=identity_path),
+        certificate_service=certificate_service,
+        http_client_factory=lambda **kwargs: StepCaHttpClient(
+            root_pem=new_ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+            ca_key=new_ca_key,
+            certificate_service=certificate_service,
+        ),
+    )
+
+    certificate = await provisioner.ensure_certificate(
+        _enrollment_record(
+            certificate_bootstrap=StepCaOttBootstrap(
+                mode=CertificateBootstrapMode.STEP_CA_OTT,
+                ca_url="https://step-ca.example.com",
+                root_fingerprint=_fingerprint(new_ca_cert),
+                ott="ott_bootstrap_token",
+                sign_url="https://step-ca.example.com/1.0/sign",
+                renew_url="https://step-ca.example.com/1.0/renew",
+            )
+        )
+    )
+
+    assert certificate is not None
+    installed_ca_pem = certificate_service.ca_path.read_text(encoding="utf-8")
+    assert _fingerprint(x509.load_pem_x509_certificate(installed_ca_pem.encode("utf-8"))) == _fingerprint(new_ca_cert)
+
+
 def test_caddy_required_mtls_requires_enrollment_route_or_existing_certificate(tmp_path: Path) -> None:
     settings = AgentSettings(
         gateway_mode="managed",
@@ -291,13 +446,6 @@ class StaticAuthProvider:
         return dict(self.headers)
 
     async def invalidate(self) -> None:
-        return None
-
-
-class NoopCertificateProvisioner:
-    mode = "none"
-
-    async def ensure_certificate(self, enrollment=None):
         return None
 
 

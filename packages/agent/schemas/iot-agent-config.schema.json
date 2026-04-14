@@ -147,6 +147,11 @@
           "title": "Certificate Renewal Skew Seconds",
           "type": "integer"
         },
+        "lifecycle_poll_interval_seconds": {
+          "default": 60.0,
+          "title": "Lifecycle Poll Interval Seconds",
+          "type": "number"
+        },
         "renew_url": {
           "anyOf": [
             {

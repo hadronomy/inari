@@ -57,6 +57,40 @@ class CertificateBootstrapMode(StrEnum):
     STEP_CA_OTT = "step_ca_ott"
 
 
+class ManagedCertificateState(StrEnum):
+    DISABLED = "disabled"
+    WAITING_FOR_ENROLLMENT = "waiting_for_enrollment"
+    WAITING_FOR_BOOTSTRAP = "waiting_for_bootstrap"
+    VALID = "valid"
+    RENEWAL_DUE = "renewal_due"
+    BOOTSTRAPPING = "bootstrapping"
+    RENEWING = "renewing"
+    RENEWAL_FAILED = "renewal_failed"
+    REBOOTSTRAP_REQUIRED = "rebootstrap_required"
+    EXPIRED = "expired"
+
+
+class ManagedCertificateOperation(StrEnum):
+    IDLE = "idle"
+    INSPECT = "inspect"
+    BOOTSTRAP_ROOT = "bootstrap_root"
+    ISSUE = "issue"
+    RENEW = "renew"
+
+
+class ManagedCertificateFailureReason(StrEnum):
+    NONE = "none"
+    NETWORK_ERROR = "network_error"
+    AUTH_FAILED = "auth_failed"
+    CA_UNAVAILABLE = "ca_unavailable"
+    ROOT_FINGERPRINT_MISMATCH = "root_fingerprint_mismatch"
+    LOCAL_CERTIFICATE_INVALID = "local_certificate_invalid"
+    BOOTSTRAP_REQUIRED = "bootstrap_required"
+    BOOTSTRAP_EXPIRED = "bootstrap_expired"
+    RENEWAL_UNSUPPORTED = "renewal_unsupported"
+    UNKNOWN = "unknown"
+
+
 @dataclass(slots=True, frozen=True)
 class StepCaOttBootstrap:
     mode: CertificateBootstrapMode
@@ -93,6 +127,30 @@ class GatewayEnrollmentRecord:
 
 
 @dataclass(slots=True, frozen=True)
+class ManagedCertificateStatus:
+    state: ManagedCertificateState
+    operation: ManagedCertificateOperation = ManagedCertificateOperation.IDLE
+    failure_reason: ManagedCertificateFailureReason = ManagedCertificateFailureReason.NONE
+    detail: str | None = None
+    current_expires_at: datetime | None = None
+    last_checked_at: datetime | None = None
+    last_operation_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    next_action_at: datetime | None = None
+    retry_delay_seconds: float | None = None
+    certificate_present: bool = False
+    bootstrap_pending: bool = False
+    subject: str | None = None
+    issuer: str | None = None
+    serial_number: str | None = None
+    successful_issue_count: int = 0
+    failed_issue_count: int = 0
+    successful_renewal_count: int = 0
+    failed_renewal_count: int = 0
+
+
+@dataclass(slots=True, frozen=True)
 class UpstreamStatus:
     mode: GatewayMode
     state: UpstreamConnectionState
@@ -120,6 +178,7 @@ class UpstreamStatus:
     successful_sync_count: int = 0
     failed_event_stream_count: int = 0
     successful_event_stream_count: int = 0
+    certificate_lifecycle: ManagedCertificateStatus | None = None
 
 
 @dataclass(slots=True, frozen=True)

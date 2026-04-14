@@ -11,18 +11,17 @@ from ..config import AgentSettings
 from ..exceptions import AgentError
 from ..gateway.models import (
     CertificateBootstrapMode,
+    GatewayEnrollmentRecord,
     StepCaOttBootstrap,
     UpstreamAuthMode,
     UpstreamCertificateMode,
 )
-from ..security.certificate_provisioners import ClientCertificateProvisioner
-from ..security.certificates import CertificateLifecycleService
+from ..security.certificates import CertificateLifecycleService, ManagedCertificate
 from ..security.identity import AgentIdentityService
 from ..security.secrets import SecretStore
 from ..security.tls import TlsContextFactory
 from ..version import GATEWAY_PROTOCOL_VERSION
 from .auth_providers import UpstreamAuthProvider
-from .models import GatewayEnrollmentRecord
 from .protocol import EnrollmentRequestPayload, EnrollmentResponsePayload
 
 UPSTREAM_ACCESS_TOKEN_KEY = "upstream_access_token"
@@ -42,7 +41,6 @@ class GatewayEnrollmentService:
         tls_context_factory: TlsContextFactory,
         certificate_service: CertificateLifecycleService,
         auth_provider: UpstreamAuthProvider,
-        certificate_provisioner: ClientCertificateProvisioner,
         metadata_path: Path,
         snapshot_provider: Callable[[], dict[str, Any]],
         http_client_factory: Callable[..., httpx.AsyncClient] | None = None,
@@ -53,7 +51,6 @@ class GatewayEnrollmentService:
         self.tls_context_factory = tls_context_factory
         self.certificate_service = certificate_service
         self.auth_provider = auth_provider
-        self.certificate_provisioner = certificate_provisioner
         self.metadata_path = metadata_path
         self.snapshot_provider = snapshot_provider
         self._http_client_factory = http_client_factory or httpx.AsyncClient
@@ -62,8 +59,6 @@ class GatewayEnrollmentService:
         existing = self.load_enrollment()
         if existing is not None and existing.auth_mode is UpstreamAuthMode.CONTROLLER and existing.access_token is None:
             existing = None
-        if existing is not None:
-            existing = await self._synchronize_certificate(existing)
         if existing is not None and not self._should_refresh(existing):
             return existing
         if existing is not None and existing.refresh_url and (
@@ -71,11 +66,11 @@ class GatewayEnrollmentService:
         ):
             refreshed = await self._refresh(existing)
             if refreshed is not None:
-                return await self._synchronize_certificate(refreshed)
+                return refreshed
         enrolled = await self._enroll()
         if enrolled is None:
             return None
-        return await self._synchronize_certificate(enrolled)
+        return enrolled
 
     def load_enrollment(self) -> GatewayEnrollmentRecord | None:
         if not self.metadata_path.exists():
@@ -211,10 +206,15 @@ class GatewayEnrollmentService:
         self._store_enrollment(record)
         return record
 
-    async def _synchronize_certificate(self, record: GatewayEnrollmentRecord) -> GatewayEnrollmentRecord:
-        certificate = await self.certificate_provisioner.ensure_certificate(record)
+    def persist_certificate_state(
+        self,
+        record: GatewayEnrollmentRecord,
+        *,
+        certificate: ManagedCertificate | None,
+        clear_bootstrap_ott: bool,
+    ) -> GatewayEnrollmentRecord:
         bootstrap = record.certificate_bootstrap
-        if certificate is not None and bootstrap is not None and bootstrap.ott is not None:
+        if clear_bootstrap_ott and certificate is not None and bootstrap is not None and bootstrap.ott is not None:
             bootstrap = replace(bootstrap, ott=None)
         certificate_expires_at = certificate.not_valid_after if certificate is not None else None
         updated = replace(
@@ -222,8 +222,7 @@ class GatewayEnrollmentService:
             certificate_expires_at=certificate_expires_at,
             certificate_bootstrap=bootstrap,
         )
-        if updated != record:
-            self._store_enrollment(updated)
+        self._store_enrollment(updated)
         return updated
 
     def _store_enrollment(self, record: GatewayEnrollmentRecord) -> None:

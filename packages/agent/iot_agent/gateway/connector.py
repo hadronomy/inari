@@ -13,6 +13,7 @@ from websockets.asyncio.client import connect as websocket_connect
 from ..config import AgentSettings
 from ..exceptions import AgentError
 from ..runtime.models import utc_now
+from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from ..security.models import GatewayMode
 from ..security.tls import TlsContextFactory
 from .enrollment import GatewayEnrollmentService
@@ -41,6 +42,7 @@ class GatewayConnector:
         *,
         settings: AgentSettings,
         enrollment_service: GatewayEnrollmentService,
+        certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None,
         tls_context_factory: TlsContextFactory,
         snapshot_provider: Callable[[], dict[str, Any]],
         gateway_repository: GatewayRepository,
@@ -50,6 +52,7 @@ class GatewayConnector:
     ) -> None:
         self.settings = settings
         self.enrollment_service = enrollment_service
+        self.certificate_lifecycle_manager = certificate_lifecycle_manager
         self.tls_context_factory = tls_context_factory
         self.snapshot_provider = snapshot_provider
         self.gateway_repository = gateway_repository
@@ -100,6 +103,12 @@ class GatewayConnector:
                 controller_instance_id=enrollment.controller_instance_id,
             )
             return
+
+        if self.certificate_lifecycle_manager is not None:
+            await self.certificate_lifecycle_manager.ensure_current(
+                enrollment=enrollment,
+                trigger="status_sync",
+            )
 
         snapshot = self.snapshot_provider()
         headers = await self.enrollment_service.upstream_headers(enrollment)
@@ -167,6 +176,11 @@ class GatewayConnector:
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None or not enrollment.events_url:
             return
+        if self.certificate_lifecycle_manager is not None:
+            await self.certificate_lifecycle_manager.ensure_current(
+                enrollment=enrollment,
+                trigger="control_stream",
+            )
 
         client_certificate_present = (
             self.tls_context_factory.certificate_service.current_certificate() is not None
@@ -257,8 +271,14 @@ class GatewayConnector:
                 failed_event_stream_count=self._status.failed_event_stream_count + 1,
             )
 
-    def current_status(self) -> UpstreamStatus:
-        return self._status
+    def current_status(self, *, certificate_lifecycle=None) -> UpstreamStatus:
+        if certificate_lifecycle is None:
+            certificate_lifecycle = (
+                self.certificate_lifecycle_manager.current_status()
+                if self.certificate_lifecycle_manager is not None
+                else None
+            )
+        return replace(self._status, certificate_lifecycle=certificate_lifecycle)
 
     async def _receive_loop(self, websocket, enrollment: GatewayEnrollmentRecord) -> None:
         while True:

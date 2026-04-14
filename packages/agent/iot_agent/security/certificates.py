@@ -17,6 +17,12 @@ class ManagedCertificate:
     serial_number: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class ManagedCertificateInspection:
+    certificate: ManagedCertificate | None
+    error_detail: str | None = None
+
+
 class CertificateLifecycleService:
     def __init__(
         self,
@@ -53,16 +59,24 @@ class CertificateLifecycleService:
         return self.ca_path
 
     def current_certificate(self) -> ManagedCertificate | None:
+        return self.inspect_current_certificate().certificate
+
+    def inspect_current_certificate(self) -> ManagedCertificateInspection:
         if not self.certificate_path.exists():
-            return None
-        certificate = x509.load_pem_x509_certificate(self.certificate_path.read_bytes())
-        return ManagedCertificate(
-            certificate_path=self.certificate_path,
-            ca_path=self.ca_path if self.ca_path is not None and self.ca_path.exists() else None,
-            not_valid_after=_normalize_datetime(certificate.not_valid_after_utc),
-            subject=certificate.subject.rfc4514_string() or None,
-            issuer=certificate.issuer.rfc4514_string() or None,
-            serial_number=format(certificate.serial_number, "x"),
+            return ManagedCertificateInspection(certificate=None)
+        try:
+            certificate = x509.load_pem_x509_certificate(self.certificate_path.read_bytes())
+        except Exception as exc:
+            return ManagedCertificateInspection(certificate=None, error_detail=str(exc))
+        return ManagedCertificateInspection(
+            certificate=ManagedCertificate(
+                certificate_path=self.certificate_path,
+                ca_path=self.ca_path if self.ca_path is not None and self.ca_path.exists() else None,
+                not_valid_after=_normalize_datetime(certificate.not_valid_after_utc),
+                subject=certificate.subject.rfc4514_string() or None,
+                issuer=certificate.issuer.rfc4514_string() or None,
+                serial_number=format(certificate.serial_number, "x"),
+            )
         )
 
     def current_cert_chain(self) -> tuple[str | None, str | None, str | None]:
@@ -78,6 +92,12 @@ class CertificateLifecycleService:
         if certificate is None or certificate.not_valid_after is None:
             return True
         return certificate.not_valid_after <= datetime.now(tz=UTC) + timedelta(seconds=skew_seconds)
+
+    def clear_managed_certificate(self, *, keep_certificate_authority: bool = True) -> None:
+        if self.certificate_path.exists():
+            self.certificate_path.unlink()
+        if not keep_certificate_authority and self.ca_path is not None and self.ca_path.exists():
+            self.ca_path.unlink()
 
 
 def _normalize_datetime(value: datetime | None) -> datetime | None:

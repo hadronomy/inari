@@ -30,6 +30,7 @@ For the current external controller contract, see [docs/gateway_protocol.md](../
 - ZITADEL service-account auth with private-key JWT for managed controller access
 - controller-issued enrollment-token bootstrap for seamless managed installs
 - step-ca-backed client-certificate bootstrap, issuance, and renewal through controller-issued one-time tokens
+- dedicated managed certificate lifecycle supervision with renewal, rebootstrap, and failure-state reporting
 - Caddy-compatible controller edge profile with optional or required mTLS
 - cross-platform printer discovery through Windows spooler and CUPS
 - raw TCP socket printer support for receipt and ESC/POS-style devices
@@ -84,6 +85,8 @@ Primary endpoints:
 Interactive API docs are served with Scalar at `GET /docs`.
 
 The operational API is now authenticated. Local desktop clients obtain a short-lived bearer token from `POST /auth/local-token` over loopback, then use that token for protected HTTP and WebSocket calls. By default the agent runs in standalone, loopback-only gateway mode, so it does not need any external gateway to broker local device connections.
+
+When managed mode uses `step_ca`, `GET /gateway/upstream/status` also reports a nested `certificate_lifecycle` object that explains whether the managed client certificate is healthy, renewing, waiting for bootstrap, expired, or needs rebootstrap after a failed renewal.
 
 The live events stream is snapshot-backed: the socket sends an initial `snapshot` message on connect, then `event_update` messages containing both the runtime event and a refreshed `SystemStatusResponse`. That lets local clients stay push-first without repeatedly polling `/system/status` for every queue or device change.
 

@@ -29,6 +29,10 @@ from .print_jobs import (
 from .printers import CutMode, PrinterTransport
 from .security.models import AccessScope, AgentIdentity, AuthenticatedPrincipal, GatewayExposure, GatewayMode, IssuedToken, PrincipalKind
 from .gateway.models import (
+    ManagedCertificateFailureReason,
+    ManagedCertificateOperation,
+    ManagedCertificateState,
+    ManagedCertificateStatus,
     MutualTlsMode,
     UpstreamAuthMode,
     UpstreamCertificateMode,
@@ -164,6 +168,54 @@ class GatewayIdentityResponse(APIModel):
         )
 
 
+class ManagedCertificateStatusResponse(APIModel):
+    state: ManagedCertificateState
+    operation: ManagedCertificateOperation
+    failure_reason: ManagedCertificateFailureReason
+    detail: str | None = None
+    current_expires_at: datetime | None = None
+    last_checked_at: datetime | None = None
+    last_operation_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    next_action_at: datetime | None = None
+    retry_delay_seconds: float | None = None
+    certificate_present: bool = False
+    bootstrap_pending: bool = False
+    subject: str | None = None
+    issuer: str | None = None
+    serial_number: str | None = None
+    successful_issue_count: int = 0
+    failed_issue_count: int = 0
+    successful_renewal_count: int = 0
+    failed_renewal_count: int = 0
+
+    @classmethod
+    def from_status(cls, status: ManagedCertificateStatus) -> ManagedCertificateStatusResponse:
+        return cls(
+            state=status.state,
+            operation=status.operation,
+            failure_reason=status.failure_reason,
+            detail=status.detail,
+            current_expires_at=status.current_expires_at,
+            last_checked_at=status.last_checked_at,
+            last_operation_at=status.last_operation_at,
+            last_success_at=status.last_success_at,
+            last_failure_at=status.last_failure_at,
+            next_action_at=status.next_action_at,
+            retry_delay_seconds=status.retry_delay_seconds,
+            certificate_present=status.certificate_present,
+            bootstrap_pending=status.bootstrap_pending,
+            subject=status.subject,
+            issuer=status.issuer,
+            serial_number=status.serial_number,
+            successful_issue_count=status.successful_issue_count,
+            failed_issue_count=status.failed_issue_count,
+            successful_renewal_count=status.successful_renewal_count,
+            failed_renewal_count=status.failed_renewal_count,
+        )
+
+
 class GatewayUpstreamStatusResponse(APIModel):
     mode: GatewayMode
     state: UpstreamConnectionState
@@ -191,6 +243,7 @@ class GatewayUpstreamStatusResponse(APIModel):
     successful_sync_count: int = 0
     failed_event_stream_count: int = 0
     successful_event_stream_count: int = 0
+    certificate_lifecycle: ManagedCertificateStatusResponse | None = None
 
     @classmethod
     def from_status(cls, status: UpstreamStatus) -> GatewayUpstreamStatusResponse:
@@ -221,6 +274,11 @@ class GatewayUpstreamStatusResponse(APIModel):
             successful_sync_count=status.successful_sync_count,
             failed_event_stream_count=status.failed_event_stream_count,
             successful_event_stream_count=status.successful_event_stream_count,
+            certificate_lifecycle=(
+                ManagedCertificateStatusResponse.from_status(status.certificate_lifecycle)
+                if status.certificate_lifecycle is not None
+                else None
+            ),
         )
 
 

@@ -210,3 +210,5 @@ config_version = 1
 # requested_sans = []
 # How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.
 # certificate_renewal_skew_seconds = 3600
+# How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.
+# lifecycle_poll_interval_seconds = 60.0
