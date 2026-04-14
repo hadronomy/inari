@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from iot_agent.config import AgentSettings
 
 
-def test_service_cli_uses_handle_command_line_for_management_commands(mocker) -> None:
+def test_service_cli_uses_handle_command_line_for_management_commands(mocker, tmp_path) -> None:
     fake_win32serviceutil = SimpleNamespace(HandleCommandLine=mocker.Mock())
     fake_modules = (
         SimpleNamespace(
@@ -23,12 +24,38 @@ def test_service_cli_uses_handle_command_line_for_management_commands(mocker) ->
 
     from iot_agent.windows_service import _run_service_cli
 
-    _run_service_cli(["iot-agent-windows-service", "install"])
+    _run_service_cli(["iot-agent-windows-service", "--config", str(tmp_path / "agent.toml"), "install"])
 
     fake_win32serviceutil.HandleCommandLine.assert_called_once_with(
         mocked_service_class,
         argv=["iot-agent-windows-service", "install"],
     )
+
+
+def test_service_class_includes_config_path_in_service_exe_args(mocker, tmp_path) -> None:
+    fake_servicemanager = SimpleNamespace(LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock())
+    fake_win32event = SimpleNamespace(CreateEvent=mocker.Mock(return_value="event"), SetEvent=mocker.Mock())
+    fake_win32service = SimpleNamespace(SERVICE_STOP_PENDING=3)
+
+    class FakeServiceFramework:
+        def __init__(self, args):
+            self.args = args
+
+    fake_win32serviceutil = SimpleNamespace(ServiceFramework=FakeServiceFramework)
+    mocker.patch(
+        "iot_agent.windows_service._import_pywin32_service_modules",
+        return_value=(fake_servicemanager, fake_win32event, fake_win32service, fake_win32serviceutil),
+    )
+
+    from iot_agent.windows_service import create_windows_service_class
+
+    config_path = tmp_path / "iot-agent.toml"
+    service_class = create_windows_service_class(
+        settings=AgentSettings(),
+        config_path=config_path,
+    )
+
+    assert Path(config_path).resolve().as_posix() in service_class._exe_args_.replace("\\", "/")
 
 
 def test_service_class_requests_shutdown_when_stopped(mocker) -> None:

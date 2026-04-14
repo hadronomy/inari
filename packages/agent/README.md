@@ -12,8 +12,6 @@ The agent now runs on top of a proper runtime layer with:
 - persisted job and device history
 - built-in gateway identity, scoped local auth, and optional managed upstream mode
 
-For the Windows packaging workflow that builds an MSIX with the tray and packaged service host, see [packaging/windows/README.md](../../packaging/windows/README.md).
-
 For the current external controller contract, see [docs/gateway_protocol.md](../../docs/gateway_protocol.md). For supported deployment stacks with Caddy, ZITADEL, and step-ca, see [docs/managed_gateway_stacks.md](../../docs/managed_gateway_stacks.md).
 
 ## Highlights
@@ -218,6 +216,40 @@ To run with an explicit TOML config:
 uv run --directory packages/agent iot-agent serve --config .\config\iot-agent.toml
 ```
 
+## Service Management
+
+The agent can now install and manage itself as a native platform service without relying on an external installer workflow.
+
+Recommended first-run flow:
+
+```powershell
+uv run --directory packages/agent iot-agent config write-default
+uv run --directory packages/agent iot-agent service print-definition
+uv run --directory packages/agent iot-agent service install
+uv run --directory packages/agent iot-agent service start
+uv run --directory packages/agent iot-agent service status
+```
+
+Available commands:
+
+```powershell
+uv run --directory packages/agent iot-agent service install
+uv run --directory packages/agent iot-agent service uninstall
+uv run --directory packages/agent iot-agent service start
+uv run --directory packages/agent iot-agent service stop
+uv run --directory packages/agent iot-agent service restart
+uv run --directory packages/agent iot-agent service status
+uv run --directory packages/agent iot-agent service print-definition
+```
+
+Platform defaults:
+
+- Windows: `IoTAgentService`
+- Linux: `iot-agent.service`
+- macOS: `io.iot-agent.service`
+
+Linux and macOS also support `--scope user` when you want a per-user service instead of the default system scope.
+
 ## Database Migrations
 
 The runtime database now uses versioned Alembic migrations on top of SQLAlchemy Core.
@@ -266,6 +298,12 @@ Generate the schema and example file from the package directory:
 
 ```powershell
 uv run --directory packages/agent iot-agent-generate-config
+```
+
+Write a production-oriented default runtime config directly to the platform service path:
+
+```powershell
+uv run --directory packages/agent iot-agent config write-default
 ```
 
 That writes:

@@ -569,7 +569,7 @@ def generate_taplo_schema() -> dict[str, Any]:
 
 def render_example_toml(
     *,
-    schema_path: str = "./schemas/iot-agent-config.schema.json",
+    schema_path: str | None = "./schemas/iot-agent-config.schema.json",
     config: AgentConfigFile | None = None,
 ) -> str:
     document = config.model_copy(deep=True) if config is not None else _build_example_config()
@@ -580,13 +580,16 @@ def render_example_toml(
         for key, value in payload.items()
         if isinstance(value, dict) and not _is_empty_toml_table(value)
     }
-    lines = [
-        f"#:schema {schema_path}",
-        "",
-        "# Generated example configuration for iot-agent.",
-        "# Environment variables with the IOT_AGENT_ prefix still override these values.",
-        "",
-    ]
+    lines: list[str] = []
+    if schema_path is not None:
+        lines.extend([f"#:schema {schema_path}", ""])
+    lines.extend(
+        [
+            "# Generated example configuration for iot-agent.",
+            "# Environment variables with the IOT_AGENT_ prefix still override these values.",
+            "",
+        ]
+    )
     for key, value in root_scalars.items():
         lines.append(f"{key} = {_toml_literal(value)}")
     if root_scalars:

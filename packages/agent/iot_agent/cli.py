@@ -7,8 +7,10 @@ import typer
 
 from .container import build_container
 from .db import DatabaseMigrationError, DatabaseMigrator
-from .config import AgentSettings, load_settings
+from .config import AgentConfigFile, AgentSettings, PathProfile, load_settings, render_example_toml
 from .server import serve as serve_agent
+from .service.manager import build_service_manager, load_service_settings, resolve_service_config_path
+from .service.models import DEFAULT_SERVICE_SCOPE, ServiceScope
 
 app = typer.Typer(
     add_completion=False,
@@ -16,7 +18,11 @@ app = typer.Typer(
     help="Run the IoT Agent service and manage its runtime database.",
 )
 db_app = typer.Typer(help="Inspect and upgrade the runtime database.")
+service_app = typer.Typer(help="Install and manage the IoT Agent as a platform service.")
+config_app = typer.Typer(help="Generate and write agent configuration files.")
 app.add_typer(db_app, name="db")
+app.add_typer(service_app, name="service")
+app.add_typer(config_app, name="config")
 
 ConfigOption = Annotated[
     Path | None,
@@ -29,6 +35,27 @@ ConfigOption = Annotated[
         resolve_path=True,
     ),
 ]
+ScopeOption = Annotated[
+    ServiceScope,
+    typer.Option(
+        "--scope",
+        help="Service scope for launchd/systemd. Windows always uses system scope.",
+    ),
+]
+PathProfileOption = Annotated[
+    PathProfile,
+    typer.Option(
+        "--profile",
+        help="Path profile to bake into a generated default config.",
+    ),
+]
+ForceOption = Annotated[
+    bool,
+    typer.Option(
+        "--force",
+        help="Overwrite the target file if it already exists.",
+    ),
+]
 
 
 def _load_cli_settings(config_path: Path | None) -> AgentSettings:
@@ -38,6 +65,12 @@ def _load_cli_settings(config_path: Path | None) -> AgentSettings:
 def _database_migrator(config_path: Path | None) -> tuple[AgentSettings, DatabaseMigrator]:
     settings = _load_cli_settings(config_path)
     return settings, DatabaseMigrator(settings.runtime_database_path)
+
+
+def _service_manager(config_path: Path | None, scope: ServiceScope):
+    settings, resolved_config_path = load_service_settings(config_path)
+    manager = build_service_manager(settings, config_path=resolved_config_path, scope=scope)
+    return settings, resolved_config_path, manager
 
 
 @app.callback(invoke_without_command=True)
@@ -103,3 +136,132 @@ def db_backup(
 
 def main(argv: list[str] | None = None) -> None:
     app(args=argv, prog_name="iot-agent", standalone_mode=False)
+
+
+@service_app.command("install")
+def service_install(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Install the IoT Agent as a platform-native service."""
+    try:
+        _, resolved_config_path, manager = _service_manager(config, scope)
+        typer.echo(manager.install())
+        typer.echo(f"Config: {resolved_config_path}")
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+
+@service_app.command("uninstall")
+def service_uninstall(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Remove the IoT Agent platform service definition."""
+    try:
+        _, _, manager = _service_manager(config, scope)
+        typer.echo(manager.uninstall())
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+
+@service_app.command("start")
+def service_start(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Start the platform service."""
+    try:
+        _, _, manager = _service_manager(config, scope)
+        typer.echo(manager.start())
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+
+@service_app.command("stop")
+def service_stop(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Stop the platform service."""
+    try:
+        _, _, manager = _service_manager(config, scope)
+        typer.echo(manager.stop())
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+
+@service_app.command("restart")
+def service_restart(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Restart the platform service."""
+    try:
+        _, _, manager = _service_manager(config, scope)
+        typer.echo(manager.restart())
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+
+@service_app.command("status")
+def service_status(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Show the current platform service state."""
+    try:
+        _, _, manager = _service_manager(config, scope)
+        status = manager.status()
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"State: {status.state.value}")
+    typer.echo(f"Detail: {status.detail}")
+
+
+@service_app.command("print-definition")
+def service_print_definition(
+    config: ConfigOption = None,
+    scope: ScopeOption = DEFAULT_SERVICE_SCOPE,
+) -> None:
+    """Print the platform-native service definition without installing it."""
+    try:
+        _, _, manager = _service_manager(config, scope)
+        definition = manager.definition()
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    if definition.path is not None:
+        typer.echo(f"# Path: {definition.path}")
+    typer.echo(definition.content, nl=not definition.content.endswith("\n"))
+
+
+@config_app.command("write-default")
+def config_write_default(
+    config: ConfigOption = None,
+    profile: PathProfileOption = "production",
+    force: ForceOption = False,
+) -> None:
+    """Write a sensible default config file for the agent."""
+    target_path = resolve_service_config_path(config)
+    if target_path.exists() and not force:
+        typer.secho(
+            f"Config file already exists: {target_path}. Pass --force to overwrite it.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    document = AgentConfigFile()
+    document.paths.profile = profile
+    target_path.write_text(
+        render_example_toml(schema_path=None, config=document),
+        encoding="utf-8",
+    )
+    typer.echo(f"Wrote default config to {target_path}")
