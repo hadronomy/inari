@@ -213,8 +213,27 @@ uv run iot-agent
 To run with an explicit TOML config:
 
 ```powershell
-uv run --directory packages/agent iot-agent --config .\config\iot-agent.toml
+uv run --directory packages/agent iot-agent serve --config .\config\iot-agent.toml
 ```
+
+## Database Migrations
+
+The runtime database now uses versioned Alembic migrations on top of SQLAlchemy Core.
+
+- startup runs `upgrade head` automatically before the runtime starts
+- existing non-empty SQLite databases are backed up before upgrade work
+- legacy unversioned databases from pre-migration releases are stamped and brought under Alembic management automatically
+- if the database revision is newer than the running agent understands, startup fails safely instead of guessing
+
+Operational commands:
+
+```powershell
+uv run --directory packages/agent iot-agent db current
+uv run --directory packages/agent iot-agent db upgrade
+uv run --directory packages/agent iot-agent db backup
+```
+
+For developer migration work inside `packages/agent`, the repo also includes [alembic.ini](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/packages/agent/alembic.ini), which points at the packaged migration environment under `iot_agent/db/alembic`. Its `sqlalchemy.url` is an explicit developer placeholder, not the authoritative runtime database location; the agent injects the real configured database URL in code during startup and `iot-agent db ...` commands.
 
 ## Test
 

@@ -8,6 +8,13 @@ from typing import Any, Mapping
 from sqlalchemy import collate, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from ..db.schema import (
+    device_events_table,
+    devices_table,
+    job_attempts_table,
+    job_events_table,
+    jobs_table,
+)
 from ..drivers import DeviceKind
 from ..printers import PrinterTransport
 from .models import (
@@ -23,16 +30,7 @@ from .models import (
     timestamp_to_iso,
     utc_now,
 )
-from .store import (
-    RuntimeStore,
-    device_events_table,
-    devices_table,
-    dump_json,
-    job_attempts_table,
-    job_events_table,
-    jobs_table,
-    load_json,
-)
+from .store import RuntimeStore, dump_json, load_json
 
 
 class DeviceRepository:

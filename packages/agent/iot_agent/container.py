@@ -5,6 +5,7 @@ from functools import lru_cache
 import platform
 
 from .config import AgentSettings, get_settings
+from .db import DatabaseMigrator
 from .drivers import DriverRegistry
 from .drivers.printers import CupsPrinterDriver, RawSocketPrinterDriver, WindowsPrinterDriver, WindowsSpooler
 from .gateway.auth_providers import build_upstream_auth_provider
@@ -38,6 +39,7 @@ from .supervision import ApplicationSupervisor
 @dataclass(slots=True, frozen=True)
 class AgentContainer:
     settings: AgentSettings
+    database_migrator: DatabaseMigrator
     driver_registry: DriverRegistry
     printer_service: PrinterService
     event_hub: EventHub
@@ -54,6 +56,7 @@ class AgentContainer:
 
 
 def build_container(settings: AgentSettings) -> AgentContainer:
+    database_migrator = DatabaseMigrator(settings.runtime_database_path)
     driver_registry = DriverRegistry(drivers=_build_printer_drivers(settings))
     printer_service = PrinterService(
         settings=settings,
@@ -196,6 +199,7 @@ def build_container(settings: AgentSettings) -> AgentContainer:
     )
     return AgentContainer(
         settings=settings,
+        database_migrator=database_migrator,
         driver_registry=driver_registry,
         printer_service=printer_service,
         event_hub=event_hub,

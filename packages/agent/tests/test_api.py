@@ -61,6 +61,12 @@ class StubApplicationSupervisor:
 
 
 @dataclass(slots=True)
+class StubDatabaseMigrator:
+    def ensure_current(self):
+        return None
+
+
+@dataclass(slots=True)
 class StubDeviceCatalog:
     devices: tuple[DeviceRecord, ...]
     device_events: tuple[JobEventRecord, ...] = ()
@@ -614,6 +620,7 @@ def make_test_container(
     )
     return AgentContainer(
         settings=settings,
+        database_migrator=StubDatabaseMigrator(),
         driver_registry=DriverRegistry(drivers=()),
         printer_service=mocker.Mock(spec=StubPrinterService),
         event_hub=EventHub(),
