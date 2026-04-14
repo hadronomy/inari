@@ -26,6 +26,7 @@ from .runtime.services import DeviceCatalog, JobService
 from .runtime.store import RuntimeStore
 from .runtime.supervisor import RuntimeSupervisor
 from .security.auth import AuthorizationService
+from .security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from .security.certificate_provisioners import build_certificate_provisioner
 from .security.certificates import CertificateLifecycleService
 from .security.identity import AgentIdentityService
@@ -50,6 +51,7 @@ class AgentContainer:
     authorization_service: AuthorizationService | None = None
     security_policy_service: SecurityPolicyService | None = None
     tls_context_factory: TlsContextFactory | None = None
+    certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None = None
     gateway_service: GatewayService | None = None
     gateway_supervisor: GatewaySupervisor | None = None
     application_supervisor: ApplicationSupervisor | None = None
@@ -157,20 +159,29 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         gateway_repository=gateway_repository,
         security_policy_service=security_policy_service,
         certificate_service=certificate_service,
+        certificate_lifecycle_manager=None,
     )
+    enrollment_service = GatewayEnrollmentService(
+        settings=settings,
+        identity_service=identity_service,
+        secret_store=secret_store,
+        tls_context_factory=tls_context_factory,
+        certificate_service=certificate_service,
+        auth_provider=upstream_auth_provider,
+        metadata_path=security_state_dir / "upstream-enrollment.json",
+        snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
+    )
+    certificate_lifecycle_manager = ManagedCertificateLifecycleManager(
+        settings=settings,
+        enrollment_service=enrollment_service,
+        certificate_service=certificate_service,
+        certificate_provisioner=certificate_provisioner,
+    )
+    snapshot_builder.certificate_lifecycle_manager = certificate_lifecycle_manager
     gateway_connector = GatewayConnector(
         settings=settings,
-        enrollment_service=GatewayEnrollmentService(
-            settings=settings,
-            identity_service=identity_service,
-            secret_store=secret_store,
-            tls_context_factory=tls_context_factory,
-            certificate_service=certificate_service,
-            auth_provider=upstream_auth_provider,
-            certificate_provisioner=certificate_provisioner,
-            metadata_path=security_state_dir / "upstream-enrollment.json",
-            snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
-        ),
+        enrollment_service=enrollment_service,
+        certificate_lifecycle_manager=certificate_lifecycle_manager,
         tls_context_factory=tls_context_factory,
         snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
         gateway_repository=gateway_repository,
@@ -184,10 +195,12 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         identity_service=identity_service,
         connector=gateway_connector,
         snapshot_builder=snapshot_builder,
+        certificate_lifecycle_manager=certificate_lifecycle_manager,
     )
     gateway_supervisor = GatewaySupervisor(
         settings=settings,
         connector=gateway_connector,
+        certificate_lifecycle_manager=certificate_lifecycle_manager,
         runtime_event_forwarder=GatewayRuntimeEventForwarder(
             event_hub=event_hub,
             gateway_repository=gateway_repository,
@@ -210,6 +223,7 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         authorization_service=authorization_service,
         security_policy_service=security_policy_service,
         tls_context_factory=tls_context_factory,
+        certificate_lifecycle_manager=certificate_lifecycle_manager,
         gateway_service=gateway_service,
         gateway_supervisor=gateway_supervisor,
         application_supervisor=application_supervisor,

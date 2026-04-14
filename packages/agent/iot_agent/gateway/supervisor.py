@@ -6,6 +6,7 @@ import logging
 import random
 
 from ..config import AgentSettings
+from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from ..security.models import GatewayMode
 from .connector import GatewayConnector
 from .runtime_bridge import GatewayRuntimeEventForwarder
@@ -19,10 +20,12 @@ class GatewaySupervisor:
         *,
         settings: AgentSettings,
         connector: GatewayConnector,
+        certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None,
         runtime_event_forwarder: GatewayRuntimeEventForwarder,
     ) -> None:
         self.settings = settings
         self.connector = connector
+        self.certificate_lifecycle_manager = certificate_lifecycle_manager
         self.runtime_event_forwarder = runtime_event_forwarder
         self._tasks: list[asyncio.Task[None]] = []
         self._started = False
@@ -31,6 +34,16 @@ class GatewaySupervisor:
         if self._started or self.settings.gateway_mode is not GatewayMode.MANAGED:
             return
         self._tasks = [
+            *(
+                [
+                    asyncio.create_task(
+                        self.certificate_lifecycle_manager.run_forever(),
+                        name="iot-agent-gateway-certificate-lifecycle",
+                    )
+                ]
+                if self.certificate_lifecycle_manager is not None
+                else []
+            ),
             asyncio.create_task(self._sync_loop(), name="iot-agent-gateway-sync"),
             asyncio.create_task(self._events_loop(), name="iot-agent-gateway-events"),
             asyncio.create_task(self.runtime_event_forwarder.run_forever(), name="iot-agent-gateway-runtime-forwarder"),

@@ -28,6 +28,7 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
     connector = GatewayConnector(
         settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
         enrollment_service=FakeEnrollmentService(None),
+        certificate_lifecycle_manager=None,
         tls_context_factory=TlsContextFactory(AgentSettings()),
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
@@ -61,6 +62,7 @@ async def test_connector_marks_online_after_successful_status_sync(tmp_path: Pat
     connector = GatewayConnector(
         settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
         enrollment_service=FakeEnrollmentService(enrollment),
+        certificate_lifecycle_manager=None,
         tls_context_factory=TlsContextFactory(AgentSettings()),
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
