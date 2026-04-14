@@ -28,7 +28,7 @@ For the current external controller contract, see [docs/gateway_protocol.md](../
 - upstream command acknowledgement, replay-safe deduplication, and runtime event forwarding
 - optional managed client-certificate installation for outbound mTLS
 - ZITADEL service-account auth with private-key JWT for managed controller access
-- controller-issued enrollment-code bootstrap for seamless managed installs
+- controller-issued enrollment-token bootstrap for seamless managed installs
 - step-ca-backed client-certificate bootstrap, issuance, and renewal through controller-issued one-time tokens
 - Caddy-compatible controller edge profile with optional or required mTLS
 - cross-platform printer discovery through Windows spooler and CUPS
@@ -412,7 +412,7 @@ IOT_AGENT_PATH_PROFILE=production
 IOT_AGENT_DEFAULT_PRINTER_NAME=EPSON TM-T20III
 IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
 IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-IOT_AGENT_UPSTREAM_BOOTSTRAP_TOKEN=replace-me
+IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
 For controller-issued step-ca bootstrap, the controller can return the CA URL, fingerprint, sign URL, and renew URL dynamically, so those values do not need to be preconfigured on every agent. `IOT_AGENT_STEP_CA_URL`, `IOT_AGENT_STEP_CA_SIGN_URL`, `IOT_AGENT_STEP_CA_RENEW_URL`, and `IOT_AGENT_STEP_CA_ROOT_FINGERPRINT` remain available as explicit overrides when you want local fallback knowledge of the CA.

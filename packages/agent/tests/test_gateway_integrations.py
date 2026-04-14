@@ -113,7 +113,9 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
 
 
 @pytest.mark.anyio
-async def test_enrollment_includes_code_and_persists_step_ca_bootstrap_without_metadata_ott(tmp_path: Path) -> None:
+async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_bootstrap_without_metadata_ott(
+    tmp_path: Path,
+) -> None:
     identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
     certificate_service = CertificateLifecycleService(
         certificate_path=tmp_path / "upstream-client-cert.pem",
@@ -149,13 +151,13 @@ async def test_enrollment_includes_code_and_persists_step_ca_bootstrap_without_m
             gateway_mode="managed",
             upstream_base_url="https://controller.example.com",
             upstream_certificate_mode="step_ca",
-            upstream_enrollment_code="ABCD-1234",
+            upstream_enrollment_token="bootstrap-token",
         ),
         identity_service=identity_service,
         secret_store=secret_store,
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
-        auth_provider=StaticAuthProvider({"Authorization": "Bearer bootstrap-token"}),
+        auth_provider=StaticAuthProvider({}),
         certificate_provisioner=provisioner,
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
@@ -165,7 +167,8 @@ async def test_enrollment_includes_code_and_persists_step_ca_bootstrap_without_m
     record = await service.ensure_enrolled()
 
     assert record is not None
-    assert http_client.last_post_json["enrollment_code"] == "ABCD-1234"
+    assert http_client.last_post_headers["Authorization"] == "Bearer bootstrap-token"
+    assert "enrollment_code" not in http_client.last_post_json
     assert record.certificate_bootstrap is not None
     assert record.certificate_bootstrap.mode is CertificateBootstrapMode.STEP_CA_OTT
     assert record.certificate_bootstrap.ott == "ott_bootstrap_token"

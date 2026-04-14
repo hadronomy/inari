@@ -128,7 +128,6 @@ class EnrollmentRequestPayload(GatewayProtocolModel):
     public_jwk: dict[str, Any]
     certificate_pem: str | None = None
     csr_pem: str
-    enrollment_code: str | None = None
     snapshot: GatewaySnapshotPayload
 
 

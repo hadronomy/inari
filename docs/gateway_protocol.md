@@ -9,8 +9,8 @@ This is the Boundary 2 protocol: controller `<->` agent/gateway.
 
 ## Status
 
-- Protocol version: `2026-04-13`
-- Agent API version at time of writing: `1.12.0a1`
+- Protocol version: `2026-04-14`
+- Agent API version at time of writing: `1.19.0a1`
 - Transport model: outbound `HTTPS` for enrollment and status sync, outbound `WSS` for the control stream
 
 The agent is the client in this relationship. The controller is the server.
@@ -20,8 +20,8 @@ The agent is the client in this relationship. The controller is the server.
 The protocol covers:
 
 - enrollment
-- enrollment-code bootstrap
-- controller-issued or external access-token bootstrap
+- controller-issued enrollment-token bootstrap
+- external access-token bootstrap
 - controller-issued step-ca OTT bootstrap for client certificates
 - optional controller-installed client-certificate installation
 - periodic status synchronization
@@ -50,10 +50,8 @@ Managed mode uses an outbound trust model:
 
 The agent may use four credential types across the lifecycle:
 
-- `enrollment code`
-  Optional human-facing bootstrap input that the controller exchanges for agent credentials and, when needed, a one-time step-ca issuance token.
-- `bootstrap token`
-  Used only for initial enrollment.
+- `enrollment token`
+  Short-lived controller-issued bootstrap credential used only for initial enrollment.
 - `access token`
   Used for status sync and control-stream authentication. This may be controller-issued or obtained from an external identity provider.
 - `refresh token`
@@ -91,7 +89,7 @@ The controller may override the status, events, and refresh URLs explicitly in t
 The current protocol version is:
 
 ```text
-2026-04-13
+2026-04-14
 ```
 
 The agent sends its version in:
@@ -120,19 +118,19 @@ The agent enrolls with:
 
 ```http
 POST /api/iot-agent/enroll
-Authorization: Bearer <bootstrap-token>
+Authorization: Bearer <enrollment-token>
 Content-Type: application/json
 ```
 
-The `Authorization` header is optional when the installation is using an enrollment code instead of a controller-issued bootstrap bearer token.
+The `Authorization` header is optional only when the installation uses an external auth provider such as ZITADEL for enrollment.
 
 Request body:
 
 ```json
 {
   "protocol": {
-    "version": "2026-04-13",
-    "supported_versions": ["2026-04-13"]
+    "version": "2026-04-14",
+    "supported_versions": ["2026-04-14"]
   },
   "agent_id": "agt_123...",
   "key_id": "kid_123...",
@@ -146,16 +144,15 @@ Request body:
   },
   "certificate_pem": null,
   "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n",
-  "enrollment_code": "SITE-A-4F7K-92LM",
   "snapshot": {
     "generated_at": "2026-04-12T10:00:00Z",
     "protocol": {
-      "version": "2026-04-13",
-      "supported_versions": ["2026-04-13"]
+      "version": "2026-04-14",
+      "supported_versions": ["2026-04-14"]
     },
     "service": {
       "name": "IoT Agent",
-      "version": "1.12.0a1",
+      "version": "1.19.0a1",
       "agent_id": "agt_123...",
       "key_id": "kid_123..."
     },
@@ -221,7 +218,7 @@ Successful enrollment returns:
 
 ```json
 {
-  "protocol_version": "2026-04-13",
+  "protocol_version": "2026-04-14",
   "controller_name": "Acme IoT Controller",
   "controller_instance_id": "controller-01",
   "access_token": "eyJ...",
@@ -256,7 +253,7 @@ Successful enrollment returns:
 
 ### Enrollment Rules
 
-- `enrollment_code` is optional and intended for user-friendly installations where the controller turns a short invite code into real gateway credentials.
+- `Authorization: Bearer <enrollment-token>` is the standard bootstrap path for controller-managed enrollment.
 - `access_token` is required only when the controller is responsible for ongoing bearer authentication.
 - `access_token` may be omitted when the agent uses an external auth provider such as ZITADEL.
 - `refresh_token` is optional.
@@ -281,7 +278,7 @@ The one-time token should be short-lived, single-use, and scoped to the specific
 The current agent supports two managed auth modes:
 
 - `controller`
-  The controller returns `access_token` and optionally `refresh_token` during enrollment. The agent uses those credentials for status sync and the control stream.
+  The agent enrolls with a controller-issued `enrollment_token`. The controller returns `access_token` and optionally `refresh_token` during enrollment. The agent uses those credentials for status sync and the control stream.
 - `zitadel_service_account`
   The agent obtains bearer tokens directly from ZITADEL using a service account and private-key JWT. In this mode the controller may omit `access_token` from the enrollment response.
 
@@ -311,7 +308,7 @@ Request body:
 
 ```json
 {
-  "protocol_version": "2026-04-13",
+  "protocol_version": "2026-04-14",
   "agent_id": "agt_123..."
 }
 ```
@@ -331,7 +328,7 @@ The agent periodically sends a snapshot to the controller:
 ```http
 POST <status_url>
 Authorization: Bearer <access-token>
-X-IoT-Agent-Protocol-Version: 2026-04-13
+X-IoT-Agent-Protocol-Version: 2026-04-14
 Content-Type: application/json
 ```
 
@@ -384,8 +381,8 @@ Sent immediately after WebSocket connection:
   "type": "agent.hello",
   "message_id": "ghello_...",
   "protocol": {
-    "version": "2026-04-13",
-    "supported_versions": ["2026-04-13"]
+    "version": "2026-04-14",
+    "supported_versions": ["2026-04-14"]
   },
   "snapshot": { "...GatewaySnapshotPayload..." }
 }
@@ -399,7 +396,7 @@ Expected from the controller:
 {
   "type": "controller.hello",
   "message_id": "hello_1",
-  "protocol_version": "2026-04-13",
+  "protocol_version": "2026-04-14",
   "controller_name": "Acme IoT Controller",
   "controller_instance_id": "controller-01"
 }
@@ -666,7 +663,7 @@ If present, the agent installs them locally and may present the client certifica
 
 For production `step_ca` mode, the preferred flow is controller-issued bootstrap material instead of a shared step-ca provisioner key on the agent. In that mode:
 
-- the installer supplies an enrollment code or other bootstrap input to the agent
+- the installer supplies an enrollment token or other controller-issued bootstrap credential to the agent
 - the controller validates the installation policy
 - the controller mints a short-lived step-ca OTT for that specific agent
 - the controller returns `certificate_bootstrap`
@@ -693,7 +690,7 @@ In practice, strict Caddy mTLS deployments should expose a bootstrap enrollment 
 A controller implementation is production-compatible with the current agent if it:
 
 1. Exposes the enrollment endpoint.
-2. Accepts and validates the bootstrap token.
+2. Accepts and validates the enrollment token.
 3. Returns an enrollment response with at least `access_token`.
 4. Accepts status snapshots over HTTPS.
 5. Exposes a WSS control-stream endpoint.
@@ -714,4 +711,4 @@ The following are not yet standardized beyond the current implementation:
 - explicit server-to-agent backpressure messages
 - multi-controller coordination for a single agent identity
 
-Those can be added in future protocol versions, but they are not part of the current `2026-04-13` contract.
+Those can be added in future protocol versions, but they are not part of the current `2026-04-14` contract.

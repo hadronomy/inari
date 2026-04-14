@@ -147,11 +147,10 @@ config_version = 1
 # trust_client_ca = true
 
 # Bootstrap material used only for first enrollment.
+# Use a single short-lived controller-issued enrollment token for the initial managed enrollment call.
 [gateway.bootstrap]
-# One-time bootstrap token provided by the controller.
-# bootstrap_token = "bootstrap-token"
-# Human-entered or QR-derived enrollment code.
-# enrollment_code = "SITE-A-4F7K-92LM"
+# Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.
+# enrollment_token = "enrollment-token"
 
 # Managed-mode reconnect, polling, and backoff tuning.
 [gateway.sync]
@@ -196,16 +195,18 @@ config_version = 1
 # token_refresh_skew_seconds = 120
 
 # step-ca certificate bootstrap and renewal settings.
+# In the normal managed flow, the controller returns these values during enrollment.
+# Leave them commented unless you want explicit local overrides or fallback knowledge of the CA.
 [gateway.step_ca]
-# Base URL for the private step-ca instance.
+# Base URL for the private step-ca instance when you want to override the controller-provided CA URL.
 # url = "https://ca.example.com"
-# Explicit sign endpoint if not derived from `url`.
+# Explicit sign endpoint override when it cannot be derived from `url` or the controller enrollment response.
 # sign_url = "https://ca.example.com/1.0/sign"
-# Explicit renew endpoint if not derived from `url`.
+# Explicit renew endpoint override when it cannot be derived from `url` or the controller enrollment response.
 # renew_url = "https://ca.example.com/1.0/renew"
-# Expected fingerprint of the step-ca root certificate.
+# Expected fingerprint of the step-ca root certificate. The controller normally provides this during enrollment.
 # root_fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-# Additional SANs requested for the managed client certificate.
+# Additional SANs requested for the managed client certificate beyond the agent's default identity.
 # requested_sans = []
-# How early to renew managed certificates before expiry.
+# How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.
 # certificate_renewal_skew_seconds = 3600

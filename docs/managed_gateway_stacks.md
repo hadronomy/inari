@@ -6,7 +6,7 @@ This guide documents the managed gateway stacks the agent now supports directly:
 - ZITADEL as the identity provider for controller and agent bearer auth
 - step-ca as the private CA for short-lived client certificates
 
-Use this document together with [gateway_protocol.md](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/docs/gateway_protocol.md).
+Use this document together with [gateway_protocol.md](./gateway_protocol.md).
 
 ## Design Overview
 
@@ -25,7 +25,7 @@ The agent stays the local edge gateway. It does not require an external hardware
 
 For production bootstrap, the recommended certificate path is:
 
-1. installer provides an enrollment code or invite
+1. installer provides a short-lived controller-issued enrollment token
 2. agent enrolls with the controller
 3. controller validates policy and mints a short-lived step-ca OTT
 4. agent exchanges that OTT with step-ca for its first client certificate
@@ -33,7 +33,7 @@ For production bootstrap, the recommended certificate path is:
 
 ## Supported Modes
 
-### 1. Controller-Issued Tokens
+### 1. Controller-Issued Enrollment Tokens
 
 Use when the controller owns enrollment and token lifecycle itself.
 
@@ -41,13 +41,13 @@ Use when the controller owns enrollment and token lifecycle itself.
 IOT_AGENT_GATEWAY_MODE=managed
 IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
 IOT_AGENT_UPSTREAM_AUTH_MODE=controller
-IOT_AGENT_UPSTREAM_BOOTSTRAP_TOKEN=replace-me
+IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=controller
 ```
 
 In this mode:
 
-- enrollment uses the bootstrap token
+- enrollment uses the controller-issued enrollment token
 - the controller returns `access_token`
 - the controller may optionally return a client certificate
 
@@ -77,7 +77,7 @@ Use when the controller edge expects the agent to present a short-lived client c
 ```env
 IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
 IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/iot-agent/enroll
-IOT_AGENT_UPSTREAM_ENROLLMENT_CODE=SITE-A-4F7K-92LM
+IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
 In this mode:
@@ -164,7 +164,7 @@ IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
 IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
 IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
 IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/iot-agent/enroll
-IOT_AGENT_UPSTREAM_ENROLLMENT_CODE=SITE-A-4F7K-92LM
+IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
 That gives you:

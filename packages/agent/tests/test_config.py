@@ -4,6 +4,8 @@ import json
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from iot_agent.config import (
     AgentSettings,
     generate_taplo_schema,
@@ -213,6 +215,37 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
     assert settings.trusted_hosts == ["127.0.0.1", "localhost"]
 
 
+@pytest.mark.parametrize("legacy_field", ["bootstrap_token", "enrollment_code"])
+def test_load_settings_accepts_legacy_gateway_bootstrap_field_names(tmp_path: Path, legacy_field: str) -> None:
+    config_path = tmp_path / "iot-agent.toml"
+    config_path.write_text(
+        textwrap.dedent(
+            f"""
+            [gateway.bootstrap]
+            {legacy_field} = "legacy-bootstrap"
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(config_path=config_path, environ={})
+
+    assert settings.upstream_enrollment_token == "legacy-bootstrap"
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "IOT_AGENT_UPSTREAM_BOOTSTRAP_TOKEN",
+        "IOT_AGENT_UPSTREAM_ENROLLMENT_CODE",
+    ],
+)
+def test_load_settings_maps_legacy_bootstrap_env_names(env_name: str) -> None:
+    settings = load_settings(environ={env_name: "legacy-env-bootstrap"})
+
+    assert settings.upstream_enrollment_token == "legacy-env-bootstrap"
+
+
 def test_load_settings_uses_development_defaults_inside_workspace(tmp_path: Path) -> None:
     (tmp_path / "packages" / "agent").mkdir(parents=True)
     (tmp_path / "pyproject.toml").write_text("[project]\nname='workspace'\n", encoding="utf-8")
@@ -269,6 +302,9 @@ def test_render_example_toml_includes_schema_header_and_sections() -> None:
     assert "Uncomment only the settings you want to override." in rendered
     assert "# Default:" not in rendered
     assert "testserver" not in rendered
+    assert '# enrollment_token = "enrollment-token"' in rendered
+    assert "bootstrap_token" not in rendered
+    assert "enrollment_code" not in rendered
 
 
 def test_write_generated_config_artifacts_writes_schema_and_example(tmp_path: Path) -> None:

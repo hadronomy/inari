@@ -100,7 +100,7 @@ class GatewaySnapshotBuilder:
                     "token_refresh",
                     "certificate_rotation",
                     "protocol_negotiation",
-                    *(("enrollment_code_bootstrap",) if self.settings.upstream_enrollment_code else ()),
+                    *(("enrollment_token_bootstrap",) if self.settings.upstream_enrollment_token else ()),
                     *(("zitadel_private_key_jwt",) if self.settings.upstream_auth_mode.value == "zitadel_service_account" else ()),
                     *(("step_ca_client_certificates", "step_ca_ott_bootstrap") if self.settings.upstream_certificate_mode.value == "step_ca" else ()),
                     *(("caddy_edge",) if CaddyControllerProfile.from_settings(self.settings).enabled else ()),
