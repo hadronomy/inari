@@ -14,6 +14,7 @@ class TrayMenuEntry:
     label: str = ""
     callback: MenuCallback | None = None
     enabled: bool = True
+    visible: bool = True
     default: bool = False
     separator: bool = False
 
