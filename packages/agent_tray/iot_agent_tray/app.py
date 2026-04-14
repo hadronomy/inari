@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
+import subprocess
 import threading
 import time
 import webbrowser
-from typing import Any, Callable
+from pathlib import Path
+from typing import Callable
 
 from iot_agent.models import LiveEventUpdateResponse, LiveSnapshotResponse, RuntimeEventResponse, SystemStatusResponse
 
 from .bridge import AgentControlBridge, build_control_bridge
 from .client import AgentApiClient
 from .config import TraySettings
-from .icons import build_tray_icon
 from .models import ControlMode, ControlSnapshot, TrayLinks, TraySnapshot
+from .tray_host import TrayHost, TrayMenuEntry, create_tray_host
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +28,12 @@ class AgentTrayApplication:
         *,
         client: AgentApiClient | None = None,
         bridge: AgentControlBridge | None = None,
+        host: TrayHost | None = None,
     ) -> None:
         self.settings = settings
         self.client = client or AgentApiClient(settings)
         self.bridge = bridge or build_control_bridge(settings)
+        self.host = host
         self.links = TrayLinks(
             api_base_url=settings.agent_api_base_url,
             docs_url=settings.agent_docs_url,
@@ -39,8 +44,6 @@ class AgentTrayApplication:
         self._snapshot_lock = threading.Lock()
         self._refresh_lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._icon: Any | None = None
-        self._pystray: Any | None = None
         self._threads: list[threading.Thread] = []
         self._snapshot = TraySnapshot.initial(
             title=settings.title,
@@ -58,24 +61,18 @@ class AgentTrayApplication:
             return self._snapshot
 
     def run(self) -> None:
-        import pystray
-
-        self._pystray = pystray
         snapshot = self.snapshot
         logger.info("Starting tray icon for %s", self.settings.title)
-        icon = pystray.Icon(
-            "iot-agent-tray",
-            icon=build_tray_icon(snapshot),
-            title=snapshot.tooltip,
-            menu=self._build_menu(pystray),
+        host = self.host or create_tray_host(self.settings)
+        self.host = host
+        host.run(
+            snapshot=snapshot,
+            menu_entries=self._build_menu(snapshot),
+            on_ready=self._setup_background,
         )
-        self._icon = icon
-        icon.run(setup=self._setup_background)
 
-    def _setup_background(self, icon: Any) -> None:
-        self._icon = icon
-        self._icon.visible = True
-        logger.info("Tray icon is now visible")
+    def _setup_background(self) -> None:
+        logger.info("Tray host is now ready")
         self._ensure_local_agent_started()
         self._refresh_snapshot(notify_connection=False)
         self._threads = [
@@ -187,46 +184,53 @@ class AgentTrayApplication:
     def _apply_snapshot(self, snapshot: TraySnapshot) -> None:
         with self._snapshot_lock:
             self._snapshot = snapshot
-        if self._icon is None or self._pystray is None:
+        if self.host is None:
             return
         try:
-            self._icon.icon = build_tray_icon(snapshot)
-            self._icon.title = snapshot.tooltip
-            self._icon.menu = self._build_menu(self._pystray)
-            self._icon.update_menu()
+            self.host.update(snapshot=snapshot, menu_entries=self._build_menu(snapshot))
         except Exception:
             logger.exception("Failed to apply tray snapshot")
 
-    def _build_menu(self, pystray_module: Any) -> Any:
-        Menu = pystray_module.Menu
-        MenuItem = pystray_module.MenuItem
-        snapshot = self.snapshot
+    def _build_menu(self, snapshot: TraySnapshot | None = None) -> list[TrayMenuEntry]:
+        current_snapshot = snapshot or self.snapshot
         items = [
-            MenuItem(snapshot.status_line, None, enabled=False),
-            MenuItem(snapshot.control_line, None, enabled=False),
-            MenuItem(snapshot.device_line, None, enabled=False),
-            MenuItem(snapshot.queue_line, None, enabled=False),
+            TrayMenuEntry(current_snapshot.status_line, enabled=False),
+            TrayMenuEntry(current_snapshot.control_line, enabled=False),
+            TrayMenuEntry(current_snapshot.device_line, enabled=False),
+            TrayMenuEntry(current_snapshot.queue_line, enabled=False),
         ]
-        if snapshot.error_line:
-            items.append(MenuItem(snapshot.error_line, None, enabled=False))
+        if current_snapshot.error_line:
+            items.append(TrayMenuEntry(current_snapshot.error_line, enabled=False))
         items.extend(
             [
-                Menu.SEPARATOR,
-                MenuItem("Open API Docs", self._open_docs, default=True),
-                MenuItem("Open Devices", self._open_devices),
-                MenuItem("Open Queue", self._open_jobs),
-                MenuItem("Open Logs", self._open_logs),
-                Menu.SEPARATOR,
-                MenuItem("Print Test Page", self._print_test_page, enabled=snapshot.connected),
-                MenuItem("Refresh Now", self._refresh_now),
-                MenuItem(self._start_label(snapshot), self._start_agent, enabled=self._can_start(snapshot)),
-                MenuItem(self._stop_label(snapshot), self._stop_agent, enabled=self._can_stop(snapshot)),
-                MenuItem(self._restart_label(snapshot), self._restart_agent, enabled=self._can_restart(snapshot)),
-                Menu.SEPARATOR,
-                MenuItem("Quit Tray", self._quit_tray),
+                TrayMenuEntry.separator_item(),
+                TrayMenuEntry("Open API Docs", callback=self._open_docs, default=True),
+                TrayMenuEntry("Open Devices", callback=self._open_devices),
+                TrayMenuEntry("Open Queue", callback=self._open_jobs),
+                TrayMenuEntry("Open Logs", callback=self._open_logs),
+                TrayMenuEntry.separator_item(),
+                TrayMenuEntry("Print Test Page", callback=self._print_test_page, enabled=current_snapshot.connected),
+                TrayMenuEntry("Refresh Now", callback=self._refresh_now),
+                TrayMenuEntry(
+                    self._start_label(current_snapshot),
+                    callback=self._start_agent,
+                    enabled=self._can_start(current_snapshot),
+                ),
+                TrayMenuEntry(
+                    self._stop_label(current_snapshot),
+                    callback=self._stop_agent,
+                    enabled=self._can_stop(current_snapshot),
+                ),
+                TrayMenuEntry(
+                    self._restart_label(current_snapshot),
+                    callback=self._restart_agent,
+                    enabled=self._can_restart(current_snapshot),
+                ),
+                TrayMenuEntry.separator_item(),
+                TrayMenuEntry("Quit Tray", callback=self._quit_tray),
             ]
         )
-        return Menu(*items)
+        return items
 
     def _open_docs(self, *_: object) -> None:
         webbrowser.open(self.links.docs_url)
@@ -239,10 +243,7 @@ class AgentTrayApplication:
 
     def _open_logs(self, *_: object) -> None:
         self.links.log_dir.mkdir(parents=True, exist_ok=True)
-        if hasattr(os, "startfile"):
-            os.startfile(self.links.log_dir)  # type: ignore[attr-defined]
-            return
-        webbrowser.open(self.links.log_dir.as_uri())
+        _open_path(self.links.log_dir)
 
     def _refresh_now(self, *_: object) -> None:
         self._launch_background(self._refresh_snapshot, name="iot-agent-tray-refresh")
@@ -273,8 +274,8 @@ class AgentTrayApplication:
         try:
             self.bridge.shutdown()
         finally:
-            if self._icon is not None:
-                self._icon.stop()
+            if self.host is not None:
+                self.host.stop()
 
     def _print_test_page_sync(self) -> None:
         try:
@@ -327,13 +328,11 @@ class AgentTrayApplication:
             self._notify("A device connected.", subtitle=_event_subtitle(event))
 
     def _notify(self, message: str, *, subtitle: str | None = None) -> None:
-        if self._icon is None:
-            return
-        if not getattr(self._icon, "HAS_NOTIFICATION", False):
+        if self.host is None:
             return
         body = message if subtitle is None else f"{message}\n{subtitle}"
         try:
-            self._icon.notify(body, self.settings.title)
+            self.host.notify(title=self.settings.title, message=body)
         except Exception:
             logger.debug("Tray notification failed", exc_info=True)
 
@@ -385,3 +384,20 @@ def _connection_failure_message(control, exc: Exception) -> str:
         if control.lifecycle is not None and "exited with code" in control.detail:
             return control.detail
     return _humanize_exception(exc)
+
+
+def _open_path(path: Path) -> None:
+    current_platform = platform.system()
+    try:
+        if current_platform == "Windows" and hasattr(os, "startfile"):
+            os.startfile(path)  # type: ignore[attr-defined]
+            return
+        if current_platform == "Darwin":
+            subprocess.run(["open", str(path)], check=False)
+            return
+        if current_platform == "Linux":
+            subprocess.run(["xdg-open", str(path)], check=False)
+            return
+    except Exception:
+        logger.debug("Falling back to browser-based path open for %s", path, exc_info=True)
+    webbrowser.open(path.as_uri())

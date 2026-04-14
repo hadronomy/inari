@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Protocol, Sequence
 
 from .config import TraySettings
 from .models import ControlMode, ControlSnapshot, LifecycleState
+
+
+class CommandRunner(Protocol):
+    def __call__(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]: ...
 
 
 class AgentControlBridge:
@@ -31,6 +36,23 @@ class AgentControlBridge:
 
     def shutdown(self) -> None:
         return None
+
+
+class UnsupportedServiceAgentBridge(AgentControlBridge):
+    mode = ControlMode.SERVICE
+
+    def __init__(self, detail: str) -> None:
+        self._detail = detail
+
+    def query_state(self) -> ControlSnapshot:
+        return ControlSnapshot(
+            mode=self.mode,
+            lifecycle=LifecycleState.UNKNOWN,
+            detail=self._detail,
+            can_start=False,
+            can_stop=False,
+            can_restart=False,
+        )
 
 
 class MonitorAgentBridge(AgentControlBridge):
@@ -197,6 +219,66 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
             self._process_output_handle = None
 
 
+class SubprocessServiceAgentBridge(AgentControlBridge):
+    mode = ControlMode.SERVICE
+    manager_name = "service"
+
+    def __init__(self, settings: TraySettings, *, runner: CommandRunner | None = None) -> None:
+        self.settings = settings
+        self._runner = runner or _run_command
+
+    def query_state(self) -> ControlSnapshot:
+        try:
+            lifecycle, detail = self._query_lifecycle_state()
+            return ControlSnapshot(
+                mode=self.mode,
+                lifecycle=lifecycle,
+                detail=detail,
+                can_start=lifecycle in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
+                can_stop=lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING},
+                can_restart=lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING, LifecycleState.STOPPED},
+            )
+        except Exception as exc:
+            return ControlSnapshot(
+                mode=self.mode,
+                lifecycle=LifecycleState.UNKNOWN,
+                detail=str(exc),
+            )
+
+    def start(self) -> str:
+        lifecycle, _ = self._query_lifecycle_state()
+        if lifecycle is LifecycleState.RUNNING:
+            return f"{self.manager_name.title()} {self.settings.service_name!r} is already running."
+        self._run(self._start_command())
+        return f"Start requested for {self.manager_name} {self.settings.service_name!r}."
+
+    def stop(self) -> str:
+        lifecycle, _ = self._query_lifecycle_state()
+        if lifecycle is LifecycleState.STOPPED:
+            return f"{self.manager_name.title()} {self.settings.service_name!r} is already stopped."
+        self._run(self._stop_command())
+        return f"Stop requested for {self.manager_name} {self.settings.service_name!r}."
+
+    def restart(self) -> str:
+        self._run(self._restart_command())
+        return f"Restart requested for {self.manager_name} {self.settings.service_name!r}."
+
+    def _query_lifecycle_state(self) -> tuple[LifecycleState, str]:
+        raise NotImplementedError
+
+    def _start_command(self) -> Sequence[str]:
+        raise NotImplementedError
+
+    def _stop_command(self) -> Sequence[str]:
+        raise NotImplementedError
+
+    def _restart_command(self) -> Sequence[str]:
+        raise NotImplementedError
+
+    def _run(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return self._runner(command)
+
+
 class WindowsServiceAgentBridge(AgentControlBridge):
     mode = ControlMode.SERVICE
 
@@ -278,11 +360,90 @@ class WindowsServiceAgentBridge(AgentControlBridge):
         return win32service, win32serviceutil
 
 
-def build_control_bridge(settings: TraySettings) -> AgentControlBridge:
+class SystemdAgentBridge(SubprocessServiceAgentBridge):
+    manager_name = "systemd service"
+
+    def _query_lifecycle_state(self) -> tuple[LifecycleState, str]:
+        result = self._run([*self._systemctl_base_command(), "show", self.settings.service_name, "--property=ActiveState", "--value"])
+        active_state = result.stdout.strip().casefold()
+        lifecycle = {
+            "active": LifecycleState.RUNNING,
+            "inactive": LifecycleState.STOPPED,
+            "activating": LifecycleState.STARTING,
+            "deactivating": LifecycleState.STOPPING,
+            "failed": LifecycleState.STOPPED,
+        }.get(active_state, LifecycleState.UNKNOWN)
+        scope = "user" if self.settings.service_scope == "user" else "system"
+        return lifecycle, f"Managing {scope} systemd service {self.settings.service_name!r}."
+
+    def _start_command(self) -> Sequence[str]:
+        return [*self._systemctl_base_command(), "start", self.settings.service_name]
+
+    def _stop_command(self) -> Sequence[str]:
+        return [*self._systemctl_base_command(), "stop", self.settings.service_name]
+
+    def _restart_command(self) -> Sequence[str]:
+        return [*self._systemctl_base_command(), "restart", self.settings.service_name]
+
+    def _systemctl_base_command(self) -> list[str]:
+        command = ["systemctl"]
+        if self.settings.service_scope == "user":
+            command.append("--user")
+        return command
+
+
+class LaunchdAgentBridge(SubprocessServiceAgentBridge):
+    manager_name = "launchd service"
+
+    def _query_lifecycle_state(self) -> tuple[LifecycleState, str]:
+        target = self._launchd_target()
+        try:
+            result = self._run(["launchctl", "print", target])
+        except RuntimeError as exc:
+            message = str(exc).casefold()
+            if "could not find service" in message or "not found" in message:
+                return LifecycleState.STOPPED, f"Managing launchd job {target!r}."
+            raise
+        output = result.stdout.casefold()
+        if "state = running" in output:
+            lifecycle = LifecycleState.RUNNING
+        elif "state = waiting" in output:
+            lifecycle = LifecycleState.STOPPED
+        elif "state = spawning" in output:
+            lifecycle = LifecycleState.STARTING
+        elif "state = stopping" in output:
+            lifecycle = LifecycleState.STOPPING
+        else:
+            lifecycle = LifecycleState.UNKNOWN
+        return lifecycle, f"Managing launchd job {target!r}."
+
+    def _start_command(self) -> Sequence[str]:
+        return ["launchctl", "kickstart", "-k", self._launchd_target()]
+
+    def _stop_command(self) -> Sequence[str]:
+        return ["launchctl", "stop", self._launchd_target()]
+
+    def _restart_command(self) -> Sequence[str]:
+        return ["launchctl", "kickstart", "-k", self._launchd_target()]
+
+    def _launchd_target(self) -> str:
+        if self.settings.service_scope == "system":
+            return f"system/{self.settings.service_name}"
+        return f"gui/{_current_user_id()}/{self.settings.service_name}"
+
+
+def build_control_bridge(settings: TraySettings, *, platform_name: str | None = None) -> AgentControlBridge:
+    current_platform = platform_name or platform.system()
     if settings.control_mode == "spawn":
         return SpawnedProcessAgentBridge(settings)
     if settings.control_mode == "service":
-        return WindowsServiceAgentBridge(settings)
+        if current_platform == "Windows":
+            return WindowsServiceAgentBridge(settings)
+        if current_platform == "Linux":
+            return SystemdAgentBridge(settings)
+        if current_platform == "Darwin":
+            return LaunchdAgentBridge(settings)
+        return UnsupportedServiceAgentBridge(f"Service control mode is not supported on {current_platform}.")
     return MonitorAgentBridge()
 
 
@@ -305,3 +466,26 @@ def _detect_agent_workspace(working_directory: Path) -> Path | None:
 
 def _supports_module_launch() -> bool:
     return importlib.util.find_spec("iot_agent.__main__") is not None
+
+
+def _run_command(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            list(command),
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        executable = command[0] if command else "command"
+        raise RuntimeError(f"{executable!r} is not available on this machine.") from exc
+    except subprocess.CalledProcessError as exc:
+        message = exc.stderr.strip() or exc.stdout.strip() or "Command failed."
+        raise RuntimeError(message) from exc
+
+
+def _current_user_id() -> int:
+    getuid = getattr(os, "getuid", None)
+    if callable(getuid):
+        return int(getuid())
+    return 0

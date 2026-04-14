@@ -1,6 +1,6 @@
 [project]
 name = "iot-agent"
-version = "1.14.0a1"
+version = "1.15.0a1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
@@ -17,6 +17,11 @@ dependencies = [
   "platformdirs>=4.4.0",
   "scalar-fastapi>=1.8.2",
   "websockets>=16.0",
+]
+
+[project.optional-dependencies]
+cups = [
+  "pycups>=2.0.4; platform_system != 'Windows'",
 ]
 
 [project.scripts]

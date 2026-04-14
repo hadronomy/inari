@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import platform
 
 from .config import AgentSettings, get_settings
 from .drivers import DriverRegistry
-from .drivers.printers import WindowsPrinterDriver, WindowsSpooler
+from .drivers.printers import CupsPrinterDriver, RawSocketPrinterDriver, WindowsPrinterDriver, WindowsSpooler
 from .gateway.auth_providers import build_upstream_auth_provider
 from .gateway.connector import GatewayConnector
 from .gateway.enrollment import GatewayEnrollmentService
@@ -53,14 +54,7 @@ class AgentContainer:
 
 
 def build_container(settings: AgentSettings) -> AgentContainer:
-    driver_registry = DriverRegistry(
-        drivers=(
-            WindowsPrinterDriver(
-                spooler=WindowsSpooler(),
-                default_transport=PrinterTransport(settings.default_printer_mode),
-            ),
-        )
-    )
+    driver_registry = DriverRegistry(drivers=_build_printer_drivers(settings))
     printer_service = PrinterService(
         settings=settings,
         driver_registry=driver_registry,
@@ -216,6 +210,31 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         gateway_supervisor=gateway_supervisor,
         application_supervisor=application_supervisor,
     )
+
+
+def _build_printer_drivers(settings: AgentSettings, *, platform_system: str | None = None) -> tuple:
+    current_platform = platform_system or platform.system()
+    drivers = []
+    if current_platform == "Windows":
+        drivers.append(
+            WindowsPrinterDriver(
+                spooler=WindowsSpooler(),
+                default_transport=PrinterTransport(settings.default_printer_mode),
+            )
+        )
+    elif current_platform in {"Linux", "Darwin"}:
+        drivers.append(
+            CupsPrinterDriver(
+                default_transport=PrinterTransport(settings.default_printer_mode),
+            )
+        )
+    if settings.network_printers:
+        drivers.append(
+            RawSocketPrinterDriver(
+                configured_printers=tuple(settings.network_printers),
+            )
+        )
+    return tuple(drivers)
 
 
 @lru_cache(maxsize=1)

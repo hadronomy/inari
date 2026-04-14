@@ -100,6 +100,68 @@ class AgentSettingsTests(unittest.TestCase):
             self.assertEqual(settings.runtime_database_path, (temp_path / "state/iot-agent.sqlite3").resolve())
             self.assertEqual(settings.security_state_dir, (temp_path / "state/security").resolve())
 
+    def test_load_settings_reads_network_printers_from_toml(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_path = temp_path / "iot-agent.toml"
+            config_path.write_text(
+                textwrap.dedent(
+                    """
+                    [printing]
+                    default_transport = "auto"
+
+                    [[printing.network_printers]]
+                    name = "Kitchen LAN Printer"
+                    host = "192.168.1.40"
+                    port = 9100
+                    is_default = true
+                    preferred_transport = "raw"
+                    cash_drawer = true
+                    text_enabled = true
+
+                    [[printing.network_printers]]
+                    name = "Office Label Printer"
+                    host = "192.168.1.41"
+                    port = 9200
+                    preferred_transport = "document"
+                    document_enabled = true
+                    """
+                ).strip(),
+                encoding="utf-8",
+            )
+
+            settings = load_settings(config_path=config_path, environ={})
+
+            self.assertEqual(len(settings.network_printers), 2)
+            self.assertEqual(settings.network_printers[0].name, "Kitchen LAN Printer")
+            self.assertEqual(settings.network_printers[0].host, "192.168.1.40")
+            self.assertTrue(settings.network_printers[0].is_default)
+            self.assertTrue(settings.network_printers[0].text_enabled)
+            self.assertEqual(settings.network_printers[1].preferred_transport, "document")
+            self.assertTrue(settings.network_printers[1].document_enabled)
+
+    def test_load_settings_reads_network_printers_from_env_json(self) -> None:
+        settings = load_settings(
+            environ={
+                "IOT_AGENT_NETWORK_PRINTERS": json.dumps(
+                    [
+                        {
+                            "name": "Back Bar Printer",
+                            "host": "10.0.0.20",
+                            "port": 9100,
+                            "preferred_transport": "raw",
+                            "text_enabled": True,
+                        }
+                    ]
+                )
+            }
+        )
+
+        self.assertEqual(len(settings.network_printers), 1)
+        self.assertEqual(settings.network_printers[0].name, "Back Bar Printer")
+        self.assertEqual(settings.network_printers[0].host, "10.0.0.20")
+        self.assertTrue(settings.network_printers[0].text_enabled)
+
     def test_load_settings_merges_local_override_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

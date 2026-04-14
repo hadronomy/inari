@@ -1,14 +1,14 @@
 [project]
 name = "iot-agent-tray"
-version = "0.1.0a1"
-description = "Windows tray companion for the IoT Agent"
+version = "0.3.0a1"
+description = "Cross-platform tray companion for the IoT Agent"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28.1",
   "iot-agent",
   "pillow>=11.3.0",
   "pydantic-settings>=2.13.1",
-  "pystray>=0.19.5",
+  "PySide6>=6.9.1",
   "pywin32>=306 ; sys_platform == 'win32'",
   "websockets>=16.0",
 ]
