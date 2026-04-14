@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-import asyncio
-import unittest
+import anyio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from tempfile import mkdtemp
-from unittest.mock import Mock
 
+import pytest
+from asgi_lifespan import LifespanManager
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from iot_agent.config import AgentSettings
 from iot_agent.container import AgentContainer
@@ -15,6 +18,7 @@ from iot_agent.drivers import DriverRegistry
 from iot_agent.exceptions import AgentError
 from iot_agent.gateway.models import UpstreamConnectionState, UpstreamStatus
 from iot_agent.main import create_app
+from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
 from iot_agent.runtime.events import EventHub
 from iot_agent.runtime.models import (
     DeviceConnectionState,
@@ -35,7 +39,6 @@ from iot_agent.security.models import (
     IssuedToken,
     PrincipalKind,
 )
-from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
 from iot_agent.version import API_VERSION
 
 
@@ -189,83 +192,124 @@ class StubGatewayService:
         )
 
 
-class ApiShapeTests(unittest.TestCase):
-    def test_system_status_reports_device_and_queue_summary(self) -> None:
-        container = make_test_container()
-        client = TestClient(create_app(container=container))
+@dataclass(slots=True)
+class StubPrinterService:
+    pass
 
-        response = client.get("/system/status", headers=auth_headers(client))
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["service"]["version"], API_VERSION)
-        self.assertEqual(payload["devices"]["count"], 1)
-        self.assertEqual(
-            payload["devices"]["default_device"],
-            {"id": next(iter(container.device_catalog.devices)).id, "name": "Kitchen Printer"},
-        )
-        self.assertEqual(payload["queue"]["queued"], 1)
-        self.assertIn("receipt_image", payload["supported_content_kinds"])
-        self.assertIn("cut_paper", payload["supported_device_commands"])
+@asynccontextmanager
+async def async_client_for(container: AgentContainer):
+    app = create_app(container=container)
+    async with LifespanManager(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+            yield client
 
-    def test_list_devices_uses_semantically_refined_shape(self) -> None:
-        container = make_test_container()
-        client = TestClient(create_app(container=container))
 
-        response = client.get("/devices", headers=auth_headers(client))
+async def auth_headers(client: AsyncClient, *, requested_scopes: tuple[str, ...] | None = None) -> dict[str, str]:
+    payload: dict[str, object] = {"client_name": "test-client"}
+    if requested_scopes is not None:
+        payload["requested_scopes"] = list(requested_scopes)
+    response = await client.post("/auth/local-token", json=payload)
+    response.raise_for_status()
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertNotIn("ok", payload)
-        self.assertEqual(
-            payload["summary"]["default_device"],
-            {"id": next(iter(container.device_catalog.devices)).id, "name": "Kitchen Printer"},
-        )
-        device = payload["devices"][0]
-        self.assertEqual(device["driver_key"], "tests.fake-printers")
-        self.assertEqual(device["device_class"], "physical")
-        self.assertEqual(device["connection"]["state"], "online")
-        self.assertIn("observed_at", device["connection"])
-        self.assertEqual(device["printer"]["supported_transports"], ["raw", "text", "document"])
-        self.assertEqual(device["printer"]["capabilities"], ["cash_drawer"])
 
-    def test_list_devices_marks_virtual_windows_printers(self) -> None:
-        device = DeviceRecord.from_printer(
-            PrinterDevice(
-                name="Microsoft Print to PDF",
-                driver_key="windows.printers",
-                capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
-            ),
-            connection_state=DeviceConnectionState.ONLINE,
-        )
-        client = TestClient(create_app(container=make_test_container(devices=(device,))))
+def sync_auth_headers(client: TestClient, *, requested_scopes: tuple[str, ...] | None = None) -> dict[str, str]:
+    payload: dict[str, object] = {"client_name": "test-client"}
+    if requested_scopes is not None:
+        payload["requested_scopes"] = list(requested_scopes)
+    response = client.post("/auth/local-token", json=payload)
+    response.raise_for_status()
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
-        response = client.get("/devices", headers=auth_headers(client))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["devices"][0]["device_class"], "virtual")
+@pytest.mark.anyio
+async def test_system_status_reports_device_and_queue_summary(mocker) -> None:
+    container = make_test_container(mocker=mocker)
 
-    def test_docs_route_serves_scalar_reference(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
+    async with async_client_for(container) as client:
+        response = await client.get("/system/status", headers=await auth_headers(client))
 
-        response = client.get("/docs")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["service"]["version"] == API_VERSION
+    assert payload["devices"]["count"] == 1
+    assert payload["devices"]["default_device"] == {
+        "id": next(iter(container.device_catalog.devices)).id,
+        "name": "Kitchen Printer",
+    }
+    assert payload["queue"]["queued"] == 1
+    assert "receipt_image" in payload["supported_content_kinds"]
+    assert "cut_paper" in payload["supported_device_commands"]
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("scalar", response.text.lower())
-        self.assertNotIn("swagger ui", response.text.lower())
 
-    def test_redoc_route_is_disabled(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
+@pytest.mark.anyio
+async def test_list_devices_uses_semantically_refined_shape(mocker) -> None:
+    container = make_test_container(mocker=mocker)
 
-        response = client.get("/redoc")
+    async with async_client_for(container) as client:
+        response = await client.get("/devices", headers=await auth_headers(client))
 
-        self.assertEqual(response.status_code, 404)
+    assert response.status_code == 200
+    payload = response.json()
+    assert "ok" not in payload
+    assert payload["summary"]["default_device"] == {
+        "id": next(iter(container.device_catalog.devices)).id,
+        "name": "Kitchen Printer",
+    }
+    device = payload["devices"][0]
+    assert device["driver_key"] == "tests.fake-printers"
+    assert device["device_class"] == "physical"
+    assert device["connection"]["state"] == "online"
+    assert "observed_at" in device["connection"]
+    assert device["printer"]["supported_transports"] == ["raw", "text", "document"]
+    assert device["printer"]["capabilities"] == ["cash_drawer"]
 
-    def test_submit_print_job_returns_queued_job_resource(self) -> None:
-        container = make_test_container()
-        client = TestClient(create_app(container=container))
 
-        response = client.post(
+@pytest.mark.anyio
+async def test_list_devices_marks_virtual_windows_printers(mocker) -> None:
+    device = DeviceRecord.from_printer(
+        PrinterDevice(
+            name="Microsoft Print to PDF",
+            driver_key="windows.printers",
+            capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+        ),
+        connection_state=DeviceConnectionState.ONLINE,
+    )
+
+    async with async_client_for(make_test_container(devices=(device,), mocker=mocker)) as client:
+        response = await client.get("/devices", headers=await auth_headers(client))
+
+    assert response.status_code == 200
+    assert response.json()["devices"][0]["device_class"] == "virtual"
+
+
+@pytest.mark.anyio
+async def test_docs_route_serves_scalar_reference(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.get("/docs")
+
+    assert response.status_code == 200
+    assert "scalar" in response.text.lower()
+    assert "swagger ui" not in response.text.lower()
+
+
+@pytest.mark.anyio
+async def test_redoc_route_is_disabled(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.get("/redoc")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_submit_print_job_returns_queued_job_resource(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+
+    async with async_client_for(container) as client:
+        response = await client.post(
             "/print-jobs",
             json={
                 "content": {
@@ -276,157 +320,170 @@ class ApiShapeTests(unittest.TestCase):
                 "target": {"printer_name": "Kitchen Printer"},
                 "options": {"transport": "text"},
             },
-            headers=auth_headers(client),
+            headers=await auth_headers(client),
         )
 
-        self.assertEqual(response.status_code, 202)
-        payload = response.json()
-        self.assertTrue(payload["ok"])
-        self.assertEqual(payload["job"]["kind"], "print_job")
-        self.assertEqual(payload["job"]["state"], "queued")
-        self.assertEqual(payload["job"]["target"]["device_name"], "Kitchen Printer")
-        self.assertEqual(container.job_service.submitted_print_operation.target.printer_name, "Kitchen Printer")
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["job"]["kind"] == "print_job"
+    assert payload["job"]["state"] == "queued"
+    assert payload["job"]["target"]["device_name"] == "Kitchen Printer"
+    assert container.job_service.submitted_print_operation.target.printer_name == "Kitchen Printer"
 
-    def test_submit_device_command_returns_queued_job_resource(self) -> None:
-        container = make_test_container(job_kind=JobKind.COMMAND, operation="cut_paper", command_kind="cut_paper")
-        client = TestClient(create_app(container=container))
 
-        response = client.post(
+@pytest.mark.anyio
+async def test_submit_device_command_returns_queued_job_resource(mocker) -> None:
+    container = make_test_container(job_kind=JobKind.COMMAND, operation="cut_paper", command_kind="cut_paper", mocker=mocker)
+
+    async with async_client_for(container) as client:
+        response = await client.post(
             "/device-commands",
             json={
                 "target": {"printer_name": "Kitchen Printer"},
                 "command": {"kind": "cut_paper", "mode": "full"},
             },
-            headers=auth_headers(client),
+            headers=await auth_headers(client),
         )
 
-        self.assertEqual(response.status_code, 202)
-        payload = response.json()
-        self.assertEqual(payload["job"]["kind"], "device_command")
-        self.assertEqual(payload["job"]["operation"], "cut_paper")
-        self.assertEqual(container.job_service.submitted_command_operation.command.kind, "cut_paper")
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["job"]["kind"] == "device_command"
+    assert payload["job"]["operation"] == "cut_paper"
+    assert container.job_service.submitted_command_operation.command.kind == "cut_paper"
 
-    def test_job_history_response_includes_attempts_and_events(self) -> None:
-        container = make_test_container()
-        client = TestClient(create_app(container=container))
-        job_id = next(iter(container.job_service.jobs))
 
-        response = client.get(f"/jobs/{job_id}/history", headers=auth_headers(client))
+@pytest.mark.anyio
+async def test_job_history_response_includes_attempts_and_events(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    job_id = next(iter(container.job_service.jobs))
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["job"]["id"], job_id)
-        self.assertEqual(payload["attempts"][0]["attempt_number"], 1)
-        self.assertEqual(payload["events"][0]["event_type"], "job.queued")
+    async with async_client_for(container) as client:
+        response = await client.get(f"/jobs/{job_id}/history", headers=await auth_headers(client))
 
-    def test_list_jobs_serializes_job_execution_results(self) -> None:
-        container = make_test_container()
-        job_id = next(iter(container.job_service.jobs))
-        completed = replace(
-            container.job_service.jobs[job_id],
-            state=JobState.SUCCEEDED,
-            result_payload={
-                "printer": {
-                    "device_id": "dev_test",
-                    "printer_name": "Kitchen Printer",
-                    "driver_key": "tests.fake-printers",
-                    "is_default": True,
-                },
-                "transport": "raw",
-                "bytes_written": 128,
-                "device_job_id": 42,
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job"]["id"] == job_id
+    assert payload["attempts"][0]["attempt_number"] == 1
+    assert payload["events"][0]["event_type"] == "job.queued"
+
+
+@pytest.mark.anyio
+async def test_list_jobs_serializes_job_execution_results(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    job_id = next(iter(container.job_service.jobs))
+    completed = replace(
+        container.job_service.jobs[job_id],
+        state=JobState.SUCCEEDED,
+        result_payload={
+            "printer": {
+                "device_id": "dev_test",
+                "printer_name": "Kitchen Printer",
+                "driver_key": "tests.fake-printers",
+                "is_default": True,
             },
-        )
-        container.job_service.jobs[job_id] = completed
-        client = TestClient(create_app(container=container))
+            "transport": "raw",
+            "bytes_written": 128,
+            "device_job_id": 42,
+        },
+    )
+    container.job_service.jobs[job_id] = completed
 
-        response = client.get("/jobs", headers=auth_headers(client))
+    async with async_client_for(container) as client:
+        response = await client.get("/jobs", headers=await auth_headers(client))
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["jobs"][0]["result"]["target"]["printer_name"], "Kitchen Printer")
-        self.assertEqual(payload["jobs"][0]["result"]["target"]["driver_key"], "tests.fake-printers")
-        self.assertEqual(payload["jobs"][0]["result"]["bytes_written"], 128)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["jobs"][0]["result"]["target"]["printer_name"] == "Kitchen Printer"
+    assert payload["jobs"][0]["result"]["target"]["driver_key"] == "tests.fake-printers"
+    assert payload["jobs"][0]["result"]["bytes_written"] == 128
 
-    def test_events_websocket_connects_successfully(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
 
-        with client.websocket_connect("/events", headers=auth_headers(client)) as websocket:
+def test_events_websocket_connects_successfully(mocker) -> None:
+    with TestClient(create_app(container=make_test_container(mocker=mocker))) as client:
+        with client.websocket_connect("/events", headers=sync_auth_headers(client)) as websocket:
             payload = websocket.receive_json()
 
-        self.assertEqual(payload["kind"], "snapshot")
-        self.assertEqual(payload["status"]["service"]["name"], "IoT Agent")
-        self.assertEqual(payload["status"]["queue"]["queued"], 1)
+    assert payload["kind"] == "snapshot"
+    assert payload["status"]["service"]["name"] == "IoT Agent"
+    assert payload["status"]["queue"]["queued"] == 1
 
-    def test_events_websocket_streams_snapshot_backed_updates(self) -> None:
-        container = make_test_container()
-        client = TestClient(create_app(container=container))
-        event = JobEventRecord(
-            sequence=2,
-            resource_id="job_123",
-            event_type="job.failed",
-            occurred_at=utc_now(),
-            payload={"job_id": "job_123", "error_detail": "Printer offline"},
-        )
 
-        with client.websocket_connect("/events", headers=auth_headers(client)) as websocket:
+def test_events_websocket_streams_snapshot_backed_updates(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    event = JobEventRecord(
+        sequence=2,
+        resource_id="job_123",
+        event_type="job.failed",
+        occurred_at=utc_now(),
+        payload={"job_id": "job_123", "error_detail": "Printer offline"},
+    )
+
+    with TestClient(create_app(container=container)) as client:
+        with client.websocket_connect("/events", headers=sync_auth_headers(client)) as websocket:
             websocket.receive_json()
-            asyncio.run(container.event_hub.publish(event))
+            anyio.run(container.event_hub.publish, event)
             payload = websocket.receive_json()
 
-        self.assertEqual(payload["kind"], "event_update")
-        self.assertEqual(payload["event"]["event_type"], "job.failed")
-        self.assertEqual(payload["event"]["payload"]["error_detail"], "Printer offline")
-        self.assertEqual(payload["status"]["queue"]["queued"], 1)
+    assert payload["kind"] == "event_update"
+    assert payload["event"]["event_type"] == "job.failed"
+    assert payload["event"]["payload"]["error_detail"] == "Printer offline"
+    assert payload["status"]["queue"]["queued"] == 1
 
-    def test_validation_errors_use_unified_problem_details_shape(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
 
-        response = client.post("/print-jobs", json={})
+@pytest.mark.anyio
+async def test_validation_errors_use_unified_problem_details_shape(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.post("/print-jobs", json={})
 
-        self.assertEqual(response.status_code, 422)
-        payload = response.json()
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["code"], "REQUEST_VALIDATION_FAILED")
-        self.assertEqual(payload["type"], "urn:iot-agent:error:request-validation-failed")
-        self.assertEqual(payload["errors"][0]["source"]["pointer"], "/content")
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["code"] == "REQUEST_VALIDATION_FAILED"
+    assert payload["type"] == "urn:iot-agent:error:request-validation-failed"
+    assert payload["errors"][0]["source"]["pointer"] == "/content"
 
-    def test_agent_errors_use_unified_problem_details_shape(self) -> None:
-        container = make_test_container()
-        container.job_service.enqueue_print_error = AgentError(
-            "DEVICE_NOT_FOUND",
-            "Device 'dev_missing' was not found.",
-            status_code=404,
-        )
-        client = TestClient(create_app(container=container))
 
-        response = client.post(
+@pytest.mark.anyio
+async def test_agent_errors_use_unified_problem_details_shape(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    container.job_service.enqueue_print_error = AgentError(
+        "DEVICE_NOT_FOUND",
+        "Device 'dev_missing' was not found.",
+        status_code=404,
+    )
+
+    async with async_client_for(container) as client:
+        response = await client.post(
             "/print-jobs",
             json={"content": {"kind": "text", "text": "Hello printer"}},
-            headers=auth_headers(client),
+            headers=await auth_headers(client),
         )
 
-        self.assertEqual(response.status_code, 404)
-        payload = response.json()
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["code"], "DEVICE_NOT_FOUND")
-        self.assertEqual(payload["title"], "Device Not Found")
-        self.assertEqual(payload["type"], "urn:iot-agent:error:device-not-found")
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["code"] == "DEVICE_NOT_FOUND"
+    assert payload["title"] == "Device Not Found"
+    assert payload["type"] == "urn:iot-agent:error:device-not-found"
 
-    def test_framework_http_errors_use_unified_problem_details_shape(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
 
-        response = client.get("/missing-route")
+@pytest.mark.anyio
+async def test_framework_http_errors_use_unified_problem_details_shape(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.get("/missing-route")
 
-        self.assertEqual(response.status_code, 404)
-        payload = response.json()
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["code"], "HTTP_404")
-        self.assertEqual(payload["details"]["path"], "/missing-route")
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["code"] == "HTTP_404"
+    assert payload["details"]["path"] == "/missing-route"
 
-    def test_removed_endpoints_are_not_exposed(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
 
+@pytest.mark.anyio
+async def test_removed_endpoints_are_not_exposed(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        headers = await auth_headers(client)
         for method, path in (
             ("get", "/printers"),
             ("get", "/devices/printers"),
@@ -434,13 +491,14 @@ class ApiShapeTests(unittest.TestCase):
             ("post", "/print"),
             ("post", "/print_receipt"),
         ):
-            response = getattr(client, method)(path, headers=auth_headers(client))
-            self.assertEqual(response.status_code, 404, path)
+            response = await getattr(client, method)(path, headers=headers)
+            assert response.status_code == 404, path
 
-    def test_local_token_endpoint_issues_scoped_token(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
 
-        response = client.post(
+@pytest.mark.anyio
+async def test_local_token_endpoint_issues_scoped_token(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.post(
             "/auth/local-token",
             json={
                 "client_name": "tray",
@@ -448,48 +506,52 @@ class ApiShapeTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["subject"], "local:tray")
-        self.assertEqual(payload["scopes"], ["system:read", "events:read"])
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["subject"] == "local:tray"
+    assert payload["scopes"] == ["system:read", "events:read"]
 
-    def test_protected_routes_require_bearer_token(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
 
-        response = client.get("/devices")
+@pytest.mark.anyio
+async def test_protected_routes_require_bearer_token(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.get("/devices")
 
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.json()["code"], "AUTHENTICATION_REQUIRED")
+    assert response.status_code == 401
+    assert response.json()["code"] == "AUTHENTICATION_REQUIRED"
 
-    def test_insufficient_scope_returns_forbidden(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
-        headers = auth_headers(client, requested_scopes=("system:read",))
 
-        response = client.get("/devices", headers=headers)
+@pytest.mark.anyio
+async def test_insufficient_scope_returns_forbidden(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        headers = await auth_headers(client, requested_scopes=("system:read",))
+        response = await client.get("/devices", headers=headers)
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["code"], "INSUFFICIENT_SCOPE")
+    assert response.status_code == 403
+    assert response.json()["code"] == "INSUFFICIENT_SCOPE"
 
-    def test_gateway_routes_surface_identity_and_status(self) -> None:
-        client = TestClient(create_app(container=make_test_container()))
-        headers = auth_headers(client, requested_scopes=("admin:read",))
 
-        identity = client.get("/gateway/identity", headers=headers)
-        upstream = client.get("/gateway/upstream/status", headers=headers)
+@pytest.mark.anyio
+async def test_gateway_routes_surface_identity_and_status(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        headers = await auth_headers(client, requested_scopes=("admin:read",))
+        identity = await client.get("/gateway/identity", headers=headers)
+        upstream = await client.get("/gateway/upstream/status", headers=headers)
 
-        self.assertEqual(identity.status_code, 200)
-        self.assertEqual(identity.json()["agent_id"], "agt_test")
-        self.assertEqual(upstream.status_code, 200)
-        self.assertEqual(upstream.json()["state"], "disabled")
+    assert identity.status_code == 200
+    assert identity.json()["agent_id"] == "agt_test"
+    assert upstream.status_code == 200
+    assert upstream.json()["state"] == "disabled"
 
-    def test_lan_exposure_requires_tls_material(self) -> None:
-        with self.assertRaises(RuntimeError):
-            create_app(
-                settings=AgentSettings(
-                    host="0.0.0.0",
-                    gateway_exposure=GatewayExposure.LAN,
-                )
+
+def test_lan_exposure_requires_tls_material() -> None:
+    with pytest.raises(RuntimeError):
+        create_app(
+            settings=AgentSettings(
+                host="0.0.0.0",
+                gateway_exposure=GatewayExposure.LAN,
             )
+        )
 
 
 def make_test_container(
@@ -498,10 +560,11 @@ def make_test_container(
     operation: str = "print_job",
     command_kind: str | None = None,
     devices: tuple[DeviceRecord, ...] | None = None,
+    mocker,
 ) -> AgentContainer:
     settings = AgentSettings(
         security_state_dir=mkdtemp(prefix="iot-agent-security-"),
-        runtime_database_path=mkdtemp(prefix="iot-agent-runtime-") + "\\runtime.sqlite3",
+        runtime_database_path=Path(mkdtemp(prefix="iot-agent-runtime-")) / "runtime.sqlite3",
     )
     default_device = DeviceRecord.from_printer(
         PrinterDevice(
@@ -552,7 +615,7 @@ def make_test_container(
     return AgentContainer(
         settings=settings,
         driver_registry=DriverRegistry(drivers=()),
-        printer_service=Mock(),
+        printer_service=mocker.Mock(spec=StubPrinterService),
         event_hub=EventHub(),
         device_catalog=StubDeviceCatalog(devices=devices),
         job_service=StubJobService(
@@ -566,17 +629,3 @@ def make_test_container(
         gateway_service=StubGatewayService(settings=settings),
         application_supervisor=StubApplicationSupervisor(),
     )
-
-
-def auth_headers(client: TestClient, *, requested_scopes: tuple[str, ...] | None = None) -> dict[str, str]:
-    payload: dict[str, object] = {"client_name": "test-client"}
-    if requested_scopes is not None:
-        payload["requested_scopes"] = list(requested_scopes)
-    response = client.post("/auth/local-token", json=payload)
-    response.raise_for_status()
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -219,7 +219,7 @@ uv run --directory packages/agent iot-agent --config .\config\iot-agent.toml
 ## Test
 
 ```powershell
-uv run --directory packages/agent python -m unittest discover -s tests -v
+uv run --directory packages/agent --group dev pytest tests -q
 ```
 
 ## Config

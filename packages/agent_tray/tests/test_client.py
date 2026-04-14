@@ -1,119 +1,106 @@
 from __future__ import annotations
 
 import json
-import unittest
 from threading import Event
+
+import httpx
+import respx
 
 from iot_agent.version import API_VERSION
 from iot_agent_tray.client import AgentApiClient
 from iot_agent_tray.config import TraySettings
 
 
-class AgentApiClientTests(unittest.TestCase):
-    def test_client_fetches_local_token_before_calling_protected_status(self) -> None:
-        http_client = FakeHttpClient()
+def test_client_fetches_local_token_before_calling_protected_status() -> None:
+    settings = TraySettings(agent_api_base_url="http://agent.test")
+    with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
+        token_route = respx_mock.post("/auth/local-token").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "local-token",
+                    "token_type": "Bearer",
+                    "expires_at": "2099-01-01T00:00:00Z",
+                    "scopes": ["system:read", "devices:read"],
+                    "subject": "local:iot-agent-tray",
+                    "principal_kind": "local_client",
+                },
+            )
+        )
+        status_route = respx_mock.get("/system/status").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "status": "healthy",
+                    "service": {"name": "IoT Agent", "version": API_VERSION},
+                    "devices": {
+                        "count": 0,
+                        "online_count": 0,
+                        "offline_count": 0,
+                        "kind_counts": {},
+                        "default_device": None,
+                    },
+                    "queue": {
+                        "total": 0,
+                        "queued": 0,
+                        "dispatched": 0,
+                        "running": 0,
+                        "retry_scheduled": 0,
+                        "succeeded": 0,
+                        "failed": 0,
+                        "cancelled": 0,
+                    },
+                    "supported_content_kinds": ["text"],
+                    "supported_device_commands": ["print_test_page"],
+                },
+            )
+        )
         client = AgentApiClient(
-            TraySettings(),
-            http_client_factory=lambda: http_client,
+            settings,
+            http_client_factory=lambda: httpx.Client(base_url=settings.agent_api_base_url),
             websocket_connect=lambda *args, **kwargs: FakeWebSocketConnection(kwargs),
         )
 
         status = client.get_status()
 
-        self.assertEqual(status.service.version, API_VERSION)
-        self.assertEqual(http_client.requests[0][1], "/auth/local-token")
-        self.assertEqual(http_client.requests[1][1], "/system/status")
-        self.assertEqual(http_client.requests[1][2]["Authorization"], "Bearer local-token")
+    assert status.service.version == API_VERSION
+    assert token_route.called
+    assert status_route.called
+    assert status_route.calls.last.request.headers["Authorization"] == "Bearer local-token"
 
-    def test_client_reuses_cached_token_for_websocket_stream(self) -> None:
-        http_client = FakeHttpClient()
-        captured: dict[str, object] = {}
 
-        def websocket_connect(*args, **kwargs):
-            captured.update(kwargs)
-            return FakeWebSocketConnection(kwargs)
+def test_client_reuses_cached_token_for_websocket_stream() -> None:
+    settings = TraySettings(agent_api_base_url="http://agent.test")
+    captured: dict[str, object] = {}
 
+    def websocket_connect(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeWebSocketConnection(kwargs)
+
+    with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
+        respx_mock.post("/auth/local-token").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "access_token": "local-token",
+                    "token_type": "Bearer",
+                    "expires_at": "2099-01-01T00:00:00Z",
+                    "scopes": ["system:read", "devices:read", "events:read"],
+                    "subject": "local:iot-agent-tray",
+                    "principal_kind": "local_client",
+                },
+            )
+        )
         client = AgentApiClient(
-            TraySettings(),
-            http_client_factory=lambda: http_client,
+            settings,
+            http_client_factory=lambda: httpx.Client(base_url=settings.agent_api_base_url),
             websocket_connect=websocket_connect,
         )
 
         next(client.iter_live_updates(Event()))
 
-        self.assertEqual(http_client.requests[0][1], "/auth/local-token")
-        self.assertEqual(captured["additional_headers"]["Authorization"], "Bearer local-token")
-
-
-class FakeHttpClient:
-    def __init__(self) -> None:
-        self.requests: list[tuple[str, str, dict[str, str]]] = []
-
-    def __enter__(self) -> FakeHttpClient:
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def close(self) -> None:
-        return None
-
-    def get(self, path: str, headers: dict[str, str] | None = None):
-        self.requests.append(("GET", path, headers or {}))
-        return FakeResponse(
-            {
-                "ok": True,
-                "status": "healthy",
-                "service": {"name": "IoT Agent", "version": API_VERSION},
-                "devices": {
-                    "count": 0,
-                    "online_count": 0,
-                    "offline_count": 0,
-                    "kind_counts": {},
-                    "default_device": None,
-                },
-                "queue": {
-                    "total": 0,
-                    "queued": 0,
-                    "dispatched": 0,
-                    "running": 0,
-                    "retry_scheduled": 0,
-                    "succeeded": 0,
-                    "failed": 0,
-                    "cancelled": 0,
-                },
-                "supported_content_kinds": ["text"],
-                "supported_device_commands": ["print_test_page"],
-            }
-        )
-
-    def post(self, path: str, json: dict[str, object], headers: dict[str, str] | None = None):
-        self.requests.append(("POST", path, headers or {}))
-        if path == "/auth/local-token":
-            return FakeResponse(
-                {
-                    "access_token": "local-token",
-                    "token_type": "Bearer",
-                    "expires_at": "2099-01-01T00:00:00Z",
-                    "scopes": ["system:read", "devices:read", "events:read", "jobs:read", "jobs:submit", "commands:execute", "admin:read", "admin:write"],
-                    "subject": f"local:{json['client_name']}",
-                    "principal_kind": "local_client",
-                }
-            )
-        return FakeResponse({"ok": True, "job": {"id": "job_1"}})
-
-
-class FakeResponse:
-    def __init__(self, payload: dict[str, object], status_code: int = 200) -> None:
-        self._payload = payload
-        self.status_code = status_code
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-    def json(self) -> dict[str, object]:
-        return self._payload
+    assert captured["additional_headers"]["Authorization"] == "Bearer local-token"
 
 
 class FakeWebSocketConnection:
@@ -160,7 +147,3 @@ class FakeWebSocketConnection:
                 },
             }
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

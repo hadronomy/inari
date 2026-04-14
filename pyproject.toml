@@ -6,3 +6,11 @@ dependencies = []
 
 [tool.uv.workspace]
 members = ["packages/*"]
+
+[tool.pytest.ini_options]
+minversion = "8.3"
+addopts = "--strict-markers --strict-config"
+timeout = 30
+filterwarnings = [
+  "ignore::DeprecationWarning:pkg_resources",
+]

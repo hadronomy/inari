@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
-import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
+
+import pytest
 
 from iot_agent.config import AgentSettings
 from iot_agent.drivers import DeviceKind, DriverMetadata, DriverRegistry
@@ -73,97 +73,94 @@ class FakePrinterDriver(PrinterDriver):
         return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4)
 
 
-class RuntimeArchitectureTests(unittest.TestCase):
-    def test_supervisor_executes_queued_print_jobs_asynchronously(self) -> None:
-        async def scenario() -> None:
-            printer = PrinterDevice(
-                name="Kitchen Printer",
-                driver_key=FakePrinterDriver.metadata.key,
-                is_default=True,
-                preferred_transport=PrinterTransport.TEXT,
-                capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
-            )
-            driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
-            registry = DriverRegistry(drivers=(driver,))
+@pytest.mark.anyio
+@pytest.mark.timeout(10)
+async def test_supervisor_executes_queued_print_jobs_asynchronously(tmp_path: Path) -> None:
+    printer = PrinterDevice(
+        name="Kitchen Printer",
+        driver_key=FakePrinterDriver.metadata.key,
+        is_default=True,
+        preferred_transport=PrinterTransport.TEXT,
+        capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+    )
+    driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
+    registry = DriverRegistry(drivers=(driver,))
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                settings = AgentSettings(
-                    runtime_database_path=Path(temp_dir) / "runtime.sqlite3",
-                    discovery_poll_interval_seconds=0.05,
-                    scheduler_poll_interval_seconds=0.05,
-                    scheduler_batch_size=8,
-                    job_heartbeat_interval_seconds=0.05,
-                    job_dispatch_lease_seconds=1,
-                    job_execution_lease_seconds=1,
-                    job_execution_timeout_seconds=5.0,
-                    job_lease_recovery_interval_seconds=0.05,
-                )
-                printer_service = PrinterService(settings=settings, driver_registry=registry)
-                store = RuntimeStore(settings.runtime_database_path)
-                event_hub = EventHub()
-                device_repository = DeviceRepository(store)
-                job_repository = JobRepository(store)
-                discovery = DiscoveryCoordinator(
-                    driver_registry=registry,
-                    device_repository=device_repository,
-                    event_hub=event_hub,
-                )
-                device_catalog = DeviceCatalog(
-                    device_repository=device_repository,
-                    discovery=discovery,
-                    printer_service=printer_service,
-                )
-                job_service = JobService(
-                    settings=settings,
-                    job_repository=job_repository,
-                    device_catalog=device_catalog,
-                    event_hub=event_hub,
-                )
-                worker_pool = DeviceWorkerPool(
-                    settings=settings,
-                    job_repository=job_repository,
-                    job_service=job_service,
-                    executor=RuntimeJobExecutor(PrinterOperationExecutor(printer_service)),
-                )
-                supervisor = RuntimeSupervisor(
-                    settings=settings,
-                    store=store,
-                    device_catalog=device_catalog,
-                    job_service=job_service,
-                    job_scheduler=JobScheduler(
-                        settings=settings,
-                        job_repository=job_repository,
-                        job_service=job_service,
-                        worker_pool=worker_pool,
-                    ),
-                    lease_recovery=LeaseRecoveryCoordinator(
-                        settings=settings,
-                        job_repository=job_repository,
-                        job_service=job_service,
-                    ),
-                    worker_pool=worker_pool,
-                )
+    settings = AgentSettings(
+        runtime_database_path=tmp_path / "runtime.sqlite3",
+        discovery_poll_interval_seconds=0.05,
+        scheduler_poll_interval_seconds=0.05,
+        scheduler_batch_size=8,
+        job_heartbeat_interval_seconds=0.05,
+        job_dispatch_lease_seconds=1,
+        job_execution_lease_seconds=1,
+        job_execution_timeout_seconds=5.0,
+        job_lease_recovery_interval_seconds=0.05,
+    )
+    printer_service = PrinterService(settings=settings, driver_registry=registry)
+    store = RuntimeStore(settings.runtime_database_path)
+    event_hub = EventHub()
+    device_repository = DeviceRepository(store)
+    job_repository = JobRepository(store)
+    discovery = DiscoveryCoordinator(
+        driver_registry=registry,
+        device_repository=device_repository,
+        event_hub=event_hub,
+    )
+    device_catalog = DeviceCatalog(
+        device_repository=device_repository,
+        discovery=discovery,
+        printer_service=printer_service,
+    )
+    job_service = JobService(
+        settings=settings,
+        job_repository=job_repository,
+        device_catalog=device_catalog,
+        event_hub=event_hub,
+    )
+    worker_pool = DeviceWorkerPool(
+        settings=settings,
+        job_repository=job_repository,
+        job_service=job_service,
+        executor=RuntimeJobExecutor(PrinterOperationExecutor(printer_service)),
+    )
+    supervisor = RuntimeSupervisor(
+        settings=settings,
+        store=store,
+        device_catalog=device_catalog,
+        job_service=job_service,
+        job_scheduler=JobScheduler(
+            settings=settings,
+            job_repository=job_repository,
+            job_service=job_service,
+            worker_pool=worker_pool,
+        ),
+        lease_recovery=LeaseRecoveryCoordinator(
+            settings=settings,
+            job_repository=job_repository,
+            job_service=job_service,
+        ),
+        worker_pool=worker_pool,
+    )
 
-                await supervisor.start()
-                try:
-                    job = await job_service.enqueue_print(
-                        PrintJobRequest.model_validate(
-                            {
-                                "content": {"kind": "text", "text": "Hello queue"},
-                                "target": {"printer_name": printer.name},
-                                "options": {"transport": "text"},
-                            }
-                        ).to_operation()
-                    )
-                    completed = await wait_for_job(job_service, job.id)
-                finally:
-                    await supervisor.stop()
+    await supervisor.start()
+    try:
+        job = await job_service.enqueue_print(
+            PrintJobRequest.model_validate(
+                {
+                    "content": {"kind": "text", "text": "Hello queue"},
+                    "target": {"printer_name": printer.name},
+                    "options": {"transport": "text"},
+                }
+            ).to_operation()
+        )
+        completed = await wait_for_job(job_service, job.id)
+    finally:
+        await supervisor.stop()
 
-                self.assertEqual(job.state, JobState.QUEUED)
-                self.assertEqual(completed.state, JobState.SUCCEEDED)
-                self.assertEqual(driver.text_jobs, [(printer.name, "Hello queue", "Text Document")])
-
-        asyncio.run(scenario())
+    assert job.state is JobState.QUEUED
+    assert completed.state is JobState.SUCCEEDED
+    assert driver.text_jobs == [(printer.name, "Hello queue", "Text Document")]
 
 
 async def wait_for_job(job_service: JobService, job_id: str) -> JobRecord:
@@ -175,7 +172,3 @@ async def wait_for_job(job_service: JobService, job_id: str) -> JobRecord:
         if asyncio.get_running_loop().time() >= deadline:
             raise AssertionError(f"Job {job_id!r} did not complete in time.")
         await asyncio.sleep(0.05)
-
-
-if __name__ == "__main__":
-    unittest.main()

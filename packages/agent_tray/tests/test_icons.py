@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import unittest
 
 from iot_agent_tray.icons import ICON_SIZE, build_tray_icon
 from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot, TrayStatusLevel
@@ -24,22 +23,18 @@ def _snapshot(*, level: TrayStatusLevel) -> TraySnapshot:
     )
 
 
-class TrayIconTests(unittest.TestCase):
-    def test_build_tray_icon_keeps_canvas_edges_transparent(self) -> None:
-        image = build_tray_icon(_snapshot(level=TrayStatusLevel.ONLINE))
+def test_build_tray_icon_keeps_canvas_edges_transparent() -> None:
+    image = build_tray_icon(_snapshot(level=TrayStatusLevel.ONLINE))
 
-        self.assertEqual(image.size, (ICON_SIZE, ICON_SIZE))
-        self.assertEqual(image.getpixel((0, 0))[3], 0)
-        self.assertEqual(image.getpixel((ICON_SIZE - 1, 0))[3], 0)
-        self.assertEqual(image.getpixel((0, ICON_SIZE - 1))[3], 0)
-
-    def test_build_tray_icon_places_colored_status_dot(self) -> None:
-        image = build_tray_icon(_snapshot(level=TrayStatusLevel.OFFLINE))
-
-        dot_pixel = image.getpixel((ICON_SIZE - 8, ICON_SIZE - 8))
-        self.assertEqual(dot_pixel[:3], (240, 87, 113))
-        self.assertEqual(dot_pixel[3], 255)
+    assert image.size == (ICON_SIZE, ICON_SIZE)
+    assert image.getpixel((0, 0))[3] == 0
+    assert image.getpixel((ICON_SIZE - 1, 0))[3] == 0
+    assert image.getpixel((0, ICON_SIZE - 1))[3] == 0
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_build_tray_icon_places_colored_status_dot() -> None:
+    image = build_tray_icon(_snapshot(level=TrayStatusLevel.OFFLINE))
+
+    dot_pixel = image.getpixel((ICON_SIZE - 8, ICON_SIZE - 8))
+    assert dot_pixel[:3] == (240, 87, 113)
+    assert dot_pixel[3] == 255
