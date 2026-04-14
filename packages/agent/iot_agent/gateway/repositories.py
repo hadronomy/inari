@@ -5,14 +5,9 @@ from typing import Any, Mapping
 
 from sqlalchemy import func, insert, select, update
 
+from ..db.schema import gateway_inbound_commands_table, gateway_outbox_table
 from ..runtime.models import normalize_timestamp, timestamp_to_iso, utc_now
-from ..runtime.store import (
-    RuntimeStore,
-    dump_json,
-    gateway_inbound_commands_table,
-    gateway_outbox_table,
-    load_json,
-)
+from ..runtime.store import RuntimeStore, dump_json, load_json
 from .models import (
     GatewayInboundCommandRecord,
     GatewayInboundCommandState,

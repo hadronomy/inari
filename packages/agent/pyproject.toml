@@ -1,13 +1,15 @@
 [project]
 name = "iot-agent"
-version = "1.16.0a1"
+version = "1.17.0a1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.16.5,<2.0.0",
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
   "pydantic>=2.8.0,<3.0.0",
   "sqlalchemy>=2.0.44,<3.0.0",
+  "typer>=0.19.2,<1.0.0",
   "pillow>=10.4.0,<12.0.0",
   "puremagic>=2.0.0,<3.0.0",
   "pywin32>=306; platform_system == 'Windows'",
@@ -39,7 +41,7 @@ dev = [
 ]
 
 [project.scripts]
-iot-agent = "iot_agent.main:main"
+iot-agent = "iot_agent.cli:main"
 iot-agent-generate-config = "iot_agent.config:generate_schema_main"
 
 [build-system]
@@ -50,3 +52,6 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["iot_agent*"]
 exclude = ["notebooks*", "tests*"]
+
+[tool.setuptools.package-data]
+iot_agent = ["db/alembic/script.py.mako"]
