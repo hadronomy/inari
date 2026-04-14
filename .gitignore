@@ -270,3 +270,4 @@ data
 !report/lib
 .tmp*
 *.duckdb
+packaging/windows/iot-agent-windows.toml

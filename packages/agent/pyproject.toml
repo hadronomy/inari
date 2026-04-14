@@ -42,6 +42,7 @@ dev = [
 
 [project.scripts]
 iot-agent = "iot_agent.cli:main"
+iot-agent-windows-service = "iot_agent.windows_service:main"
 iot-agent-generate-config = "iot_agent.config:generate_schema_main"
 
 [build-system]

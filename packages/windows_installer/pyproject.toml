@@ -1,0 +1,34 @@
+[project]
+name = "iot-agent-windows-installer"
+version = "0.1.0a1"
+description = "Windows packaging toolchain for the IoT Agent and tray"
+requires-python = ">=3.12"
+dependencies = [
+  "iot-agent",
+  "iot-agent-tray",
+  "packaging>=25.0,<26.0",
+  "pydantic>=2.11.0,<3.0.0",
+  "typer>=0.19.2,<1.0.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5,<9.0.0",
+  "pytest-mock>=3.14.1,<4.0.0",
+]
+
+[project.scripts]
+iot-agent-windows-installer = "iot_agent_windows_installer.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iot_agent_windows_installer*"]
+exclude = ["tests*"]
+
+[tool.uv.sources]
+iot-agent = { workspace = true }
+iot-agent-tray = { workspace = true }
