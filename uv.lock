@@ -465,7 +465,7 @@ wheels = [
 
 [[package]]
 name = "iot-agent"
-version = "1.18.0a1"
+version = "1.19.0a1"
 source = { editable = "packages/agent" }
 dependencies = [
     { name = "alembic" },

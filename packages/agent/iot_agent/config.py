@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import get_args, get_origin
 from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config_paths import (
     PathProfile,
@@ -71,6 +71,7 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("gateway", "bootstrap"): (
         "Bootstrap material used only for first enrollment.",
+        "Use a single short-lived controller-issued enrollment token for the initial managed enrollment call.",
     ),
     ("gateway", "sync"): (
         "Managed-mode reconnect, polling, and backoff tuning.",
@@ -80,6 +81,8 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("gateway", "step_ca"): (
         "step-ca certificate bootstrap and renewal settings.",
+        "In the normal managed flow, the controller returns these values during enrollment.",
+        "Leave them commented unless you want explicit local overrides or fallback knowledge of the CA.",
     ),
 }
 
@@ -130,8 +133,7 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("gateway", "edge_provider"): ("Controller edge layout. `caddy` enables stricter profile validation.",),
     ("gateway", "mutual_tls_mode"): ("Whether client certificates are disabled, optional, or required upstream.",),
     ("gateway", "trust_client_ca"): ("Trust the managed CA bundle for outbound TLS validation.",),
-    ("gateway", "bootstrap", "bootstrap_token"): ("One-time bootstrap token provided by the controller.",),
-    ("gateway", "bootstrap", "enrollment_code"): ("Human-entered or QR-derived enrollment code.",),
+    ("gateway", "bootstrap", "enrollment_token"): ("Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.",),
     ("gateway", "sync", "interval_seconds"): ("How often snapshots are pushed to the controller.",),
     ("gateway", "sync", "reconnect_delay_seconds"): ("Base reconnect delay after controller disconnects.",),
     ("gateway", "sync", "event_timeout_seconds"): ("Read timeout for upstream event streams.",),
@@ -150,12 +152,12 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("gateway", "zitadel", "assertion_algorithm"): ("Signing algorithm used for the private-key JWT assertion.",),
     ("gateway", "zitadel", "requested_scopes"): ("Scopes requested from ZITADEL.",),
     ("gateway", "zitadel", "token_refresh_skew_seconds"): ("How early to refresh ZITADEL access tokens.",),
-    ("gateway", "step_ca", "url"): ("Base URL for the private step-ca instance.",),
-    ("gateway", "step_ca", "sign_url"): ("Explicit sign endpoint if not derived from `url`.",),
-    ("gateway", "step_ca", "renew_url"): ("Explicit renew endpoint if not derived from `url`.",),
-    ("gateway", "step_ca", "root_fingerprint"): ("Expected fingerprint of the step-ca root certificate.",),
-    ("gateway", "step_ca", "requested_sans"): ("Additional SANs requested for the managed client certificate.",),
-    ("gateway", "step_ca", "certificate_renewal_skew_seconds"): ("How early to renew managed certificates before expiry.",),
+    ("gateway", "step_ca", "url"): ("Base URL for the private step-ca instance when you want to override the controller-provided CA URL.",),
+    ("gateway", "step_ca", "sign_url"): ("Explicit sign endpoint override when it cannot be derived from `url` or the controller enrollment response.",),
+    ("gateway", "step_ca", "renew_url"): ("Explicit renew endpoint override when it cannot be derived from `url` or the controller enrollment response.",),
+    ("gateway", "step_ca", "root_fingerprint"): ("Expected fingerprint of the step-ca root certificate. The controller normally provides this during enrollment.",),
+    ("gateway", "step_ca", "requested_sans"): ("Additional SANs requested for the managed client certificate beyond the agent's default identity.",),
+    ("gateway", "step_ca", "certificate_renewal_skew_seconds"): ("How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.",),
 }
 
 _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
@@ -173,8 +175,7 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     ("gateway", "enrollment_url"): "https://bootstrap.controller.example.com/api/iot-agent/enroll",
     ("gateway", "status_url"): "https://controller.example.com/api/iot-agent/agents/agt_123/status",
     ("gateway", "events_url"): "wss://controller.example.com/api/iot-agent/agents/agt_123/events",
-    ("gateway", "bootstrap", "bootstrap_token"): "bootstrap-token",
-    ("gateway", "bootstrap", "enrollment_code"): "SITE-A-4F7K-92LM",
+    ("gateway", "bootstrap", "enrollment_token"): "enrollment-token",
     ("gateway", "zitadel", "base_url"): "https://zitadel.example.com",
     ("gateway", "zitadel", "token_url"): "https://zitadel.example.com/oauth/v2/token",
     ("gateway", "zitadel", "audience"): "https://controller.example.com",
@@ -354,8 +355,10 @@ class GatewaySyncConfig(BaseModel):
 class GatewayBootstrapConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
-    bootstrap_token: str | None = None
-    enrollment_code: str | None = None
+    enrollment_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("enrollment_token", "bootstrap_token", "enrollment_code"),
+    )
 
 
 class GatewayZitadelConfig(BaseModel):
@@ -466,8 +469,7 @@ class AgentConfigFile(BaseModel):
             "upstream_edge_provider": self.gateway.edge_provider,
             "upstream_mutual_tls_mode": self.gateway.mutual_tls_mode,
             "upstream_trust_client_ca": self.gateway.trust_client_ca,
-            "upstream_bootstrap_token": self.gateway.bootstrap.bootstrap_token,
-            "upstream_enrollment_code": self.gateway.bootstrap.enrollment_code,
+            "upstream_enrollment_token": self.gateway.bootstrap.enrollment_token,
             "gateway_sync_interval_seconds": self.gateway.sync.interval_seconds,
             "gateway_reconnect_delay_seconds": self.gateway.sync.reconnect_delay_seconds,
             "gateway_event_timeout_seconds": self.gateway.sync.event_timeout_seconds,
@@ -554,8 +556,7 @@ class AgentSettings(BaseModel):
     upstream_enrollment_url: str | None = None
     upstream_status_url: str | None = None
     upstream_events_url: str | None = None
-    upstream_bootstrap_token: str | None = None
-    upstream_enrollment_code: str | None = None
+    upstream_enrollment_token: str | None = None
     upstream_trust_client_ca: bool = True
     zitadel_base_url: str | None = None
     zitadel_token_url: str | None = None
@@ -757,6 +758,7 @@ def render_example_toml(
     *,
     schema_path: str | None = "./schemas/iot-agent-config.schema.json",
     config: AgentConfigFile | None = None,
+    active_fields: set[tuple[str, ...]] | None = None,
 ) -> str:
     document = config.model_copy(deep=True) if config is not None else _build_example_config()
     lines: list[str] = []
@@ -764,7 +766,7 @@ def render_example_toml(
         lines.extend([f"#:schema {schema_path}", ""])
     _append_comment_block(lines, _TEMPLATE_HEADER_COMMENTS)
     lines.append("")
-    _render_model_template(lines, (), document, root=True)
+    _render_model_template(lines, (), document, root=True, active_fields=active_fields or set())
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
@@ -802,7 +804,11 @@ def write_default_config_file(
     document = AgentConfigFile()
     document.paths.profile = profile
     path.write_text(
-        render_example_toml(schema_path=schema_path, config=document),
+        render_example_toml(
+            schema_path=schema_path,
+            config=document,
+            active_fields={("paths", "profile")},
+        ),
         encoding="utf-8",
     )
     return path
@@ -912,6 +918,14 @@ def _build_env_override_payload(
         env_name = f"{ENV_PREFIX}{field_name.upper()}"
         if env_name in combined:
             payload[field_name] = combined[env_name]
+    if "upstream_enrollment_token" not in payload:
+        for legacy_name in (
+            f"{ENV_PREFIX}UPSTREAM_BOOTSTRAP_TOKEN",
+            f"{ENV_PREFIX}UPSTREAM_ENROLLMENT_CODE",
+        ):
+            if legacy_name in combined:
+                payload["upstream_enrollment_token"] = combined[legacy_name]
+                break
     return payload
 
 
@@ -969,6 +983,7 @@ def _render_model_template(
     model: BaseModel,
     *,
     root: bool = False,
+    active_fields: set[tuple[str, ...]],
 ) -> None:
     scalar_fields: list[tuple[str, Any]] = []
     nested_models: list[tuple[str, BaseModel]] = []
@@ -994,13 +1009,13 @@ def _render_model_template(
 
     for field_name, raw_value in scalar_fields:
         field_path = (*path, field_name)
-        _render_commented_field(lines, field_path, raw_value)
+        _render_commented_field(lines, field_path, raw_value, active_fields=active_fields)
 
     if scalar_fields or should_render_header:
         lines.append("")
 
     for field_name, child_model in nested_models:
-        _render_model_template(lines, (*path, field_name), child_model)
+        _render_model_template(lines, (*path, field_name), child_model, active_fields=active_fields)
 
     for field_name, field_items, item_model_type in table_lists:
         _render_array_of_tables_template(
@@ -1011,11 +1026,20 @@ def _render_model_template(
         )
 
 
-def _render_commented_field(lines: list[str], field_path: tuple[str, ...], raw_value: Any) -> None:
+def _render_commented_field(
+    lines: list[str],
+    field_path: tuple[str, ...],
+    raw_value: Any,
+    *,
+    active_fields: set[tuple[str, ...]],
+) -> None:
     if field_path in _FIELD_COMMENTS:
         _append_comment_block(lines, _FIELD_COMMENTS[field_path])
     example_value = _field_example_value(field_path, raw_value)
     if field_path == ("config_version",):
+        lines.append(f"{field_path[-1]} = {_toml_literal(example_value)}")
+        return
+    if field_path in active_fields:
         lines.append(f"{field_path[-1]} = {_toml_literal(example_value)}")
         return
     lines.append(f"# {field_path[-1]} = {_toml_literal(example_value)}")

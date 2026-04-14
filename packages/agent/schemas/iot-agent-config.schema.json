@@ -19,7 +19,7 @@
     "GatewayBootstrapConfig": {
       "additionalProperties": false,
       "properties": {
-        "bootstrap_token": {
+        "enrollment_token": {
           "anyOf": [
             {
               "type": "string"
@@ -29,19 +29,7 @@
             }
           ],
           "default": null,
-          "title": "Bootstrap Token"
-        },
-        "enrollment_code": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Enrollment Code"
+          "title": "Enrollment Token"
         }
       },
       "title": "GatewayBootstrapConfig",

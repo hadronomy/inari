@@ -26,7 +26,8 @@ from .models import GatewayEnrollmentRecord
 from .protocol import EnrollmentRequestPayload, EnrollmentResponsePayload
 
 UPSTREAM_ACCESS_TOKEN_KEY = "upstream_access_token"
-UPSTREAM_BOOTSTRAP_TOKEN_KEY = "upstream_bootstrap_token"
+UPSTREAM_ENROLLMENT_TOKEN_KEY = "upstream_enrollment_token"
+LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY = "upstream_bootstrap_token"
 UPSTREAM_REFRESH_TOKEN_KEY = "upstream_refresh_token"
 UPSTREAM_STEP_CA_OTT_KEY = "upstream_step_ca_ott"
 
@@ -119,11 +120,10 @@ class GatewayEnrollmentService:
 
     async def _enroll(self) -> GatewayEnrollmentRecord | None:
         enrollment_url = self._enrollment_url()
-        enrollment_code = self._enrollment_code()
         headers = await self._enrollment_headers()
         if enrollment_url is None:
             return None
-        if not headers and enrollment_code is None:
+        if not headers:
             return None
 
         identity = self.identity_service.get_or_create_identity()
@@ -133,7 +133,6 @@ class GatewayEnrollmentService:
             public_jwk=dict(identity.public_jwk),
             certificate_pem=identity.certificate_pem,
             csr_pem=self.identity_service.build_csr_pem(),
-            enrollment_code=enrollment_code,
             snapshot=self.snapshot_provider(),
         )
         async with self._client() as client:
@@ -300,13 +299,6 @@ class GatewayEnrollmentService:
             return f"{scheme}://{authority}/api/iot-agent/agents/{agent_id}/events"
         return None
 
-    def _enrollment_code(self) -> str | None:
-        value = self.settings.upstream_enrollment_code
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
     def _client(self) -> httpx.AsyncClient:
         return self._http_client_factory(
             verify=self.tls_context_factory.create_outbound_context(),
@@ -317,12 +309,12 @@ class GatewayEnrollmentService:
         provider_headers = await self.auth_provider.headers_for_enrollment()
         if provider_headers:
             return provider_headers
-        bootstrap_token = self.settings.upstream_bootstrap_token or self.secret_store.get_secret(
-            UPSTREAM_BOOTSTRAP_TOKEN_KEY
-        )
-        if bootstrap_token is None:
+        enrollment_token = self.settings.upstream_enrollment_token or self.secret_store.get_secret(
+            UPSTREAM_ENROLLMENT_TOKEN_KEY
+        ) or self.secret_store.get_secret(LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY)
+        if enrollment_token is None:
             return {}
-        return {"Authorization": f"Bearer {bootstrap_token}"}
+        return {"Authorization": f"Bearer {enrollment_token}"}
 
 
 def _parse_scope_values(values: object):

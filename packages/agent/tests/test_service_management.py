@@ -126,7 +126,9 @@ def test_cli_config_write_default_omits_schema_header(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     content = target_path.read_text(encoding="utf-8")
     assert not content.startswith("#:schema")
-    assert '[paths]\nprofile = "production"' in content
+    assert "[paths]" in content
+    assert 'profile = "production"' in content
+    assert '# profile = "production"' not in content
 
 
 def test_cli_config_write_default_is_idempotent_without_force(tmp_path) -> None:
