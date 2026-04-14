@@ -1,75 +1,116 @@
 from __future__ import annotations
 
 import base64
-import unittest
+
+import pytest
+from pydantic import ValidationError
 
 from iot_agent.binary_payloads import coerce_image_payload, coerce_pdf_payload
 from iot_agent.exceptions import PrinterServiceError
 from iot_agent.models import DeviceCommandRequest, PrintJobRequest
 from iot_agent.print_jobs import ReceiptImageContent, TextDocumentContent
-from pydantic import ValidationError
 
 
-class BinaryPayloadTests(unittest.TestCase):
-    def test_image_payload_accepts_data_url_and_detects_mime(self) -> None:
-        png_base64 = (
-            "data:image/png;base64,"
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
+def test_image_payload_accepts_data_url_and_detects_mime() -> None:
+    png_base64 = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
+    )
+
+    payload = coerce_image_payload(png_base64, label="receipt image")
+
+    assert payload.source == "data_url"
+    assert "image/png" in payload.declared_mime_types
+    assert payload.mime_type == "image/png"
+
+
+def test_pdf_payload_rejects_non_pdf_bytes() -> None:
+    encoded = base64.b64encode(b"not a pdf").decode("ascii")
+
+    with pytest.raises(PrinterServiceError, match="PDF document"):
+        coerce_pdf_payload(encoded, label="PDF document")
+
+
+def test_image_payload_rejects_conflicting_declared_mime_types() -> None:
+    png_base64 = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
+    )
+
+    with pytest.raises(PrinterServiceError, match="Conflicting MIME type declarations"):
+        coerce_image_payload(
+            png_base64,
+            label="receipt image",
+            declared_mime_type="image/jpeg",
         )
 
-        payload = coerce_image_payload(png_base64, label="receipt image")
 
-        self.assertEqual(payload.source, "data_url")
-        self.assertIn("image/png", payload.declared_mime_types)
-        self.assertEqual(payload.mime_type, "image/png")
+def test_generic_print_request_accepts_nested_target_and_options() -> None:
+    request = PrintJobRequest.model_validate(
+        {
+            "content": {
+                "kind": "text",
+                "text": "Hello printer",
+                "document_name": "Greeting",
+            },
+            "target": {"printer_name": "Office Printer"},
+            "options": {"transport": "text", "open_cash_drawer": True},
+        }
+    )
 
-    def test_pdf_payload_rejects_non_pdf_bytes(self) -> None:
-        encoded = base64.b64encode(b"not a pdf").decode("ascii")
+    operation = request.to_operation()
+    job = operation.job
 
-        with self.assertRaisesRegex(PrinterServiceError, "PDF document"):
-            coerce_pdf_payload(encoded, label="PDF document")
-
-    def test_image_payload_rejects_conflicting_declared_mime_types(self) -> None:
-        png_base64 = (
-            "data:image/png;base64,"
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-        )
-
-        with self.assertRaisesRegex(PrinterServiceError, "Conflicting MIME type declarations"):
-            coerce_image_payload(
-                png_base64,
-                label="receipt image",
-                declared_mime_type="image/jpeg",
-            )
+    assert isinstance(job.content, TextDocumentContent)
+    assert job.content.text == "Hello printer"
+    assert job.content.document_name == "Greeting"
+    assert job.printer_name == "Office Printer"
+    assert job.transport == "text"
+    assert job.open_drawer is True
+    assert operation.target.printer_name == "Office Printer"
 
 
-class PrintModelTests(unittest.TestCase):
-    def test_generic_print_request_accepts_nested_target_and_options(self) -> None:
-        request = PrintJobRequest.model_validate(
+def test_generic_print_request_accepts_binary_wrapper() -> None:
+    request = PrintJobRequest.model_validate(
+        {
+            "content": {
+                "kind": "receipt_image",
+                "binary": {
+                    "base64": (
+                        "data:image/png;base64,"
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
+                    ),
+                    "declared_mime_type": "image/png",
+                },
+                "document_name": "POS Ticket",
+            }
+        }
+    )
+
+    operation = request.to_operation()
+    job = operation.job
+
+    assert isinstance(job.content, ReceiptImageContent)
+    assert job.content.document_name == "POS Ticket"
+    assert job.content.mime_type == "image/png"
+
+
+def test_generic_print_request_rejects_legacy_option_alias() -> None:
+    with pytest.raises(ValidationError):
+        PrintJobRequest.model_validate(
             {
                 "content": {
                     "kind": "text",
                     "text": "Hello printer",
-                    "document_name": "Greeting",
                 },
-                "target": {"printer_name": "Office Printer"},
-                "options": {"transport": "text", "open_cash_drawer": True},
+                "options": {"open_drawer": True},
             }
         )
 
-        operation = request.to_operation()
-        job = operation.job
 
-        self.assertIsInstance(job.content, TextDocumentContent)
-        self.assertEqual(job.content.text, "Hello printer")
-        self.assertEqual(job.content.document_name, "Greeting")
-        self.assertEqual(job.printer_name, "Office Printer")
-        self.assertEqual(job.transport, "text")
-        self.assertTrue(job.open_drawer)
-        self.assertEqual(operation.target.printer_name, "Office Printer")
-
-    def test_generic_print_request_accepts_binary_wrapper(self) -> None:
-        request = PrintJobRequest.model_validate(
+def test_generic_print_request_rejects_legacy_binary_alias() -> None:
+    with pytest.raises(ValidationError):
+        PrintJobRequest.model_validate(
             {
                 "content": {
                     "kind": "receipt_image",
@@ -78,67 +119,27 @@ class PrintModelTests(unittest.TestCase):
                             "data:image/png;base64,"
                             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
                         ),
-                        "declared_mime_type": "image/png",
+                        "mime_type": "image/png",
                     },
-                    "document_name": "POS Ticket",
                 }
             }
         )
 
-        operation = request.to_operation()
-        job = operation.job
 
-        self.assertIsInstance(job.content, ReceiptImageContent)
-        self.assertEqual(job.content.document_name, "POS Ticket")
-        self.assertEqual(job.content.mime_type, "image/png")
+def test_device_command_request_accepts_typed_command() -> None:
+    request = DeviceCommandRequest.model_validate(
+        {
+            "target": {"device_id": "dev_test", "printer_name": "Kitchen Printer"},
+            "command": {
+                "kind": "cut_paper",
+                "mode": "full",
+            },
+        }
+    )
 
-    def test_generic_print_request_rejects_legacy_option_alias(self) -> None:
-        with self.assertRaises(ValidationError):
-            PrintJobRequest.model_validate(
-                {
-                    "content": {
-                        "kind": "text",
-                        "text": "Hello printer",
-                    },
-                    "options": {"open_drawer": True},
-                }
-            )
+    operation = request.to_operation()
 
-    def test_generic_print_request_rejects_legacy_binary_alias(self) -> None:
-        with self.assertRaises(ValidationError):
-            PrintJobRequest.model_validate(
-                {
-                    "content": {
-                        "kind": "receipt_image",
-                        "binary": {
-                            "base64": (
-                                "data:image/png;base64,"
-                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-                            ),
-                            "mime_type": "image/png",
-                        },
-                    }
-                }
-            )
-
-    def test_device_command_request_accepts_typed_command(self) -> None:
-        request = DeviceCommandRequest.model_validate(
-            {
-                "target": {"device_id": "dev_test", "printer_name": "Kitchen Printer"},
-                "command": {
-                    "kind": "cut_paper",
-                    "mode": "full",
-                },
-            }
-        )
-
-        operation = request.to_operation()
-
-        self.assertEqual(operation.target.device_id, "dev_test")
-        self.assertEqual(operation.target.printer_name, "Kitchen Printer")
-        self.assertEqual(operation.command.kind, "cut_paper")
-        self.assertEqual(operation.command.mode, "full")
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert operation.target.device_id == "dev_test"
+    assert operation.target.printer_name == "Kitchen Printer"
+    assert operation.command.kind == "cut_paper"
+    assert operation.command.mode == "full"

@@ -24,6 +24,19 @@ cups = [
   "pycups>=2.0.4; platform_system != 'Windows'",
 ]
 
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5,<9.0.0",
+  "anyio>=4.13.0,<5.0.0",
+  "asgi-lifespan>=2.1.0,<3.0.0",
+  "pytest-cov>=6.2.1,<7.0.0",
+  "pytest-xdist>=3.8.0,<4.0.0",
+  "respx>=0.22.0,<1.0.0",
+  "pytest-mock>=3.14.1,<4.0.0",
+  "hypothesis>=6.151.0,<7.0.0",
+  "pytest-timeout>=2.4.0,<3.0.0",
+]
+
 [project.scripts]
 iot-agent = "iot_agent.main:main"
 iot-agent-generate-config = "iot_agent.config:generate_schema_main"

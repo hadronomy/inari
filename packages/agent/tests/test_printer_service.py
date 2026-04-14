@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import unittest
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Mapping
+
+import pytest
 
 from iot_agent.binary_payloads import BinaryPayload
 from iot_agent.config import AgentSettings
@@ -109,121 +110,120 @@ def make_service(
     )
 
 
-class PrinterServiceTests(unittest.TestCase):
-    def test_print_receipt_data_routes_raw_jobs_through_selected_driver(self) -> None:
-        printer = PrinterDevice(
-            name="EPSON TM-T20III",
-            driver_key=FakePrinterDriver.metadata.key,
-            is_default=True,
-            preferred_transport=PrinterTransport.RAW,
-            capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
-        )
-        renderer = FakeStructuredReceiptRenderer()
-        driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
-        service = make_service(driver, structured_receipt_renderer=renderer)
+def test_print_receipt_data_routes_raw_jobs_through_selected_driver() -> None:
+    printer = PrinterDevice(
+        name="EPSON TM-T20III",
+        driver_key=FakePrinterDriver.metadata.key,
+        is_default=True,
+        preferred_transport=PrinterTransport.RAW,
+        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+    )
+    renderer = FakeStructuredReceiptRenderer()
+    driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
+    service = make_service(driver, structured_receipt_renderer=renderer)
 
-        result = service.print_receipt_data(
+    result = service.print_receipt_data(
+        {
+            "name": "POS/001",
+            "orderlines": [{"product_name": "Coffee", "qty": 1, "price_display": "2.50"}],
+            "amount_tax": 0,
+            "amount_total": 2.50,
+        }
+    )
+
+    assert result.printer_name == printer.name
+    assert result.transport is PrinterTransport.RAW
+    assert renderer.calls[0]["name"] == "POS/001"
+    assert driver.raw_jobs[0][1] == b"structured-receipt"
+
+
+def test_print_job_dispatches_receipt_image_through_image_renderer() -> None:
+    printer = PrinterDevice(
+        name="EPSON TM-T20III",
+        driver_key=FakePrinterDriver.metadata.key,
+        is_default=True,
+        preferred_transport=PrinterTransport.RAW,
+        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+    )
+    image_renderer = FakeReceiptImageRenderer()
+    driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
+    service = make_service(driver, image_receipt_renderer=image_renderer)
+
+    result = service.print_job(
+        PrintJob(
+            content=ReceiptImageContent(
+                binary_payload=BinaryPayload(
+                    content=b"image-bytes",
+                    declared_mime_types=("image/png",),
+                )
+            ),
+            printer_name=printer.name,
+        )
+    )
+
+    assert result.printer_name == printer.name
+    assert image_renderer.calls == [(b"image-bytes", "image/png")]
+    assert driver.raw_jobs[0][1] == b"image-receipt"
+
+
+def test_open_cash_drawer_checks_printer_capability_not_default_transport_policy() -> None:
+    printer = PrinterDevice(
+        name="EPSON TM-T20III",
+        driver_key=FakePrinterDriver.metadata.key,
+        is_default=True,
+        preferred_transport=PrinterTransport.RAW,
+        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+    )
+    driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
+    service = make_service(driver)
+
+    result = service.open_cash_drawer()
+
+    assert result.printer_name == printer.name
+    assert driver.drawer_pulses == [printer.name]
+
+
+def test_print_receipt_rejects_non_raw_printers() -> None:
+    office_printer = PrinterDevice(
+        name="HP LaserJet",
+        driver_key=FakePrinterDriver.metadata.key,
+        is_default=True,
+        preferred_transport=PrinterTransport.DOCUMENT,
+        capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+    )
+    renderer = FakeStructuredReceiptRenderer()
+    service = make_service(
+        FakePrinterDriver(devices=(office_printer,), default_name=office_printer.name),
+        structured_receipt_renderer=renderer,
+    )
+
+    with pytest.raises(PrinterServiceError, match="RAW receipt printing"):
+        service.print_receipt_data(
             {
-                "name": "POS/001",
                 "orderlines": [{"product_name": "Coffee", "qty": 1, "price_display": "2.50"}],
                 "amount_tax": 0,
                 "amount_total": 2.50,
             }
         )
 
-        self.assertEqual(result.printer_name, printer.name)
-        self.assertIs(result.transport, PrinterTransport.RAW)
-        self.assertEqual(renderer.calls[0]["name"], "POS/001")
-        self.assertEqual(driver.raw_jobs[0][1], b"structured-receipt")
 
-    def test_print_job_dispatches_receipt_image_through_image_renderer(self) -> None:
-        printer = PrinterDevice(
-            name="EPSON TM-T20III",
-            driver_key=FakePrinterDriver.metadata.key,
-            is_default=True,
-            preferred_transport=PrinterTransport.RAW,
-            capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
-        )
-        image_renderer = FakeReceiptImageRenderer()
-        driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
-        service = make_service(driver, image_receipt_renderer=image_renderer)
+def test_print_rendered_document_uses_default_printer_name_when_configured() -> None:
+    primary = PrinterDevice(
+        name="Back Office",
+        driver_key=FakePrinterDriver.metadata.key,
+        preferred_transport=PrinterTransport.DOCUMENT,
+        capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+    )
+    kitchen = PrinterDevice(
+        name="Kitchen Receipt Printer",
+        driver_key=FakePrinterDriver.metadata.key,
+        preferred_transport=PrinterTransport.RAW,
+        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+    )
+    driver = FakePrinterDriver(devices=(primary, kitchen), default_name=primary.name)
+    service = make_service(driver, default_printer_name=kitchen.name)
 
-        result = service.print_job(
-            PrintJob(
-                content=ReceiptImageContent(
-                    binary_payload=BinaryPayload(
-                        content=b"image-bytes",
-                        declared_mime_types=("image/png",),
-                    )
-                ),
-                printer_name=printer.name,
-            )
-        )
+    result = service.print_rendered_document(RenderedDocument(content=b"document", data_type="RAW"))
 
-        self.assertEqual(result.printer_name, printer.name)
-        self.assertEqual(image_renderer.calls, [(b"image-bytes", "image/png")])
-        self.assertEqual(driver.raw_jobs[0][1], b"image-receipt")
-
-    def test_open_cash_drawer_checks_printer_capability_not_default_transport_policy(self) -> None:
-        printer = PrinterDevice(
-            name="EPSON TM-T20III",
-            driver_key=FakePrinterDriver.metadata.key,
-            is_default=True,
-            preferred_transport=PrinterTransport.RAW,
-            capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
-        )
-        driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
-        service = make_service(driver)
-
-        result = service.open_cash_drawer()
-
-        self.assertEqual(result.printer_name, printer.name)
-        self.assertEqual(driver.drawer_pulses, [printer.name])
-
-    def test_print_receipt_rejects_non_raw_printers(self) -> None:
-        office_printer = PrinterDevice(
-            name="HP LaserJet",
-            driver_key=FakePrinterDriver.metadata.key,
-            is_default=True,
-            preferred_transport=PrinterTransport.DOCUMENT,
-            capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
-        )
-        renderer = FakeStructuredReceiptRenderer()
-        service = make_service(
-            FakePrinterDriver(devices=(office_printer,), default_name=office_printer.name),
-            structured_receipt_renderer=renderer,
-        )
-
-        with self.assertRaisesRegex(PrinterServiceError, "RAW receipt printing"):
-            service.print_receipt_data(
-                {
-                    "orderlines": [{"product_name": "Coffee", "qty": 1, "price_display": "2.50"}],
-                    "amount_tax": 0,
-                    "amount_total": 2.50,
-                }
-            )
-
-    def test_print_rendered_document_uses_default_printer_name_when_configured(self) -> None:
-        primary = PrinterDevice(
-            name="Back Office",
-            driver_key=FakePrinterDriver.metadata.key,
-            preferred_transport=PrinterTransport.DOCUMENT,
-            capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
-        )
-        kitchen = PrinterDevice(
-            name="Kitchen Receipt Printer",
-            driver_key=FakePrinterDriver.metadata.key,
-            preferred_transport=PrinterTransport.RAW,
-            capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
-        )
-        driver = FakePrinterDriver(devices=(primary, kitchen), default_name=primary.name)
-        service = make_service(driver, default_printer_name=kitchen.name)
-
-        result = service.print_rendered_document(RenderedDocument(content=b"document", data_type="RAW"))
-
-        self.assertEqual(result.printer_name, kitchen.name)
-        self.assertEqual(driver.document_jobs[0][0], kitchen.name)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert result.printer_name == kitchen.name
+    assert driver.document_jobs[0][0] == kitchen.name

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import unittest
 from datetime import timedelta
 from pathlib import Path
-from tempfile import TemporaryDirectory
+
+import pytest
 
 from iot_agent.config import AgentSettings
 from iot_agent.gateway.connector import GatewayConnector
@@ -21,128 +21,128 @@ from iot_agent.security.tls import TlsContextFactory
 from iot_agent.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
-class GatewayConnectorTests(unittest.IsolatedAsyncioTestCase):
-    async def test_connector_stays_disconnected_without_enrollment(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            store = RuntimeStore(_database_path(temp_dir))
-            store.initialize()
-            connector = GatewayConnector(
-                settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
-                enrollment_service=FakeEnrollmentService(None),
-                tls_context_factory=TlsContextFactory(AgentSettings()),
-                snapshot_provider=_snapshot_provider,
-                gateway_repository=GatewayRepository(store),
-                command_dispatcher=FakeCommandDispatcher(),
-                http_client_factory=lambda **kwargs: FakeAsyncHttpClient(),
+@pytest.mark.anyio
+async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -> None:
+    store = RuntimeStore(_database_path(tmp_path))
+    store.initialize()
+    connector = GatewayConnector(
+        settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
+        enrollment_service=FakeEnrollmentService(None),
+        tls_context_factory=TlsContextFactory(AgentSettings()),
+        snapshot_provider=_snapshot_provider,
+        gateway_repository=GatewayRepository(store),
+        command_dispatcher=FakeCommandDispatcher(),
+        http_client_factory=lambda **kwargs: FakeAsyncHttpClient(),
+    )
+
+    await connector.sync_once()
+
+    assert connector.current_status().state is UpstreamConnectionState.DISCONNECTED
+
+
+@pytest.mark.anyio
+async def test_connector_marks_online_after_successful_status_sync(tmp_path: Path) -> None:
+    enrollment = GatewayEnrollmentRecord(
+        access_token="upstream-token",
+        enrolled_at=utc_now(),
+        status_url="https://controller.example/status",
+        events_url="wss://controller.example/events",
+        protocol_version=GATEWAY_PROTOCOL_VERSION,
+    )
+    http_client = FakeAsyncHttpClient(
+        response_payload={
+            "protocol_version": GATEWAY_PROTOCOL_VERSION,
+            "controller_name": "Controller",
+            "controller_instance_id": "controller-1",
+        }
+    )
+    store = RuntimeStore(_database_path(tmp_path))
+    store.initialize()
+    connector = GatewayConnector(
+        settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
+        enrollment_service=FakeEnrollmentService(enrollment),
+        tls_context_factory=TlsContextFactory(AgentSettings()),
+        snapshot_provider=_snapshot_provider,
+        gateway_repository=GatewayRepository(store),
+        command_dispatcher=FakeCommandDispatcher(),
+        http_client_factory=lambda **kwargs: http_client,
+    )
+
+    await connector.sync_once()
+
+    assert connector.current_status().state is UpstreamConnectionState.ONLINE
+    assert http_client.requests[0][0] == "https://controller.example/status"
+    assert connector.current_status().controller_name == "Controller"
+
+
+@pytest.mark.anyio
+async def test_dispatcher_accepts_remote_print_job_and_persists_response(tmp_path: Path) -> None:
+    store = RuntimeStore(_database_path(tmp_path))
+    store.initialize()
+    repository = GatewayRepository(store)
+    dispatcher = GatewayCommandDispatcher(
+        job_service=StubJobService(),
+        gateway_repository=repository,
+    )
+    enrollment = GatewayEnrollmentRecord(
+        access_token="token",
+        enrolled_at=utc_now(),
+        granted_scopes=(AccessScope.JOBS_SUBMIT,),
+    )
+    from iot_agent.gateway.protocol import ControllerSubmitPrintJobMessage
+
+    message = ControllerSubmitPrintJobMessage.model_validate(
+        {
+            "type": "controller.command.submit_print_job",
+            "message_id": "msg_1",
+            "command_id": "cmd_1",
+            "payload": {
+                "content": {"kind": "text", "text": "Hello gateway"},
+                "target": {"printer_name": "Kitchen Printer"},
+            },
+        }
+    )
+
+    await dispatcher.handle_submit_print_job(message, enrollment=enrollment)
+
+    record = repository.get_inbound_command("cmd_1")
+    assert record is not None
+    assert record.state.value == "accepted"
+    outbox = repository.list_pending_outbox()
+    assert len(outbox) == 1
+    assert outbox[0].message_type == "agent.command.accepted"
+
+
+@pytest.mark.anyio
+async def test_runtime_event_forwarder_enqueues_runtime_event_messages(tmp_path: Path) -> None:
+    store = RuntimeStore(_database_path(tmp_path))
+    store.initialize()
+    repository = GatewayRepository(store)
+    event_hub = EventHub()
+    forwarder = GatewayRuntimeEventForwarder(
+        event_hub=event_hub,
+        gateway_repository=repository,
+    )
+    worker = asyncio.create_task(forwarder.run_forever())
+    try:
+        await asyncio.sleep(0)
+        await event_hub.publish(
+            JobEventRecord(
+                sequence=7,
+                resource_id="job_123",
+                event_type="job.succeeded",
+                occurred_at=utc_now(),
+                payload={"job_id": "job_123"},
             )
+        )
+        await asyncio.sleep(0)
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
-            await connector.sync_once()
-
-            self.assertEqual(connector.current_status().state, UpstreamConnectionState.DISCONNECTED)
-
-    async def test_connector_marks_online_after_successful_status_sync(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            enrollment = GatewayEnrollmentRecord(
-                access_token="upstream-token",
-                enrolled_at=utc_now(),
-                status_url="https://controller.example/status",
-                events_url="wss://controller.example/events",
-                protocol_version=GATEWAY_PROTOCOL_VERSION,
-            )
-            http_client = FakeAsyncHttpClient(
-                response_payload={
-                    "protocol_version": GATEWAY_PROTOCOL_VERSION,
-                    "controller_name": "Controller",
-                    "controller_instance_id": "controller-1",
-                }
-            )
-            store = RuntimeStore(_database_path(temp_dir))
-            store.initialize()
-            connector = GatewayConnector(
-                settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
-                enrollment_service=FakeEnrollmentService(enrollment),
-                tls_context_factory=TlsContextFactory(AgentSettings()),
-                snapshot_provider=_snapshot_provider,
-                gateway_repository=GatewayRepository(store),
-                command_dispatcher=FakeCommandDispatcher(),
-                http_client_factory=lambda **kwargs: http_client,
-            )
-
-            await connector.sync_once()
-
-            self.assertEqual(connector.current_status().state, UpstreamConnectionState.ONLINE)
-            self.assertEqual(http_client.requests[0][0], "https://controller.example/status")
-            self.assertEqual(connector.current_status().controller_name, "Controller")
-
-
-class GatewayCommandDispatcherTests(unittest.IsolatedAsyncioTestCase):
-    async def test_dispatcher_accepts_remote_print_job_and_persists_response(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            store = RuntimeStore(_database_path(temp_dir))
-            store.initialize()
-            repository = GatewayRepository(store)
-            dispatcher = GatewayCommandDispatcher(
-                job_service=StubJobService(),
-                gateway_repository=repository,
-            )
-            enrollment = GatewayEnrollmentRecord(
-                access_token="token",
-                enrolled_at=utc_now(),
-                granted_scopes=(AccessScope.JOBS_SUBMIT,),
-            )
-            from iot_agent.gateway.protocol import ControllerSubmitPrintJobMessage
-
-            message = ControllerSubmitPrintJobMessage.model_validate(
-                {
-                    "type": "controller.command.submit_print_job",
-                    "message_id": "msg_1",
-                    "command_id": "cmd_1",
-                    "payload": {
-                        "content": {"kind": "text", "text": "Hello gateway"},
-                        "target": {"printer_name": "Kitchen Printer"},
-                    },
-                }
-            )
-
-            await dispatcher.handle_submit_print_job(message, enrollment=enrollment)
-
-            record = repository.get_inbound_command("cmd_1")
-            self.assertIsNotNone(record)
-            self.assertEqual(record.state.value, "accepted")
-            outbox = repository.list_pending_outbox()
-            self.assertEqual(len(outbox), 1)
-            self.assertEqual(outbox[0].message_type, "agent.command.accepted")
-
-    async def test_runtime_event_forwarder_enqueues_runtime_event_messages(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            store = RuntimeStore(_database_path(temp_dir))
-            store.initialize()
-            repository = GatewayRepository(store)
-            event_hub = EventHub()
-            forwarder = GatewayRuntimeEventForwarder(
-                event_hub=event_hub,
-                gateway_repository=repository,
-            )
-            worker = asyncio.create_task(forwarder.run_forever())
-            try:
-                await asyncio.sleep(0)
-                await event_hub.publish(
-                    JobEventRecord(
-                        sequence=7,
-                        resource_id="job_123",
-                        event_type="job.succeeded",
-                        occurred_at=utc_now(),
-                        payload={"job_id": "job_123"},
-                    )
-                )
-                await asyncio.sleep(0)
-            finally:
-                worker.cancel()
-                await asyncio.gather(worker, return_exceptions=True)
-
-            outbox = repository.list_pending_outbox()
-            self.assertEqual(len(outbox), 1)
-            self.assertEqual(outbox[0].message_type, "agent.runtime.event")
+    outbox = repository.list_pending_outbox()
+    assert len(outbox) == 1
+    assert outbox[0].message_type == "agent.runtime.event"
 
 
 class FakeEnrollmentService:
@@ -245,8 +245,8 @@ class StubJobService:
         return self.job
 
 
-def _database_path(temp_dir: str) -> Path:
-    return Path(temp_dir) / "runtime.sqlite3"
+def _database_path(temp_dir: Path) -> Path:
+    return temp_dir / "runtime.sqlite3"
 
 
 def _snapshot_provider() -> dict[str, object]:
@@ -288,7 +288,3 @@ def _snapshot_provider() -> dict[str, object]:
         },
         "observability": {},
     }
-
-
-if __name__ == "__main__":
-    unittest.main()
