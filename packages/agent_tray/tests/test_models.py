@@ -98,6 +98,23 @@ def test_snapshot_with_error_preserves_counts_and_marks_offline() -> None:
     assert offline.last_error == "Connection refused"
 
 
+def test_snapshot_with_error_marks_spawn_startup_as_starting() -> None:
+    snapshot = TraySnapshot.initial(
+        title="IoT Agent",
+        links=_links(),
+        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING),
+    )
+
+    starting = snapshot.with_error(
+        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING),
+        message="timed out",
+    )
+
+    assert not starting.connected
+    assert starting.level is TrayStatusLevel.STARTING
+    assert starting.last_error == "timed out"
+
+
 def test_snapshot_with_event_captures_humanized_detail() -> None:
     snapshot = TraySnapshot.initial(
         title="IoT Agent",
