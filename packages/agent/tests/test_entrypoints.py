@@ -25,13 +25,11 @@ def test_cli_serve_accepts_explicit_config_path(tmp_path, mocker) -> None:
     fake_container = type(
         "FakeContainer",
         (),
-        {"tls_context_factory": None},
+        {},
     )()
 
     mocked_build_container = mocker.patch("iot_agent.cli.build_container", return_value=fake_container)
-    mocked_create_app = mocker.patch("iot_agent.cli.create_app", return_value="app")
-    uvicorn_run = mocker.Mock()
-    mocker.patch.dict("sys.modules", {"uvicorn": type("UvicornModule", (), {"run": uvicorn_run})()})
+    mocked_serve = mocker.patch("iot_agent.cli.serve_agent")
 
     from iot_agent.cli import app
 
@@ -41,5 +39,4 @@ def test_cli_serve_accepts_explicit_config_path(tmp_path, mocker) -> None:
     called_settings = mocked_build_container.call_args.args[0]
     assert isinstance(called_settings, AgentSettings)
     assert called_settings.port == 8123
-    mocked_create_app.assert_called_once()
-    uvicorn_run.assert_called_once()
+    mocked_serve.assert_called_once_with(called_settings, container=fake_container)

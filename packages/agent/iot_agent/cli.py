@@ -7,8 +7,8 @@ import typer
 
 from .container import build_container
 from .db import DatabaseMigrationError, DatabaseMigrator
-from .main import create_app
 from .config import AgentSettings, load_settings
+from .server import serve as serve_agent
 
 app = typer.Typer(
     add_completion=False,
@@ -54,18 +54,8 @@ def serve(
     config: ConfigOption = None,
 ) -> None:
     """Run the IoT Agent API server."""
-    import uvicorn
-
     settings = _load_cli_settings(config)
-    container = build_container(settings)
-    uvicorn.run(
-        create_app(settings=settings, container=container),
-        host=settings.host,
-        port=settings.port,
-        log_level=settings.log_level.lower(),
-        reload=False,
-        **(container.tls_context_factory.server_options() if container.tls_context_factory is not None else {}),
-    )
+    serve_agent(settings, container=build_container(settings))
 
 
 @db_app.command("upgrade")

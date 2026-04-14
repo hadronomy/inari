@@ -9,6 +9,8 @@ The tray app is intentionally separate from the headless agent service:
 - it can either monitor an external agent, manage a local background process, or control a platform service
 - it now uses a Qt-based tray shell through `PySide6`, which gives us a more consistent cross-platform tray experience than the old `pystray` backend
 
+For the Windows packaging workflow that builds the tray launcher and packaged agent service host into an MSIX, see [packaging/windows/README.md](../../packaging/windows/README.md).
+
 The tray is now WebSocket-first for live state:
 
 - it bootstraps and reconciles with HTTP

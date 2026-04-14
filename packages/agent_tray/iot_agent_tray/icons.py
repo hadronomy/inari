@@ -11,7 +11,52 @@ def build_tray_icon(snapshot: TraySnapshot, *, size: int = ICON_SIZE) -> Image.I
     glyph_fill, glyph_detail, glyph_shadow, accent = _palette(snapshot.level)
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
+    _draw_gateway_glyph(
+        draw,
+        size=size,
+        glyph_fill=glyph_fill,
+        glyph_detail=glyph_detail,
+        glyph_shadow=glyph_shadow,
+    )
 
+    dot_size = max(11, size // 5)
+    dot_margin = max(4, size // 14)
+    draw.ellipse(
+        (
+            size - dot_size - dot_margin,
+            size - dot_size - dot_margin,
+            size - dot_margin,
+            size - dot_margin,
+        ),
+        fill=accent,
+    )
+
+    return image
+
+def build_packaged_app_icon(*, size: int = ICON_SIZE) -> Image.Image:
+    glyph_fill = (246, 248, 250, 238)
+    glyph_detail = (104, 116, 128, 232)
+    glyph_shadow = (0, 0, 0, 58)
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    _draw_gateway_glyph(
+        draw,
+        size=size,
+        glyph_fill=glyph_fill,
+        glyph_detail=glyph_detail,
+        glyph_shadow=glyph_shadow,
+    )
+    return image
+
+
+def _draw_gateway_glyph(
+    draw: ImageDraw.ImageDraw,
+    *,
+    size: int,
+    glyph_fill: tuple[int, int, int, int],
+    glyph_detail: tuple[int, int, int, int],
+    glyph_shadow: tuple[int, int, int, int],
+) -> None:
     center_left = size * 0.32
     center_top = size * 0.30
     center_right = size * 0.68
@@ -120,20 +165,6 @@ def build_tray_icon(snapshot: TraySnapshot, *, size: int = ICON_SIZE) -> Image.I
         shadow=glyph_shadow,
         shadow_offset=shadow_offset,
     )
-
-    dot_size = max(11, size // 5)
-    dot_margin = max(4, size // 14)
-    draw.ellipse(
-        (
-            size - dot_size - dot_margin,
-            size - dot_size - dot_margin,
-            size - dot_margin,
-            size - dot_margin,
-        ),
-        fill=accent,
-    )
-
-    return image
 
 
 def _draw_shadowed_rounded_rectangle(

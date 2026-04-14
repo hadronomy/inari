@@ -12,7 +12,9 @@ The agent now runs on top of a proper runtime layer with:
 - persisted job and device history
 - built-in gateway identity, scoped local auth, and optional managed upstream mode
 
-For the current external controller contract, see [docs/gateway_protocol.md](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/docs/gateway_protocol.md). For supported deployment stacks with Caddy, ZITADEL, and step-ca, see [docs/managed_gateway_stacks.md](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/docs/managed_gateway_stacks.md).
+For the Windows packaging workflow that builds an MSIX with the tray and packaged service host, see [packaging/windows/README.md](../../packaging/windows/README.md).
+
+For the current external controller contract, see [docs/gateway_protocol.md](../../docs/gateway_protocol.md). For supported deployment stacks with Caddy, ZITADEL, and step-ca, see [docs/managed_gateway_stacks.md](../../docs/managed_gateway_stacks.md).
 
 ## Highlights
 
@@ -233,7 +235,7 @@ uv run --directory packages/agent iot-agent db upgrade
 uv run --directory packages/agent iot-agent db backup
 ```
 
-For developer migration work inside `packages/agent`, the repo also includes [alembic.ini](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/packages/agent/alembic.ini), which points at the packaged migration environment under `iot_agent/db/alembic`. Its `sqlalchemy.url` is an explicit developer placeholder, not the authoritative runtime database location; the agent injects the real configured database URL in code during startup and `iot-agent db ...` commands.
+For developer migration work inside `packages/agent`, the repo also includes [alembic.ini](./alembic.ini), which points at the packaged migration environment under `iot_agent/db/alembic`. Its `sqlalchemy.url` is an explicit developer placeholder, not the authoritative runtime database location; the agent injects the real configured database URL in code during startup and `iot-agent db ...` commands.
 
 ## Test
 
@@ -268,8 +270,8 @@ uv run --directory packages/agent iot-agent-generate-config
 
 That writes:
 
-- [schemas/iot-agent-config.schema.json](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/packages/agent/schemas/iot-agent-config.schema.json)
-- [config.example.toml](C:/Users/pablo/.codex/worktrees/2eb5/odoo_iot_alt/packages/agent/config.example.toml)
+- [schemas/iot-agent-config.schema.json](./schemas/iot-agent-config.schema.json)
+- [config.example.toml](./config.example.toml)
 
 `config.example.toml` includes a Taplo schema reference, so editors that support Taplo can validate and autocomplete the file directly.
 
