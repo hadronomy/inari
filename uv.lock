@@ -6,7 +6,6 @@ members = [
     "albatross",
     "iot-agent",
     "iot-agent-tray",
-    "iot-agent-windows-installer",
     "pos-iot-bridge",
 ]
 
@@ -466,7 +465,7 @@ wheels = [
 
 [[package]]
 name = "iot-agent"
-version = "1.17.0a1"
+version = "1.18.0a1"
 source = { editable = "packages/agent" }
 dependencies = [
     { name = "alembic" },
@@ -541,7 +540,7 @@ dev = [
 
 [[package]]
 name = "iot-agent-tray"
-version = "0.3.0a1"
+version = "0.3.1a1"
 source = { editable = "packages/agent_tray" }
 dependencies = [
     { name = "httpx" },
@@ -586,39 +585,6 @@ dev = [
     { name = "pytest-timeout", specifier = ">=2.4.0,<3.0.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0,<4.0.0" },
     { name = "respx", specifier = ">=0.22.0,<1.0.0" },
-]
-
-[[package]]
-name = "iot-agent-windows-installer"
-version = "0.1.0a1"
-source = { editable = "packages/windows_installer" }
-dependencies = [
-    { name = "iot-agent" },
-    { name = "iot-agent-tray" },
-    { name = "packaging" },
-    { name = "pydantic" },
-    { name = "typer" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-mock" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "iot-agent", editable = "packages/agent" },
-    { name = "iot-agent-tray", editable = "packages/agent_tray" },
-    { name = "packaging", specifier = ">=25.0,<26.0" },
-    { name = "pydantic", specifier = ">=2.11.0,<3.0.0" },
-    { name = "typer", specifier = ">=0.19.2,<1.0.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.3.5,<9.0.0" },
-    { name = "pytest-mock", specifier = ">=3.14.1,<4.0.0" },
 ]
 
 [[package]]

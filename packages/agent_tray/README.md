@@ -9,8 +9,6 @@ The tray app is intentionally separate from the headless agent service:
 - it can either monitor an external agent, manage a local background process, or control a platform service
 - it now uses a Qt-based tray shell through `PySide6`, which gives us a more consistent cross-platform tray experience than the old `pystray` backend
 
-For the Windows packaging workflow that builds the tray launcher and packaged agent service host into an MSIX, see [packaging/windows/README.md](../../packaging/windows/README.md).
-
 The tray is now WebSocket-first for live state:
 
 - it bootstraps and reconciles with HTTP
@@ -33,7 +31,6 @@ The tray expects a desktop session with a visible system tray available to Qt.
 ```env
 IOT_AGENT_TRAY_AGENT_API_BASE_URL=http://127.0.0.1:7310
 IOT_AGENT_TRAY_CONTROL_MODE=spawn
-IOT_AGENT_TRAY_SERVICE_NAME=IoT Agent
 IOT_AGENT_TRAY_SERVICE_SCOPE=system
 IOT_AGENT_TRAY_AUTO_START_AGENT=true
 IOT_AGENT_TRAY_AUTH_CLIENT_NAME=iot-agent-tray
@@ -52,6 +49,12 @@ Control modes:
   - macOS: `launchctl`
 - `monitor`: the tray only observes an already-running agent
 
+In `service` mode, the tray now defaults to the same platform-native service identifier that the agent CLI installs:
+
+- Windows: `IoTAgentService`
+- Linux: `iot-agent.service`
+- macOS: `io.iot-agent.service`
+
 When `spawn` mode cannot boot the local agent, the tray writes the launcher output to `logs/agent-launch.log` so early startup failures are visible even before the agent itself configures logging.
 
 By default, quitting the tray also stops the tray-managed local agent process in `spawn` mode.
@@ -60,5 +63,5 @@ By default, quitting the tray also stops the tray-managed local agent process in
 
 - Windows service mode uses the configured service name directly.
 - Linux service mode expects a `systemd` unit name such as `iot-agent.service`.
-- macOS service mode expects a `launchd` label such as `com.example.iot-agent`.
+- macOS service mode expects a `launchd` label such as `io.iot-agent.service`.
 - Opening the log directory uses the platform-native opener when available: `start`, `xdg-open`, or `open`.

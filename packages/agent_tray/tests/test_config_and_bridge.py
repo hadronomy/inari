@@ -125,6 +125,15 @@ def test_settings_derive_related_agent_urls() -> None:
     assert settings.agent_events_url == "ws://localhost:7310/events"
 
 
+def test_settings_default_service_name_tracks_platform_defaults(monkeypatch) -> None:
+    monkeypatch.setattr("iot_agent.service.models.platform.system", lambda: "Linux")
+
+    settings = TraySettings()
+
+    assert settings.service_name == "iot-agent.service"
+    assert settings.service_scope == "system"
+
+
 def test_create_tray_host_uses_qt_backend() -> None:
     host = create_tray_host(TraySettings())
 

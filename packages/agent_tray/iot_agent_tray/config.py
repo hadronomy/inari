@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from iot_agent.service.models import DEFAULT_SERVICE_SCOPE, default_service_name
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 TrayControlMode = Literal["monitor", "spawn", "service"]
@@ -23,8 +24,8 @@ class TraySettings(BaseSettings):
     title: str = "IoT Agent"
     agent_api_base_url: str = "http://127.0.0.1:7310"
     control_mode: TrayControlMode = "spawn"
-    service_name: str = "IoT Agent"
-    service_scope: TrayServiceScope = "system"
+    service_name: str = Field(default_factory=default_service_name)
+    service_scope: TrayServiceScope = DEFAULT_SERVICE_SCOPE
     log_level: LogLevel = "INFO"
     auto_start_agent: bool = True
     auth_client_name: str = "iot-agent-tray"
