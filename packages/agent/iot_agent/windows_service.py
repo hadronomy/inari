@@ -126,6 +126,8 @@ def _load_service_settings(config_path: Path | str | None = None) -> AgentSettin
     resolved_config_path = Path(config_path).expanduser().resolve() if config_path is not None else None
     if resolved_config_path is None:
         resolved_config_path = get_windows_service_config_path()
+    if resolved_config_path is not None and not resolved_config_path.exists():
+        return AgentSettings.model_validate({"path_profile": "production"})
     return load_settings(config_path=resolved_config_path)
 
 

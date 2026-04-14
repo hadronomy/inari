@@ -61,7 +61,13 @@ def test_windows_service_manager_install_persists_config_path(tmp_path, mocker) 
 
     message = manager.install()
 
-    assert message == "Installed Windows service 'IoTAgentService'."
+    assert message == (
+        "Installed Windows service 'IoTAgentService'. "
+        f"Wrote default config to {tmp_path / 'iot-agent.toml'}."
+    )
+    config_path = tmp_path / "iot-agent.toml"
+    assert config_path.exists()
+    assert not config_path.read_text(encoding="utf-8").startswith("#:schema")
     fake_win32serviceutil.HandleCommandLine.assert_called_once_with(
         fake_service_class,
         argv=["iot-agent-windows-service", "--startup", "delayed", "install"],
@@ -121,6 +127,18 @@ def test_cli_config_write_default_omits_schema_header(tmp_path) -> None:
     content = target_path.read_text(encoding="utf-8")
     assert not content.startswith("#:schema")
     assert '[paths]\nprofile = "production"' in content
+
+
+def test_cli_config_write_default_is_idempotent_without_force(tmp_path) -> None:
+    target_path = tmp_path / "iot-agent.toml"
+    target_path.write_text("custom = true\n", encoding="utf-8")
+
+    from iot_agent.cli import app
+
+    result = CliRunner().invoke(app, ["config", "write-default", "--config", str(target_path)])
+
+    assert result.exit_code == 1, result.output
+    assert target_path.read_text(encoding="utf-8") == "custom = true\n"
 
 
 def test_build_service_manager_rejects_windows_user_scope() -> None:
@@ -193,7 +211,11 @@ def test_systemd_install_writes_unit_and_enables_service(tmp_path, mocker) -> No
     message = manager.install()
 
     assert unit_path.exists()
-    assert message == f"Installed systemd unit at {unit_path}."
+    assert message == (
+        f"Installed systemd unit at {unit_path}. "
+        f"Wrote default config to {tmp_path / 'iot-agent.toml'}."
+    )
+    assert (tmp_path / "iot-agent.toml").exists()
     assert commands == [
         ("systemctl", "daemon-reload"),
         ("systemctl", "enable", "iot-agent.service"),
@@ -263,7 +285,11 @@ def test_launchd_install_writes_plist_and_bootstraps_job(tmp_path, mocker) -> No
     message = manager.install()
 
     assert plist_path.exists()
-    assert message == f"Installed launchd plist at {plist_path}."
+    assert message == (
+        f"Installed launchd plist at {plist_path}. "
+        f"Wrote default config to {tmp_path / 'iot-agent.toml'}."
+    )
+    assert (tmp_path / "iot-agent.toml").exists()
     assert commands == [
         ("launchctl", "bootout", "gui/501/io.iot-agent.service"),
         ("launchctl", "bootstrap", "gui/501", str(plist_path)),

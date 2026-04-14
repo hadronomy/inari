@@ -110,3 +110,22 @@ def test_windows_service_entrypoint_requires_windows(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="only available on Windows"):
         _import_pywin32_service_modules()
+
+
+def test_load_service_settings_falls_back_to_production_defaults_when_config_missing(mocker, tmp_path) -> None:
+    fake_servicemanager = SimpleNamespace(LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock())
+    fake_win32event = SimpleNamespace(CreateEvent=mocker.Mock(return_value="event"), SetEvent=mocker.Mock())
+    fake_win32service = SimpleNamespace(SERVICE_STOP_PENDING=3)
+    fake_win32serviceutil = SimpleNamespace(
+        GetServiceCustomOption=mocker.Mock(return_value=str(tmp_path / "missing.toml")),
+    )
+    mocker.patch(
+        "iot_agent.windows_service._import_pywin32_service_modules",
+        return_value=(fake_servicemanager, fake_win32event, fake_win32service, fake_win32serviceutil),
+    )
+
+    from iot_agent.windows_service import _load_service_settings
+
+    settings = _load_service_settings()
+
+    assert settings.path_profile == "production"

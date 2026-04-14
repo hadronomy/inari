@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from .manager import ServiceContext
+from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
 from .models import ServiceDefinition, ServiceScope, ServiceState, ServiceStatus
 
 
@@ -32,11 +32,15 @@ class LaunchdServiceManager:
         plist_path = self._plist_path()
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_parent_directories()
+        config_created = ensure_service_config_file(self.context.config_path)
         plist_path.write_bytes(self.definition().content.encode("utf-8"))
         self._safe_bootout()
         self._run(["launchctl", "bootstrap", self._domain_target(), str(plist_path)])
         self._run(["launchctl", "enable", f"{self._domain_target()}/{self.identity.launchd_label}"])
-        return f"Installed launchd plist at {plist_path}."
+        message = f"Installed launchd plist at {plist_path}."
+        if config_created:
+            message += f" Wrote default config to {self.context.config_path}."
+        return message
 
     def uninstall(self) -> str:
         plist_path = self._plist_path()
@@ -46,6 +50,7 @@ class LaunchdServiceManager:
         return f"Removed launchd job {self.identity.launchd_label!r}."
 
     def start(self) -> str:
+        validate_service_config_file(self.context.config_path)
         self._run(["launchctl", "kickstart", "-k", self._service_target()])
         return f"Started launchd job {self.identity.launchd_label!r}."
 
@@ -54,6 +59,7 @@ class LaunchdServiceManager:
         return f"Stopped launchd job {self.identity.launchd_label!r}."
 
     def restart(self) -> str:
+        validate_service_config_file(self.context.config_path)
         self._run(["launchctl", "kickstart", "-k", self._service_target()])
         return f"Restarted launchd job {self.identity.launchd_label!r}."
 

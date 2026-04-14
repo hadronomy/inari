@@ -7,7 +7,7 @@ import typer
 
 from .container import build_container
 from .db import DatabaseMigrationError, DatabaseMigrator
-from .config import AgentConfigFile, AgentSettings, PathProfile, load_settings, render_example_toml
+from .config import AgentSettings, PathProfile, load_settings, write_default_config_file
 from .server import serve as serve_agent
 from .service.manager import build_service_manager, load_service_settings, resolve_service_config_path
 from .service.models import DEFAULT_SERVICE_SCOPE, ServiceScope
@@ -258,10 +258,10 @@ def config_write_default(
         )
         raise typer.Exit(code=1)
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    document = AgentConfigFile()
-    document.paths.profile = profile
-    target_path.write_text(
-        render_example_toml(schema_path=None, config=document),
-        encoding="utf-8",
+    write_default_config_file(
+        target_path,
+        profile=profile,
+        overwrite=force,
+        schema_path=None,
     )
     typer.echo(f"Wrote default config to {target_path}")
