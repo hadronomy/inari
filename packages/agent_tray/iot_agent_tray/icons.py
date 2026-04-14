@@ -8,64 +8,127 @@ ICON_SIZE = 64
 
 
 def build_tray_icon(snapshot: TraySnapshot, *, size: int = ICON_SIZE) -> Image.Image:
-    background, panel, accent = _palette(snapshot.level)
+    glyph_fill, glyph_detail, glyph_shadow, accent = _palette(snapshot.level)
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
-    outer_margin = max(4, size // 10)
-    panel_top = outer_margin + max(2, size // 16)
-    radius = max(10, size // 5)
-    draw.rounded_rectangle(
-        (outer_margin, outer_margin, size - outer_margin, size - outer_margin),
-        radius=radius,
-        fill=background,
+    center_left = size * 0.32
+    center_top = size * 0.30
+    center_right = size * 0.68
+    center_bottom = size * 0.66
+    center_x = size * 0.50
+    center_y = size * 0.48
+    shadow_offset = max(1, size // 48)
+    stroke_width = max(3, size // 16)
+    node_radius = max(5, size // 12)
+
+    top_left_node = (size * 0.24, size * 0.22)
+    top_right_node = (size * 0.76, size * 0.22)
+    lower_left_node = (size * 0.18, size * 0.66)
+
+    _draw_connector(
+        draw,
+        start=top_left_node,
+        end=(center_left + size * 0.03, center_top + size * 0.06),
+        fill=glyph_shadow,
+        width=stroke_width,
+        offset=shadow_offset,
     )
-    draw.rounded_rectangle(
-        (outer_margin + 2, outer_margin + 2, size - outer_margin - 2, panel_top + size // 3),
-        radius=max(8, radius - 3),
-        fill=panel,
+    _draw_connector(
+        draw,
+        start=top_right_node,
+        end=(center_right - size * 0.03, center_top + size * 0.06),
+        fill=glyph_shadow,
+        width=stroke_width,
+        offset=shadow_offset,
+    )
+    _draw_connector(
+        draw,
+        start=lower_left_node,
+        end=(center_left + size * 0.04, center_bottom - size * 0.05),
+        fill=glyph_shadow,
+        width=stroke_width,
+        offset=shadow_offset,
+    )
+    _draw_connector(
+        draw,
+        start=top_left_node,
+        end=(center_left + size * 0.03, center_top + size * 0.06),
+        fill=glyph_detail,
+        width=stroke_width,
+        offset=0,
+    )
+    _draw_connector(
+        draw,
+        start=top_right_node,
+        end=(center_right - size * 0.03, center_top + size * 0.06),
+        fill=glyph_detail,
+        width=stroke_width,
+        offset=0,
+    )
+    _draw_connector(
+        draw,
+        start=lower_left_node,
+        end=(center_left + size * 0.04, center_bottom - size * 0.05),
+        fill=glyph_detail,
+        width=stroke_width,
+        offset=0,
     )
 
-    paper_left = size * 0.3
-    paper_top = size * 0.18
-    paper_right = size * 0.7
-    paper_bottom = size * 0.46
+    _draw_shadowed_rounded_rectangle(
+        draw,
+        (center_left, center_top, center_right, center_bottom),
+        radius=max(8, size // 9),
+        fill=glyph_fill,
+        shadow=glyph_shadow,
+        shadow_offset=shadow_offset,
+    )
+
+    inner_radius = max(3, size // 18)
     draw.rounded_rectangle(
-        (paper_left, paper_top, paper_right, paper_bottom),
-        radius=max(4, size // 12),
-        fill=(255, 255, 255, 240),
+        (
+            center_x - size * 0.08,
+            center_y - size * 0.08,
+            center_x + size * 0.08,
+            center_y + size * 0.08,
+        ),
+        radius=inner_radius,
+        fill=glyph_detail,
     )
 
-    body_left = size * 0.2
-    body_top = size * 0.35
-    body_right = size * 0.8
-    body_bottom = size * 0.74
-    draw.rounded_rectangle(
-        (body_left, body_top, body_right, body_bottom),
-        radius=max(6, size // 10),
-        fill=(244, 247, 250, 245),
+    _draw_shadowed_node(
+        draw,
+        center=top_left_node,
+        radius=node_radius,
+        fill=glyph_fill,
+        shadow=glyph_shadow,
+        shadow_offset=shadow_offset,
+    )
+    _draw_shadowed_node(
+        draw,
+        center=top_right_node,
+        radius=node_radius,
+        fill=glyph_fill,
+        shadow=glyph_shadow,
+        shadow_offset=shadow_offset,
+    )
+    _draw_shadowed_node(
+        draw,
+        center=lower_left_node,
+        radius=node_radius,
+        fill=glyph_fill,
+        shadow=glyph_shadow,
+        shadow_offset=shadow_offset,
     )
 
-    slot_y = int(size * 0.52)
-    draw.line(
-        (int(size * 0.34), slot_y, int(size * 0.66), slot_y),
-        fill=(94, 110, 126, 255),
-        width=max(2, size // 18),
-    )
-    draw.line(
-        (int(size * 0.34), int(size * 0.60), int(size * 0.58), int(size * 0.60)),
-        fill=(163, 174, 184, 255),
-        width=max(2, size // 24),
-    )
-
-    dot_size = max(10, size // 5)
-    dot_margin = max(6, size // 12)
+    dot_size = max(11, size // 5)
+    dot_margin = max(4, size // 14)
     draw.ellipse(
         (
-            size - outer_margin - dot_size - dot_margin,
-            size - outer_margin - dot_size - dot_margin,
-            size - outer_margin - dot_margin,
-            size - outer_margin - dot_margin,
+            size - dot_size - dot_margin,
+            size - dot_size - dot_margin,
+            size - dot_margin,
+            size - dot_margin,
         ),
         fill=accent,
     )
@@ -73,13 +136,80 @@ def build_tray_icon(snapshot: TraySnapshot, *, size: int = ICON_SIZE) -> Image.I
     return image
 
 
-def _palette(level: TrayStatusLevel) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]:
+def _draw_shadowed_rounded_rectangle(
+    draw: ImageDraw.ImageDraw,
+    bounds: tuple[float, float, float, float],
+    *,
+    radius: int,
+    fill: tuple[int, int, int, int],
+    shadow: tuple[int, int, int, int],
+    shadow_offset: int,
+) -> None:
+    left, top, right, bottom = bounds
+    draw.rounded_rectangle(
+        (
+            left + shadow_offset,
+            top + shadow_offset,
+            right + shadow_offset,
+            bottom + shadow_offset,
+        ),
+        radius=radius,
+        fill=shadow,
+    )
+    draw.rounded_rectangle(bounds, radius=radius, fill=fill)
+
+
+def _draw_shadowed_node(
+    draw: ImageDraw.ImageDraw,
+    *,
+    center: tuple[float, float],
+    radius: int,
+    fill: tuple[int, int, int, int],
+    shadow: tuple[int, int, int, int],
+    shadow_offset: int,
+) -> None:
+    x, y = center
+    shadow_bounds = (
+        x - radius + shadow_offset,
+        y - radius + shadow_offset,
+        x + radius + shadow_offset,
+        y + radius + shadow_offset,
+    )
+    bounds = (x - radius, y - radius, x + radius, y + radius)
+    draw.ellipse(shadow_bounds, fill=shadow)
+    draw.ellipse(bounds, fill=fill)
+
+
+def _draw_connector(
+    draw: ImageDraw.ImageDraw,
+    *,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    fill: tuple[int, int, int, int],
+    width: int,
+    offset: int,
+) -> None:
+    draw.line(
+        (
+            start[0] + offset,
+            start[1] + offset,
+            end[0] + offset,
+            end[1] + offset,
+        ),
+        fill=fill,
+        width=width,
+    )
+
+
+def _palette(
+    level: TrayStatusLevel,
+) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]:
     palettes = {
-        TrayStatusLevel.ONLINE: ((21, 108, 74, 255), (49, 145, 104, 255), (145, 255, 196, 255)),
-        TrayStatusLevel.BUSY: ((16, 84, 147, 255), (39, 120, 201, 255), (157, 214, 255, 255)),
-        TrayStatusLevel.DEGRADED: ((171, 98, 20, 255), (214, 138, 40, 255), (255, 216, 145, 255)),
-        TrayStatusLevel.OFFLINE: ((130, 38, 53, 255), (181, 57, 79, 255), (255, 167, 187, 255)),
-        TrayStatusLevel.STARTING: ((82, 63, 168, 255), (116, 92, 219, 255), (202, 194, 255, 255)),
-        TrayStatusLevel.STOPPED: ((77, 83, 95, 255), (111, 119, 136, 255), (202, 209, 222, 255)),
+        TrayStatusLevel.ONLINE: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (58, 211, 122, 255)),
+        TrayStatusLevel.BUSY: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (56, 163, 255, 255)),
+        TrayStatusLevel.DEGRADED: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (255, 179, 71, 255)),
+        TrayStatusLevel.OFFLINE: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (240, 87, 113, 255)),
+        TrayStatusLevel.STARTING: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (108, 126, 255, 255)),
+        TrayStatusLevel.STOPPED: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (163, 174, 184, 255)),
     }
     return palettes[level]
