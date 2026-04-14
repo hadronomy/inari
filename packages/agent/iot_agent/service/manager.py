@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..config import AgentSettings, load_settings
+from ..config import AgentSettings, load_settings, write_default_config_file
 from ..config_paths import resolve_default_path_bundle
 from .models import DEFAULT_SERVICE_IDENTITY, DEFAULT_SERVICE_SCOPE, ServiceDefinition, ServiceIdentity, ServiceScope, ServiceStatus
 
@@ -80,6 +80,26 @@ def load_service_settings(config_path: Path | str | None = None) -> tuple[AgentS
     if resolved_config_path.exists():
         return load_settings(config_path=resolved_config_path), resolved_config_path
     return AgentSettings.model_validate({"path_profile": "production"}), resolved_config_path
+
+
+def ensure_service_config_file(config_path: Path) -> bool:
+    if config_path.exists():
+        return False
+    write_default_config_file(
+        config_path,
+        profile="production",
+        overwrite=False,
+        schema_path=None,
+    )
+    return True
+
+
+def validate_service_config_file(config_path: Path) -> None:
+    if config_path.exists():
+        return
+    raise RuntimeError(
+        f"Config file not found at {config_path}. Run `iot-agent config write-default --config \"{config_path}\"` first."
+    )
 
 
 def build_service_manager(

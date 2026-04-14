@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from .manager import ServiceContext
+from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
 from .models import ServiceDefinition, ServiceScope, ServiceState, ServiceStatus
 
 
@@ -30,10 +30,14 @@ class SystemdServiceManager:
         unit_path = self._unit_path()
         unit_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_parent_directories()
+        config_created = ensure_service_config_file(self.context.config_path)
         unit_path.write_text(self.definition().content, encoding="utf-8")
         self._run([*self._systemctl_base_command(), "daemon-reload"])
         self._run([*self._systemctl_base_command(), "enable", self.identity.systemd_unit_name])
-        return f"Installed systemd unit at {unit_path}."
+        message = f"Installed systemd unit at {unit_path}."
+        if config_created:
+            message += f" Wrote default config to {self.context.config_path}."
+        return message
 
     def uninstall(self) -> str:
         unit_path = self._unit_path()
@@ -44,6 +48,7 @@ class SystemdServiceManager:
         return f"Removed systemd unit {self.identity.systemd_unit_name!r}."
 
     def start(self) -> str:
+        validate_service_config_file(self.context.config_path)
         self._run([*self._systemctl_base_command(), "start", self.identity.systemd_unit_name])
         return f"Started systemd unit {self.identity.systemd_unit_name!r}."
 
@@ -52,6 +57,7 @@ class SystemdServiceManager:
         return f"Stopped systemd unit {self.identity.systemd_unit_name!r}."
 
     def restart(self) -> str:
+        validate_service_config_file(self.context.config_path)
         self._run([*self._systemctl_base_command(), "restart", self.identity.systemd_unit_name])
         return f"Restarted systemd unit {self.identity.systemd_unit_name!r}."
 

@@ -620,6 +620,25 @@ def write_generated_config_artifacts(
     return schema_output_path, example_output_path
 
 
+def write_default_config_file(
+    path: Path,
+    *,
+    profile: PathProfile = "production",
+    overwrite: bool = False,
+    schema_path: str | None = None,
+) -> Path:
+    if path.exists() and not overwrite:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = AgentConfigFile()
+    document.paths.profile = profile
+    path.write_text(
+        render_example_toml(schema_path=schema_path, config=document),
+        encoding="utf-8",
+    )
+    return path
+
+
 def generate_schema_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate the IoT Agent TOML schema and example config.")
     parser.add_argument(

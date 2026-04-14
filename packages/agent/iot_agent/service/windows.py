@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .manager import ServiceContext
+from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
 from .models import ServiceDefinition, ServiceScope, ServiceState, ServiceStatus
 
 
@@ -26,6 +26,7 @@ class WindowsServiceManager:
         from ..windows_service import create_windows_service_class, set_windows_service_config_path
 
         self._ensure_parent_directories()
+        config_created = ensure_service_config_file(self.context.config_path)
         service_class = create_windows_service_class()
         win32serviceutil.HandleCommandLine(
             service_class,
@@ -37,7 +38,10 @@ class WindowsServiceManager:
             ],
         )
         set_windows_service_config_path(self.context.config_path)
-        return f"Installed Windows service {self.identity.windows_name!r}."
+        message = f"Installed Windows service {self.identity.windows_name!r}."
+        if config_created:
+            message += f" Wrote default config to {self.context.config_path}."
+        return message
 
     def uninstall(self) -> str:
         win32serviceutil = self._serviceutil()
@@ -54,6 +58,7 @@ class WindowsServiceManager:
         return f"Removed Windows service {self.identity.windows_name!r}."
 
     def start(self) -> str:
+        validate_service_config_file(self.context.config_path)
         self._serviceutil().StartService(self.identity.windows_name)
         return f"Started Windows service {self.identity.windows_name!r}."
 
@@ -62,6 +67,7 @@ class WindowsServiceManager:
         return f"Stopped Windows service {self.identity.windows_name!r}."
 
     def restart(self) -> str:
+        validate_service_config_file(self.context.config_path)
         if self.status().state in {ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING}:
             self.stop()
             self._wait_for_state(ServiceState.STOPPED, timeout_seconds=20.0)
