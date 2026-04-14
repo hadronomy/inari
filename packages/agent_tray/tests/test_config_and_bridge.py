@@ -59,6 +59,44 @@ def test_setup_background_auto_starts_spawn_mode_when_enabled() -> None:
         thread.join(timeout=1.0)
 
 
+def test_setup_background_promotes_to_service_mode_when_api_is_reachable_and_service_is_running(mocker) -> None:
+    bridge = FakeControlBridge()
+    service_bridge = FakeServiceControlBridge()
+    build_bridge = mocker.patch("iot_agent_tray.app.build_control_bridge", return_value=service_bridge)
+    application = AgentTrayApplication(
+        TraySettings(control_mode="spawn", auto_start_agent=True),
+        client=FakeTrayClient(),
+        bridge=bridge,
+        host=FakeTrayHost(),
+    )
+
+    application._setup_background()
+
+    assert application.bridge is service_bridge
+    assert bridge.start_calls == 0
+    build_bridge.assert_called()
+    application._stop_event.set()
+    for thread in application._threads:
+        thread.join(timeout=1.0)
+
+
+def test_refresh_snapshot_keeps_spawn_mode_when_service_is_not_running(mocker) -> None:
+    bridge = FakeControlBridge()
+    service_bridge = FakeServiceControlBridge(lifecycle=LifecycleState.STOPPED)
+    mocker.patch("iot_agent_tray.app.build_control_bridge", return_value=service_bridge)
+    application = AgentTrayApplication(
+        TraySettings(control_mode="spawn", auto_start_agent=True),
+        client=FakeTrayClient(),
+        bridge=bridge,
+        host=FakeTrayHost(),
+    )
+
+    application._refresh_snapshot(notify_connection=False)
+
+    assert application.bridge is bridge
+    assert application.snapshot.control.mode is ControlMode.SPAWN
+
+
 def test_apply_snapshot_swallow_tray_host_update_errors(caplog) -> None:
     host = FailingTrayHost()
     application = AgentTrayApplication(
@@ -483,7 +521,34 @@ class FakeControlBridge:
         self.start_calls += 1
         return "Started the local agent process."
 
+    def mark_ready(self) -> None:
+        return None
+
     def shutdown(self) -> None:
+        return None
+
+
+class FakeServiceControlBridge:
+    mode = ControlMode.SERVICE
+
+    def __init__(self, *, lifecycle: LifecycleState = LifecycleState.RUNNING) -> None:
+        self.lifecycle = lifecycle
+
+    def query_state(self):
+        return ControlSnapshot(
+            mode=ControlMode.SERVICE,
+            lifecycle=self.lifecycle,
+            detail="Managing platform service 'iot-agent'.",
+            can_start=self.lifecycle in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
+            can_stop=self.lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING},
+            can_restart=self.lifecycle in {
+                LifecycleState.RUNNING,
+                LifecycleState.STARTING,
+                LifecycleState.STOPPED,
+            },
+        )
+
+    def mark_ready(self) -> None:
         return None
 
 

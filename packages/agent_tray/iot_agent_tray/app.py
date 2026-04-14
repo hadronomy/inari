@@ -15,7 +15,7 @@ from iot_agent.models import LiveEventUpdateResponse, LiveSnapshotResponse, Runt
 from .bridge import AgentControlBridge, build_control_bridge
 from .client import AgentApiClient
 from .config import TraySettings
-from .models import ControlMode, ControlSnapshot, TrayLinks, TraySnapshot
+from .models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot
 from .tray_host import TrayHost, TrayMenuEntry, create_tray_host
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ class AgentTrayApplication:
         except Exception:
             pass
         else:
+            self._promote_to_service_bridge_if_available()
             logger.info("Agent API is already reachable; skipping auto-start")
             return
         control = self.bridge.query_state()
@@ -157,12 +158,26 @@ class AgentTrayApplication:
                     self._notify_connection_change(snapshot)
             else:
                 self.bridge.mark_ready()
+                self._promote_to_service_bridge_if_available()
                 control = self.bridge.query_state()
                 self._apply_status_snapshot(
                     status,
                     control=control,
                     notify_connection=notify_connection,
                 )
+
+    def _promote_to_service_bridge_if_available(self) -> None:
+        if self.settings.control_mode != "spawn" or self.bridge.mode is ControlMode.SERVICE:
+            return
+        service_settings = self.settings.model_copy(update={"control_mode": "service"})
+        candidate = build_control_bridge(service_settings)
+        control = candidate.query_state()
+        if control.mode is not ControlMode.SERVICE:
+            return
+        if control.lifecycle not in {LifecycleState.RUNNING, LifecycleState.STARTING, LifecycleState.STOPPING}:
+            return
+        self.bridge = candidate
+        logger.info("Detected an active platform service for the reachable agent API; switching tray control mode to service")
 
     def _apply_status_snapshot(
         self,
