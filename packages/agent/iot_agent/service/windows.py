@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Any
 
 from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
@@ -109,8 +110,8 @@ class WindowsServiceManager:
                 f"service_name = {self.identity.windows_name}",
                 f"display_name = {self.identity.display_name}",
                 f"description = {self.identity.description}",
-                f"host_executable = pythonservice.exe",
-                f"service_entrypoint = iot-agent-windows-service",
+                f"host_executable = {Path(sys.executable).name}",
+                "service_entrypoint = python -m iot_agent.windows_service",
                 f"config_path = {self.context.config_path}",
                 "startup = delayed-auto",
             ]
