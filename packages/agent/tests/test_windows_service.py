@@ -7,7 +7,11 @@ from iot_agent.config import AgentSettings
 
 
 def test_service_cli_uses_handle_command_line_for_management_commands(mocker, tmp_path) -> None:
-    fake_win32serviceutil = SimpleNamespace(HandleCommandLine=mocker.Mock())
+    fake_win32serviceutil = SimpleNamespace(
+        HandleCommandLine=mocker.Mock(),
+        SetServiceCustomOption=mocker.Mock(),
+        GetServiceCustomOption=mocker.Mock(return_value=None),
+    )
     fake_modules = (
         SimpleNamespace(
             Initialize=mocker.Mock(),
@@ -30,32 +34,38 @@ def test_service_cli_uses_handle_command_line_for_management_commands(mocker, tm
         mocked_service_class,
         argv=["iot-agent-windows-service", "install"],
     )
+    fake_win32serviceutil.SetServiceCustomOption.assert_called_once_with(
+        "IoTAgentService",
+        "ConfigPath",
+        str((tmp_path / "agent.toml").resolve()),
+    )
 
 
-def test_service_class_includes_config_path_in_service_exe_args(mocker, tmp_path) -> None:
+def test_service_custom_option_round_trip_uses_pywin32_storage(mocker, tmp_path) -> None:
     fake_servicemanager = SimpleNamespace(LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock())
     fake_win32event = SimpleNamespace(CreateEvent=mocker.Mock(return_value="event"), SetEvent=mocker.Mock())
     fake_win32service = SimpleNamespace(SERVICE_STOP_PENDING=3)
-
-    class FakeServiceFramework:
-        def __init__(self, args):
-            self.args = args
-
-    fake_win32serviceutil = SimpleNamespace(ServiceFramework=FakeServiceFramework)
+    fake_win32serviceutil = SimpleNamespace(
+        ServiceFramework=type("FakeServiceFramework", (), {"__init__": lambda self, args: None}),
+        SetServiceCustomOption=mocker.Mock(),
+        GetServiceCustomOption=mocker.Mock(return_value=str((tmp_path / "agent.toml").resolve())),
+    )
     mocker.patch(
         "iot_agent.windows_service._import_pywin32_service_modules",
         return_value=(fake_servicemanager, fake_win32event, fake_win32service, fake_win32serviceutil),
     )
 
-    from iot_agent.windows_service import create_windows_service_class
+    from iot_agent.windows_service import get_windows_service_config_path, set_windows_service_config_path
 
-    config_path = tmp_path / "iot-agent.toml"
-    service_class = create_windows_service_class(
-        settings=AgentSettings(),
-        config_path=config_path,
+    config_path = tmp_path / "agent.toml"
+    set_windows_service_config_path(config_path)
+
+    fake_win32serviceutil.SetServiceCustomOption.assert_called_once_with(
+        "IoTAgentService",
+        "ConfigPath",
+        str(config_path.resolve()),
     )
-
-    assert Path(config_path).resolve().as_posix() in service_class._exe_args_.replace("\\", "/")
+    assert get_windows_service_config_path() == config_path.resolve()
 
 
 def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
@@ -70,7 +80,10 @@ def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
         def ReportServiceStatus(self, status_code):
             self.status_code = status_code
 
-    fake_win32serviceutil = SimpleNamespace(ServiceFramework=FakeServiceFramework)
+    fake_win32serviceutil = SimpleNamespace(
+        ServiceFramework=FakeServiceFramework,
+        GetServiceCustomOption=mocker.Mock(return_value=None),
+    )
     mocker.patch(
         "iot_agent.windows_service._import_pywin32_service_modules",
         return_value=(fake_servicemanager, fake_win32event, fake_win32service, fake_win32serviceutil),

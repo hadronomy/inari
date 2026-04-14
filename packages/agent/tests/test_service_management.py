@@ -31,6 +31,44 @@ def test_cli_service_install_uses_service_manager(tmp_path, mocker) -> None:
     fake_manager.install.assert_called_once_with()
 
 
+def test_windows_service_manager_install_persists_config_path(tmp_path, mocker) -> None:
+    settings = AgentSettings.model_validate(
+        {
+            "path_profile": "production",
+            "data_dir": tmp_path / "data",
+            "log_dir": tmp_path / "logs",
+            "temp_dir": tmp_path / "tmp",
+            "security_state_dir": tmp_path / "security",
+            "runtime_database_path": tmp_path / "data" / "iot-agent.sqlite3",
+        }
+    )
+    fake_win32serviceutil = mocker.Mock()
+    mocker.patch("iot_agent.service.windows.WindowsServiceManager._serviceutil", return_value=fake_win32serviceutil)
+    fake_service_class = object()
+    mocker.patch("iot_agent.windows_service.create_windows_service_class", return_value=fake_service_class)
+    persist_config = mocker.patch("iot_agent.windows_service.set_windows_service_config_path")
+
+    from iot_agent.service.windows import WindowsServiceManager
+
+    manager = WindowsServiceManager(
+        build_service_context(
+            settings,
+            config_path=tmp_path / "iot-agent.toml",
+            scope="system",
+            platform_system="Windows",
+        )
+    )
+
+    message = manager.install()
+
+    assert message == "Installed Windows service 'IoTAgentService'."
+    fake_win32serviceutil.HandleCommandLine.assert_called_once_with(
+        fake_service_class,
+        argv=["iot-agent-windows-service", "--startup", "delayed", "install"],
+    )
+    persist_config.assert_called_once_with(tmp_path / "iot-agent.toml")
+
+
 def test_cli_service_status_prints_current_state(tmp_path, mocker) -> None:
     fake_manager = mocker.Mock()
     fake_manager.status.return_value = ServiceStatus(
