@@ -67,12 +67,27 @@ class PathsConfig(BaseModel):
     security_state_dir: Path | None = None
 
 
+class NetworkPrinterConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    name: str
+    host: str
+    port: int = 9100
+    is_default: bool = False
+    preferred_transport: PrinterMode = "raw"
+    cash_drawer: bool = True
+    text_enabled: bool = False
+    document_enabled: bool = False
+    encoding: str = "utf-8"
+
+
 class PrintingConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     default_printer_name: str | None = None
     default_transport: PrinterMode = "auto"
     html_enabled: bool = True
+    network_printers: list[NetworkPrinterConfig] = Field(default_factory=list)
 
 
 class RuntimeDiscoveryConfig(BaseModel):
@@ -233,6 +248,7 @@ class AgentConfigFile(BaseModel):
             "default_printer_name": self.printing.default_printer_name,
             "default_printer_mode": self.printing.default_transport,
             "html_print_enabled": self.printing.html_enabled,
+            "network_printers": [printer.model_dump(mode="python") for printer in self.printing.network_printers],
             "discovery_poll_interval_seconds": self.runtime.discovery.poll_interval_seconds,
             "scheduler_poll_interval_seconds": self.runtime.scheduler.poll_interval_seconds,
             "scheduler_batch_size": self.runtime.scheduler.batch_size,
@@ -322,6 +338,7 @@ class AgentSettings(BaseModel):
     log_level: LogLevel = "INFO"
     html_print_enabled: bool = True
     default_printer_mode: PrinterMode = "auto"
+    network_printers: list[NetworkPrinterConfig] = Field(default_factory=list)
     data_dir: Path | None = None
     temp_dir: Path | None = None
     log_dir: Path | None = None
@@ -433,6 +450,15 @@ class AgentSettings(BaseModel):
     @classmethod
     def normalize_list_values(cls, value: object) -> object:
         return _normalize_list_like(value)
+
+    @field_validator("network_printers", mode="before")
+    @classmethod
+    def normalize_network_printers(cls, value: object) -> object:
+        if isinstance(value, str):
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        return value
 
     @model_validator(mode="after")
     def apply_path_defaults(self) -> AgentSettings:

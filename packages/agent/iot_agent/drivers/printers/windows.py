@@ -16,6 +16,7 @@ from ...printers.types import (
 )
 from ..base import DeviceKind, DriverMetadata
 from .base import PrinterDriver
+from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
 
 logger = logging.getLogger(__name__)
 
@@ -177,18 +178,7 @@ class WindowsPrinterDriver(PrinterDriver):
     spooler: WindowsSpooler
     default_transport: PrinterTransport = PrinterTransport.AUTO
     raw_name_hints: frozenset[str] = field(
-        default_factory=lambda: frozenset(
-            {
-                "epson tm",
-                "tm-t",
-                "receipt",
-                "pos",
-                "esc/pos",
-                "thermal",
-                "star tsp",
-                "bixolon",
-            }
-        )
+        default_factory=lambda: RECEIPT_RAW_NAME_HINTS
     )
 
     metadata: ClassVar[DriverMetadata] = DriverMetadata(
@@ -329,10 +319,7 @@ class WindowsPrinterDriver(PrinterDriver):
         )
 
     def _guess_preferred_transport(self, printer_name: str) -> PrinterTransport:
-        normalized = printer_name.casefold()
-        if any(hint in normalized for hint in self.raw_name_hints):
-            return PrinterTransport.RAW
-        return PrinterTransport.DOCUMENT
+        return guess_preferred_transport(printer_name, raw_name_hints=self.raw_name_hints)
 
     @staticmethod
     def _ensure_transport_supported(printer: PrinterDevice, transport: PrinterTransport) -> None:

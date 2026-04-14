@@ -416,6 +416,66 @@
       "title": "MutualTlsMode",
       "type": "string"
     },
+    "NetworkPrinterConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cash_drawer": {
+          "default": true,
+          "title": "Cash Drawer",
+          "type": "boolean"
+        },
+        "document_enabled": {
+          "default": false,
+          "title": "Document Enabled",
+          "type": "boolean"
+        },
+        "encoding": {
+          "default": "utf-8",
+          "title": "Encoding",
+          "type": "string"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "is_default": {
+          "default": false,
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "port": {
+          "default": 9100,
+          "title": "Port",
+          "type": "integer"
+        },
+        "preferred_transport": {
+          "default": "raw",
+          "enum": [
+            "auto",
+            "raw",
+            "text",
+            "document"
+          ],
+          "title": "Preferred Transport",
+          "type": "string"
+        },
+        "text_enabled": {
+          "default": false,
+          "title": "Text Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "host"
+      ],
+      "title": "NetworkPrinterConfig",
+      "type": "object"
+    },
     "PathsConfig": {
       "additionalProperties": false,
       "properties": {
@@ -515,6 +575,13 @@
           "default": true,
           "title": "Html Enabled",
           "type": "boolean"
+        },
+        "network_printers": {
+          "items": {
+            "$ref": "#/definitions/NetworkPrinterConfig"
+          },
+          "title": "Network Printers",
+          "type": "array"
         }
       },
       "title": "PrintingConfig",

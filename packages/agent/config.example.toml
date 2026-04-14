@@ -22,6 +22,7 @@ profile = "auto"
 [printing]
 default_transport = "auto"
 html_enabled = true
+network_printers = []
 
 [runtime.discovery]
 poll_interval_seconds = 3.0

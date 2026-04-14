@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 TrayControlMode = Literal["monitor", "spawn", "service"]
+TrayServiceScope = Literal["system", "user"]
 
 
 class TraySettings(BaseSettings):
@@ -23,6 +24,7 @@ class TraySettings(BaseSettings):
     agent_api_base_url: str = "http://127.0.0.1:7310"
     control_mode: TrayControlMode = "spawn"
     service_name: str = "IoT Agent"
+    service_scope: TrayServiceScope = "system"
     log_level: LogLevel = "INFO"
     auto_start_agent: bool = True
     auth_client_name: str = "iot-agent-tray"

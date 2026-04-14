@@ -58,7 +58,7 @@ class ControlSnapshot:
         mode_label = {
             ControlMode.MONITOR: "Monitor",
             ControlMode.SPAWN: "Local Process",
-            ControlMode.SERVICE: "Windows Service",
+            ControlMode.SERVICE: "Service",
         }[self.mode]
         lifecycle_label = {
             LifecycleState.RUNNING: "Running",

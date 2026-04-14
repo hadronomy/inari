@@ -2,7 +2,7 @@
 
 Extensible local hardware bridge for POS and local devices.
 
-The current MVP is still Windows-printer focused, but the agent now runs on top of a proper runtime layer with:
+The agent now runs on top of a proper runtime layer with:
 
 - durable job queueing
 - background device discovery
@@ -17,8 +17,8 @@ For the current external controller contract, see [docs/gateway_protocol.md](C:/
 ## Highlights
 
 - loopback-first FastAPI service with explicit CORS allowlist
-- driver registry that can grow from Windows printers into broader IoT device support
-- Windows spooler driver isolated from the application layer
+- driver registry that now spans Windows spooler printers, CUPS printers, and configured raw socket printers
+- platform-specific printer backends isolated from the application layer
 - coherent HTTP API split into `system`, `devices`, `jobs`, and live `events`
 - built-in gateway mode so the agent can operate as its own secure local edge node
 - scoped bearer-token auth for HTTP and WebSocket endpoints
@@ -31,6 +31,8 @@ For the current external controller contract, see [docs/gateway_protocol.md](C:/
 - controller-issued enrollment-code bootstrap for seamless managed installs
 - step-ca-backed client-certificate bootstrap, issuance, and renewal through controller-issued one-time tokens
 - Caddy-compatible controller edge profile with optional or required mTLS
+- cross-platform printer discovery through Windows spooler and CUPS
+- raw TCP socket printer support for receipt and ESC/POS-style devices
 - generic print-job endpoint with typed content kinds and nested device targeting
 - receipt image pipeline that converts base64 images to monochrome ESC/POS raster commands
 - structured ESC/POS receipt renderer with configurable layout and paper control
@@ -49,6 +51,8 @@ iot_agent/
   container.py
   drivers/
     printers/
+      cups.py
+      socket.py
       windows.py
   print_jobs.py
   printer_service.py
@@ -169,6 +173,16 @@ Queued job responses expose the agent-managed job resource immediately, and the 
 - SQLite-backed gateway inbox/outbox for upstream command audit and replay
 - background discovery polling plus lease-based job recovery
 
+## Platform Support
+
+- Windows: fully supported for the agent, including Windows spooler discovery and service-friendly defaults
+- Linux: supported with CUPS discovery/printing plus optional raw socket printer targets
+- macOS: supported with CUPS discovery/printing plus optional raw socket printer targets
+
+For Linux and macOS, install the native CUPS tooling so `lp` and `lpstat` are available. The agent will use `pycups` when you install the optional `cups` extra and native bindings are available, and it falls back to the CUPS command-line tools when needed.
+
+If you want the native CUPS Python binding in a local environment, install the package with the optional extra, for example `uv sync --directory packages/agent --extra cups`.
+
 ## Security And Gateway
 
 - `gateway_exposure=loopback` is the secure default
@@ -264,6 +278,14 @@ profile = "auto"
 [printing]
 default_transport = "auto"
 html_enabled = true
+
+[[printing.network_printers]]
+name = "Kitchen Receipt Printer"
+host = "192.168.1.40"
+port = 9100
+preferred_transport = "raw"
+cash_drawer = true
+text_enabled = true
 
 [security]
 gateway_mode = "standalone"
