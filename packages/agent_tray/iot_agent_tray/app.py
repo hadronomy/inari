@@ -199,8 +199,6 @@ class AgentTrayApplication:
             TrayMenuEntry(current_snapshot.device_line, enabled=False),
             TrayMenuEntry(current_snapshot.queue_line, enabled=False),
         ]
-        if current_snapshot.error_line:
-            items.append(TrayMenuEntry(current_snapshot.error_line, enabled=False))
         items.extend(
             [
                 TrayMenuEntry.separator_item(),

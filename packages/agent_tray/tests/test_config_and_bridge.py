@@ -17,7 +17,8 @@ from iot_agent_tray.bridge import (
     build_control_bridge,
 )
 from iot_agent_tray.config import TraySettings
-from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState
+from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot
+from iot_agent_tray.qt_host import QtTrayHost
 from iot_agent_tray.tray_host import TrayMenuEntry, create_tray_host
 
 
@@ -89,6 +90,27 @@ class TrayApplicationTests(unittest.TestCase):
 
         self.assertTrue(host.stopped)
 
+    def test_build_menu_does_not_render_error_row(self) -> None:
+        application = AgentTrayApplication(
+            TraySettings(),
+            client=FakeTrayClient(),
+            bridge=MonitorAgentBridge(),
+            host=FakeTrayHost(),
+        )
+
+        baseline = application._build_menu(application.snapshot)
+        errored = application._build_menu(
+            application.snapshot.with_error(
+                control=ControlSnapshot(mode=ControlMode.MONITOR),
+                message="Connection refused",
+            )
+        )
+
+        self.assertEqual(len(baseline), len(errored))
+        self.assertEqual([entry.separator for entry in baseline], [entry.separator for entry in errored])
+        self.assertFalse(any(entry.label.startswith("Last error:") for entry in baseline if not entry.separator))
+        self.assertFalse(any(entry.label.startswith("Last error:") for entry in errored if not entry.separator))
+
 
 class TraySettingsTests(unittest.TestCase):
     def test_settings_derive_related_agent_urls(self) -> None:
@@ -104,6 +126,44 @@ class TraySettingsTests(unittest.TestCase):
         host = create_tray_host(TraySettings())
 
         self.assertEqual(type(host).__name__, "QtTrayHost")
+
+
+class QtTrayHostTests(unittest.TestCase):
+    def test_apply_update_keeps_menu_live_while_visible(self) -> None:
+        host = QtTrayHost(title="IoT Agent")
+        host._tray_icon = FakeQtTrayIcon()
+        host._menu = FakeQtMenu(visible=True)
+        host._menu_actions = [object()]
+        snapshot = _tray_snapshot()
+        menu_entries = [TrayMenuEntry("Refresh Now")]
+
+        with (
+            patch("iot_agent_tray.qt_host._image_to_qicon", return_value=object()),
+            patch("iot_agent_tray.qt_host._menu_layout_matches", return_value=True),
+            patch("iot_agent_tray.qt_host._update_menu_actions") as update_menu_actions,
+        ):
+            host._apply_update(snapshot, menu_entries)
+
+        self.assertIsNotNone(host._tray_icon.icon)
+        self.assertEqual(host._tray_icon.tooltip, snapshot.tooltip)
+        update_menu_actions.assert_called_once_with(host._menu, host._menu_actions, menu_entries)
+
+    def test_apply_update_rebuilds_menu_when_layout_changes(self) -> None:
+        host = QtTrayHost(title="IoT Agent")
+        host._tray_icon = FakeQtTrayIcon()
+        host._menu = FakeQtMenu(visible=False)
+        menu_entries = [TrayMenuEntry("Open Logs")]
+
+        with (
+            patch("iot_agent_tray.qt_host._image_to_qicon", return_value=object()),
+            patch("iot_agent_tray.qt_host._build_menu_actions", return_value=["action"]) as build_menu_actions,
+        ):
+            host._apply_update(_tray_snapshot(), menu_entries)
+
+        self.assertEqual(host._menu_actions, ["action"])
+        self.assertIsNotNone(host._tray_icon.icon)
+        self.assertEqual(host._tray_icon.tooltip, _tray_snapshot().tooltip)
+        build_menu_actions.assert_called_once_with(host._menu, menu_entries)
 
 
 class SpawnedProcessBridgeTests(unittest.TestCase):
@@ -423,10 +483,62 @@ class FakeFailingTrayClient(FakeTrayClient):
         raise TimeoutError("timed out")
 
 
+class FakeQtTrayIcon:
+    def __init__(self) -> None:
+        self.icon = None
+        self.tooltip = None
+
+    def setIcon(self, icon) -> None:
+        self.icon = icon
+
+    def setToolTip(self, tooltip: str) -> None:
+        self.tooltip = tooltip
+
+    def setContextMenu(self, menu) -> None:
+        return None
+
+    def hide(self) -> None:
+        return None
+
+
+class FakeQtMenu:
+    def __init__(self, *, visible: bool) -> None:
+        self._visible = visible
+
+    def isVisible(self) -> bool:
+        return self._visible
+
+    def clear(self) -> None:
+        return None
+
+    def addSeparator(self) -> None:
+        return None
+
+    def addAction(self, action) -> None:
+        return None
+
+    def setDefaultAction(self, action) -> None:
+        return None
+
+
 def bridge_module_sys_executable() -> str:
     import sys
 
     return sys.executable
+
+
+def _tray_snapshot() -> TraySnapshot:
+    return TraySnapshot.initial(
+        title="IoT Agent",
+        links=TrayLinks(
+            api_base_url="http://127.0.0.1:7310",
+            docs_url="http://127.0.0.1:7310/docs",
+            devices_url="http://127.0.0.1:7310/devices",
+            jobs_url="http://127.0.0.1:7310/jobs",
+            log_dir=Path("./logs"),
+        ),
+        control=ControlSnapshot(mode=ControlMode.MONITOR, lifecycle=LifecycleState.RUNNING),
+    )
 
 
 if __name__ == "__main__":
