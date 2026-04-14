@@ -1,79 +1,211 @@
 #:schema ./schemas/iot-agent-config.schema.json
 
-# Generated example configuration for iot-agent.
-# Environment variables with the IOT_AGENT_ prefix still override these values.
+# Generated configuration template for iot-agent.
+# Uncomment only the settings you want to override.
+# Commented values show the built-in default or a recommended example.
+# Environment variables with the IOT_AGENT_ prefix still override file values.
 
+# Schema version for this TOML format.
 config_version = 1
 
+# HTTP API binding and host filtering.
 [server]
-host = "127.0.0.1"
-port = 7310
-trusted_hosts = ["127.0.0.1", "localhost"]
+# Bind host for the local HTTP API.
+# host = "127.0.0.1"
+# Bind port for the local HTTP API.
+# port = 7310
+# Allowed Host headers for incoming requests.
+# trusted_hosts = ["127.0.0.1", "localhost"]
 
+# Browser access policy for local UI clients such as Odoo or the tray.
 [cors]
-allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
+# Browser origins allowed to call the local API.
+# allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
 
+# Logging verbosity and log file location.
 [logging]
-level = "INFO"
+# Application log verbosity.
+# level = "INFO"
+# Directory for rotated agent logs.
+# directory = "./logs"
 
+# Filesystem locations for runtime state. Leave these commented to use OS-specific defaults.
 [paths]
-profile = "auto"
+# Choose development or production path defaults. `auto` detects based on the working directory.
+# profile = "auto"
+# Base directory for runtime state files.
+# data_dir = "./data"
+# Directory for temporary files.
+# temp_dir = "./tmp"
+# SQLite database file path.
+# runtime_database = "./data/iot-agent.sqlite3"
+# Directory for identities, enrollment state, and fallback local secrets.
+# security_state_dir = "./data/security"
 
+# Default printer behavior and optional network printer definitions.
 [printing]
-default_transport = "auto"
-html_enabled = true
-network_printers = []
+# Preferred printer when jobs do not target a specific device.
+# default_printer_name = "Kitchen Printer"
+# Default transport strategy when a driver supports more than one mode.
+# default_transport = "auto"
+# Allow HTML receipt/document rendering.
+# html_enabled = true
 
+# Repeat this block for each raw TCP or receipt printer that should be managed directly by the agent.
+# [[printing.network_printers]]
+# name = "Kitchen LAN Printer"
+# host = "192.168.1.40"
+# port = 9100
+# is_default = false
+# preferred_transport = "raw"
+# cash_drawer = true
+# text_enabled = false
+# document_enabled = false
+# encoding = "utf-8"
+
+# Device discovery cadence.
 [runtime.discovery]
-poll_interval_seconds = 3.0
+# How often the agent refreshes device discovery.
+# poll_interval_seconds = 3.0
 
+# Job scheduler tuning.
 [runtime.scheduler]
-poll_interval_seconds = 0.5
-batch_size = 32
+# How often the scheduler looks for runnable jobs.
+# poll_interval_seconds = 0.5
+# Maximum number of jobs leased per scheduling pass.
+# batch_size = 32
 
+# Job execution leases, retries, and timeouts.
 [runtime.jobs]
-max_attempts = 3
-retry_base_delay_seconds = 2
-retry_max_delay_seconds = 30
-dispatch_lease_seconds = 15
-execution_lease_seconds = 30
-heartbeat_interval_seconds = 5.0
-execution_timeout_seconds = 60.0
-lease_recovery_interval_seconds = 5.0
+# Maximum attempts before a job is marked failed.
+# max_attempts = 3
+# Initial retry delay after a failed job attempt.
+# retry_base_delay_seconds = 2
+# Upper bound for exponential retry delays.
+# retry_max_delay_seconds = 30
+# How long a dispatch lease is held before another worker may reclaim it.
+# dispatch_lease_seconds = 15
+# How long a worker execution lease remains valid without a heartbeat.
+# execution_lease_seconds = 30
+# How often active workers refresh their job lease.
+# heartbeat_interval_seconds = 5.0
+# Hard timeout for a single job execution.
+# execution_timeout_seconds = 60.0
+# How often the agent scans for expired leases.
+# lease_recovery_interval_seconds = 5.0
 
+# Local API exposure and local-auth defaults.
 [security]
-gateway_mode = "standalone"
-gateway_exposure = "loopback"
-allow_loopback_bootstrap = true
-https_redirect_enabled = true
-secret_store_service_name = "iot-agent"
+# Run purely local (`standalone`) or connect to an upstream controller (`managed`).
+# gateway_mode = "standalone"
+# Expose the API only on loopback or to the LAN.
+# gateway_exposure = "loopback"
+# Allow local bootstrap token minting for trusted loopback clients.
+# allow_loopback_bootstrap = true
+# Redirect HTTP to HTTPS when LAN TLS is enabled.
+# https_redirect_enabled = true
+# OS credential store namespace used by the agent.
+# secret_store_service_name = "iot-agent"
 
+# Short-lived tokens issued to local clients like the tray.
 [security.local_tokens]
-ttl_seconds = 3600
-audience = "iot-agent.local"
+# Lifetime of locally issued bearer tokens in seconds.
+# ttl_seconds = 3600
+# Audience claim for locally issued tokens.
+# audience = "iot-agent.local"
+# Issuer claim for locally issued tokens.
+# issuer = "iot-agent.local"
 
+# Inbound TLS files for LAN exposure. Loopback-only deployments usually leave these unset.
+[security.tls]
+# PEM certificate file presented by the local API.
+# cert_path = "./certs/agent.crt"
+# Private key for the local API certificate.
+# key_path = "./certs/agent.key"
+# Optional custom CA bundle trusted by the agent.
+# ca_path = "./certs/ca.crt"
+
+# Managed-mode controller connectivity. Leave commented for standalone/local-only deployments.
 [gateway]
-auth_mode = "controller"
-certificate_mode = "controller"
-edge_provider = "direct"
-mutual_tls_mode = "disabled"
-trust_client_ca = true
+# Base URL for the external controller.
+# base_url = "https://controller.example.com"
+# Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.
+# enrollment_url = "https://bootstrap.controller.example.com/api/iot-agent/enroll"
+# Explicit status endpoint if the controller expects a fixed URL.
+# status_url = "https://controller.example.com/api/iot-agent/agents/agt_123/status"
+# WebSocket control/event endpoint.
+# events_url = "wss://controller.example.com/api/iot-agent/agents/agt_123/events"
+# How the agent authenticates to the controller.
+# auth_mode = "controller"
+# How the agent obtains and refreshes client certificates.
+# certificate_mode = "controller"
+# Controller edge layout. `caddy` enables stricter profile validation.
+# edge_provider = "direct"
+# Whether client certificates are disabled, optional, or required upstream.
+# mutual_tls_mode = "disabled"
+# Trust the managed CA bundle for outbound TLS validation.
+# trust_client_ca = true
 
+# Bootstrap material used only for first enrollment.
+[gateway.bootstrap]
+# One-time bootstrap token provided by the controller.
+# bootstrap_token = "bootstrap-token"
+# Human-entered or QR-derived enrollment code.
+# enrollment_code = "SITE-A-4F7K-92LM"
+
+# Managed-mode reconnect, polling, and backoff tuning.
 [gateway.sync]
-interval_seconds = 30.0
-reconnect_delay_seconds = 5.0
-event_timeout_seconds = 30.0
-control_poll_interval_seconds = 0.5
-outbox_batch_size = 128
-backoff_base_seconds = 1.0
-backoff_max_seconds = 60.0
-token_refresh_skew_seconds = 300
+# How often snapshots are pushed to the controller.
+# interval_seconds = 30.0
+# Base reconnect delay after controller disconnects.
+# reconnect_delay_seconds = 5.0
+# Read timeout for upstream event streams.
+# event_timeout_seconds = 30.0
+# Polling cadence for control-plane maintenance work.
+# control_poll_interval_seconds = 0.5
+# Maximum queued outbound messages sent in one batch.
+# outbox_batch_size = 128
+# Starting backoff value for repeated upstream failures.
+# backoff_base_seconds = 1.0
+# Maximum backoff value for repeated upstream failures.
+# backoff_max_seconds = 60.0
+# How early to refresh upstream tokens before expiry.
+# token_refresh_skew_seconds = 300
 
+# ZITADEL service-account settings for controller authentication.
 [gateway.zitadel]
-assertion_algorithm = "RS256"
-requested_scopes = ["openid"]
-token_refresh_skew_seconds = 120
+# Base URL for your ZITADEL instance.
+# base_url = "https://zitadel.example.com"
+# Explicit token endpoint if it differs from the default instance URL.
+# token_url = "https://zitadel.example.com/oauth/v2/token"
+# Audience requested for controller tokens.
+# audience = "https://controller.example.com"
+# Path to the ZITADEL service-account JSON file.
+# service_account_key_path = "./secrets/zitadel-service-account.json"
+# Service user id when configuring the assertion components manually.
+# service_user_id = "123456789012345678"
+# Key identifier for the service-account private key.
+# key_id = "key-id"
+# Path to the service-account private key PEM.
+# private_key_path = "./secrets/zitadel-private-key.pem"
+# Signing algorithm used for the private-key JWT assertion.
+# assertion_algorithm = "RS256"
+# Scopes requested from ZITADEL.
+# requested_scopes = ["openid"]
+# How early to refresh ZITADEL access tokens.
+# token_refresh_skew_seconds = 120
 
+# step-ca certificate bootstrap and renewal settings.
 [gateway.step_ca]
-requested_sans = []
-certificate_renewal_skew_seconds = 3600
+# Base URL for the private step-ca instance.
+# url = "https://ca.example.com"
+# Explicit sign endpoint if not derived from `url`.
+# sign_url = "https://ca.example.com/1.0/sign"
+# Explicit renew endpoint if not derived from `url`.
+# renew_url = "https://ca.example.com/1.0/renew"
+# Expected fingerprint of the step-ca root certificate.
+# root_fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+# Additional SANs requested for the managed client certificate.
+# requested_sans = []
+# How early to renew managed certificates before expiry.
+# certificate_renewal_skew_seconds = 3600

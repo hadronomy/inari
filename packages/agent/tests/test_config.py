@@ -216,6 +216,7 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
 def test_load_settings_uses_development_defaults_inside_workspace(tmp_path: Path) -> None:
     (tmp_path / "packages" / "agent").mkdir(parents=True)
     (tmp_path / "pyproject.toml").write_text("[project]\nname='workspace'\n", encoding="utf-8")
+    (tmp_path / "config.toml").write_text("", encoding="utf-8")
 
     settings = load_settings(cwd=tmp_path, environ={})
 
@@ -259,10 +260,14 @@ def test_render_example_toml_includes_schema_header_and_sections() -> None:
     assert "[server]" in rendered
     assert "[paths]" in rendered
     assert "[gateway.sync]" in rendered
-    assert "config_version = 1" in rendered
-    assert 'profile = "auto"' in rendered
+    assert "\nconfig_version = 1\n" in rendered
+    assert '# profile = "auto"' in rendered
+    assert "[security.tls]" in rendered
     assert "[runtime]" not in rendered
-    assert "[security.tls]" not in rendered
+    assert "network_printers = []" not in rendered
+    assert "# [[printing.network_printers]]" in rendered
+    assert "Uncomment only the settings you want to override." in rendered
+    assert "# Default:" not in rendered
     assert "testserver" not in rendered
 
 
