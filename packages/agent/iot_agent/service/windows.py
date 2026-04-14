@@ -23,13 +23,10 @@ class WindowsServiceManager:
 
     def install(self) -> str:
         win32serviceutil = self._serviceutil()
-        from ..windows_service import create_windows_service_class
+        from ..windows_service import create_windows_service_class, set_windows_service_config_path
 
         self._ensure_parent_directories()
-        service_class = create_windows_service_class(
-            config_path=self.context.config_path,
-            settings=self.context.settings,
-        )
+        service_class = create_windows_service_class()
         win32serviceutil.HandleCommandLine(
             service_class,
             argv=[
@@ -39,6 +36,7 @@ class WindowsServiceManager:
                 "install",
             ],
         )
+        set_windows_service_config_path(self.context.config_path)
         return f"Installed Windows service {self.identity.windows_name!r}."
 
     def uninstall(self) -> str:
@@ -48,10 +46,7 @@ class WindowsServiceManager:
         if self.status().state in {ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING}:
             self.stop()
             self._wait_for_state(ServiceState.STOPPED, timeout_seconds=20.0)
-        service_class = create_windows_service_class(
-            config_path=self.context.config_path,
-            settings=self.context.settings,
-        )
+        service_class = create_windows_service_class()
         win32serviceutil.HandleCommandLine(
             service_class,
             argv=["iot-agent-windows-service", "remove"],
