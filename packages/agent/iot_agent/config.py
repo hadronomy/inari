@@ -6,6 +6,7 @@ import os
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+from typing import get_args, get_origin
 from typing import Any, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -23,6 +24,191 @@ from .security.models import GatewayExposure, GatewayMode
 ENV_PREFIX = "IOT_AGENT_"
 CONFIG_ENV_VAR = f"{ENV_PREFIX}CONFIG"
 EXAMPLE_CONFIG_FILENAME = "config.example.toml"
+
+_TEMPLATE_HEADER_COMMENTS = [
+    "Generated configuration template for iot-agent.",
+    "Uncomment only the settings you want to override.",
+    "Commented values show the built-in default or a recommended example.",
+    "Environment variables with the IOT_AGENT_ prefix still override file values.",
+]
+
+_SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("server",): (
+        "HTTP API binding and host filtering.",
+    ),
+    ("cors",): (
+        "Browser access policy for local UI clients such as Odoo or the tray.",
+    ),
+    ("logging",): (
+        "Logging verbosity and log file location.",
+    ),
+    ("paths",): (
+        "Filesystem locations for runtime state. Leave these commented to use OS-specific defaults.",
+    ),
+    ("printing",): (
+        "Default printer behavior and optional network printer definitions.",
+    ),
+    ("runtime", "discovery"): (
+        "Device discovery cadence.",
+    ),
+    ("runtime", "scheduler"): (
+        "Job scheduler tuning.",
+    ),
+    ("runtime", "jobs"): (
+        "Job execution leases, retries, and timeouts.",
+    ),
+    ("security",): (
+        "Local API exposure and local-auth defaults.",
+    ),
+    ("security", "local_tokens"): (
+        "Short-lived tokens issued to local clients like the tray.",
+    ),
+    ("security", "tls"): (
+        "Inbound TLS files for LAN exposure. Loopback-only deployments usually leave these unset.",
+    ),
+    ("gateway",): (
+        "Managed-mode controller connectivity. Leave commented for standalone/local-only deployments.",
+    ),
+    ("gateway", "bootstrap"): (
+        "Bootstrap material used only for first enrollment.",
+    ),
+    ("gateway", "sync"): (
+        "Managed-mode reconnect, polling, and backoff tuning.",
+    ),
+    ("gateway", "zitadel"): (
+        "ZITADEL service-account settings for controller authentication.",
+    ),
+    ("gateway", "step_ca"): (
+        "step-ca certificate bootstrap and renewal settings.",
+    ),
+}
+
+_FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("config_version",): ("Schema version for this TOML format.",),
+    ("server", "host"): ("Bind host for the local HTTP API.",),
+    ("server", "port"): ("Bind port for the local HTTP API.",),
+    ("server", "trusted_hosts"): ("Allowed Host headers for incoming requests.",),
+    ("cors", "allowed_origins"): ("Browser origins allowed to call the local API.",),
+    ("logging", "level"): ("Application log verbosity.",),
+    ("logging", "directory"): ("Directory for rotated agent logs.",),
+    ("paths", "profile"): ("Choose development or production path defaults. `auto` detects based on the working directory.",),
+    ("paths", "data_dir"): ("Base directory for runtime state files.",),
+    ("paths", "temp_dir"): ("Directory for temporary files.",),
+    ("paths", "runtime_database"): ("SQLite database file path.",),
+    ("paths", "security_state_dir"): ("Directory for identities, enrollment state, and fallback local secrets.",),
+    ("printing", "default_printer_name"): ("Preferred printer when jobs do not target a specific device.",),
+    ("printing", "default_transport"): ("Default transport strategy when a driver supports more than one mode.",),
+    ("printing", "html_enabled"): ("Allow HTML receipt/document rendering.",),
+    ("runtime", "discovery", "poll_interval_seconds"): ("How often the agent refreshes device discovery.",),
+    ("runtime", "scheduler", "poll_interval_seconds"): ("How often the scheduler looks for runnable jobs.",),
+    ("runtime", "scheduler", "batch_size"): ("Maximum number of jobs leased per scheduling pass.",),
+    ("runtime", "jobs", "max_attempts"): ("Maximum attempts before a job is marked failed.",),
+    ("runtime", "jobs", "retry_base_delay_seconds"): ("Initial retry delay after a failed job attempt.",),
+    ("runtime", "jobs", "retry_max_delay_seconds"): ("Upper bound for exponential retry delays.",),
+    ("runtime", "jobs", "dispatch_lease_seconds"): ("How long a dispatch lease is held before another worker may reclaim it.",),
+    ("runtime", "jobs", "execution_lease_seconds"): ("How long a worker execution lease remains valid without a heartbeat.",),
+    ("runtime", "jobs", "heartbeat_interval_seconds"): ("How often active workers refresh their job lease.",),
+    ("runtime", "jobs", "execution_timeout_seconds"): ("Hard timeout for a single job execution.",),
+    ("runtime", "jobs", "lease_recovery_interval_seconds"): ("How often the agent scans for expired leases.",),
+    ("security", "gateway_mode"): ("Run purely local (`standalone`) or connect to an upstream controller (`managed`).",),
+    ("security", "gateway_exposure"): ("Expose the API only on loopback or to the LAN.",),
+    ("security", "allow_loopback_bootstrap"): ("Allow local bootstrap token minting for trusted loopback clients.",),
+    ("security", "https_redirect_enabled"): ("Redirect HTTP to HTTPS when LAN TLS is enabled.",),
+    ("security", "secret_store_service_name"): ("OS credential store namespace used by the agent.",),
+    ("security", "local_tokens", "ttl_seconds"): ("Lifetime of locally issued bearer tokens in seconds.",),
+    ("security", "local_tokens", "audience"): ("Audience claim for locally issued tokens.",),
+    ("security", "local_tokens", "issuer"): ("Issuer claim for locally issued tokens.",),
+    ("security", "tls", "cert_path"): ("PEM certificate file presented by the local API.",),
+    ("security", "tls", "key_path"): ("Private key for the local API certificate.",),
+    ("security", "tls", "ca_path"): ("Optional custom CA bundle trusted by the agent.",),
+    ("gateway", "base_url"): ("Base URL for the external controller.",),
+    ("gateway", "enrollment_url"): ("Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.",),
+    ("gateway", "status_url"): ("Explicit status endpoint if the controller expects a fixed URL.",),
+    ("gateway", "events_url"): ("WebSocket control/event endpoint.",),
+    ("gateway", "auth_mode"): ("How the agent authenticates to the controller.",),
+    ("gateway", "certificate_mode"): ("How the agent obtains and refreshes client certificates.",),
+    ("gateway", "edge_provider"): ("Controller edge layout. `caddy` enables stricter profile validation.",),
+    ("gateway", "mutual_tls_mode"): ("Whether client certificates are disabled, optional, or required upstream.",),
+    ("gateway", "trust_client_ca"): ("Trust the managed CA bundle for outbound TLS validation.",),
+    ("gateway", "bootstrap", "bootstrap_token"): ("One-time bootstrap token provided by the controller.",),
+    ("gateway", "bootstrap", "enrollment_code"): ("Human-entered or QR-derived enrollment code.",),
+    ("gateway", "sync", "interval_seconds"): ("How often snapshots are pushed to the controller.",),
+    ("gateway", "sync", "reconnect_delay_seconds"): ("Base reconnect delay after controller disconnects.",),
+    ("gateway", "sync", "event_timeout_seconds"): ("Read timeout for upstream event streams.",),
+    ("gateway", "sync", "control_poll_interval_seconds"): ("Polling cadence for control-plane maintenance work.",),
+    ("gateway", "sync", "outbox_batch_size"): ("Maximum queued outbound messages sent in one batch.",),
+    ("gateway", "sync", "backoff_base_seconds"): ("Starting backoff value for repeated upstream failures.",),
+    ("gateway", "sync", "backoff_max_seconds"): ("Maximum backoff value for repeated upstream failures.",),
+    ("gateway", "sync", "token_refresh_skew_seconds"): ("How early to refresh upstream tokens before expiry.",),
+    ("gateway", "zitadel", "base_url"): ("Base URL for your ZITADEL instance.",),
+    ("gateway", "zitadel", "token_url"): ("Explicit token endpoint if it differs from the default instance URL.",),
+    ("gateway", "zitadel", "audience"): ("Audience requested for controller tokens.",),
+    ("gateway", "zitadel", "service_account_key_path"): ("Path to the ZITADEL service-account JSON file.",),
+    ("gateway", "zitadel", "service_user_id"): ("Service user id when configuring the assertion components manually.",),
+    ("gateway", "zitadel", "key_id"): ("Key identifier for the service-account private key.",),
+    ("gateway", "zitadel", "private_key_path"): ("Path to the service-account private key PEM.",),
+    ("gateway", "zitadel", "assertion_algorithm"): ("Signing algorithm used for the private-key JWT assertion.",),
+    ("gateway", "zitadel", "requested_scopes"): ("Scopes requested from ZITADEL.",),
+    ("gateway", "zitadel", "token_refresh_skew_seconds"): ("How early to refresh ZITADEL access tokens.",),
+    ("gateway", "step_ca", "url"): ("Base URL for the private step-ca instance.",),
+    ("gateway", "step_ca", "sign_url"): ("Explicit sign endpoint if not derived from `url`.",),
+    ("gateway", "step_ca", "renew_url"): ("Explicit renew endpoint if not derived from `url`.",),
+    ("gateway", "step_ca", "root_fingerprint"): ("Expected fingerprint of the step-ca root certificate.",),
+    ("gateway", "step_ca", "requested_sans"): ("Additional SANs requested for the managed client certificate.",),
+    ("gateway", "step_ca", "certificate_renewal_skew_seconds"): ("How early to renew managed certificates before expiry.",),
+}
+
+_FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
+    ("logging", "directory"): "./logs",
+    ("paths", "data_dir"): "./data",
+    ("paths", "temp_dir"): "./tmp",
+    ("paths", "runtime_database"): "./data/iot-agent.sqlite3",
+    ("paths", "security_state_dir"): "./data/security",
+    ("printing", "default_printer_name"): "Kitchen Printer",
+    ("security", "local_tokens", "issuer"): "iot-agent.local",
+    ("security", "tls", "cert_path"): "./certs/agent.crt",
+    ("security", "tls", "key_path"): "./certs/agent.key",
+    ("security", "tls", "ca_path"): "./certs/ca.crt",
+    ("gateway", "base_url"): "https://controller.example.com",
+    ("gateway", "enrollment_url"): "https://bootstrap.controller.example.com/api/iot-agent/enroll",
+    ("gateway", "status_url"): "https://controller.example.com/api/iot-agent/agents/agt_123/status",
+    ("gateway", "events_url"): "wss://controller.example.com/api/iot-agent/agents/agt_123/events",
+    ("gateway", "bootstrap", "bootstrap_token"): "bootstrap-token",
+    ("gateway", "bootstrap", "enrollment_code"): "SITE-A-4F7K-92LM",
+    ("gateway", "zitadel", "base_url"): "https://zitadel.example.com",
+    ("gateway", "zitadel", "token_url"): "https://zitadel.example.com/oauth/v2/token",
+    ("gateway", "zitadel", "audience"): "https://controller.example.com",
+    ("gateway", "zitadel", "service_account_key_path"): "./secrets/zitadel-service-account.json",
+    ("gateway", "zitadel", "service_user_id"): "123456789012345678",
+    ("gateway", "zitadel", "key_id"): "key-id",
+    ("gateway", "zitadel", "private_key_path"): "./secrets/zitadel-private-key.pem",
+    ("gateway", "step_ca", "url"): "https://ca.example.com",
+    ("gateway", "step_ca", "sign_url"): "https://ca.example.com/1.0/sign",
+    ("gateway", "step_ca", "renew_url"): "https://ca.example.com/1.0/renew",
+    ("gateway", "step_ca", "root_fingerprint"): "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+}
+
+_ARRAY_TABLE_EXAMPLES: dict[tuple[str, ...], tuple[dict[str, Any], ...]] = {
+    ("printing", "network_printers"): (
+        {
+            "name": "Kitchen LAN Printer",
+            "host": "192.168.1.40",
+            "port": 9100,
+            "is_default": False,
+            "preferred_transport": "raw",
+            "cash_drawer": True,
+            "text_enabled": False,
+            "document_enabled": False,
+            "encoding": "utf-8",
+        },
+    ),
+}
+
+_ARRAY_TABLE_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
+    ("printing", "network_printers"): (
+        "Repeat this block for each raw TCP or receipt printer that should be managed directly by the agent.",
+    ),
+}
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 PrinterMode = Literal["auto", "raw", "text", "document"]
@@ -573,29 +759,12 @@ def render_example_toml(
     config: AgentConfigFile | None = None,
 ) -> str:
     document = config.model_copy(deep=True) if config is not None else _build_example_config()
-    payload = _serialize_for_toml(document.model_dump(mode="python", exclude_none=True))
-    root_scalars = {key: value for key, value in payload.items() if not isinstance(value, dict)}
-    root_tables = {
-        key: value
-        for key, value in payload.items()
-        if isinstance(value, dict) and not _is_empty_toml_table(value)
-    }
     lines: list[str] = []
     if schema_path is not None:
         lines.extend([f"#:schema {schema_path}", ""])
-    lines.extend(
-        [
-            "# Generated example configuration for iot-agent.",
-            "# Environment variables with the IOT_AGENT_ prefix still override these values.",
-            "",
-        ]
-    )
-    for key, value in root_scalars.items():
-        lines.append(f"{key} = {_toml_literal(value)}")
-    if root_scalars:
-        lines.append("")
-    for table_name, table_value in root_tables.items():
-        _render_toml_table(lines, (table_name,), table_value)
+    _append_comment_block(lines, _TEMPLATE_HEADER_COMMENTS)
+    lines.append("")
+    _render_model_template(lines, (), document, root=True)
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
@@ -794,23 +963,117 @@ def _serialize_for_toml(value: Any) -> Any:
     return value
 
 
-def _render_toml_table(lines: list[str], path: tuple[str, ...], value: dict[str, Any]) -> None:
-    scalar_items = [(key, item) for key, item in value.items() if not isinstance(item, dict)]
-    nested_items = [
-        (key, item)
-        for key, item in value.items()
-        if isinstance(item, dict) and not _is_empty_toml_table(item)
-    ]
-    if not scalar_items and not nested_items:
-        return
-    if scalar_items:
+def _render_model_template(
+    lines: list[str],
+    path: tuple[str, ...],
+    model: BaseModel,
+    *,
+    root: bool = False,
+) -> None:
+    scalar_fields: list[tuple[str, Any]] = []
+    nested_models: list[tuple[str, BaseModel]] = []
+    table_lists: list[tuple[str, list[Any], type[BaseModel] | None]] = []
+
+    for field_name, field_info in model.__class__.model_fields.items():
+        value = getattr(model, field_name)
+        if isinstance(value, BaseModel):
+            nested_models.append((field_name, value))
+            continue
+        item_model_type = _list_item_model_type(field_info.annotation)
+        if isinstance(value, list) and item_model_type is not None:
+            table_lists.append((field_name, value, item_model_type))
+            continue
+        scalar_fields.append((field_name, value))
+
+    should_render_header = not root and bool(scalar_fields or (not nested_models and not table_lists))
+
+    if should_render_header:
+        if path in _SECTION_COMMENTS:
+            _append_comment_block(lines, _SECTION_COMMENTS[path])
         lines.append(f"[{'.'.join(path)}]")
-    for key, item in scalar_items:
-        lines.append(f"{key} = {_toml_literal(item)}")
-    if scalar_items:
+
+    for field_name, raw_value in scalar_fields:
+        field_path = (*path, field_name)
+        _render_commented_field(lines, field_path, raw_value)
+
+    if scalar_fields or should_render_header:
         lines.append("")
-    for key, item in nested_items:
-        _render_toml_table(lines, (*path, key), item)
+
+    for field_name, child_model in nested_models:
+        _render_model_template(lines, (*path, field_name), child_model)
+
+    for field_name, field_items, item_model_type in table_lists:
+        _render_array_of_tables_template(
+            lines,
+            (*path, field_name),
+            field_items,
+            item_model_type,
+        )
+
+
+def _render_commented_field(lines: list[str], field_path: tuple[str, ...], raw_value: Any) -> None:
+    if field_path in _FIELD_COMMENTS:
+        _append_comment_block(lines, _FIELD_COMMENTS[field_path])
+    example_value = _field_example_value(field_path, raw_value)
+    if field_path == ("config_version",):
+        lines.append(f"{field_path[-1]} = {_toml_literal(example_value)}")
+        return
+    lines.append(f"# {field_path[-1]} = {_toml_literal(example_value)}")
+
+
+def _render_array_of_tables_template(
+    lines: list[str],
+    path: tuple[str, ...],
+    items: list[Any],
+    item_model_type: type[BaseModel] | None,
+) -> None:
+    if path in _ARRAY_TABLE_COMMENTS:
+        _append_comment_block(lines, _ARRAY_TABLE_COMMENTS[path])
+
+    example_items: list[dict[str, Any]] = []
+    if items:
+        for item in items:
+            if isinstance(item, BaseModel):
+                example_items.append(_serialize_for_toml(item.model_dump(mode="python", exclude_none=False)))
+            elif isinstance(item, dict):
+                example_items.append(_serialize_for_toml(item))
+    elif path in _ARRAY_TABLE_EXAMPLES:
+        example_items.extend(_serialize_for_toml(item) for item in _ARRAY_TABLE_EXAMPLES[path])
+
+    if not example_items and item_model_type is not None:
+        lines.append(f"# {path[-1]} = []")
+        lines.append("")
+        return
+
+    for item in example_items:
+        lines.append(f"# [[{'.'.join(path)}]]")
+        for key, value in item.items():
+            lines.append(f"# {key} = {_toml_literal(value)}")
+        lines.append("")
+
+
+def _append_comment_block(lines: list[str], comments: Sequence[str]) -> None:
+    for comment in comments:
+        lines.append(f"# {comment}")
+
+
+def _field_example_value(field_path: tuple[str, ...], raw_value: Any) -> Any:
+    if field_path in _FIELD_EXAMPLES:
+        return _FIELD_EXAMPLES[field_path]
+    return _serialize_for_toml(raw_value)
+
+
+def _list_item_model_type(annotation: Any) -> type[BaseModel] | None:
+    origin = get_origin(annotation)
+    if origin not in {list, Sequence}:
+        return None
+    args = get_args(annotation)
+    if not args:
+        return None
+    item_type = args[0]
+    if isinstance(item_type, type) and issubclass(item_type, BaseModel):
+        return item_type
+    return None
 
 
 def _build_example_config() -> AgentConfigFile:
@@ -822,18 +1085,6 @@ def _build_example_config() -> AgentConfigFile:
         if host != "testserver"
     ]
     return document
-
-
-def _is_empty_toml_table(value: dict[str, Any]) -> bool:
-    if not value:
-        return True
-    for item in value.values():
-        if isinstance(item, dict):
-            if not _is_empty_toml_table(item):
-                return False
-            continue
-        return False
-    return True
 
 
 def _toml_literal(value: Any) -> str:
