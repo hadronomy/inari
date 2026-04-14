@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import sqlite3
 import uuid
-from datetime import datetime
 from typing import Any, Mapping
 
+from sqlalchemy import func, insert, select, update
+
 from ..runtime.models import normalize_timestamp, timestamp_to_iso, utc_now
-from ..runtime.store import RuntimeStore, dump_json, load_json
+from ..runtime.store import (
+    RuntimeStore,
+    dump_json,
+    gateway_inbound_commands_table,
+    gateway_outbox_table,
+    load_json,
+)
 from .models import (
     GatewayInboundCommandRecord,
     GatewayInboundCommandState,
@@ -31,45 +37,38 @@ class GatewayRepository:
         if existing is not None:
             return existing, False
         now = utc_now()
+        stmt = insert(gateway_inbound_commands_table).values(
+            command_id=command_id,
+            message_id=message_id,
+            message_type=message_type,
+            state=GatewayInboundCommandState.RECEIVED.value,
+            payload_json=dump_json(payload),
+            response_json=None,
+            error_code=None,
+            error_detail=None,
+            job_id=None,
+            received_at=timestamp_to_iso(now),
+            updated_at=timestamp_to_iso(now),
+        )
         with self.store.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO gateway_inbound_commands (
-                    command_id, message_id, message_type, state,
-                    payload_json, response_json, error_code, error_detail,
-                    job_id, received_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    command_id,
-                    message_id,
-                    message_type,
-                    GatewayInboundCommandState.RECEIVED.value,
-                    dump_json(payload),
-                    None,
-                    None,
-                    None,
-                    None,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                ),
-            )
+            connection.execute(stmt)
         return self.get_inbound_command(command_id) or _missing_inbound(command_id), True
 
     def get_inbound_command(self, command_id: str) -> GatewayInboundCommandRecord | None:
+        stmt = select(gateway_inbound_commands_table).where(gateway_inbound_commands_table.c.command_id == command_id)
         with self.store.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM gateway_inbound_commands WHERE command_id = ?",
-                (command_id,),
-            ).fetchone()
+            row = connection.execute(stmt).mappings().first()
         return _row_to_inbound(row) if row is not None else None
 
     def get_inbound_command_for_job(self, job_id: str) -> GatewayInboundCommandRecord | None:
+        stmt = (
+            select(gateway_inbound_commands_table)
+            .where(gateway_inbound_commands_table.c.job_id == job_id)
+            .order_by(gateway_inbound_commands_table.c.updated_at.desc())
+            .limit(1)
+        )
         with self.store.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM gateway_inbound_commands WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1",
-                (job_id,),
-            ).fetchone()
+            row = connection.execute(stmt).mappings().first()
         return _row_to_inbound(row) if row is not None else None
 
     def mark_inbound_accepted(
@@ -80,21 +79,20 @@ class GatewayRepository:
         response_payload: Mapping[str, Any],
     ) -> GatewayInboundCommandRecord:
         now = utc_now()
-        with self.store.connection() as connection:
-            connection.execute(
-                """
-                UPDATE gateway_inbound_commands
-                SET state = ?, job_id = ?, response_json = ?, error_code = NULL, error_detail = NULL, updated_at = ?
-                WHERE command_id = ?
-                """,
-                (
-                    GatewayInboundCommandState.ACCEPTED.value,
-                    job_id,
-                    dump_json(response_payload),
-                    timestamp_to_iso(now),
-                    command_id,
-                ),
+        stmt = (
+            update(gateway_inbound_commands_table)
+            .where(gateway_inbound_commands_table.c.command_id == command_id)
+            .values(
+                state=GatewayInboundCommandState.ACCEPTED.value,
+                job_id=job_id,
+                response_json=dump_json(response_payload),
+                error_code=None,
+                error_detail=None,
+                updated_at=timestamp_to_iso(now),
             )
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
         return self.get_inbound_command(command_id) or _missing_inbound(command_id)
 
     def mark_inbound_rejected(
@@ -106,22 +104,19 @@ class GatewayRepository:
         response_payload: Mapping[str, Any],
     ) -> GatewayInboundCommandRecord:
         now = utc_now()
-        with self.store.connection() as connection:
-            connection.execute(
-                """
-                UPDATE gateway_inbound_commands
-                SET state = ?, response_json = ?, error_code = ?, error_detail = ?, updated_at = ?
-                WHERE command_id = ?
-                """,
-                (
-                    GatewayInboundCommandState.REJECTED.value,
-                    dump_json(response_payload),
-                    error_code,
-                    error_detail,
-                    timestamp_to_iso(now),
-                    command_id,
-                ),
+        stmt = (
+            update(gateway_inbound_commands_table)
+            .where(gateway_inbound_commands_table.c.command_id == command_id)
+            .values(
+                state=GatewayInboundCommandState.REJECTED.value,
+                response_json=dump_json(response_payload),
+                error_code=error_code,
+                error_detail=error_detail,
+                updated_at=timestamp_to_iso(now),
             )
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
         return self.get_inbound_command(command_id) or _missing_inbound(command_id)
 
     def enqueue_outbound(
@@ -138,125 +133,109 @@ class GatewayRepository:
                 return existing
         now = utc_now()
         message_id = str(payload.get("message_id") or f"gout_{uuid.uuid4().hex}")
+        stmt = insert(gateway_outbox_table).values(
+            message_id=message_id,
+            message_type=message_type,
+            state=GatewayOutboxState.PENDING.value,
+            payload_json=dump_json(payload),
+            correlation_id=correlation_id,
+            dedupe_key=dedupe_key,
+            created_at=timestamp_to_iso(now),
+            updated_at=timestamp_to_iso(now),
+            sent_at=None,
+            acknowledged_at=None,
+            last_error=None,
+        )
         with self.store.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO gateway_outbox (
-                    message_id, message_type, state, payload_json, correlation_id, dedupe_key,
-                    created_at, updated_at, sent_at, acknowledged_at, last_error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    message_id,
-                    message_type,
-                    GatewayOutboxState.PENDING.value,
-                    dump_json(payload),
-                    correlation_id,
-                    dedupe_key,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    None,
-                    None,
-                    None,
-                ),
-            )
+            connection.execute(stmt)
         return self.get_outbox(message_id) or _missing_outbox(message_id)
 
     def list_pending_outbox(self, *, limit: int = 128) -> tuple[GatewayOutboxRecord, ...]:
+        stmt = (
+            select(gateway_outbox_table)
+            .where(gateway_outbox_table.c.state.in_((GatewayOutboxState.PENDING.value, GatewayOutboxState.SENT.value)))
+            .order_by(gateway_outbox_table.c.created_at.asc())
+            .limit(limit)
+        )
         with self.store.connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM gateway_outbox
-                WHERE state IN (?, ?)
-                ORDER BY created_at ASC
-                LIMIT ?
-                """,
-                (
-                    GatewayOutboxState.PENDING.value,
-                    GatewayOutboxState.SENT.value,
-                    limit,
-                ),
-            ).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_outbox(row) for row in rows)
 
     def mark_outbox_sent(self, message_id: str) -> GatewayOutboxRecord | None:
         now = utc_now()
-        with self.store.connection() as connection:
-            connection.execute(
-                """
-                UPDATE gateway_outbox
-                SET state = ?, sent_at = ?, updated_at = ?, last_error = NULL
-                WHERE message_id = ?
-                """,
-                (
-                    GatewayOutboxState.SENT.value,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    message_id,
-                ),
+        stmt = (
+            update(gateway_outbox_table)
+            .where(gateway_outbox_table.c.message_id == message_id)
+            .values(
+                state=GatewayOutboxState.SENT.value,
+                sent_at=timestamp_to_iso(now),
+                updated_at=timestamp_to_iso(now),
+                last_error=None,
             )
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
         return self.get_outbox(message_id)
 
     def mark_outbox_acked(self, message_id: str) -> GatewayOutboxRecord | None:
         now = utc_now()
-        with self.store.connection() as connection:
-            connection.execute(
-                """
-                UPDATE gateway_outbox
-                SET state = ?, acknowledged_at = ?, updated_at = ?
-                WHERE message_id = ?
-                """,
-                (
-                    GatewayOutboxState.ACKNOWLEDGED.value,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    message_id,
-                ),
+        stmt = (
+            update(gateway_outbox_table)
+            .where(gateway_outbox_table.c.message_id == message_id)
+            .values(
+                state=GatewayOutboxState.ACKNOWLEDGED.value,
+                acknowledged_at=timestamp_to_iso(now),
+                updated_at=timestamp_to_iso(now),
             )
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
         return self.get_outbox(message_id)
 
     def mark_outbox_failed(self, message_id: str, *, detail: str) -> GatewayOutboxRecord | None:
         now = utc_now()
-        with self.store.connection() as connection:
-            connection.execute(
-                """
-                UPDATE gateway_outbox
-                SET state = ?, updated_at = ?, last_error = ?
-                WHERE message_id = ?
-                """,
-                (
-                    GatewayOutboxState.PENDING.value,
-                    timestamp_to_iso(now),
-                    detail,
-                    message_id,
-                ),
+        stmt = (
+            update(gateway_outbox_table)
+            .where(gateway_outbox_table.c.message_id == message_id)
+            .values(
+                state=GatewayOutboxState.PENDING.value,
+                updated_at=timestamp_to_iso(now),
+                last_error=detail,
             )
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
         return self.get_outbox(message_id)
 
     def get_outbox(self, message_id: str) -> GatewayOutboxRecord | None:
+        stmt = select(gateway_outbox_table).where(gateway_outbox_table.c.message_id == message_id)
         with self.store.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM gateway_outbox WHERE message_id = ?",
-                (message_id,),
-            ).fetchone()
+            row = connection.execute(stmt).mappings().first()
         return _row_to_outbox(row) if row is not None else None
 
     def find_outbox_by_dedupe_key(self, dedupe_key: str) -> GatewayOutboxRecord | None:
+        stmt = (
+            select(gateway_outbox_table)
+            .where(gateway_outbox_table.c.dedupe_key == dedupe_key)
+            .order_by(gateway_outbox_table.c.created_at.desc())
+            .limit(1)
+        )
         with self.store.connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM gateway_outbox WHERE dedupe_key = ? ORDER BY created_at DESC LIMIT 1",
-                (dedupe_key,),
-            ).fetchone()
+            row = connection.execute(stmt).mappings().first()
         return _row_to_outbox(row) if row is not None else None
 
     def summary(self) -> dict[str, int]:
+        inbound_stmt = (
+            select(gateway_inbound_commands_table.c.state, func.count().label("total"))
+            .group_by(gateway_inbound_commands_table.c.state)
+        )
+        outbox_stmt = (
+            select(gateway_outbox_table.c.state, func.count().label("total"))
+            .group_by(gateway_outbox_table.c.state)
+        )
         with self.store.connection() as connection:
-            inbound_rows = connection.execute(
-                "SELECT state, COUNT(*) AS total FROM gateway_inbound_commands GROUP BY state"
-            ).fetchall()
-            outbox_rows = connection.execute(
-                "SELECT state, COUNT(*) AS total FROM gateway_outbox GROUP BY state"
-            ).fetchall()
+            inbound_rows = connection.execute(inbound_stmt).mappings().all()
+            outbox_rows = connection.execute(outbox_stmt).mappings().all()
         summary: dict[str, int] = {}
         for row in inbound_rows:
             summary[f"inbound_{row['state']}"] = int(row["total"])
@@ -265,7 +244,7 @@ class GatewayRepository:
         return summary
 
 
-def _row_to_inbound(row: sqlite3.Row) -> GatewayInboundCommandRecord:
+def _row_to_inbound(row: Mapping[str, Any]) -> GatewayInboundCommandRecord:
     return GatewayInboundCommandRecord(
         command_id=str(row["command_id"]),
         message_type=str(row["message_type"]),
@@ -281,7 +260,7 @@ def _row_to_inbound(row: sqlite3.Row) -> GatewayInboundCommandRecord:
     )
 
 
-def _row_to_outbox(row: sqlite3.Row) -> GatewayOutboxRecord:
+def _row_to_outbox(row: Mapping[str, Any]) -> GatewayOutboxRecord:
     return GatewayOutboxRecord(
         message_id=str(row["message_id"]),
         message_type=str(row["message_type"]),

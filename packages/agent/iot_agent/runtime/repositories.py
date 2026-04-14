@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
 import uuid
 from collections import Counter
 from datetime import timedelta
 from typing import Any, Mapping
+
+from sqlalchemy import collate, func, insert, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ..drivers import DeviceKind
 from ..printers import PrinterTransport
@@ -21,7 +23,16 @@ from .models import (
     timestamp_to_iso,
     utc_now,
 )
-from .store import RuntimeStore, dump_json, load_json
+from .store import (
+    RuntimeStore,
+    device_events_table,
+    devices_table,
+    dump_json,
+    job_attempts_table,
+    job_events_table,
+    jobs_table,
+    load_json,
+)
 
 
 class DeviceRepository:
@@ -31,57 +42,52 @@ class DeviceRepository:
     def upsert(self, record: DeviceRecord) -> DeviceRecord:
         existing = self.get(record.id)
         first_seen_at = existing.first_seen_at if existing is not None else record.first_seen_at
+        stmt = sqlite_insert(devices_table).values(
+            id=record.id,
+            kind=record.kind.value,
+            driver_key=record.driver_key,
+            name=record.name,
+            connection_state=record.connection_state.value,
+            first_seen_at=timestamp_to_iso(first_seen_at),
+            last_seen_at=timestamp_to_iso(record.last_seen_at),
+            updated_at=timestamp_to_iso(record.updated_at),
+            is_default=record.is_default,
+            preferred_transport=record.preferred_transport.value if record.preferred_transport is not None else None,
+            capabilities_json=dump_json(record.capabilities),
+            metadata_json=dump_json(record.metadata),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[devices_table.c.id],
+            set_={
+                "kind": record.kind.value,
+                "driver_key": record.driver_key,
+                "name": record.name,
+                "connection_state": record.connection_state.value,
+                "last_seen_at": timestamp_to_iso(record.last_seen_at),
+                "updated_at": timestamp_to_iso(record.updated_at),
+                "is_default": record.is_default,
+                "preferred_transport": record.preferred_transport.value if record.preferred_transport is not None else None,
+                "capabilities_json": dump_json(record.capabilities),
+                "metadata_json": dump_json(record.metadata),
+            },
+        )
         with self.store.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO devices (
-                    id, kind, driver_key, name, connection_state,
-                    first_seen_at, last_seen_at, updated_at,
-                    is_default, preferred_transport, capabilities_json, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    kind = excluded.kind,
-                    driver_key = excluded.driver_key,
-                    name = excluded.name,
-                    connection_state = excluded.connection_state,
-                    last_seen_at = excluded.last_seen_at,
-                    updated_at = excluded.updated_at,
-                    is_default = excluded.is_default,
-                    preferred_transport = excluded.preferred_transport,
-                    capabilities_json = excluded.capabilities_json,
-                    metadata_json = excluded.metadata_json
-                """,
-                (
-                    record.id,
-                    record.kind.value,
-                    record.driver_key,
-                    record.name,
-                    record.connection_state.value,
-                    timestamp_to_iso(first_seen_at),
-                    timestamp_to_iso(record.last_seen_at),
-                    timestamp_to_iso(record.updated_at),
-                    1 if record.is_default else 0,
-                    record.preferred_transport.value if record.preferred_transport is not None else None,
-                    dump_json(record.capabilities),
-                    dump_json(record.metadata),
-                ),
-            )
+            connection.execute(stmt)
         return self.get(record.id) or record
 
     def get(self, device_id: str) -> DeviceRecord | None:
+        stmt = select(devices_table).where(devices_table.c.id == device_id)
         with self.store.connection() as connection:
-            row = connection.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+            row = connection.execute(stmt).mappings().first()
         return _row_to_device(row) if row is not None else None
 
     def list(self, *, kind: DeviceKind | None = None) -> tuple[DeviceRecord, ...]:
-        query = "SELECT * FROM devices"
-        params: tuple[object, ...] = ()
+        stmt = select(devices_table)
         if kind is not None:
-            query += " WHERE kind = ?"
-            params = (kind.value,)
-        query += " ORDER BY name COLLATE NOCASE"
+            stmt = stmt.where(devices_table.c.kind == kind.value)
+        stmt = stmt.order_by(collate(devices_table.c.name, "NOCASE"))
         with self.store.connection() as connection:
-            rows = connection.execute(query, params).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_device(row) for row in rows)
 
     def append_event(
@@ -92,12 +98,15 @@ class DeviceRepository:
         payload: Mapping[str, Any],
     ) -> DeviceEventRecord:
         occurred_at = utc_now()
+        stmt = insert(device_events_table).values(
+            device_id=device_id,
+            event_type=event_type,
+            payload_json=dump_json(payload),
+            occurred_at=timestamp_to_iso(occurred_at),
+        )
         with self.store.connection() as connection:
-            cursor = connection.execute(
-                "INSERT INTO device_events (device_id, event_type, payload_json, occurred_at) VALUES (?, ?, ?, ?)",
-                (device_id, event_type, dump_json(payload), timestamp_to_iso(occurred_at)),
-            )
-            sequence = int(cursor.lastrowid)
+            result = connection.execute(stmt)
+            sequence = int(result.inserted_primary_key[0] or result.lastrowid)
         return DeviceEventRecord(
             sequence=sequence,
             resource_id=device_id,
@@ -107,11 +116,14 @@ class DeviceRepository:
         )
 
     def list_events(self, device_id: str, *, limit: int = 50) -> tuple[DeviceEventRecord, ...]:
+        stmt = (
+            select(device_events_table)
+            .where(device_events_table.c.device_id == device_id)
+            .order_by(device_events_table.c.sequence.desc())
+            .limit(limit)
+        )
         with self.store.connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM device_events WHERE device_id = ? ORDER BY sequence DESC LIMIT ?",
-                (device_id, limit),
-            ).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_device_event(row) for row in rows)
 
 
@@ -133,40 +145,33 @@ class JobRepository:
     ) -> JobRecord:
         now = utc_now()
         job_id = f"job_{uuid.uuid4().hex}"
+        stmt = insert(jobs_table).values(
+            id=job_id,
+            kind=kind.value,
+            operation=operation,
+            device_id=device.id,
+            device_kind=device.kind.value,
+            device_name=device.name,
+            state=JobState.QUEUED.value,
+            request_json=dump_json(request_payload),
+            request_metadata_json=dump_json(request_metadata),
+            content_kind=content_kind,
+            command_kind=command_kind,
+            attempt_count=0,
+            max_attempts=max_attempts,
+            created_at=timestamp_to_iso(now),
+            updated_at=timestamp_to_iso(now),
+            queued_at=timestamp_to_iso(now),
+            next_run_at=timestamp_to_iso(now),
+        )
         with self.store.connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO jobs (
-                    id, kind, operation, device_id, device_kind, device_name, state,
-                    request_json, request_metadata_json, content_kind, command_kind,
-                    attempt_count, max_attempts, created_at, updated_at, queued_at, next_run_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    kind.value,
-                    operation,
-                    device.id,
-                    device.kind.value,
-                    device.name,
-                    JobState.QUEUED.value,
-                    dump_json(request_payload),
-                    dump_json(request_metadata),
-                    content_kind,
-                    command_kind,
-                    0,
-                    max_attempts,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                ),
-            )
+            connection.execute(stmt)
         return self.get(job_id) or _missing_job(job_id)
 
     def get(self, job_id: str) -> JobRecord | None:
+        stmt = select(jobs_table).where(jobs_table.c.id == job_id)
         with self.store.connection() as connection:
-            row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            row = connection.execute(stmt).mappings().first()
         return _row_to_job(row) if row is not None else None
 
     def list(
@@ -176,47 +181,34 @@ class JobRepository:
         state: JobState | None = None,
         device_id: str | None = None,
     ) -> tuple[JobRecord, ...]:
-        clauses: list[str] = []
-        params: list[object] = []
+        stmt = select(jobs_table)
         if state is not None:
-            clauses.append("state = ?")
-            params.append(state.value)
+            stmt = stmt.where(jobs_table.c.state == state.value)
         if device_id is not None:
-            clauses.append("device_id = ?")
-            params.append(device_id)
-        query = "SELECT * FROM jobs"
-        if clauses:
-            query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
+            stmt = stmt.where(jobs_table.c.device_id == device_id)
+        stmt = stmt.order_by(jobs_table.c.created_at.desc()).limit(limit)
         with self.store.connection() as connection:
-            rows = connection.execute(query, tuple(params)).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_job(row) for row in rows)
 
     def claim_runnable(self, *, limit: int, lease_seconds: int) -> tuple[JobRecord, ...]:
         now = utc_now()
         lease_expires_at = now + timedelta(seconds=lease_seconds)
+        stmt = (
+            select(jobs_table.c.id)
+            .where(
+                jobs_table.c.state.in_((JobState.QUEUED.value, JobState.RETRY_SCHEDULED.value)),
+                jobs_table.c.next_run_at <= timestamp_to_iso(now),
+            )
+            .order_by(jobs_table.c.queued_at.asc(), jobs_table.c.created_at.asc())
+            .limit(limit)
+        )
         with self.store.connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT id FROM jobs
-                WHERE state IN (?, ?)
-                  AND next_run_at <= ?
-                ORDER BY queued_at ASC, created_at ASC
-                LIMIT ?
-                """,
-                (
-                    JobState.QUEUED.value,
-                    JobState.RETRY_SCHEDULED.value,
-                    timestamp_to_iso(now),
-                    limit,
-                ),
-            ).fetchall()
+            job_ids = tuple(connection.execute(stmt).scalars().all())
         claimed: list[JobRecord] = []
-        for row in rows:
-            job_id = str(row["id"])
+        for job_id in job_ids:
             updated = self._transition(
-                job_id=job_id,
+                job_id=str(job_id),
                 from_states=(JobState.QUEUED, JobState.RETRY_SCHEDULED),
                 to_state=JobState.DISPATCHED,
                 assignments={
@@ -237,35 +229,27 @@ class JobRepository:
         attempt_number = job.attempt_count + 1
         with self.store.connection() as connection:
             connection.execute(
-                """
-                UPDATE jobs
-                SET state = ?, attempt_count = ?, updated_at = ?, started_at = COALESCE(started_at, ?),
-                    lease_expires_at = ?, last_error_code = NULL, last_error_detail = NULL
-                WHERE id = ? AND state = ?
-                """,
-                (
-                    JobState.RUNNING.value,
-                    attempt_number,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(lease_expires_at),
-                    job_id,
-                    JobState.DISPATCHED.value,
-                ),
+                update(jobs_table)
+                .where(jobs_table.c.id == job_id, jobs_table.c.state == JobState.DISPATCHED.value)
+                .values(
+                    state=JobState.RUNNING.value,
+                    attempt_count=attempt_number,
+                    updated_at=timestamp_to_iso(now),
+                    started_at=job.started_at and timestamp_to_iso(job.started_at) or timestamp_to_iso(now),
+                    lease_expires_at=timestamp_to_iso(lease_expires_at),
+                    last_error_code=None,
+                    last_error_detail=None,
+                )
             )
-            cursor = connection.execute(
-                """
-                INSERT INTO job_attempts (job_id, attempt_number, state, started_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    attempt_number,
-                    JobState.RUNNING.value,
-                    timestamp_to_iso(now),
-                ),
+            result = connection.execute(
+                insert(job_attempts_table).values(
+                    job_id=job_id,
+                    attempt_number=attempt_number,
+                    state=JobState.RUNNING.value,
+                    started_at=timestamp_to_iso(now),
+                )
             )
-            attempt_id = int(cursor.lastrowid)
+            attempt_id = int(result.inserted_primary_key[0] or result.lastrowid)
         updated = self.get(job_id) or _missing_job(job_id)
         return updated, JobAttemptRecord(
             id=attempt_id,
@@ -297,33 +281,29 @@ class JobRepository:
         now = utc_now()
         with self.store.connection() as connection:
             connection.execute(
-                """
-                UPDATE jobs
-                SET state = ?, updated_at = ?, finished_at = ?, lease_expires_at = NULL,
-                    result_json = ?, last_error_code = NULL, last_error_detail = NULL
-                WHERE id = ?
-                """,
-                (
-                    JobState.SUCCEEDED.value,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    dump_json(result_payload),
-                    job_id,
-                ),
+                update(jobs_table)
+                .where(jobs_table.c.id == job_id)
+                .values(
+                    state=JobState.SUCCEEDED.value,
+                    updated_at=timestamp_to_iso(now),
+                    finished_at=timestamp_to_iso(now),
+                    lease_expires_at=None,
+                    result_json=dump_json(result_payload),
+                    last_error_code=None,
+                    last_error_detail=None,
+                )
             )
             connection.execute(
-                """
-                UPDATE job_attempts
-                SET state = ?, finished_at = ?, result_json = ?
-                WHERE job_id = ? AND attempt_number = ?
-                """,
-                (
-                    JobState.SUCCEEDED.value,
-                    timestamp_to_iso(now),
-                    dump_json(result_payload),
-                    job_id,
-                    attempt_number,
-                ),
+                update(job_attempts_table)
+                .where(
+                    job_attempts_table.c.job_id == job_id,
+                    job_attempts_table.c.attempt_number == attempt_number,
+                )
+                .values(
+                    state=JobState.SUCCEEDED.value,
+                    finished_at=timestamp_to_iso(now),
+                    result_json=dump_json(result_payload),
+                )
             )
         return self.get(job_id) or _missing_job(job_id)
 
@@ -340,35 +320,29 @@ class JobRepository:
         retry_at = normalize_timestamp(next_run_at) or now
         with self.store.connection() as connection:
             connection.execute(
-                """
-                UPDATE jobs
-                SET state = ?, updated_at = ?, next_run_at = ?, lease_expires_at = NULL,
-                    last_error_code = ?, last_error_detail = ?
-                WHERE id = ?
-                """,
-                (
-                    JobState.RETRY_SCHEDULED.value,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(retry_at),
-                    error_code,
-                    error_detail,
-                    job_id,
-                ),
+                update(jobs_table)
+                .where(jobs_table.c.id == job_id)
+                .values(
+                    state=JobState.RETRY_SCHEDULED.value,
+                    updated_at=timestamp_to_iso(now),
+                    next_run_at=timestamp_to_iso(retry_at),
+                    lease_expires_at=None,
+                    last_error_code=error_code,
+                    last_error_detail=error_detail,
+                )
             )
             connection.execute(
-                """
-                UPDATE job_attempts
-                SET state = ?, finished_at = ?, error_code = ?, error_detail = ?
-                WHERE job_id = ? AND attempt_number = ?
-                """,
-                (
-                    JobState.RETRY_SCHEDULED.value,
-                    timestamp_to_iso(now),
-                    error_code,
-                    error_detail,
-                    job_id,
-                    attempt_number,
-                ),
+                update(job_attempts_table)
+                .where(
+                    job_attempts_table.c.job_id == job_id,
+                    job_attempts_table.c.attempt_number == attempt_number,
+                )
+                .values(
+                    state=JobState.RETRY_SCHEDULED.value,
+                    finished_at=timestamp_to_iso(now),
+                    error_code=error_code,
+                    error_detail=error_detail,
+                )
             )
         return self.get(job_id) or _missing_job(job_id)
 
@@ -383,66 +357,62 @@ class JobRepository:
         now = utc_now()
         with self.store.connection() as connection:
             connection.execute(
-                """
-                UPDATE jobs
-                SET state = ?, updated_at = ?, finished_at = ?, lease_expires_at = NULL,
-                    last_error_code = ?, last_error_detail = ?
-                WHERE id = ?
-                """,
-                (
-                    JobState.FAILED.value,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    error_code,
-                    error_detail,
-                    job_id,
-                ),
+                update(jobs_table)
+                .where(jobs_table.c.id == job_id)
+                .values(
+                    state=JobState.FAILED.value,
+                    updated_at=timestamp_to_iso(now),
+                    finished_at=timestamp_to_iso(now),
+                    lease_expires_at=None,
+                    last_error_code=error_code,
+                    last_error_detail=error_detail,
+                )
             )
             if attempt_number is not None:
                 connection.execute(
-                    """
-                    UPDATE job_attempts
-                    SET state = ?, finished_at = ?, error_code = ?, error_detail = ?
-                    WHERE job_id = ? AND attempt_number = ?
-                    """,
-                    (
-                        JobState.FAILED.value,
-                        timestamp_to_iso(now),
-                        error_code,
-                        error_detail,
-                        job_id,
-                        attempt_number,
-                    ),
+                    update(job_attempts_table)
+                    .where(
+                        job_attempts_table.c.job_id == job_id,
+                        job_attempts_table.c.attempt_number == attempt_number,
+                    )
+                    .values(
+                        state=JobState.FAILED.value,
+                        finished_at=timestamp_to_iso(now),
+                        error_code=error_code,
+                        error_detail=error_detail,
+                    )
                 )
         return self.get(job_id) or _missing_job(job_id)
 
     def cancel(self, job_id: str) -> JobRecord | None:
         now = utc_now()
-        with self.store.connection() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE jobs
-                SET state = ?, updated_at = ?, finished_at = ?, lease_expires_at = NULL
-                WHERE id = ? AND state IN (?, ?, ?)
-                """,
-                (
-                    JobState.CANCELLED.value,
-                    timestamp_to_iso(now),
-                    timestamp_to_iso(now),
-                    job_id,
-                    JobState.QUEUED.value,
-                    JobState.RETRY_SCHEDULED.value,
-                    JobState.DISPATCHED.value,
+        stmt = (
+            update(jobs_table)
+            .where(
+                jobs_table.c.id == job_id,
+                jobs_table.c.state.in_(
+                    (JobState.QUEUED.value, JobState.RETRY_SCHEDULED.value, JobState.DISPATCHED.value)
                 ),
             )
-        return self.get(job_id) if cursor.rowcount > 0 else None
+            .values(
+                state=JobState.CANCELLED.value,
+                updated_at=timestamp_to_iso(now),
+                finished_at=timestamp_to_iso(now),
+                lease_expires_at=None,
+            )
+        )
+        with self.store.connection() as connection:
+            result = connection.execute(stmt)
+        return self.get(job_id) if result.rowcount and result.rowcount > 0 else None
 
     def list_attempts(self, job_id: str) -> tuple[JobAttemptRecord, ...]:
+        stmt = (
+            select(job_attempts_table)
+            .where(job_attempts_table.c.job_id == job_id)
+            .order_by(job_attempts_table.c.attempt_number.desc())
+        )
         with self.store.connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM job_attempts WHERE job_id = ? ORDER BY attempt_number DESC",
-                (job_id,),
-            ).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_job_attempt(row) for row in rows)
 
     def append_event(
@@ -453,12 +423,15 @@ class JobRepository:
         payload: Mapping[str, Any],
     ) -> JobEventRecord:
         occurred_at = utc_now()
+        stmt = insert(job_events_table).values(
+            job_id=job_id,
+            event_type=event_type,
+            payload_json=dump_json(payload),
+            occurred_at=timestamp_to_iso(occurred_at),
+        )
         with self.store.connection() as connection:
-            cursor = connection.execute(
-                "INSERT INTO job_events (job_id, event_type, payload_json, occurred_at) VALUES (?, ?, ?, ?)",
-                (job_id, event_type, dump_json(payload), timestamp_to_iso(occurred_at)),
-            )
-            sequence = int(cursor.lastrowid)
+            result = connection.execute(stmt)
+            sequence = int(result.inserted_primary_key[0] or result.lastrowid)
         return JobEventRecord(
             sequence=sequence,
             resource_id=job_id,
@@ -468,16 +441,20 @@ class JobRepository:
         )
 
     def list_events(self, job_id: str, *, limit: int = 100) -> tuple[JobEventRecord, ...]:
+        stmt = (
+            select(job_events_table)
+            .where(job_events_table.c.job_id == job_id)
+            .order_by(job_events_table.c.sequence.desc())
+            .limit(limit)
+        )
         with self.store.connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM job_events WHERE job_id = ? ORDER BY sequence DESC LIMIT ?",
-                (job_id, limit),
-            ).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_job_event(row) for row in rows)
 
     def queue_counts(self) -> Mapping[str, int]:
+        stmt = select(jobs_table.c.state, func.count().label("total")).group_by(jobs_table.c.state)
         with self.store.connection() as connection:
-            rows = connection.execute("SELECT state, COUNT(*) AS total FROM jobs GROUP BY state").fetchall()
+            rows = connection.execute(stmt).mappings().all()
         counts = Counter()
         for row in rows:
             counts[str(row["state"])] = int(row["total"])
@@ -485,41 +462,30 @@ class JobRepository:
 
     def recover_expired(self) -> tuple[JobRecord, ...]:
         now = utc_now()
+        stmt = select(jobs_table).where(
+            jobs_table.c.state.in_((JobState.DISPATCHED.value, JobState.RUNNING.value)),
+            jobs_table.c.lease_expires_at.is_not(None),
+            jobs_table.c.lease_expires_at <= timestamp_to_iso(now),
+        )
         with self.store.connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM jobs
-                WHERE state IN (?, ?)
-                  AND lease_expires_at IS NOT NULL
-                  AND lease_expires_at <= ?
-                """,
-                (
-                    JobState.DISPATCHED.value,
-                    JobState.RUNNING.value,
-                    timestamp_to_iso(now),
-                ),
-            ).fetchall()
+            rows = connection.execute(stmt).mappings().all()
         recovered: list[JobRecord] = []
         for row in rows:
             job = _row_to_job(row)
             next_state = JobState.RETRY_SCHEDULED if job.attempt_count < job.max_attempts else JobState.FAILED
             with self.store.connection() as connection:
                 connection.execute(
-                    """
-                    UPDATE jobs
-                    SET state = ?, updated_at = ?, next_run_at = ?, finished_at = ?, lease_expires_at = NULL,
-                        last_error_code = ?, last_error_detail = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        next_state.value,
-                        timestamp_to_iso(now),
-                        timestamp_to_iso(now),
-                        timestamp_to_iso(now) if next_state is JobState.FAILED else None,
-                        "JOB_LEASE_EXPIRED",
-                        "Job execution lease expired before completion.",
-                        job.id,
-                    ),
+                    update(jobs_table)
+                    .where(jobs_table.c.id == job.id)
+                    .values(
+                        state=next_state.value,
+                        updated_at=timestamp_to_iso(now),
+                        next_run_at=timestamp_to_iso(now),
+                        finished_at=timestamp_to_iso(now) if next_state is JobState.FAILED else None,
+                        lease_expires_at=None,
+                        last_error_code="JOB_LEASE_EXPIRED",
+                        last_error_detail="Job execution lease expired before completion.",
+                    )
                 )
             recovered.append(self.get(job.id) or job)
         return tuple(recovered)
@@ -532,26 +498,23 @@ class JobRepository:
         to_state: JobState | None,
         assignments: Mapping[str, object],
     ) -> JobRecord | None:
-        updates: list[str] = []
-        params: list[object] = []
+        values: dict[str, object] = dict(assignments)
         if to_state is not None:
-            updates.append("state = ?")
-            params.append(to_state.value)
-        for key, value in assignments.items():
-            updates.append(f"{key} = ?")
-            params.append(value)
-        params.append(job_id)
-        params.extend(state.value for state in from_states)
-        placeholders = ", ".join("?" for _ in from_states)
-        with self.store.connection() as connection:
-            cursor = connection.execute(
-                f"UPDATE jobs SET {', '.join(updates)} WHERE id = ? AND state IN ({placeholders})",
-                tuple(params),
+            values["state"] = to_state.value
+        stmt = (
+            update(jobs_table)
+            .where(
+                jobs_table.c.id == job_id,
+                jobs_table.c.state.in_(tuple(state.value for state in from_states)),
             )
-        return self.get(job_id) if cursor.rowcount > 0 else None
+            .values(**values)
+        )
+        with self.store.connection() as connection:
+            result = connection.execute(stmt)
+        return self.get(job_id) if result.rowcount and result.rowcount > 0 else None
 
 
-def _row_to_device(row: sqlite3.Row) -> DeviceRecord:
+def _row_to_device(row: Mapping[str, Any]) -> DeviceRecord:
     return DeviceRecord(
         id=str(row["id"]),
         kind=DeviceKind(str(row["kind"])),
@@ -570,7 +533,7 @@ def _row_to_device(row: sqlite3.Row) -> DeviceRecord:
     )
 
 
-def _row_to_job(row: sqlite3.Row) -> JobRecord:
+def _row_to_job(row: Mapping[str, Any]) -> JobRecord:
     return JobRecord(
         id=str(row["id"]),
         kind=JobKind(str(row["kind"])),
@@ -600,7 +563,7 @@ def _row_to_job(row: sqlite3.Row) -> JobRecord:
     )
 
 
-def _row_to_job_attempt(row: sqlite3.Row) -> JobAttemptRecord:
+def _row_to_job_attempt(row: Mapping[str, Any]) -> JobAttemptRecord:
     return JobAttemptRecord(
         id=int(row["id"]),
         job_id=str(row["job_id"]),
@@ -614,7 +577,7 @@ def _row_to_job_attempt(row: sqlite3.Row) -> JobAttemptRecord:
     )
 
 
-def _row_to_device_event(row: sqlite3.Row) -> DeviceEventRecord:
+def _row_to_device_event(row: Mapping[str, Any]) -> DeviceEventRecord:
     return DeviceEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["device_id"]),
@@ -624,7 +587,7 @@ def _row_to_device_event(row: sqlite3.Row) -> DeviceEventRecord:
     )
 
 
-def _row_to_job_event(row: sqlite3.Row) -> JobEventRecord:
+def _row_to_job_event(row: Mapping[str, Any]) -> JobEventRecord:
     return JobEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["job_id"]),

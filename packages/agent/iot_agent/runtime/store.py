@@ -1,162 +1,189 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    create_engine,
+    event,
+)
+from sqlalchemy.engine import Connection, Engine, URL
+from sqlalchemy.pool import NullPool
+
+
+metadata = MetaData()
+
+devices_table = Table(
+    "devices",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("kind", String, nullable=False),
+    Column("driver_key", String, nullable=False),
+    Column("name", String, nullable=False),
+    Column("connection_state", String, nullable=False),
+    Column("first_seen_at", String, nullable=False),
+    Column("last_seen_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("is_default", Boolean, nullable=False),
+    Column("preferred_transport", String),
+    Column("capabilities_json", Text, nullable=False),
+    Column("metadata_json", Text, nullable=False),
+)
+
+device_events_table = Table(
+    "device_events",
+    metadata,
+    Column("sequence", Integer, primary_key=True, autoincrement=True),
+    Column("device_id", String, nullable=False),
+    Column("event_type", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("occurred_at", String, nullable=False),
+)
+Index("idx_device_events_device_id", device_events_table.c.device_id, device_events_table.c.sequence.desc())
+
+jobs_table = Table(
+    "jobs",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("kind", String, nullable=False),
+    Column("operation", String, nullable=False),
+    Column("device_id", String, nullable=False),
+    Column("device_kind", String, nullable=False),
+    Column("device_name", String, nullable=False),
+    Column("state", String, nullable=False),
+    Column("request_json", Text, nullable=False),
+    Column("request_metadata_json", Text, nullable=False),
+    Column("content_kind", String),
+    Column("command_kind", String),
+    Column("attempt_count", Integer, nullable=False),
+    Column("max_attempts", Integer, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("queued_at", String, nullable=False),
+    Column("next_run_at", String, nullable=False),
+    Column("started_at", String),
+    Column("finished_at", String),
+    Column("lease_expires_at", String),
+    Column("result_json", Text),
+    Column("last_error_code", String),
+    Column("last_error_detail", Text),
+)
+Index("idx_jobs_state_next_run_at", jobs_table.c.state, jobs_table.c.next_run_at, jobs_table.c.created_at)
+Index("idx_jobs_device_id", jobs_table.c.device_id, jobs_table.c.created_at)
+
+job_attempts_table = Table(
+    "job_attempts",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("job_id", String, nullable=False),
+    Column("attempt_number", Integer, nullable=False),
+    Column("state", String, nullable=False),
+    Column("started_at", String, nullable=False),
+    Column("finished_at", String),
+    Column("error_code", String),
+    Column("error_detail", Text),
+    Column("result_json", Text),
+)
+Index("idx_job_attempts_job_id", job_attempts_table.c.job_id, job_attempts_table.c.attempt_number.desc())
+
+job_events_table = Table(
+    "job_events",
+    metadata,
+    Column("sequence", Integer, primary_key=True, autoincrement=True),
+    Column("job_id", String, nullable=False),
+    Column("event_type", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("occurred_at", String, nullable=False),
+)
+Index("idx_job_events_job_id", job_events_table.c.job_id, job_events_table.c.sequence.desc())
+
+gateway_inbound_commands_table = Table(
+    "gateway_inbound_commands",
+    metadata,
+    Column("command_id", String, primary_key=True),
+    Column("message_id", String, nullable=False),
+    Column("message_type", String, nullable=False),
+    Column("state", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("response_json", Text),
+    Column("error_code", String),
+    Column("error_detail", Text),
+    Column("job_id", String),
+    Column("received_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+Index("idx_gateway_inbound_job_id", gateway_inbound_commands_table.c.job_id, gateway_inbound_commands_table.c.updated_at.desc())
+
+gateway_outbox_table = Table(
+    "gateway_outbox",
+    metadata,
+    Column("message_id", String, primary_key=True),
+    Column("message_type", String, nullable=False),
+    Column("state", String, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("correlation_id", String),
+    Column("dedupe_key", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("sent_at", String),
+    Column("acknowledged_at", String),
+    Column("last_error", Text),
+)
+Index(
+    "idx_gateway_outbox_dedupe_key",
+    gateway_outbox_table.c.dedupe_key,
+    unique=True,
+    sqlite_where=gateway_outbox_table.c.dedupe_key.is_not(None),
+)
+Index("idx_gateway_outbox_state_created_at", gateway_outbox_table.c.state, gateway_outbox_table.c.created_at)
+
+
+def _create_engine(database_path: Path) -> Engine:
+    engine = create_engine(
+        URL.create("sqlite+pysqlite", database=str(database_path)),
+        connect_args={"timeout": 30, "check_same_thread": False},
+        poolclass=NullPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _configure_sqlite(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+        del connection_record
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys = ON")
+            cursor.execute("PRAGMA journal_mode = WAL")
+        finally:
+            cursor.close()
+
+    return engine
 
 
 class RuntimeStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
         self._lock = threading.RLock()
+        self.engine = _create_engine(database_path)
 
     def initialize(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connection() as connection:
-            connection.executescript(
-                """
-                PRAGMA journal_mode = WAL;
-                PRAGMA foreign_keys = ON;
-
-                CREATE TABLE IF NOT EXISTS devices (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    driver_key TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    connection_state TEXT NOT NULL,
-                    first_seen_at TEXT NOT NULL,
-                    last_seen_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    is_default INTEGER NOT NULL,
-                    preferred_transport TEXT,
-                    capabilities_json TEXT NOT NULL,
-                    metadata_json TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS device_events (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                    device_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    occurred_at TEXT NOT NULL,
-                    FOREIGN KEY (device_id) REFERENCES devices(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_device_events_device_id
-                ON device_events(device_id, sequence DESC);
-
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    operation TEXT NOT NULL,
-                    device_id TEXT NOT NULL,
-                    device_kind TEXT NOT NULL,
-                    device_name TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    request_json TEXT NOT NULL,
-                    request_metadata_json TEXT NOT NULL,
-                    content_kind TEXT,
-                    command_kind TEXT,
-                    attempt_count INTEGER NOT NULL,
-                    max_attempts INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    queued_at TEXT NOT NULL,
-                    next_run_at TEXT NOT NULL,
-                    started_at TEXT,
-                    finished_at TEXT,
-                    lease_expires_at TEXT,
-                    result_json TEXT,
-                    last_error_code TEXT,
-                    last_error_detail TEXT
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_jobs_state_next_run_at
-                ON jobs(state, next_run_at, created_at);
-
-                CREATE INDEX IF NOT EXISTS idx_jobs_device_id
-                ON jobs(device_id, created_at);
-
-                CREATE TABLE IF NOT EXISTS job_attempts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT NOT NULL,
-                    attempt_number INTEGER NOT NULL,
-                    state TEXT NOT NULL,
-                    started_at TEXT NOT NULL,
-                    finished_at TEXT,
-                    error_code TEXT,
-                    error_detail TEXT,
-                    result_json TEXT,
-                    FOREIGN KEY (job_id) REFERENCES jobs(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_job_attempts_job_id
-                ON job_attempts(job_id, attempt_number DESC);
-
-                CREATE TABLE IF NOT EXISTS job_events (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    occurred_at TEXT NOT NULL,
-                    FOREIGN KEY (job_id) REFERENCES jobs(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_job_events_job_id
-                ON job_events(job_id, sequence DESC);
-
-                CREATE TABLE IF NOT EXISTS gateway_inbound_commands (
-                    command_id TEXT PRIMARY KEY,
-                    message_id TEXT NOT NULL,
-                    message_type TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    response_json TEXT,
-                    error_code TEXT,
-                    error_detail TEXT,
-                    job_id TEXT,
-                    received_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_gateway_inbound_job_id
-                ON gateway_inbound_commands(job_id, updated_at DESC);
-
-                CREATE TABLE IF NOT EXISTS gateway_outbox (
-                    message_id TEXT PRIMARY KEY,
-                    message_type TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    correlation_id TEXT,
-                    dedupe_key TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    sent_at TEXT,
-                    acknowledged_at TEXT,
-                    last_error TEXT
-                );
-
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_outbox_dedupe_key
-                ON gateway_outbox(dedupe_key)
-                WHERE dedupe_key IS NOT NULL;
-
-                CREATE INDEX IF NOT EXISTS idx_gateway_outbox_state_created_at
-                ON gateway_outbox(state, created_at);
-                """
-            )
+        with self._lock, self.engine.begin() as connection:
+            metadata.create_all(connection)
 
     @contextmanager
-    def connection(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            connection = sqlite3.connect(self.database_path, timeout=30, isolation_level=None)
-            connection.row_factory = sqlite3.Row
-            try:
-                yield connection
-            finally:
-                connection.close()
+    def connection(self) -> Iterator[Connection]:
+        with self._lock, self.engine.begin() as connection:
+            yield connection
 
 
 def dump_json(value: Mapping[str, Any] | None) -> str:
