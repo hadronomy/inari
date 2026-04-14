@@ -25,6 +25,9 @@ class AgentControlBridge:
     def query_state(self) -> ControlSnapshot:
         raise NotImplementedError
 
+    def mark_ready(self) -> None:
+        return None
+
     def start(self) -> str:
         raise RuntimeError("Start is not supported by this control mode.")
 
@@ -76,61 +79,85 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         process_factory: Callable[..., Any] | None = None,
         launch_command: Sequence[str] | None = None,
         working_directory: Path | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self.settings = settings
         self._process_factory = process_factory or subprocess.Popen
         self._launch_command = tuple(launch_command) if launch_command is not None else None
         self._working_directory = working_directory or _default_working_directory()
+        self._clock = clock or time.monotonic
         self._launch_log_path = settings.log_dir / "agent-launch.log"
         self._lock = threading.Lock()
         self._process: Any | None = None
         self._process_output_handle: Any | None = None
+        self._startup_started_at: float | None = None
+        self._ready = False
 
     def query_state(self) -> ControlSnapshot:
-        process = self._process
-        if process is None:
+        with self._lock:
+            process = self._process
+            if process is None:
+                return ControlSnapshot(
+                    mode=self.mode,
+                    lifecycle=LifecycleState.STOPPED,
+                    detail="Ready to launch a local agent process.",
+                    can_start=True,
+                    can_stop=False,
+                    can_restart=False,
+                    managed_by_tray=False,
+                )
+
+            exit_code = process.poll()
+            if exit_code is None:
+                if self._is_starting():
+                    return ControlSnapshot(
+                        mode=self.mode,
+                        lifecycle=LifecycleState.STARTING,
+                        detail="Waiting for the local agent API to become ready.",
+                        can_start=False,
+                        can_stop=True,
+                        can_restart=True,
+                        managed_by_tray=True,
+                    )
+                detail = "Managing a local background agent process."
+                if getattr(process, "pid", None) is not None:
+                    detail = f"Managing local agent process PID {process.pid}."
+                return ControlSnapshot(
+                    mode=self.mode,
+                    lifecycle=LifecycleState.RUNNING,
+                    detail=detail,
+                    can_start=False,
+                    can_stop=True,
+                    can_restart=True,
+                    managed_by_tray=True,
+                )
+
+            self._startup_started_at = None
+            self._ready = False
+            self._close_process_output_handle()
+            detail = f"Last managed process exited with code {exit_code}. See {self._launch_log_path}."
             return ControlSnapshot(
                 mode=self.mode,
                 lifecycle=LifecycleState.STOPPED,
-                detail="Ready to launch a local agent process.",
+                detail=detail,
                 can_start=True,
                 can_stop=False,
-                can_restart=False,
+                can_restart=True,
                 managed_by_tray=False,
             )
 
-        exit_code = process.poll()
-        if exit_code is None:
-            detail = "Managing a local background agent process."
-            if getattr(process, "pid", None) is not None:
-                detail = f"Managing local agent process PID {process.pid}."
-            return ControlSnapshot(
-                mode=self.mode,
-                lifecycle=LifecycleState.RUNNING,
-                detail=detail,
-                can_start=False,
-                can_stop=True,
-                can_restart=True,
-                managed_by_tray=True,
-            )
-
-        self._close_process_output_handle()
-        detail = f"Last managed process exited with code {exit_code}. See {self._launch_log_path}."
-        return ControlSnapshot(
-            mode=self.mode,
-            lifecycle=LifecycleState.STOPPED,
-            detail=detail,
-            can_start=True,
-            can_stop=False,
-            can_restart=True,
-            managed_by_tray=False,
-        )
+    def mark_ready(self) -> None:
+        with self._lock:
+            if self._process is not None and self._process.poll() is None:
+                self._ready = True
 
     def start(self) -> str:
         with self._lock:
             if self._is_running():
                 return "The local agent process is already running."
             self._process = None
+            self._startup_started_at = None
+            self._ready = False
             self._close_process_output_handle()
             self.settings.log_dir.mkdir(parents=True, exist_ok=True)
             creation_flags = 0
@@ -152,6 +179,8 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
                 stderr=subprocess.STDOUT,
                 creationflags=creation_flags,
             )
+            self._startup_started_at = self._clock()
+            self._ready = False
             time.sleep(0.5)
             exit_code = self._process.poll()
             if exit_code is not None:
@@ -173,6 +202,8 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
                 process.kill()
                 process.wait(timeout=5)
             self._process = None
+            self._startup_started_at = None
+            self._ready = False
             self._close_process_output_handle()
         return "Stopped the local agent process."
 
@@ -192,6 +223,11 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
     def _is_running(self) -> bool:
         process = self._process
         return process is not None and process.poll() is None
+
+    def _is_starting(self) -> bool:
+        if self._ready or self._startup_started_at is None:
+            return False
+        return (self._clock() - self._startup_started_at) < self.settings.startup_grace_period_seconds
 
     def _resolve_launch_command(self) -> tuple[str, ...]:
         if self._launch_command is not None:

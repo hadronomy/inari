@@ -111,8 +111,9 @@ class AgentTrayApplication:
         while not self._stop_event.is_set():
             try:
                 for message in self.client.iter_live_updates(self._stop_event):
-                    control = self.bridge.query_state()
                     if isinstance(message, LiveSnapshotResponse):
+                        self.bridge.mark_ready()
+                        control = self.bridge.query_state()
                         self._apply_status_snapshot(
                             message.status,
                             control=control,
@@ -120,6 +121,8 @@ class AgentTrayApplication:
                         )
                         continue
                     if isinstance(message, LiveEventUpdateResponse):
+                        self.bridge.mark_ready()
+                        control = self.bridge.query_state()
                         self._apply_status_snapshot(
                             message.status,
                             control=control,
@@ -153,6 +156,8 @@ class AgentTrayApplication:
                 if notify_connection and previous.connected != snapshot.connected:
                     self._notify_connection_change(snapshot)
             else:
+                self.bridge.mark_ready()
+                control = self.bridge.query_state()
                 self._apply_status_snapshot(
                     status,
                     control=control,

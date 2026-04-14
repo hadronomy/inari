@@ -32,6 +32,7 @@ class TraySettings(BaseSettings):
     event_reconnect_delay_seconds: float = 3.0
     connect_timeout_seconds: float = 2.0
     event_timeout_seconds: float = 1.0
+    startup_grace_period_seconds: float = 15.0
     shutdown_started_process_on_exit: bool = True
     log_dir: Path = Path("./logs")
 

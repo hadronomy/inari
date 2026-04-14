@@ -191,11 +191,16 @@ def test_spawned_process_bridge_manages_process_lifecycle() -> None:
     )
 
     start_message = bridge.start()
+    starting = bridge.query_state()
+    bridge.mark_ready()
     running = bridge.query_state()
     stop_message = bridge.stop()
     stopped = bridge.query_state()
 
     assert start_message == "Started the local agent process."
+    assert starting.mode is ControlMode.SPAWN
+    assert starting.lifecycle is LifecycleState.STARTING
+    assert starting.can_stop is True
     assert running.mode is ControlMode.SPAWN
     assert running.lifecycle is LifecycleState.RUNNING
     assert running.can_stop is True
@@ -203,6 +208,32 @@ def test_spawned_process_bridge_manages_process_lifecycle() -> None:
     assert stopped.lifecycle is LifecycleState.STOPPED
     assert len(created) == 1
     assert created[0].terminated is True
+
+
+def test_spawned_process_bridge_leaves_starting_state_after_grace_period() -> None:
+    created: list[FakeProcess] = []
+    now = 100.0
+
+    def process_factory(*args, **kwargs):
+        process = FakeProcess()
+        created.append(process)
+        return process
+
+    def clock() -> float:
+        return now
+
+    bridge = SpawnedProcessAgentBridge(
+        TraySettings(control_mode="spawn", startup_grace_period_seconds=5.0),
+        process_factory=process_factory,
+        clock=clock,
+    )
+
+    bridge.start()
+    assert bridge.query_state().lifecycle is LifecycleState.STARTING
+
+    now = 106.0
+
+    assert bridge.query_state().lifecycle is LifecycleState.RUNNING
 
 
 def test_spawned_process_bridge_shutdown_stops_managed_process_by_default() -> None:
