@@ -31,7 +31,9 @@ class QueuedPrintOperation:
     target: DeviceTargetRef
     job: PrintJob
 
-    def with_resolved_printer(self, *, device_id: str, printer_name: str) -> QueuedPrintOperation:
+    def with_resolved_printer(
+        self, *, device_id: str, printer_name: str
+    ) -> QueuedPrintOperation:
         return QueuedPrintOperation(
             target=DeviceTargetRef(device_id=device_id, printer_name=printer_name),
             job=replace(self.job, printer_name=printer_name),
@@ -44,7 +46,9 @@ class QueuedDeviceCommandOperation:
     command: DeviceCommand
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
-    def with_resolved_printer(self, *, device_id: str, printer_name: str) -> QueuedDeviceCommandOperation:
+    def with_resolved_printer(
+        self, *, device_id: str, printer_name: str
+    ) -> QueuedDeviceCommandOperation:
         return QueuedDeviceCommandOperation(
             target=DeviceTargetRef(device_id=device_id, printer_name=printer_name),
             command=self.command,
@@ -68,7 +72,9 @@ def deserialize_print_operation(payload: Mapping[str, Any]) -> QueuedPrintOperat
     )
 
 
-def serialize_device_command_operation(operation: QueuedDeviceCommandOperation) -> dict[str, Any]:
+def serialize_device_command_operation(
+    operation: QueuedDeviceCommandOperation,
+) -> dict[str, Any]:
     return {
         "target": serialize_target_ref(operation.target),
         "command": operation.command.to_payload(),
@@ -76,7 +82,9 @@ def serialize_device_command_operation(operation: QueuedDeviceCommandOperation) 
     }
 
 
-def deserialize_device_command_operation(payload: Mapping[str, Any]) -> QueuedDeviceCommandOperation:
+def deserialize_device_command_operation(
+    payload: Mapping[str, Any],
+) -> QueuedDeviceCommandOperation:
     target_payload = _mapping(payload.get("target"))
     command_payload = _mapping(payload.get("command"))
     metadata_payload = _mapping(payload.get("metadata"))
@@ -116,7 +124,9 @@ def serialize_print_job(job: PrintJob) -> dict[str, Any]:
 def deserialize_print_job(payload: Mapping[str, Any]) -> PrintJob:
     content_payload = _mapping(payload.get("content"))
     printer_name = payload.get("printer_name")
-    transport = PrinterTransport(str(payload.get("transport", PrinterTransport.AUTO.value)))
+    transport = PrinterTransport(
+        str(payload.get("transport", PrinterTransport.AUTO.value))
+    )
     open_drawer = bool(payload.get("open_drawer", False))
     metadata = _mapping(payload.get("metadata"))
     return PrintJob(
@@ -179,7 +189,9 @@ def deserialize_print_content(payload: Mapping[str, Any]) -> PrintContent:
         )
     if kind is PrintContentKind.RECEIPT_IMAGE:
         return ReceiptImageContent(
-            binary_payload=deserialize_binary_payload(_mapping(payload.get("binary_payload"))),
+            binary_payload=deserialize_binary_payload(
+                _mapping(payload.get("binary_payload"))
+            ),
             document_name=document_name,
         )
     if kind is PrintContentKind.TEXT:
@@ -194,12 +206,16 @@ def deserialize_print_content(payload: Mapping[str, Any]) -> PrintContent:
         )
     if kind is PrintContentKind.PDF:
         return PdfDocumentContent(
-            binary_payload=deserialize_binary_payload(_mapping(payload.get("binary_payload"))),
+            binary_payload=deserialize_binary_payload(
+                _mapping(payload.get("binary_payload"))
+            ),
             document_name=document_name,
         )
     if kind is PrintContentKind.RAW:
         return RawDocumentContent(
-            binary_payload=deserialize_binary_payload(_mapping(payload.get("binary_payload"))),
+            binary_payload=deserialize_binary_payload(
+                _mapping(payload.get("binary_payload"))
+            ),
             data_type=str(payload.get("data_type", "RAW")),
             document_name=document_name,
         )

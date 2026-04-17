@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
+from .manager import (
+    ServiceContext,
+    ensure_service_config_file,
+    validate_service_config_file,
+)
 from .models import ServiceDefinition, ServiceScope, ServiceState, ServiceStatus
 
 
@@ -33,7 +37,9 @@ class SystemdServiceManager:
         config_created = ensure_service_config_file(self.context.config_path)
         unit_path.write_text(self.definition().content, encoding="utf-8")
         self._run([*self._systemctl_base_command(), "daemon-reload"])
-        self._run([*self._systemctl_base_command(), "enable", self.identity.systemd_unit_name])
+        self._run(
+            [*self._systemctl_base_command(), "enable", self.identity.systemd_unit_name]
+        )
         message = f"Installed systemd unit at {unit_path}."
         if config_created:
             message += f" Wrote default config to {self.context.config_path}."
@@ -41,7 +47,13 @@ class SystemdServiceManager:
 
     def uninstall(self) -> str:
         unit_path = self._unit_path()
-        self._run([*self._systemctl_base_command(), "disable", self.identity.systemd_unit_name])
+        self._run(
+            [
+                *self._systemctl_base_command(),
+                "disable",
+                self.identity.systemd_unit_name,
+            ]
+        )
         if unit_path.exists():
             unit_path.unlink()
         self._run([*self._systemctl_base_command(), "daemon-reload"])
@@ -49,16 +61,26 @@ class SystemdServiceManager:
 
     def start(self) -> str:
         validate_service_config_file(self.context.config_path)
-        self._run([*self._systemctl_base_command(), "start", self.identity.systemd_unit_name])
+        self._run(
+            [*self._systemctl_base_command(), "start", self.identity.systemd_unit_name]
+        )
         return f"Started systemd unit {self.identity.systemd_unit_name!r}."
 
     def stop(self) -> str:
-        self._run([*self._systemctl_base_command(), "stop", self.identity.systemd_unit_name])
+        self._run(
+            [*self._systemctl_base_command(), "stop", self.identity.systemd_unit_name]
+        )
         return f"Stopped systemd unit {self.identity.systemd_unit_name!r}."
 
     def restart(self) -> str:
         validate_service_config_file(self.context.config_path)
-        self._run([*self._systemctl_base_command(), "restart", self.identity.systemd_unit_name])
+        self._run(
+            [
+                *self._systemctl_base_command(),
+                "restart",
+                self.identity.systemd_unit_name,
+            ]
+        )
         return f"Restarted systemd unit {self.identity.systemd_unit_name!r}."
 
     def status(self) -> ServiceStatus:
@@ -88,7 +110,9 @@ class SystemdServiceManager:
         )
 
     def definition(self) -> ServiceDefinition:
-        command = " ".join(_quote_systemd_arg(part) for part in self._program_arguments())
+        command = " ".join(
+            _quote_systemd_arg(part) for part in self._program_arguments()
+        )
         lines = [
             "[Unit]",
             f"Description={self.identity.display_name}",
@@ -126,7 +150,9 @@ class SystemdServiceManager:
             [
                 "",
                 "[Install]",
-                "WantedBy=default.target" if self.scope == "user" else "WantedBy=multi-user.target",
+                "WantedBy=default.target"
+                if self.scope == "user"
+                else "WantedBy=multi-user.target",
                 "",
             ]
         )
@@ -148,7 +174,13 @@ class SystemdServiceManager:
 
     def _unit_path(self) -> Path:
         if self.scope == "user":
-            return Path.home() / ".config" / "systemd" / "user" / self.identity.systemd_unit_name
+            return (
+                Path.home()
+                / ".config"
+                / "systemd"
+                / "user"
+                / self.identity.systemd_unit_name
+            )
         return Path("/etc/systemd/system") / self.identity.systemd_unit_name
 
     def _systemctl_base_command(self) -> list[str]:
@@ -164,7 +196,9 @@ class SystemdServiceManager:
             self.context.settings.log_dir,
             self.context.settings.temp_dir,
             self.context.settings.security_state_dir,
-            self.context.settings.runtime_database_path.parent if self.context.settings.runtime_database_path is not None else None,
+            self.context.settings.runtime_database_path.parent
+            if self.context.settings.runtime_database_path is not None
+            else None,
         ):
             if path is not None:
                 Path(path).mkdir(parents=True, exist_ok=True)

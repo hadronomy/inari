@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar, Protocol
 
 from ...config import NetworkPrinterConfig
 from ...exceptions import PrinterServiceError
 from ...printers import EscPosCommands
-from ...printers.types import PrintJobResult, PrinterCapabilities, PrinterDevice, PrinterTransport, RenderedDocument
+from ...printers.types import (
+    PrintJobResult,
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+    RenderedDocument,
+)
 from ..base import DeviceKind, DriverMetadata
 from .base import PrinterDriver
 
@@ -50,33 +56,53 @@ class RawSocketPrinterDriver(PrinterDriver):
                 return config.name
         return None
 
-    def resolve_transport(self, printer: PrinterDevice, requested: PrinterTransport) -> PrinterTransport:
+    def resolve_transport(
+        self, printer: PrinterDevice, requested: PrinterTransport
+    ) -> PrinterTransport:
         if requested is not PrinterTransport.AUTO:
             self._ensure_transport_supported(printer, requested)
             return requested
         return printer.preferred_transport
 
-    def submit_raw_job(self, printer: PrinterDevice, payload: bytes, *, document_name: str) -> PrintJobResult:
+    def submit_raw_job(
+        self, printer: PrinterDevice, payload: bytes, *, document_name: str
+    ) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.RAW)
         bytes_written = self._send(printer.name, payload)
-        return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=bytes_written)
+        return PrintJobResult(
+            printer=printer, transport=PrinterTransport.RAW, bytes_written=bytes_written
+        )
 
-    def submit_text_job(self, printer: PrinterDevice, text: str, *, document_name: str) -> PrintJobResult:
+    def submit_text_job(
+        self, printer: PrinterDevice, text: str, *, document_name: str
+    ) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.TEXT)
         config = self._require_config(printer.name)
         payload = text.encode(config.encoding, errors="replace")
         bytes_written = self._send(printer.name, payload)
-        return PrintJobResult(printer=printer, transport=PrinterTransport.TEXT, bytes_written=bytes_written)
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.TEXT,
+            bytes_written=bytes_written,
+        )
 
-    def submit_document_job(self, printer: PrinterDevice, document: RenderedDocument) -> PrintJobResult:
+    def submit_document_job(
+        self, printer: PrinterDevice, document: RenderedDocument
+    ) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.DOCUMENT)
         bytes_written = self._send(printer.name, document.content)
-        return PrintJobResult(printer=printer, transport=PrinterTransport.DOCUMENT, bytes_written=bytes_written)
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.DOCUMENT,
+            bytes_written=bytes_written,
+        )
 
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.RAW)
         bytes_written = self._send(printer.name, EscPosCommands.DRAWER_PULSE)
-        return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=bytes_written)
+        return PrintJobResult(
+            printer=printer, transport=PrinterTransport.RAW, bytes_written=bytes_written
+        )
 
     def _build_device(self, config: NetworkPrinterConfig) -> PrinterDevice:
         return PrinterDevice(
@@ -97,12 +123,16 @@ class RawSocketPrinterDriver(PrinterDriver):
         for config in self.configured_printers:
             if config.name.casefold() == normalized:
                 return config
-        raise PrinterServiceError("PRINTER_NOT_FOUND", f"Printer {printer_name!r} is not configured.")
+        raise PrinterServiceError(
+            "PRINTER_NOT_FOUND", f"Printer {printer_name!r} is not configured."
+        )
 
     def _send(self, printer_name: str, payload: bytes) -> int:
         config = self._require_config(printer_name)
         try:
-            with self.socket_factory((config.host, config.port), timeout=self.connect_timeout_seconds) as connection:
+            with self.socket_factory(
+                (config.host, config.port), timeout=self.connect_timeout_seconds
+            ) as connection:
                 connection.sendall(payload)
         except Exception as exc:
             raise PrinterServiceError(
@@ -112,7 +142,9 @@ class RawSocketPrinterDriver(PrinterDriver):
         return len(payload)
 
     @staticmethod
-    def _ensure_transport_supported(printer: PrinterDevice, transport: PrinterTransport) -> None:
+    def _ensure_transport_supported(
+        printer: PrinterDevice, transport: PrinterTransport
+    ) -> None:
         supported = {
             PrinterTransport.RAW: printer.supports_raw,
             PrinterTransport.TEXT: printer.supports_text,

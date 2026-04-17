@@ -39,7 +39,9 @@ class DeviceRepository:
 
     def upsert(self, record: DeviceRecord) -> DeviceRecord:
         existing = self.get(record.id)
-        first_seen_at = existing.first_seen_at if existing is not None else record.first_seen_at
+        first_seen_at = (
+            existing.first_seen_at if existing is not None else record.first_seen_at
+        )
         stmt = sqlite_insert(devices_table).values(
             id=record.id,
             kind=record.kind.value,
@@ -50,7 +52,9 @@ class DeviceRepository:
             last_seen_at=timestamp_to_iso(record.last_seen_at),
             updated_at=timestamp_to_iso(record.updated_at),
             is_default=record.is_default,
-            preferred_transport=record.preferred_transport.value if record.preferred_transport is not None else None,
+            preferred_transport=record.preferred_transport.value
+            if record.preferred_transport is not None
+            else None,
             capabilities_json=dump_json(record.capabilities),
             metadata_json=dump_json(record.metadata),
         )
@@ -64,7 +68,9 @@ class DeviceRepository:
                 "last_seen_at": timestamp_to_iso(record.last_seen_at),
                 "updated_at": timestamp_to_iso(record.updated_at),
                 "is_default": record.is_default,
-                "preferred_transport": record.preferred_transport.value if record.preferred_transport is not None else None,
+                "preferred_transport": record.preferred_transport.value
+                if record.preferred_transport is not None
+                else None,
                 "capabilities_json": dump_json(record.capabilities),
                 "metadata_json": dump_json(record.metadata),
             },
@@ -113,7 +119,9 @@ class DeviceRepository:
             payload=dict(payload),
         )
 
-    def list_events(self, device_id: str, *, limit: int = 50) -> tuple[DeviceEventRecord, ...]:
+    def list_events(
+        self, device_id: str, *, limit: int = 50
+    ) -> tuple[DeviceEventRecord, ...]:
         stmt = (
             select(device_events_table)
             .where(device_events_table.c.device_id == device_id)
@@ -189,13 +197,17 @@ class JobRepository:
             rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_job(row) for row in rows)
 
-    def claim_runnable(self, *, limit: int, lease_seconds: int) -> tuple[JobRecord, ...]:
+    def claim_runnable(
+        self, *, limit: int, lease_seconds: int
+    ) -> tuple[JobRecord, ...]:
         now = utc_now()
         lease_expires_at = now + timedelta(seconds=lease_seconds)
         stmt = (
             select(jobs_table.c.id)
             .where(
-                jobs_table.c.state.in_((JobState.QUEUED.value, JobState.RETRY_SCHEDULED.value)),
+                jobs_table.c.state.in_(
+                    (JobState.QUEUED.value, JobState.RETRY_SCHEDULED.value)
+                ),
                 jobs_table.c.next_run_at <= timestamp_to_iso(now),
             )
             .order_by(jobs_table.c.queued_at.asc(), jobs_table.c.created_at.asc())
@@ -218,7 +230,9 @@ class JobRepository:
                 claimed.append(updated)
         return tuple(claimed)
 
-    def start_attempt(self, job_id: str, *, lease_seconds: int) -> tuple[JobRecord, JobAttemptRecord]:
+    def start_attempt(
+        self, job_id: str, *, lease_seconds: int
+    ) -> tuple[JobRecord, JobAttemptRecord]:
         job = self.get(job_id)
         if job is None:
             raise LookupError(job_id)
@@ -228,12 +242,17 @@ class JobRepository:
         with self.store.connection() as connection:
             connection.execute(
                 update(jobs_table)
-                .where(jobs_table.c.id == job_id, jobs_table.c.state == JobState.DISPATCHED.value)
+                .where(
+                    jobs_table.c.id == job_id,
+                    jobs_table.c.state == JobState.DISPATCHED.value,
+                )
                 .values(
                     state=JobState.RUNNING.value,
                     attempt_count=attempt_number,
                     updated_at=timestamp_to_iso(now),
-                    started_at=job.started_at and timestamp_to_iso(job.started_at) or timestamp_to_iso(now),
+                    started_at=job.started_at
+                    and timestamp_to_iso(job.started_at)
+                    or timestamp_to_iso(now),
                     lease_expires_at=timestamp_to_iso(lease_expires_at),
                     last_error_code=None,
                     last_error_detail=None,
@@ -264,7 +283,9 @@ class JobRepository:
             from_states=(JobState.DISPATCHED, JobState.RUNNING),
             to_state=None,
             assignments={
-                "lease_expires_at": timestamp_to_iso(now + timedelta(seconds=lease_seconds)),
+                "lease_expires_at": timestamp_to_iso(
+                    now + timedelta(seconds=lease_seconds)
+                ),
                 "updated_at": timestamp_to_iso(now),
             },
         )
@@ -389,7 +410,11 @@ class JobRepository:
             .where(
                 jobs_table.c.id == job_id,
                 jobs_table.c.state.in_(
-                    (JobState.QUEUED.value, JobState.RETRY_SCHEDULED.value, JobState.DISPATCHED.value)
+                    (
+                        JobState.QUEUED.value,
+                        JobState.RETRY_SCHEDULED.value,
+                        JobState.DISPATCHED.value,
+                    )
                 ),
             )
             .values(
@@ -438,7 +463,9 @@ class JobRepository:
             payload=dict(payload),
         )
 
-    def list_events(self, job_id: str, *, limit: int = 100) -> tuple[JobEventRecord, ...]:
+    def list_events(
+        self, job_id: str, *, limit: int = 100
+    ) -> tuple[JobEventRecord, ...]:
         stmt = (
             select(job_events_table)
             .where(job_events_table.c.job_id == job_id)
@@ -450,7 +477,9 @@ class JobRepository:
         return tuple(_row_to_job_event(row) for row in rows)
 
     def queue_counts(self) -> Mapping[str, int]:
-        stmt = select(jobs_table.c.state, func.count().label("total")).group_by(jobs_table.c.state)
+        stmt = select(jobs_table.c.state, func.count().label("total")).group_by(
+            jobs_table.c.state
+        )
         with self.store.connection() as connection:
             rows = connection.execute(stmt).mappings().all()
         counts = Counter()
@@ -470,7 +499,11 @@ class JobRepository:
         recovered: list[JobRecord] = []
         for row in rows:
             job = _row_to_job(row)
-            next_state = JobState.RETRY_SCHEDULED if job.attempt_count < job.max_attempts else JobState.FAILED
+            next_state = (
+                JobState.RETRY_SCHEDULED
+                if job.attempt_count < job.max_attempts
+                else JobState.FAILED
+            )
             with self.store.connection() as connection:
                 connection.execute(
                     update(jobs_table)
@@ -479,7 +512,9 @@ class JobRepository:
                         state=next_state.value,
                         updated_at=timestamp_to_iso(now),
                         next_run_at=timestamp_to_iso(now),
-                        finished_at=timestamp_to_iso(now) if next_state is JobState.FAILED else None,
+                        finished_at=timestamp_to_iso(now)
+                        if next_state is JobState.FAILED
+                        else None,
                         lease_expires_at=None,
                         last_error_code="JOB_LEASE_EXPIRED",
                         last_error_detail="Job execution lease expired before completion.",
@@ -542,22 +577,36 @@ def _row_to_job(row: Mapping[str, Any]) -> JobRecord:
         state=JobState(str(row["state"])),
         request_payload=load_json(str(row["request_json"])),
         request_metadata=load_json(str(row["request_metadata_json"])),
-        content_kind=str(row["content_kind"]) if row["content_kind"] is not None else None,
-        command_kind=str(row["command_kind"]) if row["command_kind"] is not None else None,
+        content_kind=str(row["content_kind"])
+        if row["content_kind"] is not None
+        else None,
+        command_kind=str(row["command_kind"])
+        if row["command_kind"] is not None
+        else None,
         attempt_count=int(row["attempt_count"]),
         max_attempts=int(row["max_attempts"]),
         created_at=normalize_timestamp(str(row["created_at"])) or utc_now(),
         updated_at=normalize_timestamp(str(row["updated_at"])) or utc_now(),
         queued_at=normalize_timestamp(str(row["queued_at"])) or utc_now(),
         next_run_at=normalize_timestamp(str(row["next_run_at"])) or utc_now(),
-        started_at=normalize_timestamp(str(row["started_at"])) if row["started_at"] is not None else None,
-        finished_at=normalize_timestamp(str(row["finished_at"])) if row["finished_at"] is not None else None,
+        started_at=normalize_timestamp(str(row["started_at"]))
+        if row["started_at"] is not None
+        else None,
+        finished_at=normalize_timestamp(str(row["finished_at"]))
+        if row["finished_at"] is not None
+        else None,
         lease_expires_at=normalize_timestamp(str(row["lease_expires_at"]))
         if row["lease_expires_at"] is not None
         else None,
-        result_payload=load_json(str(row["result_json"])) if row["result_json"] is not None else None,
-        last_error_code=str(row["last_error_code"]) if row["last_error_code"] is not None else None,
-        last_error_detail=str(row["last_error_detail"]) if row["last_error_detail"] is not None else None,
+        result_payload=load_json(str(row["result_json"]))
+        if row["result_json"] is not None
+        else None,
+        last_error_code=str(row["last_error_code"])
+        if row["last_error_code"] is not None
+        else None,
+        last_error_detail=str(row["last_error_detail"])
+        if row["last_error_detail"] is not None
+        else None,
     )
 
 
@@ -568,10 +617,16 @@ def _row_to_job_attempt(row: Mapping[str, Any]) -> JobAttemptRecord:
         attempt_number=int(row["attempt_number"]),
         state=JobState(str(row["state"])),
         started_at=normalize_timestamp(str(row["started_at"])) or utc_now(),
-        finished_at=normalize_timestamp(str(row["finished_at"])) if row["finished_at"] is not None else None,
+        finished_at=normalize_timestamp(str(row["finished_at"]))
+        if row["finished_at"] is not None
+        else None,
         error_code=str(row["error_code"]) if row["error_code"] is not None else None,
-        error_detail=str(row["error_detail"]) if row["error_detail"] is not None else None,
-        result_payload=load_json(str(row["result_json"])) if row["result_json"] is not None else None,
+        error_detail=str(row["error_detail"])
+        if row["error_detail"] is not None
+        else None,
+        result_payload=load_json(str(row["result_json"]))
+        if row["result_json"] is not None
+        else None,
     )
 
 

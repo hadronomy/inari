@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from iot_agent_tray.icons import ICON_SIZE, build_tray_icon
-from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot, TrayStatusLevel
+from iot_agent_tray.models import (
+    ControlMode,
+    ControlSnapshot,
+    LifecycleState,
+    TrayLinks,
+    TraySnapshot,
+    TrayStatusLevel,
+)
 
 
 def _snapshot(*, level: TrayStatusLevel) -> TraySnapshot:
@@ -17,7 +24,9 @@ def _snapshot(*, level: TrayStatusLevel) -> TraySnapshot:
     return TraySnapshot(
         title="IoT Agent",
         links=links,
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
+        ),
         level=level,
         connected=True,
     )

@@ -17,7 +17,12 @@ from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from ..security.models import GatewayMode
 from ..security.tls import TlsContextFactory
 from .enrollment import GatewayEnrollmentService
-from .models import GatewayEnrollmentRecord, UpstreamCertificateMode, UpstreamConnectionState, UpstreamStatus
+from .models import (
+    GatewayEnrollmentRecord,
+    UpstreamCertificateMode,
+    UpstreamConnectionState,
+    UpstreamStatus,
+)
 from .protocol import (
     AgentAcknowledgeMessage,
     AgentHelloMessage,
@@ -67,7 +72,9 @@ class GatewayConnector:
                 else UpstreamConnectionState.DISABLED
             ),
             base_url=settings.upstream_base_url,
-            detail="Gateway operates locally by default." if settings.gateway_mode is GatewayMode.STANDALONE else None,
+            detail="Gateway operates locally by default."
+            if settings.gateway_mode is GatewayMode.STANDALONE
+            else None,
             auth_mode=settings.upstream_auth_mode,
             certificate_mode=settings.upstream_certificate_mode,
             edge_provider=settings.upstream_edge_provider,
@@ -83,7 +90,10 @@ class GatewayConnector:
             )
             return
 
-        await self._update_status(state=UpstreamConnectionState.ENROLLING, detail="Ensuring upstream enrollment.")
+        await self._update_status(
+            state=UpstreamConnectionState.ENROLLING,
+            detail="Ensuring upstream enrollment.",
+        )
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None:
             await self._update_status(
@@ -113,7 +123,8 @@ class GatewayConnector:
         snapshot = self.snapshot_provider()
         headers = await self.enrollment_service.upstream_headers(enrollment)
         client_certificate_present = (
-            self.tls_context_factory.certificate_service.current_certificate() is not None
+            self.tls_context_factory.certificate_service.current_certificate()
+            is not None
             if self.tls_context_factory.certificate_service is not None
             else False
         )
@@ -131,7 +142,9 @@ class GatewayConnector:
                     json=snapshot,
                     headers={
                         **headers,
-                        "X-IoT-Agent-Protocol-Version": str(snapshot.get("protocol", {}).get("version", "")),
+                        "X-IoT-Agent-Protocol-Version": str(
+                            snapshot.get("protocol", {}).get("version", "")
+                        ),
                     },
                 )
                 if response.status_code in {401, 403}:
@@ -162,9 +175,21 @@ class GatewayConnector:
             status_url=enrollment.status_url,
             events_url=enrollment.events_url,
             last_error=None,
-            protocol_version=str(response_payload.get("protocol_version") or enrollment.protocol_version or ""),
-            controller_name=str(response_payload.get("controller_name") or enrollment.controller_name or ""),
-            controller_instance_id=str(response_payload.get("controller_instance_id") or enrollment.controller_instance_id or ""),
+            protocol_version=str(
+                response_payload.get("protocol_version")
+                or enrollment.protocol_version
+                or ""
+            ),
+            controller_name=str(
+                response_payload.get("controller_name")
+                or enrollment.controller_name
+                or ""
+            ),
+            controller_instance_id=str(
+                response_payload.get("controller_instance_id")
+                or enrollment.controller_instance_id
+                or ""
+            ),
             client_certificate_present=client_certificate_present,
             certificate_bootstrap_pending=certificate_bootstrap_pending,
             successful_sync_count=self._status.successful_sync_count + 1,
@@ -183,7 +208,8 @@ class GatewayConnector:
             )
 
         client_certificate_present = (
-            self.tls_context_factory.certificate_service.current_certificate() is not None
+            self.tls_context_factory.certificate_service.current_certificate()
+            is not None
             if self.tls_context_factory.certificate_service is not None
             else False
         )
@@ -229,9 +255,12 @@ class GatewayConnector:
                     last_error=None,
                     client_certificate_present=client_certificate_present,
                     certificate_bootstrap_pending=certificate_bootstrap_pending,
-                    successful_event_stream_count=self._status.successful_event_stream_count + 1,
+                    successful_event_stream_count=self._status.successful_event_stream_count
+                    + 1,
                 )
-                sender = asyncio.create_task(self._send_outbox_loop(websocket), name="iot-agent-gateway-outbox")
+                sender = asyncio.create_task(
+                    self._send_outbox_loop(websocket), name="iot-agent-gateway-outbox"
+                )
                 receiver = asyncio.create_task(
                     self._receive_loop(websocket, enrollment),
                     name="iot-agent-gateway-receiver",
@@ -252,16 +281,21 @@ class GatewayConnector:
                     state=UpstreamConnectionState.PROTOCOL_MISMATCH,
                     detail=exc.message,
                     last_error=exc.message,
-                    failed_event_stream_count=self._status.failed_event_stream_count + 1,
+                    failed_event_stream_count=self._status.failed_event_stream_count
+                    + 1,
                 )
                 return
-            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {401, 403}:
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {
+                401,
+                403,
+            }:
                 await self.enrollment_service.handle_auth_failure(enrollment)
                 await self._update_status(
                     state=UpstreamConnectionState.AUTH_FAILED,
                     detail="Upstream authentication failed during control-stream connection.",
                     last_error=f"Controller rejected gateway credentials with HTTP {exc.response.status_code}.",
-                    failed_event_stream_count=self._status.failed_event_stream_count + 1,
+                    failed_event_stream_count=self._status.failed_event_stream_count
+                    + 1,
                 )
                 return
             await self._update_status(
@@ -280,7 +314,9 @@ class GatewayConnector:
             )
         return replace(self._status, certificate_lifecycle=certificate_lifecycle)
 
-    async def _receive_loop(self, websocket, enrollment: GatewayEnrollmentRecord) -> None:
+    async def _receive_loop(
+        self, websocket, enrollment: GatewayEnrollmentRecord
+    ) -> None:
         while True:
             try:
                 raw_message = await asyncio.wait_for(
@@ -296,7 +332,9 @@ class GatewayConnector:
             message = CONTROLLER_STREAM_ADAPTER.validate_python(payload)
             await self._handle_message(message, websocket, enrollment)
 
-    async def _handle_message(self, message, websocket, enrollment: GatewayEnrollmentRecord) -> None:
+    async def _handle_message(
+        self, message, websocket, enrollment: GatewayEnrollmentRecord
+    ) -> None:
         if isinstance(message, ControllerAcknowledgeMessage):
             self.gateway_repository.mark_outbox_acked(message.acknowledged_message_id)
             return
@@ -312,7 +350,10 @@ class GatewayConnector:
             )
             return
         if isinstance(message, ControllerHelloMessage):
-            if message.protocol_version not in self.snapshot_provider()["protocol"]["supported_versions"]:
+            if (
+                message.protocol_version
+                not in self.snapshot_provider()["protocol"]["supported_versions"]
+            ):
                 raise AgentError(
                     "UPSTREAM_PROTOCOL_MISMATCH",
                     f"Controller protocol version {message.protocol_version!r} is not supported.",
@@ -333,11 +374,17 @@ class GatewayConnector:
             )
             return
         if isinstance(message, ControllerSubmitPrintJobMessage):
-            await self.command_dispatcher.handle_submit_print_job(message, enrollment=enrollment)
+            await self.command_dispatcher.handle_submit_print_job(
+                message, enrollment=enrollment
+            )
         elif isinstance(message, ControllerExecuteDeviceCommandMessage):
-            await self.command_dispatcher.handle_execute_device_command(message, enrollment=enrollment)
+            await self.command_dispatcher.handle_execute_device_command(
+                message, enrollment=enrollment
+            )
         elif isinstance(message, ControllerCancelJobMessage):
-            await self.command_dispatcher.handle_cancel_job(message, enrollment=enrollment)
+            await self.command_dispatcher.handle_cancel_job(
+                message, enrollment=enrollment
+            )
         await self._update_status(
             last_command_at=utc_now(),
             last_command_id=getattr(message, "command_id", None),
@@ -345,7 +392,9 @@ class GatewayConnector:
 
     async def _send_outbox_loop(self, websocket) -> None:
         while True:
-            pending = self.gateway_repository.list_pending_outbox(limit=self.settings.gateway_outbox_batch_size)
+            pending = self.gateway_repository.list_pending_outbox(
+                limit=self.settings.gateway_outbox_batch_size
+            )
             if not pending:
                 await asyncio.sleep(self.settings.gateway_control_poll_interval_seconds)
                 continue
@@ -354,7 +403,9 @@ class GatewayConnector:
                     await websocket.send(json.dumps(record.payload))
                     self.gateway_repository.mark_outbox_sent(record.message_id)
                 except Exception as exc:
-                    self.gateway_repository.mark_outbox_failed(record.message_id, detail=str(exc))
+                    self.gateway_repository.mark_outbox_failed(
+                        record.message_id, detail=str(exc)
+                    )
                     raise
 
     async def _send_snapshot(self, websocket) -> None:
@@ -379,7 +430,10 @@ class GatewayConnector:
         *,
         client_certificate_present: bool,
     ) -> bool:
-        if self.settings.upstream_certificate_mode is not UpstreamCertificateMode.STEP_CA:
+        if (
+            self.settings.upstream_certificate_mode
+            is not UpstreamCertificateMode.STEP_CA
+        ):
             return False
         if client_certificate_present:
             return False

@@ -1,8 +1,0 @@
-[project]
-name = "pos_iot_bridge"
-version = "1.0.0"
-description = "Local hardware bridge for Odoo Community POS"
-requires-python = ">=3.11"
-dependencies = []
-
-# See odoo open source projects to complete this properly

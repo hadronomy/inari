@@ -65,13 +65,17 @@ class CertificateLifecycleService:
         if not self.certificate_path.exists():
             return ManagedCertificateInspection(certificate=None)
         try:
-            certificate = x509.load_pem_x509_certificate(self.certificate_path.read_bytes())
+            certificate = x509.load_pem_x509_certificate(
+                self.certificate_path.read_bytes()
+            )
         except Exception as exc:
             return ManagedCertificateInspection(certificate=None, error_detail=str(exc))
         return ManagedCertificateInspection(
             certificate=ManagedCertificate(
                 certificate_path=self.certificate_path,
-                ca_path=self.ca_path if self.ca_path is not None and self.ca_path.exists() else None,
+                ca_path=self.ca_path
+                if self.ca_path is not None and self.ca_path.exists()
+                else None,
                 not_valid_after=_normalize_datetime(certificate.not_valid_after_utc),
                 subject=certificate.subject.rfc4514_string() or None,
                 issuer=certificate.issuer.rfc4514_string() or None,
@@ -80,8 +84,12 @@ class CertificateLifecycleService:
         )
 
     def current_cert_chain(self) -> tuple[str | None, str | None, str | None]:
-        certificate_path = str(self.certificate_path) if self.certificate_path.exists() else None
-        key_path = str(self.private_key_path) if self.private_key_path.exists() else None
+        certificate_path = (
+            str(self.certificate_path) if self.certificate_path.exists() else None
+        )
+        key_path = (
+            str(self.private_key_path) if self.private_key_path.exists() else None
+        )
         ca_path = None
         if self.ca_path is not None and self.ca_path.exists():
             ca_path = str(self.ca_path)
@@ -91,12 +99,20 @@ class CertificateLifecycleService:
         certificate = self.current_certificate()
         if certificate is None or certificate.not_valid_after is None:
             return True
-        return certificate.not_valid_after <= datetime.now(tz=UTC) + timedelta(seconds=skew_seconds)
+        return certificate.not_valid_after <= datetime.now(tz=UTC) + timedelta(
+            seconds=skew_seconds
+        )
 
-    def clear_managed_certificate(self, *, keep_certificate_authority: bool = True) -> None:
+    def clear_managed_certificate(
+        self, *, keep_certificate_authority: bool = True
+    ) -> None:
         if self.certificate_path.exists():
             self.certificate_path.unlink()
-        if not keep_certificate_authority and self.ca_path is not None and self.ca_path.exists():
+        if (
+            not keep_certificate_authority
+            and self.ca_path is not None
+            and self.ca_path.exists()
+        ):
             self.ca_path.unlink()
 
 

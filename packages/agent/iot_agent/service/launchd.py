@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
+from .manager import (
+    ServiceContext,
+    ensure_service_config_file,
+    validate_service_config_file,
+)
 from .models import ServiceDefinition, ServiceScope, ServiceState, ServiceStatus
 
 
@@ -36,7 +40,13 @@ class LaunchdServiceManager:
         plist_path.write_bytes(self.definition().content.encode("utf-8"))
         self._safe_bootout()
         self._run(["launchctl", "bootstrap", self._domain_target(), str(plist_path)])
-        self._run(["launchctl", "enable", f"{self._domain_target()}/{self.identity.launchd_label}"])
+        self._run(
+            [
+                "launchctl",
+                "enable",
+                f"{self._domain_target()}/{self.identity.launchd_label}",
+            ]
+        )
         message = f"Installed launchd plist at {plist_path}."
         if config_created:
             message += f" Wrote default config to {self.context.config_path}."
@@ -124,7 +134,12 @@ class LaunchdServiceManager:
 
     def _plist_path(self) -> Path:
         if self.scope == "user":
-            return Path.home() / "Library" / "LaunchAgents" / f"{self.identity.launchd_label}.plist"
+            return (
+                Path.home()
+                / "Library"
+                / "LaunchAgents"
+                / f"{self.identity.launchd_label}.plist"
+            )
         return Path("/Library/LaunchDaemons") / f"{self.identity.launchd_label}.plist"
 
     def _domain_target(self) -> str:
@@ -148,7 +163,9 @@ class LaunchdServiceManager:
             self.context.settings.log_dir,
             self.context.settings.temp_dir,
             self.context.settings.security_state_dir,
-            self.context.settings.runtime_database_path.parent if self.context.settings.runtime_database_path is not None else None,
+            self.context.settings.runtime_database_path.parent
+            if self.context.settings.runtime_database_path is not None
+            else None,
         ):
             if path is not None:
                 Path(path).mkdir(parents=True, exist_ok=True)

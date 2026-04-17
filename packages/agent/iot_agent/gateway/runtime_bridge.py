@@ -4,7 +4,12 @@ import uuid
 from datetime import UTC, datetime
 
 from ..exceptions import AgentError
-from ..models import DeviceCommandRequest, JobResponse, PrintJobRequest, RuntimeEventResponse
+from ..models import (
+    DeviceCommandRequest,
+    JobResponse,
+    PrintJobRequest,
+    RuntimeEventResponse,
+)
 from ..runtime.events import EventHub
 from ..runtime.services import JobService
 from ..security.models import AccessScope
@@ -40,7 +45,9 @@ class GatewayCommandDispatcher:
             message=message,
             enrollment=enrollment,
             required_scope=AccessScope.JOBS_SUBMIT,
-            enqueue=lambda: self.job_service.enqueue_print(PrintJobRequest.model_validate(message.payload).to_operation()),
+            enqueue=lambda: self.job_service.enqueue_print(
+                PrintJobRequest.model_validate(message.payload).to_operation()
+            ),
         )
 
     async def handle_execute_device_command(
@@ -101,7 +108,8 @@ class GatewayCommandDispatcher:
     async def _handle_job_submission(
         self,
         *,
-        message: ControllerSubmitPrintJobMessage | ControllerExecuteDeviceCommandMessage,
+        message: ControllerSubmitPrintJobMessage
+        | ControllerExecuteDeviceCommandMessage,
         enrollment: GatewayEnrollmentRecord,
         required_scope: AccessScope,
         enqueue,
@@ -142,7 +150,9 @@ class GatewayCommandDispatcher:
             dedupe_key=f"command-accepted:{message.command_id}",
         )
 
-    def _require_scope(self, enrollment: GatewayEnrollmentRecord, scope: AccessScope) -> None:
+    def _require_scope(
+        self, enrollment: GatewayEnrollmentRecord, scope: AccessScope
+    ) -> None:
         granted = set(enrollment.granted_scopes)
         if scope not in granted:
             raise AgentError(
@@ -155,7 +165,9 @@ class GatewayCommandDispatcher:
         if record.response_payload is None:
             return
         self.gateway_repository.enqueue_outbound(
-            message_type=str(record.response_payload.get("type", "agent.command.rejected")),
+            message_type=str(
+                record.response_payload.get("type", "agent.command.rejected")
+            ),
             payload=record.response_payload,
             correlation_id=record.command_id,
         )
@@ -197,8 +209,13 @@ class GatewayRuntimeEventForwarder:
         async for event in self.event_hub.iter_events():
             command_id = None
             if event.resource_kind == "job":
-                inbound = self.gateway_repository.get_inbound_command_for_job(event.resource_id)
-                if inbound is not None and inbound.state is GatewayInboundCommandState.ACCEPTED:
+                inbound = self.gateway_repository.get_inbound_command_for_job(
+                    event.resource_id
+                )
+                if (
+                    inbound is not None
+                    and inbound.state is GatewayInboundCommandState.ACCEPTED
+                ):
                     command_id = inbound.command_id
             message = AgentRuntimeEventMessage(
                 message_id=_message_id("gevt"),

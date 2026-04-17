@@ -32,7 +32,11 @@ class CaddyControllerProfile:
             return ""
         client_auth_block = ""
         if self.mutual_tls_mode is not MutualTlsMode.DISABLED:
-            mode = "require_and_verify" if self.mutual_tls_mode is MutualTlsMode.REQUIRED else "verify_if_given"
+            mode = (
+                "require_and_verify"
+                if self.mutual_tls_mode is MutualTlsMode.REQUIRED
+                else "verify_if_given"
+            )
             client_auth_block = (
                 "    tls {\n"
                 "        client_auth {\n"
@@ -42,10 +46,7 @@ class CaddyControllerProfile:
                 "    }\n"
             )
         return (
-            f"{server_name} {{\n"
-            f"{client_auth_block}"
-            f"    reverse_proxy {upstream}\n"
-            "}\n"
+            f"{server_name} {{\n{client_auth_block}    reverse_proxy {upstream}\n}}\n"
         )
 
 
@@ -58,7 +59,9 @@ def validate_caddy_profile(settings: AgentSettings) -> None:
     if not profile.requires_client_certificate():
         return
     if settings.upstream_certificate_mode is UpstreamCertificateMode.NONE:
-        raise RuntimeError("Caddy mTLS mode requires a managed client certificate flow.")
+        raise RuntimeError(
+            "Caddy mTLS mode requires a managed client certificate flow."
+        )
     certificate_path = settings.security_state_dir / "upstream-client-cert.pem"
     if certificate_path.exists():
         return

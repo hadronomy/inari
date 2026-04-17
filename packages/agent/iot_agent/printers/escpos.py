@@ -11,7 +11,9 @@ class EscPosCommands:
     @staticmethod
     def feed_lines(count: int) -> bytes:
         if count < 1:
-            raise PrinterServiceError("INVALID_FEED", "Line feed count must be at least 1.")
+            raise PrinterServiceError(
+                "INVALID_FEED", "Line feed count must be at least 1."
+            )
 
         chunks: list[bytes] = []
         remaining = count
@@ -24,7 +26,9 @@ class EscPosCommands:
     @staticmethod
     def feed_dots(count: int) -> bytes:
         if count < 1:
-            raise PrinterServiceError("INVALID_FEED", "Dot feed count must be at least 1.")
+            raise PrinterServiceError(
+                "INVALID_FEED", "Dot feed count must be at least 1."
+            )
 
         chunks: list[bytes] = []
         remaining = count

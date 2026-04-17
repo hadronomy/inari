@@ -62,7 +62,9 @@ class JobState(StrEnum):
 
 
 def build_device_id(*, kind: DeviceKind, driver_key: str, name: str) -> str:
-    digest = sha1(f"{kind.value}:{driver_key}:{name.casefold()}".encode("utf-8")).hexdigest()
+    digest = sha1(
+        f"{kind.value}:{driver_key}:{name.casefold()}".encode("utf-8")
+    ).hexdigest()
     return f"dev_{digest[:24]}"
 
 
@@ -134,7 +136,9 @@ class DeviceRecord:
                 "cash_drawer": printer.supports_cash_drawer,
             },
             metadata={
-                "device_class": infer_device_class(kind=DeviceKind.PRINTER, name=printer.name).value,
+                "device_class": infer_device_class(
+                    kind=DeviceKind.PRINTER, name=printer.name
+                ).value,
             },
         )
 
@@ -186,7 +190,11 @@ class DeviceRecord:
             and transport_flags.get(preferred, False)
         ):
             supported.append(preferred)
-        for transport in (PrinterTransport.RAW, PrinterTransport.TEXT, PrinterTransport.DOCUMENT):
+        for transport in (
+            PrinterTransport.RAW,
+            PrinterTransport.TEXT,
+            PrinterTransport.DOCUMENT,
+        ):
             if transport_flags[transport] and transport not in supported:
                 supported.append(transport)
         return tuple(supported)
@@ -215,7 +223,9 @@ class DeviceRecord:
             name=self.name,
             connection_state=connection_state,
             first_seen_at=self.first_seen_at,
-            last_seen_at=observed if connection_state is DeviceConnectionState.ONLINE else self.last_seen_at,
+            last_seen_at=observed
+            if connection_state is DeviceConnectionState.ONLINE
+            else self.last_seen_at,
             updated_at=observed,
             is_default=self.is_default,
             preferred_transport=self.preferred_transport,

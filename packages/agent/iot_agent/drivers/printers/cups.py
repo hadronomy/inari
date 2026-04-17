@@ -11,7 +11,13 @@ from typing import Any, ClassVar, Mapping, Protocol
 
 from ...exceptions import PrinterServiceError
 from ...printers import EscPosCommands
-from ...printers.types import PrintJobResult, PrinterCapabilities, PrinterDevice, PrinterTransport, RenderedDocument
+from ...printers.types import (
+    PrintJobResult,
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+    RenderedDocument,
+)
 from ..base import DeviceKind, DriverMetadata
 from .base import PrinterDriver
 from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
@@ -38,7 +44,9 @@ class CupsAPI(Protocol):
 class CupsPrinterDriver(PrinterDriver):
     cups_api: CupsAPI | None = None
     default_transport: PrinterTransport = PrinterTransport.AUTO
-    raw_name_hints: frozenset[str] = field(default_factory=lambda: RECEIPT_RAW_NAME_HINTS)
+    raw_name_hints: frozenset[str] = field(
+        default_factory=lambda: RECEIPT_RAW_NAME_HINTS
+    )
 
     metadata: ClassVar[DriverMetadata] = DriverMetadata(
         key="cups.printers",
@@ -61,7 +69,9 @@ class CupsPrinterDriver(PrinterDriver):
         printer_attributes = self._list_printer_attributes()
         if printer_attributes:
             devices = [
-                self._build_device(name, is_default=name == default_name, attributes=attributes)
+                self._build_device(
+                    name, is_default=name == default_name, attributes=attributes
+                )
                 for name, attributes in printer_attributes.items()
             ]
         else:
@@ -69,12 +79,18 @@ class CupsPrinterDriver(PrinterDriver):
                 self._build_device(name, is_default=name == default_name, attributes={})
                 for name in self._list_printer_names_from_cli()
             ]
-        return tuple(sorted(devices, key=lambda item: (not item.is_default, item.name.casefold())))
+        return tuple(
+            sorted(
+                devices, key=lambda item: (not item.is_default, item.name.casefold())
+            )
+        )
 
     def get_device(self, printer_name: str) -> PrinterDevice:
         default_name = self.get_default_device_name()
         attributes = self._list_printer_attributes().get(printer_name, {})
-        return self._build_device(printer_name, is_default=printer_name == default_name, attributes=attributes)
+        return self._build_device(
+            printer_name, is_default=printer_name == default_name, attributes=attributes
+        )
 
     def get_default_device_name(self) -> str | None:
         connection = self._connection(optional=True)
@@ -85,7 +101,9 @@ class CupsPrinterDriver(PrinterDriver):
                 logger.debug("Failed to query CUPS default printer", exc_info=True)
         return self._default_printer_from_cli(optional=True)
 
-    def resolve_transport(self, printer: PrinterDevice, requested: PrinterTransport) -> PrinterTransport:
+    def resolve_transport(
+        self, printer: PrinterDevice, requested: PrinterTransport
+    ) -> PrinterTransport:
         if requested is not PrinterTransport.AUTO:
             self._ensure_transport_supported(printer, requested)
             return requested
@@ -94,9 +112,16 @@ class CupsPrinterDriver(PrinterDriver):
             return self.default_transport
         return printer.preferred_transport
 
-    def submit_raw_job(self, printer: PrinterDevice, payload: bytes, *, document_name: str) -> PrintJobResult:
+    def submit_raw_job(
+        self, printer: PrinterDevice, payload: bytes, *, document_name: str
+    ) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.RAW)
-        job_id = self._submit_bytes(printer_name=printer.name, payload=payload, document_name=document_name, raw=True)
+        job_id = self._submit_bytes(
+            printer_name=printer.name,
+            payload=payload,
+            document_name=document_name,
+            raw=True,
+        )
         return PrintJobResult(
             printer=printer,
             transport=PrinterTransport.RAW,
@@ -104,10 +129,17 @@ class CupsPrinterDriver(PrinterDriver):
             job_id=job_id,
         )
 
-    def submit_text_job(self, printer: PrinterDevice, text: str, *, document_name: str) -> PrintJobResult:
+    def submit_text_job(
+        self, printer: PrinterDevice, text: str, *, document_name: str
+    ) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.TEXT)
         payload = text.encode("utf-8", errors="replace")
-        job_id = self._submit_bytes(printer_name=printer.name, payload=payload, document_name=document_name, raw=False)
+        job_id = self._submit_bytes(
+            printer_name=printer.name,
+            payload=payload,
+            document_name=document_name,
+            raw=False,
+        )
         return PrintJobResult(
             printer=printer,
             transport=PrinterTransport.TEXT,
@@ -115,7 +147,9 @@ class CupsPrinterDriver(PrinterDriver):
             job_id=job_id,
         )
 
-    def submit_document_job(self, printer: PrinterDevice, document: RenderedDocument) -> PrintJobResult:
+    def submit_document_job(
+        self, printer: PrinterDevice, document: RenderedDocument
+    ) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.DOCUMENT)
         job_id = self._submit_bytes(
             printer_name=printer.name,
@@ -132,7 +166,9 @@ class CupsPrinterDriver(PrinterDriver):
 
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.RAW)
-        return self.submit_raw_job(printer, EscPosCommands.DRAWER_PULSE, document_name="Open Drawer")
+        return self.submit_raw_job(
+            printer, EscPosCommands.DRAWER_PULSE, document_name="Open Drawer"
+        )
 
     def _build_device(
         self,
@@ -168,7 +204,9 @@ class CupsPrinterDriver(PrinterDriver):
         try:
             return connection.getPrinters()
         except Exception as exc:
-            raise PrinterServiceError("DEVICE_DISCOVERY_FAILED", "Unable to enumerate CUPS printers.") from exc
+            raise PrinterServiceError(
+                "DEVICE_DISCOVERY_FAILED", "Unable to enumerate CUPS printers."
+            ) from exc
 
     def _list_printer_names_from_cli(self) -> tuple[str, ...]:
         result = self._run_cli(self._lpstat_command(), "-e")
@@ -204,7 +242,10 @@ class CupsPrinterDriver(PrinterDriver):
                 document_name=document_name,
                 raw=raw,
             )
-        raise PrinterServiceError("PRINT_FAILED", "CUPS printing is unavailable because the lp command was not found.")
+        raise PrinterServiceError(
+            "PRINT_FAILED",
+            "CUPS printing is unavailable because the lp command was not found.",
+        )
 
     def _submit_with_cli(
         self,
@@ -248,14 +289,20 @@ class CupsPrinterDriver(PrinterDriver):
         except Exception as exc:
             if optional:
                 return None
-            raise PrinterServiceError("NO_PRINTER_DRIVER", "Unable to connect to the local CUPS service.") from exc
+            raise PrinterServiceError(
+                "NO_PRINTER_DRIVER", "Unable to connect to the local CUPS service."
+            ) from exc
 
     @staticmethod
     def _raise_cups_unavailable() -> None:
-        raise PrinterServiceError("NO_PRINTER_DRIVER", "CUPS support is not available on this machine.")
+        raise PrinterServiceError(
+            "NO_PRINTER_DRIVER", "CUPS support is not available on this machine."
+        )
 
     @staticmethod
-    def _ensure_transport_supported(printer: PrinterDevice, transport: PrinterTransport) -> None:
+    def _ensure_transport_supported(
+        printer: PrinterDevice, transport: PrinterTransport
+    ) -> None:
         supported = {
             PrinterTransport.RAW: printer.supports_raw,
             PrinterTransport.TEXT: printer.supports_text,

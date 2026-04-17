@@ -70,10 +70,14 @@ def create_windows_service_class(
             servicemanager.LogInfoMsg(f"{WINDOWS_SERVICE_DISPLAY_NAME} is starting.")
             _write_bootstrap_log("Service startup requested by SCM.")
             try:
-                self.ReportServiceStatus(win32service.SERVICE_START_PENDING, waitHint=20_000)
+                self.ReportServiceStatus(
+                    win32service.SERVICE_START_PENDING, waitHint=20_000
+                )
                 _write_bootstrap_log("Loading service settings.")
                 settings = settings_loader()
-                _write_bootstrap_log(f"Resolved config path: {get_windows_service_config_path() or 'production defaults'}")
+                _write_bootstrap_log(
+                    f"Resolved config path: {get_windows_service_config_path() or 'production defaults'}"
+                )
                 _write_bootstrap_log("Building server controller.")
                 self._controller = AgentServerController.from_settings(settings)
                 self.ReportServiceStatus(win32service.SERVICE_RUNNING)
@@ -95,7 +99,9 @@ def create_windows_service_class(
                 raise
             finally:
                 _write_bootstrap_log("Service host has stopped.")
-                servicemanager.LogInfoMsg(f"{WINDOWS_SERVICE_DISPLAY_NAME} has stopped.")
+                servicemanager.LogInfoMsg(
+                    f"{WINDOWS_SERVICE_DISPLAY_NAME} has stopped."
+                )
 
     IoTAgentWindowsService.__module__ = __name__
     globals()["IoTAgentWindowsService"] = IoTAgentWindowsService
@@ -149,7 +155,9 @@ def set_windows_service_config_path(config_path: Path | str) -> None:
 
 
 def _load_service_settings(config_path: Path | str | None = None) -> AgentSettings:
-    resolved_config_path = Path(config_path).expanduser().resolve() if config_path is not None else None
+    resolved_config_path = (
+        Path(config_path).expanduser().resolve() if config_path is not None else None
+    )
     if resolved_config_path is None:
         resolved_config_path = get_windows_service_config_path()
     if resolved_config_path is not None and not resolved_config_path.exists():
@@ -162,7 +170,11 @@ def _bootstrap_log_path() -> Path:
     if config_path is not None:
         log_dir = config_path.parent / "logs"
     else:
-        defaults = resolve_default_path_bundle(profile="production", working_directory=Path.cwd(), platform_system="Windows")
+        defaults = resolve_default_path_bundle(
+            profile="production",
+            working_directory=Path.cwd(),
+            platform_system="Windows",
+        )
         log_dir = defaults.log_dir
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / WINDOWS_SERVICE_BOOTSTRAP_LOG
@@ -174,7 +186,9 @@ def _write_bootstrap_log(message: str) -> None:
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(message.rstrip() + "\n")
     except Exception:
-        logging.getLogger(__name__).debug("Failed to write Windows service bootstrap log.", exc_info=True)
+        logging.getLogger(__name__).debug(
+            "Failed to write Windows service bootstrap log.", exc_info=True
+        )
 
 
 def _build_settings_loader(
@@ -198,5 +212,7 @@ if sys.platform == "win32":  # pragma: no branch - Windows-only integration path
         pass
 
 
-if __name__ == "__main__":  # pragma: no cover - exercised via Windows service/module entrypoint.
+if (
+    __name__ == "__main__"
+):  # pragma: no cover - exercised via Windows service/module entrypoint.
     main()

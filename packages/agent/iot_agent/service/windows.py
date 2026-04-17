@@ -6,7 +6,11 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from .manager import ServiceContext, ensure_service_config_file, validate_service_config_file
+from .manager import (
+    ServiceContext,
+    ensure_service_config_file,
+    validate_service_config_file,
+)
 from .models import ServiceDefinition, ServiceScope, ServiceState, ServiceStatus
 
 
@@ -24,7 +28,10 @@ class WindowsServiceManager:
 
     def install(self) -> str:
         win32serviceutil = self._serviceutil()
-        from ..windows_service import create_windows_service_class, set_windows_service_config_path
+        from ..windows_service import (
+            create_windows_service_class,
+            set_windows_service_config_path,
+        )
 
         self._ensure_parent_directories()
         config_created = ensure_service_config_file(self.context.config_path)
@@ -48,7 +55,11 @@ class WindowsServiceManager:
         win32serviceutil = self._serviceutil()
         from ..windows_service import create_windows_service_class
 
-        if self.status().state in {ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING}:
+        if self.status().state in {
+            ServiceState.RUNNING,
+            ServiceState.STARTING,
+            ServiceState.STOPPING,
+        }:
             self.stop()
             self._wait_for_state(ServiceState.STOPPED, timeout_seconds=20.0)
         service_class = create_windows_service_class()
@@ -69,7 +80,11 @@ class WindowsServiceManager:
 
     def restart(self) -> str:
         validate_service_config_file(self.context.config_path)
-        if self.status().state in {ServiceState.RUNNING, ServiceState.STARTING, ServiceState.STOPPING}:
+        if self.status().state in {
+            ServiceState.RUNNING,
+            ServiceState.STARTING,
+            ServiceState.STOPPING,
+        }:
             self.stop()
             self._wait_for_state(ServiceState.STOPPED, timeout_seconds=20.0)
         self.start()
@@ -128,7 +143,9 @@ class WindowsServiceManager:
             self.context.settings.log_dir,
             self.context.settings.temp_dir,
             self.context.settings.security_state_dir,
-            self.context.settings.runtime_database_path.parent if self.context.settings.runtime_database_path is not None else None,
+            self.context.settings.runtime_database_path.parent
+            if self.context.settings.runtime_database_path is not None
+            else None,
         ):
             if path is not None:
                 Path(path).mkdir(parents=True, exist_ok=True)

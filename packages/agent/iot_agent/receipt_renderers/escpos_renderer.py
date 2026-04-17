@@ -37,9 +37,10 @@ class EscPosRenderer:
 
         header = self._mapping(receipt.get("headerData"))
         company = (
-            (header.get("company") or self._mapping(receipt.get("company")).get("name") or "Receipt")
-            .strip()
-        )
+            header.get("company")
+            or self._mapping(receipt.get("company")).get("name")
+            or "Receipt"
+        ).strip()
         append(self._center(company, emphasized=True))
 
         if order_date := header.get("date_order"):
@@ -52,13 +53,22 @@ class EscPosRenderer:
         for line in self._iter_mappings(receipt.get("orderlines")):
             name = line.get("product_name") or line.get("product") or "Item"
             quantity = line.get("qty", 1)
-            price = line.get("price_display") or line.get("price_with_tax") or line.get("price") or 0
+            price = (
+                line.get("price_display")
+                or line.get("price_with_tax")
+                or line.get("price")
+                or 0
+            )
             append(self._wrap(f"{quantity} x {name}"))
             append(self._right(self._money(price)))
 
         append(self._rule())
         append(self._kv("Tax", self._money(receipt.get("amount_tax", 0))))
-        append(self._kv("Total", self._money(receipt.get("amount_total", 0)), emphasized=True))
+        append(
+            self._kv(
+                "Total", self._money(receipt.get("amount_total", 0)), emphasized=True
+            )
+        )
 
         if receipt.get("amount_paid") is not None:
             append(self._kv("Paid", self._money(receipt.get("amount_paid", 0))))
@@ -69,7 +79,12 @@ class EscPosRenderer:
         if payments:
             append(self._rule())
             for payment in payments:
-                append(self._kv(str(payment.get("name", "Payment")), self._money(payment.get("amount", 0))))
+                append(
+                    self._kv(
+                        str(payment.get("name", "Payment")),
+                        self._money(payment.get("amount", 0)),
+                    )
+                )
 
         if footer := receipt.get("footer"):
             append(self._rule())
@@ -90,20 +105,28 @@ class EscPosRenderer:
         return ("-" * self.width + "\n").encode(self.config.encoding)
 
     def _text(self, value: str) -> bytes:
-        return (value[: self.width] + "\n").encode(self.config.encoding, errors="replace")
+        return (value[: self.width] + "\n").encode(
+            self.config.encoding, errors="replace"
+        )
 
     def _wrap(self, value: str) -> bytes:
         lines = self._wrapper.wrap(value.strip()) or [""]
         return ("\n".join(lines) + "\n").encode(self.config.encoding, errors="replace")
 
     def _right(self, value: str) -> bytes:
-        return (value.rjust(self.width) + "\n").encode(self.config.encoding, errors="replace")
+        return (value.rjust(self.width) + "\n").encode(
+            self.config.encoding, errors="replace"
+        )
 
     def _center(self, value: str, *, emphasized: bool = False) -> bytes:
         prefix = b"\x1b!\x38" if emphasized else b""
         suffix = b"\x1b!\x00" if emphasized else b""
         centered = value[: self.width].center(self.width)
-        return prefix + (centered + "\n").encode(self.config.encoding, errors="replace") + suffix
+        return (
+            prefix
+            + (centered + "\n").encode(self.config.encoding, errors="replace")
+            + suffix
+        )
 
     def _kv(self, key: str, value: str, *, emphasized: bool = False) -> bytes:
         left = str(key)[:20]

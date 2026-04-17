@@ -38,7 +38,9 @@ def resolve_default_path_bundle(
         config_path=config_path,
     )
     if effective_profile == "development":
-        return _development_path_bundle(working_directory=working_directory, config_path=config_path)
+        return _development_path_bundle(
+            working_directory=working_directory, config_path=config_path
+        )
     return _production_path_bundle(platform_system=platform_system)
 
 
@@ -53,7 +55,11 @@ def resolve_effective_path_profile(
     if profile in {"development", "production"}:
         return profile
     anchor = config_path.parent if config_path is not None else working_directory
-    return "development" if find_development_workspace_root(anchor) is not None else "production"
+    return (
+        "development"
+        if find_development_workspace_root(anchor) is not None
+        else "production"
+    )
 
 
 def default_config_candidates(
@@ -62,8 +68,12 @@ def default_config_candidates(
     profile: PathProfile = "auto",
     platform_system: str | None = None,
 ) -> tuple[Path, ...]:
-    production_config = _production_path_bundle(platform_system=platform_system).config_file
-    development_root = _development_root(working_directory=working_directory, config_path=None)
+    production_config = _production_path_bundle(
+        platform_system=platform_system
+    ).config_file
+    development_root = _development_root(
+        working_directory=working_directory, config_path=None
+    )
     development_candidates = (
         (development_root / "config" / "iot-agent.toml").resolve(),
         (development_root / "config.toml").resolve(),
@@ -92,8 +102,12 @@ def find_development_workspace_root(anchor: Path) -> Path | None:
     return None
 
 
-def _development_path_bundle(*, working_directory: Path, config_path: Path | None) -> PlatformPathBundle:
-    workspace_root = _development_root(working_directory=working_directory, config_path=config_path)
+def _development_path_bundle(
+    *, working_directory: Path, config_path: Path | None
+) -> PlatformPathBundle:
+    workspace_root = _development_root(
+        working_directory=working_directory, config_path=config_path
+    )
     data_dir = (workspace_root / "data").resolve()
     return PlatformPathBundle(
         profile="development",
@@ -146,7 +160,9 @@ def _is_development_workspace(path: Path) -> bool:
     return (path / "pyproject.toml").exists() and (path / "packages" / "agent").exists()
 
 
-def _dedupe_paths(paths: tuple[Path, ...] | list[Path] | tuple[Path, Path, Path]) -> tuple[Path, ...]:
+def _dedupe_paths(
+    paths: tuple[Path, ...] | list[Path] | tuple[Path, Path, Path],
+) -> tuple[Path, ...]:
     seen: set[Path] = set()
     ordered: list[Path] = []
     for path in paths:

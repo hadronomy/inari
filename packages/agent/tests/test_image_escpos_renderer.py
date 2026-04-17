@@ -4,7 +4,10 @@ from io import BytesIO
 
 from PIL import Image
 
-from iot_agent.receipt_renderers import EscPosImageReceiptRenderer, EscPosImageReceiptRendererConfig
+from iot_agent.receipt_renderers import (
+    EscPosImageReceiptRenderer,
+    EscPosImageReceiptRendererConfig,
+)
 
 
 def test_render_converts_image_to_raster_command() -> None:

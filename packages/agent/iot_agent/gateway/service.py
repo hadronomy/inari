@@ -78,26 +78,36 @@ class GatewaySnapshotBuilder:
                 certificate_mode=self.settings.upstream_certificate_mode,
                 mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
                 mutual_tls_enabled=certificate is not None,
-                certificate_expires_at=certificate.not_valid_after if certificate is not None else None,
+                certificate_expires_at=certificate.not_valid_after
+                if certificate is not None
+                else None,
             ),
             runtime=GatewayRuntimeSummary(
                 queue=GatewayQueueSummary.model_validate(
-                    QueueSummaryResponse.from_counts(dict(self.job_service.queue_counts())).model_dump(mode="json")
+                    QueueSummaryResponse.from_counts(
+                        dict(self.job_service.queue_counts())
+                    ).model_dump(mode="json")
                 ),
                 devices=GatewayDeviceSummary(
                     count=device_summary.count,
                     online_count=device_summary.online_count,
                     offline_count=device_summary.offline_count,
                     kind_counts=dict(device_summary.kind_counts),
-                    default_device_id=device_summary.default_device.id if device_summary.default_device is not None else None,
+                    default_device_id=device_summary.default_device.id
+                    if device_summary.default_device is not None
+                    else None,
                     default_device_name=(
-                        device_summary.default_device.name if device_summary.default_device is not None else None
+                        device_summary.default_device.name
+                        if device_summary.default_device is not None
+                        else None
                     ),
                 ),
             ),
             capabilities=GatewayCapabilityDescriptor(
                 supported_content_kinds=tuple(kind.value for kind in PrintContentKind),
-                supported_device_commands=tuple(kind.value for kind in DeviceCommandKind),
+                supported_device_commands=tuple(
+                    kind.value for kind in DeviceCommandKind
+                ),
                 granted_scopes=UPSTREAM_AGENT_SCOPES,
                 features=(
                     "status_sync",
@@ -108,16 +118,39 @@ class GatewaySnapshotBuilder:
                     "token_refresh",
                     "certificate_rotation",
                     "protocol_negotiation",
-                    *(("enrollment_token_bootstrap",) if self.settings.upstream_enrollment_token else ()),
-                    *(("zitadel_private_key_jwt",) if self.settings.upstream_auth_mode.value == "zitadel_service_account" else ()),
-                    *(("step_ca_client_certificates", "step_ca_ott_bootstrap", "certificate_lifecycle_supervision") if self.settings.upstream_certificate_mode.value == "step_ca" else ()),
-                    *(("caddy_edge",) if CaddyControllerProfile.from_settings(self.settings).enabled else ()),
+                    *(
+                        ("enrollment_token_bootstrap",)
+                        if self.settings.upstream_enrollment_token
+                        else ()
+                    ),
+                    *(
+                        ("zitadel_private_key_jwt",)
+                        if self.settings.upstream_auth_mode.value
+                        == "zitadel_service_account"
+                        else ()
+                    ),
+                    *(
+                        (
+                            "step_ca_client_certificates",
+                            "step_ca_ott_bootstrap",
+                            "certificate_lifecycle_supervision",
+                        )
+                        if self.settings.upstream_certificate_mode.value == "step_ca"
+                        else ()
+                    ),
+                    *(
+                        ("caddy_edge",)
+                        if CaddyControllerProfile.from_settings(self.settings).enabled
+                        else ()
+                    ),
                 ),
                 client_certificate_present=certificate is not None,
             ),
             observability={
                 "gateway": self.gateway_repository.summary(),
-                "certificate_lifecycle": _serialize_certificate_lifecycle(certificate_lifecycle),
+                "certificate_lifecycle": _serialize_certificate_lifecycle(
+                    certificate_lifecycle
+                ),
                 "runtime": {
                     "queue_states": dict(self.job_service.queue_counts()),
                 },
@@ -145,7 +178,11 @@ class GatewayService:
         return self.identity_service.get_or_create_identity()
 
     def get_upstream_status(self):
-        return self.connector.current_status(certificate_lifecycle=self.certificate_lifecycle_manager.current_status() if self.certificate_lifecycle_manager is not None else None)
+        return self.connector.current_status(
+            certificate_lifecycle=self.certificate_lifecycle_manager.current_status()
+            if self.certificate_lifecycle_manager is not None
+            else None
+        )
 
     def build_snapshot(self) -> GatewaySnapshotPayload:
         return self.snapshot_builder.build_snapshot()
@@ -159,12 +196,24 @@ def _serialize_certificate_lifecycle(status) -> dict[str, object] | None:
         "operation": status.operation.value,
         "failure_reason": status.failure_reason.value,
         "detail": status.detail,
-        "current_expires_at": status.current_expires_at.isoformat() if status.current_expires_at is not None else None,
-        "last_checked_at": status.last_checked_at.isoformat() if status.last_checked_at is not None else None,
-        "last_operation_at": status.last_operation_at.isoformat() if status.last_operation_at is not None else None,
-        "last_success_at": status.last_success_at.isoformat() if status.last_success_at is not None else None,
-        "last_failure_at": status.last_failure_at.isoformat() if status.last_failure_at is not None else None,
-        "next_action_at": status.next_action_at.isoformat() if status.next_action_at is not None else None,
+        "current_expires_at": status.current_expires_at.isoformat()
+        if status.current_expires_at is not None
+        else None,
+        "last_checked_at": status.last_checked_at.isoformat()
+        if status.last_checked_at is not None
+        else None,
+        "last_operation_at": status.last_operation_at.isoformat()
+        if status.last_operation_at is not None
+        else None,
+        "last_success_at": status.last_success_at.isoformat()
+        if status.last_success_at is not None
+        else None,
+        "last_failure_at": status.last_failure_at.isoformat()
+        if status.last_failure_at is not None
+        else None,
+        "next_action_at": status.next_action_at.isoformat()
+        if status.next_action_at is not None
+        else None,
         "retry_delay_seconds": status.retry_delay_seconds,
         "certificate_present": status.certificate_present,
         "bootstrap_pending": status.bootstrap_pending,

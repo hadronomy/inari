@@ -24,7 +24,9 @@ def get_settings(container: AgentContainer = Depends(get_container)) -> AgentSet
     return container.settings
 
 
-def get_device_catalog(container: AgentContainer = Depends(get_container)) -> DeviceCatalog:
+def get_device_catalog(
+    container: AgentContainer = Depends(get_container),
+) -> DeviceCatalog:
     return container.device_catalog
 
 
@@ -36,19 +38,25 @@ def get_event_hub(container: AgentContainer = Depends(get_container)) -> EventHu
     return container.event_hub
 
 
-def get_authorization_service(container: AgentContainer = Depends(get_container)) -> AuthorizationService:
+def get_authorization_service(
+    container: AgentContainer = Depends(get_container),
+) -> AuthorizationService:
     if container.authorization_service is None:
         raise RuntimeError("AuthorizationService is not configured.")
     return container.authorization_service
 
 
-def get_security_policy_service(container: AgentContainer = Depends(get_container)) -> SecurityPolicyService:
+def get_security_policy_service(
+    container: AgentContainer = Depends(get_container),
+) -> SecurityPolicyService:
     if container.security_policy_service is None:
         raise RuntimeError("SecurityPolicyService is not configured.")
     return container.security_policy_service
 
 
-def get_gateway_service(container: AgentContainer = Depends(get_container)) -> GatewayService:
+def get_gateway_service(
+    container: AgentContainer = Depends(get_container),
+) -> GatewayService:
     if container.gateway_service is None:
         raise RuntimeError("GatewayService is not configured.")
     return container.gateway_service

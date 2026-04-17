@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import get_args, get_origin
 from typing import Any, Literal, Mapping, Sequence
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from .config_paths import (
     PathProfile,
@@ -18,7 +25,12 @@ from .config_paths import (
     resolve_default_path_bundle,
     resolve_effective_path_profile,
 )
-from .gateway.models import MutualTlsMode, UpstreamAuthMode, UpstreamCertificateMode, UpstreamEdgeProvider
+from .gateway.models import (
+    MutualTlsMode,
+    UpstreamAuthMode,
+    UpstreamCertificateMode,
+    UpstreamEdgeProvider,
+)
 from .security.models import GatewayExposure, GatewayMode
 
 ENV_PREFIX = "IOT_AGENT_"
@@ -33,33 +45,21 @@ _TEMPLATE_HEADER_COMMENTS = [
 ]
 
 _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
-    ("server",): (
-        "HTTP API binding and host filtering.",
-    ),
+    ("server",): ("HTTP API binding and host filtering.",),
     ("cors",): (
         "Browser access policy for local UI clients such as Odoo or the tray.",
     ),
-    ("logging",): (
-        "Logging verbosity and log file location.",
-    ),
+    ("logging",): ("Logging verbosity and log file location.",),
     ("paths",): (
         "Filesystem locations for runtime state. Leave these commented to use OS-specific defaults.",
     ),
     ("printing",): (
         "Default printer behavior and optional network printer definitions.",
     ),
-    ("runtime", "discovery"): (
-        "Device discovery cadence.",
-    ),
-    ("runtime", "scheduler"): (
-        "Job scheduler tuning.",
-    ),
-    ("runtime", "jobs"): (
-        "Job execution leases, retries, and timeouts.",
-    ),
-    ("security",): (
-        "Local API exposure and local-auth defaults.",
-    ),
+    ("runtime", "discovery"): ("Device discovery cadence.",),
+    ("runtime", "scheduler"): ("Job scheduler tuning.",),
+    ("runtime", "jobs"): ("Job execution leases, retries, and timeouts.",),
+    ("security",): ("Local API exposure and local-auth defaults.",),
     ("security", "local_tokens"): (
         "Short-lived tokens issued to local clients like the tray.",
     ),
@@ -73,9 +73,7 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
         "Bootstrap material used only for first enrollment.",
         "Use a single short-lived controller-issued enrollment token for the initial managed enrollment call.",
     ),
-    ("gateway", "sync"): (
-        "Managed-mode reconnect, polling, and backoff tuning.",
-    ),
+    ("gateway", "sync"): ("Managed-mode reconnect, polling, and backoff tuning.",),
     ("gateway", "zitadel"): (
         "ZITADEL service-account settings for controller authentication.",
     ),
@@ -94,71 +92,179 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("cors", "allowed_origins"): ("Browser origins allowed to call the local API.",),
     ("logging", "level"): ("Application log verbosity.",),
     ("logging", "directory"): ("Directory for rotated agent logs.",),
-    ("paths", "profile"): ("Choose development or production path defaults. `auto` detects based on the working directory.",),
+    ("paths", "profile"): (
+        "Choose development or production path defaults. `auto` detects based on the working directory.",
+    ),
     ("paths", "data_dir"): ("Base directory for runtime state files.",),
     ("paths", "temp_dir"): ("Directory for temporary files.",),
     ("paths", "runtime_database"): ("SQLite database file path.",),
-    ("paths", "security_state_dir"): ("Directory for identities, enrollment state, and fallback local secrets.",),
-    ("printing", "default_printer_name"): ("Preferred printer when jobs do not target a specific device.",),
-    ("printing", "default_transport"): ("Default transport strategy when a driver supports more than one mode.",),
+    ("paths", "security_state_dir"): (
+        "Directory for identities, enrollment state, and fallback local secrets.",
+    ),
+    ("printing", "default_printer_name"): (
+        "Preferred printer when jobs do not target a specific device.",
+    ),
+    ("printing", "default_transport"): (
+        "Default transport strategy when a driver supports more than one mode.",
+    ),
     ("printing", "html_enabled"): ("Allow HTML receipt/document rendering.",),
-    ("runtime", "discovery", "poll_interval_seconds"): ("How often the agent refreshes device discovery.",),
-    ("runtime", "scheduler", "poll_interval_seconds"): ("How often the scheduler looks for runnable jobs.",),
-    ("runtime", "scheduler", "batch_size"): ("Maximum number of jobs leased per scheduling pass.",),
-    ("runtime", "jobs", "max_attempts"): ("Maximum attempts before a job is marked failed.",),
-    ("runtime", "jobs", "retry_base_delay_seconds"): ("Initial retry delay after a failed job attempt.",),
-    ("runtime", "jobs", "retry_max_delay_seconds"): ("Upper bound for exponential retry delays.",),
-    ("runtime", "jobs", "dispatch_lease_seconds"): ("How long a dispatch lease is held before another worker may reclaim it.",),
-    ("runtime", "jobs", "execution_lease_seconds"): ("How long a worker execution lease remains valid without a heartbeat.",),
-    ("runtime", "jobs", "heartbeat_interval_seconds"): ("How often active workers refresh their job lease.",),
-    ("runtime", "jobs", "execution_timeout_seconds"): ("Hard timeout for a single job execution.",),
-    ("runtime", "jobs", "lease_recovery_interval_seconds"): ("How often the agent scans for expired leases.",),
-    ("security", "gateway_mode"): ("Run purely local (`standalone`) or connect to an upstream controller (`managed`).",),
-    ("security", "gateway_exposure"): ("Expose the API only on loopback or to the LAN.",),
-    ("security", "allow_loopback_bootstrap"): ("Allow local bootstrap token minting for trusted loopback clients.",),
-    ("security", "https_redirect_enabled"): ("Redirect HTTP to HTTPS when LAN TLS is enabled.",),
-    ("security", "secret_store_service_name"): ("OS credential store namespace used by the agent.",),
-    ("security", "local_tokens", "ttl_seconds"): ("Lifetime of locally issued bearer tokens in seconds.",),
-    ("security", "local_tokens", "audience"): ("Audience claim for locally issued tokens.",),
-    ("security", "local_tokens", "issuer"): ("Issuer claim for locally issued tokens.",),
-    ("security", "tls", "cert_path"): ("PEM certificate file presented by the local API.",),
+    ("runtime", "discovery", "poll_interval_seconds"): (
+        "How often the agent refreshes device discovery.",
+    ),
+    ("runtime", "scheduler", "poll_interval_seconds"): (
+        "How often the scheduler looks for runnable jobs.",
+    ),
+    ("runtime", "scheduler", "batch_size"): (
+        "Maximum number of jobs leased per scheduling pass.",
+    ),
+    ("runtime", "jobs", "max_attempts"): (
+        "Maximum attempts before a job is marked failed.",
+    ),
+    ("runtime", "jobs", "retry_base_delay_seconds"): (
+        "Initial retry delay after a failed job attempt.",
+    ),
+    ("runtime", "jobs", "retry_max_delay_seconds"): (
+        "Upper bound for exponential retry delays.",
+    ),
+    ("runtime", "jobs", "dispatch_lease_seconds"): (
+        "How long a dispatch lease is held before another worker may reclaim it.",
+    ),
+    ("runtime", "jobs", "execution_lease_seconds"): (
+        "How long a worker execution lease remains valid without a heartbeat.",
+    ),
+    ("runtime", "jobs", "heartbeat_interval_seconds"): (
+        "How often active workers refresh their job lease.",
+    ),
+    ("runtime", "jobs", "execution_timeout_seconds"): (
+        "Hard timeout for a single job execution.",
+    ),
+    ("runtime", "jobs", "lease_recovery_interval_seconds"): (
+        "How often the agent scans for expired leases.",
+    ),
+    ("security", "gateway_mode"): (
+        "Run purely local (`standalone`) or connect to an upstream controller (`managed`).",
+    ),
+    ("security", "gateway_exposure"): (
+        "Expose the API only on loopback or to the LAN.",
+    ),
+    ("security", "allow_loopback_bootstrap"): (
+        "Allow local bootstrap token minting for trusted loopback clients.",
+    ),
+    ("security", "https_redirect_enabled"): (
+        "Redirect HTTP to HTTPS when LAN TLS is enabled.",
+    ),
+    ("security", "secret_store_service_name"): (
+        "OS credential store namespace used by the agent.",
+    ),
+    ("security", "local_tokens", "ttl_seconds"): (
+        "Lifetime of locally issued bearer tokens in seconds.",
+    ),
+    ("security", "local_tokens", "audience"): (
+        "Audience claim for locally issued tokens.",
+    ),
+    ("security", "local_tokens", "issuer"): (
+        "Issuer claim for locally issued tokens.",
+    ),
+    ("security", "tls", "cert_path"): (
+        "PEM certificate file presented by the local API.",
+    ),
     ("security", "tls", "key_path"): ("Private key for the local API certificate.",),
-    ("security", "tls", "ca_path"): ("Optional custom CA bundle trusted by the agent.",),
+    ("security", "tls", "ca_path"): (
+        "Optional custom CA bundle trusted by the agent.",
+    ),
     ("gateway", "base_url"): ("Base URL for the external controller.",),
-    ("gateway", "enrollment_url"): ("Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.",),
-    ("gateway", "status_url"): ("Explicit status endpoint if the controller expects a fixed URL.",),
+    ("gateway", "enrollment_url"): (
+        "Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.",
+    ),
+    ("gateway", "status_url"): (
+        "Explicit status endpoint if the controller expects a fixed URL.",
+    ),
     ("gateway", "events_url"): ("WebSocket control/event endpoint.",),
     ("gateway", "auth_mode"): ("How the agent authenticates to the controller.",),
-    ("gateway", "certificate_mode"): ("How the agent obtains and refreshes client certificates.",),
-    ("gateway", "edge_provider"): ("Controller edge layout. `caddy` enables stricter profile validation.",),
-    ("gateway", "mutual_tls_mode"): ("Whether client certificates are disabled, optional, or required upstream.",),
-    ("gateway", "trust_client_ca"): ("Trust the managed CA bundle for outbound TLS validation.",),
-    ("gateway", "bootstrap", "enrollment_token"): ("Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.",),
-    ("gateway", "sync", "interval_seconds"): ("How often snapshots are pushed to the controller.",),
-    ("gateway", "sync", "reconnect_delay_seconds"): ("Base reconnect delay after controller disconnects.",),
-    ("gateway", "sync", "event_timeout_seconds"): ("Read timeout for upstream event streams.",),
-    ("gateway", "sync", "control_poll_interval_seconds"): ("Polling cadence for control-plane maintenance work.",),
-    ("gateway", "sync", "outbox_batch_size"): ("Maximum queued outbound messages sent in one batch.",),
-    ("gateway", "sync", "backoff_base_seconds"): ("Starting backoff value for repeated upstream failures.",),
-    ("gateway", "sync", "backoff_max_seconds"): ("Maximum backoff value for repeated upstream failures.",),
-    ("gateway", "sync", "token_refresh_skew_seconds"): ("How early to refresh upstream tokens before expiry.",),
+    ("gateway", "certificate_mode"): (
+        "How the agent obtains and refreshes client certificates.",
+    ),
+    ("gateway", "edge_provider"): (
+        "Controller edge layout. `caddy` enables stricter profile validation.",
+    ),
+    ("gateway", "mutual_tls_mode"): (
+        "Whether client certificates are disabled, optional, or required upstream.",
+    ),
+    ("gateway", "trust_client_ca"): (
+        "Trust the managed CA bundle for outbound TLS validation.",
+    ),
+    ("gateway", "bootstrap", "enrollment_token"): (
+        "Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.",
+    ),
+    ("gateway", "sync", "interval_seconds"): (
+        "How often snapshots are pushed to the controller.",
+    ),
+    ("gateway", "sync", "reconnect_delay_seconds"): (
+        "Base reconnect delay after controller disconnects.",
+    ),
+    ("gateway", "sync", "event_timeout_seconds"): (
+        "Read timeout for upstream event streams.",
+    ),
+    ("gateway", "sync", "control_poll_interval_seconds"): (
+        "Polling cadence for control-plane maintenance work.",
+    ),
+    ("gateway", "sync", "outbox_batch_size"): (
+        "Maximum queued outbound messages sent in one batch.",
+    ),
+    ("gateway", "sync", "backoff_base_seconds"): (
+        "Starting backoff value for repeated upstream failures.",
+    ),
+    ("gateway", "sync", "backoff_max_seconds"): (
+        "Maximum backoff value for repeated upstream failures.",
+    ),
+    ("gateway", "sync", "token_refresh_skew_seconds"): (
+        "How early to refresh upstream tokens before expiry.",
+    ),
     ("gateway", "zitadel", "base_url"): ("Base URL for your ZITADEL instance.",),
-    ("gateway", "zitadel", "token_url"): ("Explicit token endpoint if it differs from the default instance URL.",),
+    ("gateway", "zitadel", "token_url"): (
+        "Explicit token endpoint if it differs from the default instance URL.",
+    ),
     ("gateway", "zitadel", "audience"): ("Audience requested for controller tokens.",),
-    ("gateway", "zitadel", "service_account_key_path"): ("Path to the ZITADEL service-account JSON file.",),
-    ("gateway", "zitadel", "service_user_id"): ("Service user id when configuring the assertion components manually.",),
-    ("gateway", "zitadel", "key_id"): ("Key identifier for the service-account private key.",),
-    ("gateway", "zitadel", "private_key_path"): ("Path to the service-account private key PEM.",),
-    ("gateway", "zitadel", "assertion_algorithm"): ("Signing algorithm used for the private-key JWT assertion.",),
+    ("gateway", "zitadel", "service_account_key_path"): (
+        "Path to the ZITADEL service-account JSON file.",
+    ),
+    ("gateway", "zitadel", "service_user_id"): (
+        "Service user id when configuring the assertion components manually.",
+    ),
+    ("gateway", "zitadel", "key_id"): (
+        "Key identifier for the service-account private key.",
+    ),
+    ("gateway", "zitadel", "private_key_path"): (
+        "Path to the service-account private key PEM.",
+    ),
+    ("gateway", "zitadel", "assertion_algorithm"): (
+        "Signing algorithm used for the private-key JWT assertion.",
+    ),
     ("gateway", "zitadel", "requested_scopes"): ("Scopes requested from ZITADEL.",),
-    ("gateway", "zitadel", "token_refresh_skew_seconds"): ("How early to refresh ZITADEL access tokens.",),
-    ("gateway", "step_ca", "url"): ("Base URL for the private step-ca instance when you want to override the controller-provided CA URL.",),
-    ("gateway", "step_ca", "sign_url"): ("Explicit sign endpoint override when it cannot be derived from `url` or the controller enrollment response.",),
-    ("gateway", "step_ca", "renew_url"): ("Explicit renew endpoint override when it cannot be derived from `url` or the controller enrollment response.",),
-    ("gateway", "step_ca", "root_fingerprint"): ("Expected fingerprint of the step-ca root certificate. The controller normally provides this during enrollment.",),
-    ("gateway", "step_ca", "requested_sans"): ("Additional SANs requested for the managed client certificate beyond the agent's default identity.",),
-    ("gateway", "step_ca", "certificate_renewal_skew_seconds"): ("How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.",),
-    ("gateway", "step_ca", "lifecycle_poll_interval_seconds"): ("How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.",),
+    ("gateway", "zitadel", "token_refresh_skew_seconds"): (
+        "How early to refresh ZITADEL access tokens.",
+    ),
+    ("gateway", "step_ca", "url"): (
+        "Base URL for the private step-ca instance when you want to override the controller-provided CA URL.",
+    ),
+    ("gateway", "step_ca", "sign_url"): (
+        "Explicit sign endpoint override when it cannot be derived from `url` or the controller enrollment response.",
+    ),
+    ("gateway", "step_ca", "renew_url"): (
+        "Explicit renew endpoint override when it cannot be derived from `url` or the controller enrollment response.",
+    ),
+    ("gateway", "step_ca", "root_fingerprint"): (
+        "Expected fingerprint of the step-ca root certificate. The controller normally provides this during enrollment.",
+    ),
+    ("gateway", "step_ca", "requested_sans"): (
+        "Additional SANs requested for the managed client certificate beyond the agent's default identity.",
+    ),
+    ("gateway", "step_ca", "certificate_renewal_skew_seconds"): (
+        "How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.",
+    ),
+    ("gateway", "step_ca", "lifecycle_poll_interval_seconds"): (
+        "How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.",
+    ),
 }
 
 _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
@@ -173,21 +279,38 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     ("security", "tls", "key_path"): "./certs/agent.key",
     ("security", "tls", "ca_path"): "./certs/ca.crt",
     ("gateway", "base_url"): "https://controller.example.com",
-    ("gateway", "enrollment_url"): "https://bootstrap.controller.example.com/api/iot-agent/enroll",
-    ("gateway", "status_url"): "https://controller.example.com/api/iot-agent/agents/agt_123/status",
-    ("gateway", "events_url"): "wss://controller.example.com/api/iot-agent/agents/agt_123/events",
+    (
+        "gateway",
+        "enrollment_url",
+    ): "https://bootstrap.controller.example.com/api/iot-agent/enroll",
+    (
+        "gateway",
+        "status_url",
+    ): "https://controller.example.com/api/iot-agent/agents/agt_123/status",
+    (
+        "gateway",
+        "events_url",
+    ): "wss://controller.example.com/api/iot-agent/agents/agt_123/events",
     ("gateway", "bootstrap", "enrollment_token"): "enrollment-token",
     ("gateway", "zitadel", "base_url"): "https://zitadel.example.com",
     ("gateway", "zitadel", "token_url"): "https://zitadel.example.com/oauth/v2/token",
     ("gateway", "zitadel", "audience"): "https://controller.example.com",
-    ("gateway", "zitadel", "service_account_key_path"): "./secrets/zitadel-service-account.json",
+    (
+        "gateway",
+        "zitadel",
+        "service_account_key_path",
+    ): "./secrets/zitadel-service-account.json",
     ("gateway", "zitadel", "service_user_id"): "123456789012345678",
     ("gateway", "zitadel", "key_id"): "key-id",
     ("gateway", "zitadel", "private_key_path"): "./secrets/zitadel-private-key.pem",
     ("gateway", "step_ca", "url"): "https://ca.example.com",
     ("gateway", "step_ca", "sign_url"): "https://ca.example.com/1.0/sign",
     ("gateway", "step_ca", "renew_url"): "https://ca.example.com/1.0/renew",
-    ("gateway", "step_ca", "root_fingerprint"): "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    (
+        "gateway",
+        "step_ca",
+        "root_fingerprint",
+    ): "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 }
 
 _ARRAY_TABLE_EXAMPLES: dict[tuple[str, ...], tuple[dict[str, Any], ...]] = {
@@ -224,7 +347,9 @@ class ServerConfig(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 7310
-    trusted_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost", "testserver"])
+    trusted_hosts: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1", "localhost", "testserver"]
+    )
 
 
 class CorsConfig(BaseModel):
@@ -336,7 +461,9 @@ class SecurityConfig(BaseModel):
     allow_loopback_bootstrap: bool = True
     https_redirect_enabled: bool = True
     secret_store_service_name: str = "iot-agent"
-    local_tokens: SecurityLocalTokenConfig = Field(default_factory=SecurityLocalTokenConfig)
+    local_tokens: SecurityLocalTokenConfig = Field(
+        default_factory=SecurityLocalTokenConfig
+    )
     tls: SecurityTlsConfig = Field(default_factory=SecurityTlsConfig)
 
 
@@ -358,7 +485,9 @@ class GatewayBootstrapConfig(BaseModel):
 
     enrollment_token: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("enrollment_token", "bootstrap_token", "enrollment_code"),
+        validation_alias=AliasChoices(
+            "enrollment_token", "bootstrap_token", "enrollment_code"
+        ),
     )
 
 
@@ -420,10 +549,19 @@ class AgentConfigFile(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
 
-    def to_settings_payload(self, *, base_dir: Path, path_defaults: PlatformPathBundle) -> dict[str, object]:
-        data_dir = _resolve_relative_path(self.paths.data_dir, base_dir) or path_defaults.data_dir
-        runtime_database_path = _resolve_relative_path(self.paths.runtime_database, base_dir) or (data_dir / "iot-agent.sqlite3")
-        security_state_dir = _resolve_relative_path(self.paths.security_state_dir, base_dir) or (data_dir / "security")
+    def to_settings_payload(
+        self, *, base_dir: Path, path_defaults: PlatformPathBundle
+    ) -> dict[str, object]:
+        data_dir = (
+            _resolve_relative_path(self.paths.data_dir, base_dir)
+            or path_defaults.data_dir
+        )
+        runtime_database_path = _resolve_relative_path(
+            self.paths.runtime_database, base_dir
+        ) or (data_dir / "iot-agent.sqlite3")
+        security_state_dir = _resolve_relative_path(
+            self.paths.security_state_dir, base_dir
+        ) or (data_dir / "security")
         return {
             "host": self.server.host,
             "port": self.server.port,
@@ -432,14 +570,19 @@ class AgentConfigFile(BaseModel):
             "allowed_origins": list(self.cors.allowed_origins),
             "log_level": self.logging.level,
             "data_dir": data_dir,
-            "log_dir": _resolve_relative_path(self.logging.directory, base_dir) or path_defaults.log_dir,
-            "temp_dir": _resolve_relative_path(self.paths.temp_dir, base_dir) or path_defaults.temp_dir,
+            "log_dir": _resolve_relative_path(self.logging.directory, base_dir)
+            or path_defaults.log_dir,
+            "temp_dir": _resolve_relative_path(self.paths.temp_dir, base_dir)
+            or path_defaults.temp_dir,
             "runtime_database_path": runtime_database_path,
             "security_state_dir": security_state_dir,
             "default_printer_name": self.printing.default_printer_name,
             "default_printer_mode": self.printing.default_transport,
             "html_print_enabled": self.printing.html_enabled,
-            "network_printers": [printer.model_dump(mode="python") for printer in self.printing.network_printers],
+            "network_printers": [
+                printer.model_dump(mode="python")
+                for printer in self.printing.network_printers
+            ],
             "discovery_poll_interval_seconds": self.runtime.discovery.poll_interval_seconds,
             "scheduler_poll_interval_seconds": self.runtime.scheduler.poll_interval_seconds,
             "scheduler_batch_size": self.runtime.scheduler.batch_size,
@@ -459,8 +602,12 @@ class AgentConfigFile(BaseModel):
             "local_token_ttl_seconds": self.security.local_tokens.ttl_seconds,
             "token_audience": self.security.local_tokens.audience,
             "token_issuer": self.security.local_tokens.issuer,
-            "tls_cert_path": _resolve_relative_path(self.security.tls.cert_path, base_dir),
-            "tls_key_path": _resolve_relative_path(self.security.tls.key_path, base_dir),
+            "tls_cert_path": _resolve_relative_path(
+                self.security.tls.cert_path, base_dir
+            ),
+            "tls_key_path": _resolve_relative_path(
+                self.security.tls.key_path, base_dir
+            ),
             "tls_ca_path": _resolve_relative_path(self.security.tls.ca_path, base_dir),
             "upstream_base_url": self.gateway.base_url,
             "upstream_enrollment_url": self.gateway.enrollment_url,
@@ -515,7 +662,9 @@ class AgentSettings(BaseModel):
     gateway_mode: GatewayMode = GatewayMode.STANDALONE
     gateway_exposure: GatewayExposure = GatewayExposure.LOOPBACK
     upstream_auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
-    upstream_certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
+    upstream_certificate_mode: UpstreamCertificateMode = (
+        UpstreamCertificateMode.CONTROLLER
+    )
     upstream_edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
     upstream_mutual_tls_mode: MutualTlsMode = MutualTlsMode.DISABLED
     allowed_origins: list[str] = Field(
@@ -524,7 +673,9 @@ class AgentSettings(BaseModel):
             "http://localhost:8069",
         ]
     )
-    trusted_hosts: list[str] = Field(default_factory=lambda: ["127.0.0.1", "localhost", "testserver"])
+    trusted_hosts: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1", "localhost", "testserver"]
+    )
     default_printer_name: str | None = None
     log_level: LogLevel = "INFO"
     html_print_enabled: bool = True
@@ -637,7 +788,9 @@ class AgentSettings(BaseModel):
             return normalized or None
         return value
 
-    @field_validator("zitadel_requested_scopes", "step_ca_requested_sans", mode="before")
+    @field_validator(
+        "zitadel_requested_scopes", "step_ca_requested_sans", mode="before"
+    )
     @classmethod
     def normalize_list_values(cls, value: object) -> object:
         return _normalize_list_like(value)
@@ -664,8 +817,12 @@ class AgentSettings(BaseModel):
         self.data_dir = self.data_dir or defaults.data_dir
         self.log_dir = self.log_dir or defaults.log_dir
         self.temp_dir = self.temp_dir or defaults.temp_dir
-        self.runtime_database_path = self.runtime_database_path or (self.data_dir / "iot-agent.sqlite3")
-        self.security_state_dir = self.security_state_dir or (self.data_dir / "security")
+        self.runtime_database_path = self.runtime_database_path or (
+            self.data_dir / "iot-agent.sqlite3"
+        )
+        self.security_state_dir = self.security_state_dir or (
+            self.data_dir / "security"
+        )
         return self
 
 
@@ -677,7 +834,9 @@ def load_settings(
 ) -> AgentSettings:
     env = dict(environ or os.environ)
     working_directory = Path(cwd) if cwd is not None else Path.cwd()
-    resolved_config_path = resolve_config_path(config_path=config_path, environ=env, cwd=working_directory)
+    resolved_config_path = resolve_config_path(
+        config_path=config_path, environ=env, cwd=working_directory
+    )
     config_payload: dict[str, Any] = {}
     base_dir = working_directory
     dotenv_path = working_directory / ".env"
@@ -692,14 +851,18 @@ def load_settings(
         environment=env,
         dotenv_values=_read_dotenv(dotenv_path),
     )
-    requested_path_profile = env_payload.get("path_profile") or file_config.paths.profile
+    requested_path_profile = (
+        env_payload.get("path_profile") or file_config.paths.profile
+    )
     resolved_path_defaults = resolve_default_path_bundle(
         profile=requested_path_profile,
         working_directory=working_directory,
         config_path=resolved_config_path,
     )
     env_payload["path_profile"] = resolved_path_defaults.profile
-    settings_payload = file_config.to_settings_payload(base_dir=base_dir, path_defaults=resolved_path_defaults)
+    settings_payload = file_config.to_settings_payload(
+        base_dir=base_dir, path_defaults=resolved_path_defaults
+    )
     merged_payload = {
         **settings_payload,
         **env_payload,
@@ -754,7 +917,9 @@ def generate_taplo_schema() -> dict[str, Any]:
     converted = _convert_schema_for_taplo(schema)
     converted["$schema"] = "http://json-schema.org/draft-04/schema#"
     converted.setdefault("title", "IoT Agent Config")
-    converted.setdefault("description", "Schema for the IoT Agent TOML configuration file.")
+    converted.setdefault(
+        "description", "Schema for the IoT Agent TOML configuration file."
+    )
     return converted
 
 
@@ -764,13 +929,17 @@ def render_example_toml(
     config: AgentConfigFile | None = None,
     active_fields: set[tuple[str, ...]] | None = None,
 ) -> str:
-    document = config.model_copy(deep=True) if config is not None else _build_example_config()
+    document = (
+        config.model_copy(deep=True) if config is not None else _build_example_config()
+    )
     lines: list[str] = []
     if schema_path is not None:
         lines.extend([f"#:schema {schema_path}", ""])
     _append_comment_block(lines, _TEMPLATE_HEADER_COMMENTS)
     lines.append("")
-    _render_model_template(lines, (), document, root=True, active_fields=active_fields or set())
+    _render_model_template(
+        lines, (), document, root=True, active_fields=active_fields or set()
+    )
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
@@ -819,7 +988,9 @@ def write_default_config_file(
 
 
 def generate_schema_main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate the IoT Agent TOML schema and example config.")
+    parser = argparse.ArgumentParser(
+        description="Generate the IoT Agent TOML schema and example config."
+    )
     parser.add_argument(
         "--schema-output",
         type=Path,
@@ -902,7 +1073,12 @@ def _read_dotenv(path: Path) -> dict[str, str]:
         key, raw_value = line.split("=", 1)
         key = key.strip()
         value = raw_value.strip()
-        if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        if (
+            value
+            and len(value) >= 2
+            and value[0] == value[-1]
+            and value[0] in {'"', "'"}
+        ):
             value = value[1:-1]
         values[key] = value
     return values
@@ -933,7 +1109,9 @@ def _build_env_override_payload(
     return payload
 
 
-def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+def _deep_merge_dicts(
+    base: Mapping[str, Any], override: Mapping[str, Any]
+) -> dict[str, Any]:
     merged = dict(base)
     for key, value in override.items():
         current = merged.get(key)
@@ -949,7 +1127,13 @@ def _convert_schema_for_taplo(value: Any) -> Any:
         converted: dict[str, Any] = {}
         for key, item in value.items():
             normalized_key = "definitions" if key == "$defs" else key
-            if normalized_key in {"$id", "$anchor", "$dynamicAnchor", "$dynamicRef", "unevaluatedProperties"}:
+            if normalized_key in {
+                "$id",
+                "$anchor",
+                "$dynamicAnchor",
+                "$dynamicRef",
+                "unevaluatedProperties",
+            }:
                 continue
             if normalized_key == "const":
                 converted["enum"] = [_convert_schema_for_taplo(item)]
@@ -1004,7 +1188,9 @@ def _render_model_template(
             continue
         scalar_fields.append((field_name, value))
 
-    should_render_header = not root and bool(scalar_fields or (not nested_models and not table_lists))
+    should_render_header = not root and bool(
+        scalar_fields or (not nested_models and not table_lists)
+    )
 
     if should_render_header:
         if path in _SECTION_COMMENTS:
@@ -1013,13 +1199,17 @@ def _render_model_template(
 
     for field_name, raw_value in scalar_fields:
         field_path = (*path, field_name)
-        _render_commented_field(lines, field_path, raw_value, active_fields=active_fields)
+        _render_commented_field(
+            lines, field_path, raw_value, active_fields=active_fields
+        )
 
     if scalar_fields or should_render_header:
         lines.append("")
 
     for field_name, child_model in nested_models:
-        _render_model_template(lines, (*path, field_name), child_model, active_fields=active_fields)
+        _render_model_template(
+            lines, (*path, field_name), child_model, active_fields=active_fields
+        )
 
     for field_name, field_items, item_model_type in table_lists:
         _render_array_of_tables_template(
@@ -1062,11 +1252,17 @@ def _render_array_of_tables_template(
     if items:
         for item in items:
             if isinstance(item, BaseModel):
-                example_items.append(_serialize_for_toml(item.model_dump(mode="python", exclude_none=False)))
+                example_items.append(
+                    _serialize_for_toml(
+                        item.model_dump(mode="python", exclude_none=False)
+                    )
+                )
             elif isinstance(item, dict):
                 example_items.append(_serialize_for_toml(item))
     elif path in _ARRAY_TABLE_EXAMPLES:
-        example_items.extend(_serialize_for_toml(item) for item in _ARRAY_TABLE_EXAMPLES[path])
+        example_items.extend(
+            _serialize_for_toml(item) for item in _ARRAY_TABLE_EXAMPLES[path]
+        )
 
     if not example_items and item_model_type is not None:
         lines.append(f"# {path[-1]} = []")
@@ -1108,9 +1304,7 @@ def _build_example_config() -> AgentConfigFile:
     document = AgentConfigFile()
     document.paths.profile = "auto"
     document.server.trusted_hosts = [
-        host
-        for host in document.server.trusted_hosts
-        if host != "testserver"
+        host for host in document.server.trusted_hosts if host != "testserver"
     ]
     return document
 

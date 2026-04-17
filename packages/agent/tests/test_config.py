@@ -62,7 +62,10 @@ def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
     assert settings.data_dir == (tmp_path / "runtime/data").resolve()
     assert settings.log_dir == (tmp_path / "runtime/logs").resolve()
     assert settings.temp_dir == (tmp_path / "runtime/tmp").resolve()
-    assert settings.runtime_database_path == (tmp_path / "runtime/data/agent.sqlite3").resolve()
+    assert (
+        settings.runtime_database_path
+        == (tmp_path / "runtime/data/agent.sqlite3").resolve()
+    )
     assert settings.security_state_dir == (tmp_path / "runtime/security").resolve()
     assert settings.default_printer_name == "Kitchen Printer"
     assert settings.default_printer_mode == "raw"
@@ -86,7 +89,10 @@ def test_load_settings_derives_runtime_paths_from_data_dir(tmp_path: Path) -> No
     settings = load_settings(config_path=config_path, environ={})
 
     assert settings.data_dir == (tmp_path / "state").resolve()
-    assert settings.runtime_database_path == (tmp_path / "state/iot-agent.sqlite3").resolve()
+    assert (
+        settings.runtime_database_path
+        == (tmp_path / "state/iot-agent.sqlite3").resolve()
+    )
     assert settings.security_state_dir == (tmp_path / "state/security").resolve()
 
 
@@ -206,7 +212,7 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
         environ={
             "IOT_AGENT_LOG_LEVEL": "DEBUG",
             "IOT_AGENT_DEFAULT_PRINTER_NAME": "Bar Printer",
-            "IOT_AGENT_TRUSTED_HOSTS": "[\"127.0.0.1\", \"localhost\"]",
+            "IOT_AGENT_TRUSTED_HOSTS": '["127.0.0.1", "localhost"]',
         },
     )
 
@@ -216,7 +222,9 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("legacy_field", ["bootstrap_token", "enrollment_code"])
-def test_load_settings_accepts_legacy_gateway_bootstrap_field_names(tmp_path: Path, legacy_field: str) -> None:
+def test_load_settings_accepts_legacy_gateway_bootstrap_field_names(
+    tmp_path: Path, legacy_field: str
+) -> None:
     config_path = tmp_path / "iot-agent.toml"
     config_path.write_text(
         textwrap.dedent(
@@ -246,9 +254,13 @@ def test_load_settings_maps_legacy_bootstrap_env_names(env_name: str) -> None:
     assert settings.upstream_enrollment_token == "legacy-env-bootstrap"
 
 
-def test_load_settings_uses_development_defaults_inside_workspace(tmp_path: Path) -> None:
+def test_load_settings_uses_development_defaults_inside_workspace(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "packages" / "agent").mkdir(parents=True)
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='workspace'\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname='workspace'\n", encoding="utf-8"
+    )
     (tmp_path / "config.toml").write_text("", encoding="utf-8")
 
     settings = load_settings(cwd=tmp_path, environ={})
@@ -257,12 +269,17 @@ def test_load_settings_uses_development_defaults_inside_workspace(tmp_path: Path
     assert settings.data_dir == (tmp_path / "data").resolve()
     assert settings.log_dir == (tmp_path / "logs").resolve()
     assert settings.temp_dir == (tmp_path / "tmp").resolve()
-    assert settings.runtime_database_path == (tmp_path / "data/iot-agent.sqlite3").resolve()
+    assert (
+        settings.runtime_database_path
+        == (tmp_path / "data/iot-agent.sqlite3").resolve()
+    )
     assert settings.security_state_dir == (tmp_path / "data/security").resolve()
 
 
 def test_load_settings_can_force_production_defaults(tmp_path: Path) -> None:
-    expected = resolve_default_path_bundle(profile="production", working_directory=tmp_path)
+    expected = resolve_default_path_bundle(
+        profile="production", working_directory=tmp_path
+    )
 
     settings = load_settings(
         cwd=tmp_path,
@@ -307,7 +324,9 @@ def test_render_example_toml_includes_schema_header_and_sections() -> None:
     assert "enrollment_code" not in rendered
 
 
-def test_write_generated_config_artifacts_writes_schema_and_example(tmp_path: Path) -> None:
+def test_write_generated_config_artifacts_writes_schema_and_example(
+    tmp_path: Path,
+) -> None:
     schema_path = tmp_path / "schemas" / "iot-agent-config.schema.json"
     example_path = tmp_path / "config.example.toml"
 
@@ -318,8 +337,13 @@ def test_write_generated_config_artifacts_writes_schema_and_example(tmp_path: Pa
 
     assert schema_path.exists()
     assert example_path.exists()
-    assert '"$schema": "http://json-schema.org/draft-04/schema#"' in schema_path.read_text(encoding="utf-8")
-    assert "#:schema ./schemas/iot-agent-config.schema.json" in example_path.read_text(encoding="utf-8")
+    assert (
+        '"$schema": "http://json-schema.org/draft-04/schema#"'
+        in schema_path.read_text(encoding="utf-8")
+    )
+    assert "#:schema ./schemas/iot-agent-config.schema.json" in example_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_agent_settings_still_accept_flat_instantiation() -> None:

@@ -20,11 +20,15 @@ def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
     assert result.backup_path is None
     assert result.migrated is True
     with sqlite3.connect(database_path) as connection:
-        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
     assert revision == (BASELINE_REVISION,)
 
 
-def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(tmp_path: Path) -> None:
+def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(
+    tmp_path: Path,
+) -> None:
     database_path = _create_legacy_database(tmp_path / "legacy.sqlite3")
     migrator = DatabaseMigrator(database_path)
 
@@ -35,7 +39,9 @@ def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(tmp_path
     assert result.backup_path is not None
     assert result.backup_path.exists()
     with sqlite3.connect(database_path) as connection:
-        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        revision = connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone()
         device_count = connection.execute("SELECT COUNT(*) FROM devices").fetchone()
     assert revision == (BASELINE_REVISION,)
     assert device_count == (1,)
@@ -88,9 +94,7 @@ def _create_legacy_database(database_path: Path) -> Path:
 def _write_config(tmp_path: Path) -> Path:
     config_path = tmp_path / "iot-agent.toml"
     config_path.write_text(
-        "[paths]\n"
-        'data_dir = "."\n'
-        'runtime_database = "./runtime.sqlite3"\n',
+        '[paths]\ndata_dir = "."\nruntime_database = "./runtime.sqlite3"\n',
         encoding="utf-8",
     )
     return config_path

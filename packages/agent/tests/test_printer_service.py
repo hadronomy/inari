@@ -12,7 +12,13 @@ from iot_agent.drivers.printers.base import PrinterDriver
 from iot_agent.exceptions import PrinterServiceError
 from iot_agent.print_jobs import PrintJob, ReceiptImageContent
 from iot_agent.printer_service import PrinterService
-from iot_agent.printers import PrintJobResult, PrinterCapabilities, PrinterDevice, PrinterTransport, RenderedDocument
+from iot_agent.printers import (
+    PrintJobResult,
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+    RenderedDocument,
+)
 
 
 @dataclass(slots=True)
@@ -47,20 +53,38 @@ class FakePrinterDriver(PrinterDriver):
     def get_default_device_name(self) -> str | None:
         return self.default_name
 
-    def resolve_transport(self, printer: PrinterDevice, requested: PrinterTransport) -> PrinterTransport:
+    def resolve_transport(
+        self, printer: PrinterDevice, requested: PrinterTransport
+    ) -> PrinterTransport:
         if requested is not PrinterTransport.AUTO:
             return requested
         return printer.preferred_transport
 
-    def submit_raw_job(self, printer: PrinterDevice, payload: bytes, *, document_name: str) -> PrintJobResult:
+    def submit_raw_job(
+        self, printer: PrinterDevice, payload: bytes, *, document_name: str
+    ) -> PrintJobResult:
         self.raw_jobs.append((printer.name, payload, document_name))
-        return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=len(payload), job_id=1)
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.RAW,
+            bytes_written=len(payload),
+            job_id=1,
+        )
 
-    def submit_text_job(self, printer: PrinterDevice, text: str, *, document_name: str) -> PrintJobResult:
+    def submit_text_job(
+        self, printer: PrinterDevice, text: str, *, document_name: str
+    ) -> PrintJobResult:
         self.text_jobs.append((printer.name, text, document_name))
-        return PrintJobResult(printer=printer, transport=PrinterTransport.TEXT, bytes_written=len(text), job_id=2)
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.TEXT,
+            bytes_written=len(text),
+            job_id=2,
+        )
 
-    def submit_document_job(self, printer: PrinterDevice, document: RenderedDocument) -> PrintJobResult:
+    def submit_document_job(
+        self, printer: PrinterDevice, document: RenderedDocument
+    ) -> PrintJobResult:
         self.document_jobs.append((printer.name, document))
         return PrintJobResult(
             printer=printer,
@@ -71,7 +95,9 @@ class FakePrinterDriver(PrinterDriver):
 
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         self.drawer_pulses.append(printer.name)
-        return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4)
+        return PrintJobResult(
+            printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4
+        )
 
 
 @dataclass(slots=True)
@@ -116,7 +142,9 @@ def test_print_receipt_data_routes_raw_jobs_through_selected_driver() -> None:
         driver_key=FakePrinterDriver.metadata.key,
         is_default=True,
         preferred_transport=PrinterTransport.RAW,
-        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+        capabilities=PrinterCapabilities(
+            raw=True, text=True, documents=True, cash_drawer=True
+        ),
     )
     renderer = FakeStructuredReceiptRenderer()
     driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
@@ -125,7 +153,9 @@ def test_print_receipt_data_routes_raw_jobs_through_selected_driver() -> None:
     result = service.print_receipt_data(
         {
             "name": "POS/001",
-            "orderlines": [{"product_name": "Coffee", "qty": 1, "price_display": "2.50"}],
+            "orderlines": [
+                {"product_name": "Coffee", "qty": 1, "price_display": "2.50"}
+            ],
             "amount_tax": 0,
             "amount_total": 2.50,
         }
@@ -143,7 +173,9 @@ def test_print_job_dispatches_receipt_image_through_image_renderer() -> None:
         driver_key=FakePrinterDriver.metadata.key,
         is_default=True,
         preferred_transport=PrinterTransport.RAW,
-        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+        capabilities=PrinterCapabilities(
+            raw=True, text=True, documents=True, cash_drawer=True
+        ),
     )
     image_renderer = FakeReceiptImageRenderer()
     driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
@@ -166,13 +198,17 @@ def test_print_job_dispatches_receipt_image_through_image_renderer() -> None:
     assert driver.raw_jobs[0][1] == b"image-receipt"
 
 
-def test_open_cash_drawer_checks_printer_capability_not_default_transport_policy() -> None:
+def test_open_cash_drawer_checks_printer_capability_not_default_transport_policy() -> (
+    None
+):
     printer = PrinterDevice(
         name="EPSON TM-T20III",
         driver_key=FakePrinterDriver.metadata.key,
         is_default=True,
         preferred_transport=PrinterTransport.RAW,
-        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+        capabilities=PrinterCapabilities(
+            raw=True, text=True, documents=True, cash_drawer=True
+        ),
     )
     driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
     service = make_service(driver)
@@ -189,7 +225,9 @@ def test_print_receipt_rejects_non_raw_printers() -> None:
         driver_key=FakePrinterDriver.metadata.key,
         is_default=True,
         preferred_transport=PrinterTransport.DOCUMENT,
-        capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+        capabilities=PrinterCapabilities(
+            raw=False, text=True, documents=True, cash_drawer=False
+        ),
     )
     renderer = FakeStructuredReceiptRenderer()
     service = make_service(
@@ -200,7 +238,9 @@ def test_print_receipt_rejects_non_raw_printers() -> None:
     with pytest.raises(PrinterServiceError, match="RAW receipt printing"):
         service.print_receipt_data(
             {
-                "orderlines": [{"product_name": "Coffee", "qty": 1, "price_display": "2.50"}],
+                "orderlines": [
+                    {"product_name": "Coffee", "qty": 1, "price_display": "2.50"}
+                ],
                 "amount_tax": 0,
                 "amount_total": 2.50,
             }
@@ -212,18 +252,24 @@ def test_print_rendered_document_uses_default_printer_name_when_configured() -> 
         name="Back Office",
         driver_key=FakePrinterDriver.metadata.key,
         preferred_transport=PrinterTransport.DOCUMENT,
-        capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+        capabilities=PrinterCapabilities(
+            raw=False, text=True, documents=True, cash_drawer=False
+        ),
     )
     kitchen = PrinterDevice(
         name="Kitchen Receipt Printer",
         driver_key=FakePrinterDriver.metadata.key,
         preferred_transport=PrinterTransport.RAW,
-        capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+        capabilities=PrinterCapabilities(
+            raw=True, text=True, documents=True, cash_drawer=True
+        ),
     )
     driver = FakePrinterDriver(devices=(primary, kitchen), default_name=primary.name)
     service = make_service(driver, default_printer_name=kitchen.name)
 
-    result = service.print_rendered_document(RenderedDocument(content=b"document", data_type="RAW"))
+    result = service.print_rendered_document(
+        RenderedDocument(content=b"document", data_type="RAW")
+    )
 
     assert result.printer_name == kitchen.name
     assert driver.document_jobs[0][0] == kitchen.name

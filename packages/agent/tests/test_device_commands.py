@@ -4,7 +4,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from iot_agent.device_commands import CutPaper, DeviceCommand, FeedDots, FeedLines, PrintTestPage
+from iot_agent.device_commands import (
+    CutPaper,
+    DeviceCommand,
+    FeedDots,
+    FeedLines,
+    PrintTestPage,
+)
 from iot_agent.printers import CutMode, PrinterTransport
 from iot_agent.runtime.operations import (
     DeviceTargetRef,
@@ -24,7 +30,9 @@ def test_device_command_roundtrip_uses_kind_registry() -> None:
 
 
 @pytest.mark.parametrize("command_type", [FeedLines, FeedDots])
-def test_feed_commands_validate_positive_counts(command_type: type[FeedLines] | type[FeedDots]) -> None:
+def test_feed_commands_validate_positive_counts(
+    command_type: type[FeedLines] | type[FeedDots],
+) -> None:
     with pytest.raises(ValueError, match="greater than zero"):
         command_type(count=0)
 
@@ -43,7 +51,9 @@ def test_command_operation_roundtrip_preserves_concrete_command() -> None:
         metadata={"source": "test"},
     )
 
-    restored = deserialize_device_command_operation(serialize_device_command_operation(operation))
+    restored = deserialize_device_command_operation(
+        serialize_device_command_operation(operation)
+    )
 
     assert restored.target.device_id == "dev_123"
     assert restored.target.printer_name == "Kitchen Printer"

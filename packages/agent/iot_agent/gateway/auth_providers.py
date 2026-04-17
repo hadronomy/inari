@@ -31,7 +31,9 @@ class UpstreamAuthProvider(Protocol):
 
     async def headers_for_enrollment(self) -> dict[str, str]: ...
 
-    async def headers_for_upstream(self, enrollment: GatewayEnrollmentRecord | None) -> dict[str, str]: ...
+    async def headers_for_upstream(
+        self, enrollment: GatewayEnrollmentRecord | None
+    ) -> dict[str, str]: ...
 
     async def invalidate(self) -> None: ...
 
@@ -42,7 +44,9 @@ class ControllerAccessTokenAuthProvider:
     async def headers_for_enrollment(self) -> dict[str, str]:
         return {}
 
-    async def headers_for_upstream(self, enrollment: GatewayEnrollmentRecord | None) -> dict[str, str]:
+    async def headers_for_upstream(
+        self, enrollment: GatewayEnrollmentRecord | None
+    ) -> dict[str, str]:
         if enrollment is None or enrollment.access_token is None:
             return {}
         return UpstreamAuthorization(access_token=enrollment.access_token).as_headers()
@@ -79,7 +83,9 @@ class ZitadelServiceAccountCredentials:
         return cls(
             user_id=settings.zitadel_service_user_id,
             key_id=settings.zitadel_key_id,
-            private_key_pem=settings.zitadel_private_key_path.read_text(encoding="utf-8"),
+            private_key_pem=settings.zitadel_private_key_path.read_text(
+                encoding="utf-8"
+            ),
         )
 
 
@@ -101,7 +107,9 @@ class ZitadelServiceAccountAuthProvider:
     async def headers_for_enrollment(self) -> dict[str, str]:
         return (await self._authorization()).as_headers()
 
-    async def headers_for_upstream(self, enrollment: GatewayEnrollmentRecord | None) -> dict[str, str]:
+    async def headers_for_upstream(
+        self, enrollment: GatewayEnrollmentRecord | None
+    ) -> dict[str, str]:
         return (await self._authorization()).as_headers()
 
     async def invalidate(self) -> None:
@@ -123,7 +131,9 @@ class ZitadelServiceAccountAuthProvider:
         token_url = self._token_url()
         audience = self.settings.zitadel_audience or self.settings.zitadel_base_url
         if not token_url or not audience:
-            raise RuntimeError("ZITADEL auth mode requires a base URL or explicit token URL and audience.")
+            raise RuntimeError(
+                "ZITADEL auth mode requires a base URL or explicit token URL and audience."
+            )
 
         issued_at = _utc_now()
         expires_at = issued_at + timedelta(minutes=5)
@@ -142,8 +152,12 @@ class ZitadelServiceAccountAuthProvider:
             jwk.import_key(self._credentials.private_key_pem, "RSA"),
             algorithms=[self.settings.zitadel_assertion_algorithm],
         )
-        scopes = tuple(dict.fromkeys(("openid", *self.settings.zitadel_requested_scopes)))
-        async with self._http_client_factory(timeout=self.settings.gateway_reconnect_delay_seconds) as client:
+        scopes = tuple(
+            dict.fromkeys(("openid", *self.settings.zitadel_requested_scopes))
+        )
+        async with self._http_client_factory(
+            timeout=self.settings.gateway_reconnect_delay_seconds
+        ) as client:
             response = await client.post(
                 token_url,
                 data={

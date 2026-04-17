@@ -130,7 +130,9 @@ class GatewayEnrollmentRecord:
 class ManagedCertificateStatus:
     state: ManagedCertificateState
     operation: ManagedCertificateOperation = ManagedCertificateOperation.IDLE
-    failure_reason: ManagedCertificateFailureReason = ManagedCertificateFailureReason.NONE
+    failure_reason: ManagedCertificateFailureReason = (
+        ManagedCertificateFailureReason.NONE
+    )
     detail: str | None = None
     current_expires_at: datetime | None = None
     last_checked_at: datetime | None = None

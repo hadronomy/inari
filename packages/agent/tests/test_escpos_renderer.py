@@ -10,7 +10,9 @@ def test_render_basic_receipt() -> None:
         {
             "name": "TEST/1",
             "headerData": {"company": "Demo Shop", "date_order": "2026-04-09 12:00:00"},
-            "orderlines": [{"product_name": "Coffee", "qty": 2, "price_display": "3.00"}],
+            "orderlines": [
+                {"product_name": "Coffee", "qty": 2, "price_display": "3.00"}
+            ],
             "amount_tax": 0.30,
             "amount_total": 3.00,
             "amount_paid": 5.00,
@@ -26,7 +28,9 @@ def test_render_basic_receipt() -> None:
 
 
 def test_render_wraps_long_product_names() -> None:
-    renderer = EscPosRenderer(EscPosRendererConfig(line_width=16, trailing_feed_lines=0, cut_mode=None))
+    renderer = EscPosRenderer(
+        EscPosRendererConfig(line_width=16, trailing_feed_lines=0, cut_mode=None)
+    )
 
     payload = renderer.render(
         {

@@ -4,7 +4,11 @@ import subprocess
 
 from iot_agent.config import AgentSettings, NetworkPrinterConfig
 from iot_agent.container import _build_printer_drivers
-from iot_agent.drivers.printers import CupsPrinterDriver, RawSocketPrinterDriver, WindowsPrinterDriver
+from iot_agent.drivers.printers import (
+    CupsPrinterDriver,
+    RawSocketPrinterDriver,
+    WindowsPrinterDriver,
+)
 from iot_agent.printers import PrinterTransport
 
 
@@ -83,7 +87,9 @@ def test_list_devices_from_cups_api_and_submit_raw_job_with_lp(mocker) -> None:
 
     devices = driver.list_devices()
 
-    receipt_printer = next(device for device in devices if device.name == "Receipt Printer")
+    receipt_printer = next(
+        device for device in devices if device.name == "Receipt Printer"
+    )
 
     mocker.patch("iot_agent.drivers.printers.cups.subprocess.run", side_effect=fake_run)
     result = driver.submit_raw_job(receipt_printer, b"receipt", document_name="Receipt")

@@ -83,7 +83,9 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
     ) -> None:
         self.settings = settings
         self._process_factory = process_factory or subprocess.Popen
-        self._launch_command = tuple(launch_command) if launch_command is not None else None
+        self._launch_command = (
+            tuple(launch_command) if launch_command is not None else None
+        )
         self._working_directory = working_directory or _default_working_directory()
         self._clock = clock or time.monotonic
         self._launch_log_path = settings.log_dir / "agent-launch.log"
@@ -166,7 +168,9 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
                 creation_flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             command = self._resolve_launch_command()
             output_handle = self._launch_log_path.open("a", encoding="utf-8")
-            output_handle.write(f"\n=== Starting IoT Agent at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            output_handle.write(
+                f"\n=== Starting IoT Agent at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
+            )
             output_handle.write(f"Command: {' '.join(command)}\n")
             output_handle.flush()
             self._process_output_handle = output_handle
@@ -192,7 +196,9 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
     def stop(self) -> str:
         with self._lock:
             if not self._is_running():
-                raise RuntimeError("There is no tray-managed local agent process to stop.")
+                raise RuntimeError(
+                    "There is no tray-managed local agent process to stop."
+                )
             process = self._process
             assert process is not None
             process.terminate()
@@ -227,7 +233,9 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
     def _is_starting(self) -> bool:
         if self._ready or self._startup_started_at is None:
             return False
-        return (self._clock() - self._startup_started_at) < self.settings.startup_grace_period_seconds
+        return (
+            self._clock() - self._startup_started_at
+        ) < self.settings.startup_grace_period_seconds
 
     def _resolve_launch_command(self) -> tuple[str, ...]:
         if self._launch_command is not None:
@@ -240,7 +248,13 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         agent_workspace = _detect_agent_workspace(self._working_directory)
         uv_executable = shutil.which("uv")
         if agent_workspace is not None and uv_executable is not None:
-            return (uv_executable, "run", "--directory", str(agent_workspace), "iot-agent")
+            return (
+                uv_executable,
+                "run",
+                "--directory",
+                str(agent_workspace),
+                "iot-agent",
+            )
         return (sys.executable, "-m", "iot_agent")
 
     def _close_process_output_handle(self) -> None:
@@ -259,7 +273,9 @@ class SubprocessServiceAgentBridge(AgentControlBridge):
     mode = ControlMode.SERVICE
     manager_name = "service"
 
-    def __init__(self, settings: TraySettings, *, runner: CommandRunner | None = None) -> None:
+    def __init__(
+        self, settings: TraySettings, *, runner: CommandRunner | None = None
+    ) -> None:
         self.settings = settings
         self._runner = runner or _run_command
 
@@ -272,7 +288,12 @@ class SubprocessServiceAgentBridge(AgentControlBridge):
                 detail=detail,
                 can_start=lifecycle in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
                 can_stop=lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING},
-                can_restart=lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING, LifecycleState.STOPPED},
+                can_restart=lifecycle
+                in {
+                    LifecycleState.RUNNING,
+                    LifecycleState.STARTING,
+                    LifecycleState.STOPPED,
+                },
             )
         except Exception as exc:
             return ControlSnapshot(
@@ -286,7 +307,9 @@ class SubprocessServiceAgentBridge(AgentControlBridge):
         if lifecycle is LifecycleState.RUNNING:
             return f"{self.manager_name.title()} {self.settings.service_name!r} is already running."
         self._run(self._start_command())
-        return f"Start requested for {self.manager_name} {self.settings.service_name!r}."
+        return (
+            f"Start requested for {self.manager_name} {self.settings.service_name!r}."
+        )
 
     def stop(self) -> str:
         lifecycle, _ = self._query_lifecycle_state()
@@ -297,7 +320,9 @@ class SubprocessServiceAgentBridge(AgentControlBridge):
 
     def restart(self) -> str:
         self._run(self._restart_command())
-        return f"Restart requested for {self.manager_name} {self.settings.service_name!r}."
+        return (
+            f"Restart requested for {self.manager_name} {self.settings.service_name!r}."
+        )
 
     def _query_lifecycle_state(self) -> tuple[LifecycleState, str]:
         raise NotImplementedError
@@ -330,7 +355,12 @@ class WindowsServiceAgentBridge(AgentControlBridge):
                 detail=f"Managing Windows service {self.settings.service_name!r}.",
                 can_start=lifecycle in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
                 can_stop=lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING},
-                can_restart=lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING, LifecycleState.STOPPED},
+                can_restart=lifecycle
+                in {
+                    LifecycleState.RUNNING,
+                    LifecycleState.STARTING,
+                    LifecycleState.STOPPED,
+                },
             )
         except Exception as exc:
             return ControlSnapshot(
@@ -400,7 +430,15 @@ class SystemdAgentBridge(SubprocessServiceAgentBridge):
     manager_name = "systemd service"
 
     def _query_lifecycle_state(self) -> tuple[LifecycleState, str]:
-        result = self._run([*self._systemctl_base_command(), "show", self.settings.service_name, "--property=ActiveState", "--value"])
+        result = self._run(
+            [
+                *self._systemctl_base_command(),
+                "show",
+                self.settings.service_name,
+                "--property=ActiveState",
+                "--value",
+            ]
+        )
         active_state = result.stdout.strip().casefold()
         lifecycle = {
             "active": LifecycleState.RUNNING,
@@ -410,7 +448,10 @@ class SystemdAgentBridge(SubprocessServiceAgentBridge):
             "failed": LifecycleState.STOPPED,
         }.get(active_state, LifecycleState.UNKNOWN)
         scope = "user" if self.settings.service_scope == "user" else "system"
-        return lifecycle, f"Managing {scope} systemd service {self.settings.service_name!r}."
+        return (
+            lifecycle,
+            f"Managing {scope} systemd service {self.settings.service_name!r}.",
+        )
 
     def _start_command(self) -> Sequence[str]:
         return [*self._systemctl_base_command(), "start", self.settings.service_name]
@@ -468,7 +509,9 @@ class LaunchdAgentBridge(SubprocessServiceAgentBridge):
         return f"gui/{_current_user_id()}/{self.settings.service_name}"
 
 
-def build_control_bridge(settings: TraySettings, *, platform_name: str | None = None) -> AgentControlBridge:
+def build_control_bridge(
+    settings: TraySettings, *, platform_name: str | None = None
+) -> AgentControlBridge:
     current_platform = platform_name or platform.system()
     if settings.control_mode == "spawn":
         return SpawnedProcessAgentBridge(settings)
@@ -479,7 +522,9 @@ def build_control_bridge(settings: TraySettings, *, platform_name: str | None = 
             return SystemdAgentBridge(settings)
         if current_platform == "Darwin":
             return LaunchdAgentBridge(settings)
-        return UnsupportedServiceAgentBridge(f"Service control mode is not supported on {current_platform}.")
+        return UnsupportedServiceAgentBridge(
+            f"Service control mode is not supported on {current_platform}."
+        )
     return MonitorAgentBridge()
 
 

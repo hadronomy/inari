@@ -46,7 +46,11 @@ device_events_table = Table(
     Column("payload_json", Text, nullable=False),
     Column("occurred_at", String, nullable=False),
 )
-Index("idx_device_events_device_id", device_events_table.c.device_id, device_events_table.c.sequence.desc())
+Index(
+    "idx_device_events_device_id",
+    device_events_table.c.device_id,
+    device_events_table.c.sequence.desc(),
+)
 
 jobs_table = Table(
     "jobs",
@@ -75,7 +79,12 @@ jobs_table = Table(
     Column("last_error_code", String),
     Column("last_error_detail", Text),
 )
-Index("idx_jobs_state_next_run_at", jobs_table.c.state, jobs_table.c.next_run_at, jobs_table.c.created_at)
+Index(
+    "idx_jobs_state_next_run_at",
+    jobs_table.c.state,
+    jobs_table.c.next_run_at,
+    jobs_table.c.created_at,
+)
 Index("idx_jobs_device_id", jobs_table.c.device_id, jobs_table.c.created_at)
 
 job_attempts_table = Table(
@@ -91,7 +100,11 @@ job_attempts_table = Table(
     Column("error_detail", Text),
     Column("result_json", Text),
 )
-Index("idx_job_attempts_job_id", job_attempts_table.c.job_id, job_attempts_table.c.attempt_number.desc())
+Index(
+    "idx_job_attempts_job_id",
+    job_attempts_table.c.job_id,
+    job_attempts_table.c.attempt_number.desc(),
+)
 
 job_events_table = Table(
     "job_events",
@@ -102,7 +115,11 @@ job_events_table = Table(
     Column("payload_json", Text, nullable=False),
     Column("occurred_at", String, nullable=False),
 )
-Index("idx_job_events_job_id", job_events_table.c.job_id, job_events_table.c.sequence.desc())
+Index(
+    "idx_job_events_job_id",
+    job_events_table.c.job_id,
+    job_events_table.c.sequence.desc(),
+)
 
 gateway_inbound_commands_table = Table(
     "gateway_inbound_commands",
@@ -119,7 +136,11 @@ gateway_inbound_commands_table = Table(
     Column("received_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
-Index("idx_gateway_inbound_job_id", gateway_inbound_commands_table.c.job_id, gateway_inbound_commands_table.c.updated_at.desc())
+Index(
+    "idx_gateway_inbound_job_id",
+    gateway_inbound_commands_table.c.job_id,
+    gateway_inbound_commands_table.c.updated_at.desc(),
+)
 
 gateway_outbox_table = Table(
     "gateway_outbox",
@@ -142,7 +163,11 @@ Index(
     unique=True,
     sqlite_where=gateway_outbox_table.c.dedupe_key.is_not(None),
 )
-Index("idx_gateway_outbox_state_created_at", gateway_outbox_table.c.state, gateway_outbox_table.c.created_at)
+Index(
+    "idx_gateway_outbox_state_created_at",
+    gateway_outbox_table.c.state,
+    gateway_outbox_table.c.created_at,
+)
 
 MANAGED_TABLE_NAMES = frozenset(
     {

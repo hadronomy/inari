@@ -54,7 +54,9 @@ class _DatabaseState:
 
     @property
     def is_legacy_compatible(self) -> bool:
-        return self.current_revision is None and MANAGED_TABLE_NAMES.issubset(self.user_tables)
+        return self.current_revision is None and MANAGED_TABLE_NAMES.issubset(
+            self.user_tables
+        )
 
 
 class DatabaseMigrator:
@@ -66,7 +68,9 @@ class DatabaseMigrator:
     ) -> None:
         self.database_path = database_path
         self.lock_timeout_seconds = lock_timeout_seconds
-        self.lock_path = database_path.with_suffix(f"{database_path.suffix}.migrate.lock")
+        self.lock_path = database_path.with_suffix(
+            f"{database_path.suffix}.migrate.lock"
+        )
 
     def ensure_current(self) -> DatabaseMigrationResult:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,21 +95,33 @@ class DatabaseMigrator:
 
             if state.current_revision is None:
                 if state.is_empty:
-                    logger.info("Upgrading empty database to revision %s", target_revision)
+                    logger.info(
+                        "Upgrading empty database to revision %s", target_revision
+                    )
                     command.upgrade(config, "head")
                 elif state.is_legacy_compatible:
-                    logger.info("Stamping legacy unversioned database at revision %s", BASELINE_REVISION)
+                    logger.info(
+                        "Stamping legacy unversioned database at revision %s",
+                        BASELINE_REVISION,
+                    )
                     command.stamp(config, BASELINE_REVISION)
                     stamped_legacy = True
                     if BASELINE_REVISION != target_revision:
-                        logger.info("Upgrading stamped legacy database to revision %s", target_revision)
+                        logger.info(
+                            "Upgrading stamped legacy database to revision %s",
+                            target_revision,
+                        )
                         command.upgrade(config, "head")
                 else:
                     raise DatabaseMigrationError(
                         "Existing database is not versioned and does not match the supported legacy schema."
                     )
             else:
-                logger.info("Upgrading database from revision %s to %s", state.current_revision, target_revision)
+                logger.info(
+                    "Upgrading database from revision %s to %s",
+                    state.current_revision,
+                    target_revision,
+                )
                 command.upgrade(config, "head")
 
             current_revision = self.current_revision()
@@ -131,7 +147,9 @@ class DatabaseMigrator:
         if not self.database_path.exists() or self.database_path.stat().st_size == 0:
             return None
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        backup_path = self.database_path.with_name(f"{self.database_path.stem}.backup-{timestamp}{self.database_path.suffix}")
+        backup_path = self.database_path.with_name(
+            f"{self.database_path.stem}.backup-{timestamp}{self.database_path.suffix}"
+        )
         suffix_counter = 1
         while backup_path.exists():
             backup_path = self.database_path.with_name(
@@ -152,18 +170,26 @@ class DatabaseMigrator:
 
     def _build_alembic_config(self) -> Config:
         config = Config()
-        config.set_main_option("script_location", str(resources.files("iot_agent.db.alembic")))
-        config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{self.database_path}")
+        config.set_main_option(
+            "script_location", str(resources.files("iot_agent.db.alembic"))
+        )
+        config.set_main_option(
+            "sqlalchemy.url", f"sqlite+pysqlite:///{self.database_path}"
+        )
         return config
 
     def _head_revision(self, config: Config) -> str:
         script = ScriptDirectory.from_config(config)
         heads = script.get_heads()
         if len(heads) != 1:
-            raise DatabaseMigrationError(f"Expected exactly one migration head, found {len(heads)}.")
+            raise DatabaseMigrationError(
+                f"Expected exactly one migration head, found {len(heads)}."
+            )
         return heads[0]
 
-    def _validate_known_revision(self, config: Config, current_revision: str | None) -> None:
+    def _validate_known_revision(
+        self, config: Config, current_revision: str | None
+    ) -> None:
         if current_revision is None:
             return
         script = ScriptDirectory.from_config(config)
@@ -193,7 +219,9 @@ class DatabaseMigrator:
         while handle is None:
             try:
                 handle = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
-                payload = f"pid={os.getpid()} created_at={datetime.now(UTC).isoformat()}".encode("utf-8")
+                payload = f"pid={os.getpid()} created_at={datetime.now(UTC).isoformat()}".encode(
+                    "utf-8"
+                )
                 os.write(handle, payload)
             except FileExistsError:
                 if time.monotonic() >= deadline:

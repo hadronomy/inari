@@ -12,10 +12,22 @@ from iot_agent.drivers import DeviceKind, DriverMetadata, DriverRegistry
 from iot_agent.drivers.printers.base import PrinterDriver
 from iot_agent.models import PrintJobRequest
 from iot_agent.printer_service import PrinterService
-from iot_agent.printers import PrintJobResult, PrinterCapabilities, PrinterDevice, PrinterTransport, RenderedDocument
+from iot_agent.printers import (
+    PrintJobResult,
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+    RenderedDocument,
+)
 from iot_agent.runtime.discovery import DiscoveryCoordinator
 from iot_agent.runtime.events import EventHub
-from iot_agent.runtime.execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator, PrinterOperationExecutor, RuntimeJobExecutor
+from iot_agent.runtime.execution import (
+    DeviceWorkerPool,
+    JobScheduler,
+    LeaseRecoveryCoordinator,
+    PrinterOperationExecutor,
+    RuntimeJobExecutor,
+)
 from iot_agent.runtime.models import JobRecord, JobState
 from iot_agent.runtime.repositories import DeviceRepository, JobRepository
 from iot_agent.runtime.services import DeviceCatalog, JobService
@@ -51,17 +63,39 @@ class FakePrinterDriver(PrinterDriver):
     def get_default_device_name(self) -> str | None:
         return self.default_name
 
-    def resolve_transport(self, printer: PrinterDevice, requested: PrinterTransport) -> PrinterTransport:
-        return requested if requested is not PrinterTransport.AUTO else printer.preferred_transport
+    def resolve_transport(
+        self, printer: PrinterDevice, requested: PrinterTransport
+    ) -> PrinterTransport:
+        return (
+            requested
+            if requested is not PrinterTransport.AUTO
+            else printer.preferred_transport
+        )
 
-    def submit_raw_job(self, printer: PrinterDevice, payload: bytes, *, document_name: str) -> PrintJobResult:
-        return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=len(payload), job_id=1)
+    def submit_raw_job(
+        self, printer: PrinterDevice, payload: bytes, *, document_name: str
+    ) -> PrintJobResult:
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.RAW,
+            bytes_written=len(payload),
+            job_id=1,
+        )
 
-    def submit_text_job(self, printer: PrinterDevice, text: str, *, document_name: str) -> PrintJobResult:
+    def submit_text_job(
+        self, printer: PrinterDevice, text: str, *, document_name: str
+    ) -> PrintJobResult:
         self.text_jobs.append((printer.name, text, document_name))
-        return PrintJobResult(printer=printer, transport=PrinterTransport.TEXT, bytes_written=len(text), job_id=2)
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.TEXT,
+            bytes_written=len(text),
+            job_id=2,
+        )
 
-    def submit_document_job(self, printer: PrinterDevice, document: RenderedDocument) -> PrintJobResult:
+    def submit_document_job(
+        self, printer: PrinterDevice, document: RenderedDocument
+    ) -> PrintJobResult:
         return PrintJobResult(
             printer=printer,
             transport=PrinterTransport.DOCUMENT,
@@ -70,18 +104,24 @@ class FakePrinterDriver(PrinterDriver):
         )
 
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
-        return PrintJobResult(printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4)
+        return PrintJobResult(
+            printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4
+        )
 
 
 @pytest.mark.anyio
 @pytest.mark.timeout(10)
-async def test_supervisor_executes_queued_print_jobs_asynchronously(tmp_path: Path) -> None:
+async def test_supervisor_executes_queued_print_jobs_asynchronously(
+    tmp_path: Path,
+) -> None:
     printer = PrinterDevice(
         name="Kitchen Printer",
         driver_key=FakePrinterDriver.metadata.key,
         is_default=True,
         preferred_transport=PrinterTransport.TEXT,
-        capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+        capabilities=PrinterCapabilities(
+            raw=False, text=True, documents=True, cash_drawer=False
+        ),
     )
     driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
     registry = DriverRegistry(drivers=(driver,))

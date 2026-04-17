@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
-import pytest
 
 from iot_agent.models import SystemStatusResponse
 from iot_agent.version import API_VERSION
@@ -17,7 +16,13 @@ from iot_agent_tray.bridge import (
     build_control_bridge,
 )
 from iot_agent_tray.config import TraySettings
-from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot
+from iot_agent_tray.models import (
+    ControlMode,
+    ControlSnapshot,
+    LifecycleState,
+    TrayLinks,
+    TraySnapshot,
+)
 from iot_agent_tray.qt_host import QtTrayHost
 from iot_agent_tray.tray_host import TrayMenuEntry, create_tray_host
 
@@ -59,10 +64,14 @@ def test_setup_background_auto_starts_spawn_mode_when_enabled() -> None:
         thread.join(timeout=1.0)
 
 
-def test_setup_background_promotes_to_service_mode_when_api_is_reachable_and_service_is_running(mocker) -> None:
+def test_setup_background_promotes_to_service_mode_when_api_is_reachable_and_service_is_running(
+    mocker,
+) -> None:
     bridge = FakeControlBridge()
     service_bridge = FakeServiceControlBridge()
-    build_bridge = mocker.patch("iot_agent_tray.app.build_control_bridge", return_value=service_bridge)
+    build_bridge = mocker.patch(
+        "iot_agent_tray.app.build_control_bridge", return_value=service_bridge
+    )
     application = AgentTrayApplication(
         TraySettings(control_mode="spawn", auto_start_agent=True),
         client=FakeTrayClient(),
@@ -114,7 +123,9 @@ def test_apply_snapshot_swallow_tray_host_update_errors(caplog) -> None:
         application._apply_snapshot(snapshot)
 
     assert application.snapshot.last_error == "x" * 256
-    assert any("Failed to apply tray snapshot" in message for message in caplog.messages)
+    assert any(
+        "Failed to apply tray snapshot" in message for message in caplog.messages
+    )
 
 
 def test_quit_tray_stops_host() -> None:
@@ -148,9 +159,19 @@ def test_build_menu_does_not_render_error_row() -> None:
     )
 
     assert len(baseline) == len(errored)
-    assert [entry.separator for entry in baseline] == [entry.separator for entry in errored]
-    assert not any(entry.label.startswith("Last error:") for entry in baseline if not entry.separator)
-    assert not any(entry.label.startswith("Last error:") for entry in errored if not entry.separator)
+    assert [entry.separator for entry in baseline] == [
+        entry.separator for entry in errored
+    ]
+    assert not any(
+        entry.label.startswith("Last error:")
+        for entry in baseline
+        if not entry.separator
+    )
+    assert not any(
+        entry.label.startswith("Last error:")
+        for entry in errored
+        if not entry.separator
+    )
 
 
 def test_settings_derive_related_agent_urls() -> None:
@@ -194,7 +215,9 @@ def test_apply_update_keeps_menu_live_while_visible(mocker) -> None:
 
     assert host._tray_icon.icon is not None
     assert host._tray_icon.tooltip == snapshot.tooltip
-    update_menu_actions.assert_called_once_with(host._menu, host._menu_actions, menu_entries)
+    update_menu_actions.assert_called_once_with(
+        host._menu, host._menu_actions, menu_entries
+    )
 
 
 def test_apply_update_rebuilds_menu_when_layout_changes(mocker) -> None:
@@ -204,7 +227,9 @@ def test_apply_update_rebuilds_menu_when_layout_changes(mocker) -> None:
     menu_entries = [TrayMenuEntry("Open Logs")]
 
     mocker.patch("iot_agent_tray.qt_host._image_to_qicon", return_value=object())
-    build_menu_actions = mocker.patch("iot_agent_tray.qt_host._build_menu_actions", return_value=["action"])
+    build_menu_actions = mocker.patch(
+        "iot_agent_tray.qt_host._build_menu_actions", return_value=["action"]
+    )
 
     host._apply_update(_tray_snapshot(), menu_entries)
 
@@ -319,7 +344,9 @@ def test_spawned_process_bridge_falls_back_to_console_script(mocker) -> None:
     mocker.patch("iot_agent_tray.bridge._supports_module_launch", return_value=False)
     mocker.patch(
         "iot_agent_tray.bridge.shutil.which",
-        side_effect=lambda name: "C:/bin/iot-agent.exe" if name == "iot-agent" else None,
+        side_effect=lambda name: (
+            "C:/bin/iot-agent.exe" if name == "iot-agent" else None
+        ),
     )
     command = bridge._resolve_launch_command()
 
@@ -337,10 +364,19 @@ def test_spawned_process_bridge_uses_uv_workspace_fallback(mocker) -> None:
         "iot_agent_tray.bridge.shutil.which",
         side_effect=lambda name: "C:/bin/uv.exe" if name == "uv" else None,
     )
-    mocker.patch("iot_agent_tray.bridge._detect_agent_workspace", return_value=Path("C:/repo/packages/agent"))
+    mocker.patch(
+        "iot_agent_tray.bridge._detect_agent_workspace",
+        return_value=Path("C:/repo/packages/agent"),
+    )
     command = bridge._resolve_launch_command()
 
-    assert command == ("C:/bin/uv.exe", "run", "--directory", "C:\\repo\\packages\\agent", "iot-agent")
+    assert command == (
+        "C:/bin/uv.exe",
+        "run",
+        "--directory",
+        "C:\\repo\\packages\\agent",
+        "iot-agent",
+    )
 
 
 def test_build_control_bridge_uses_monitor_fallback() -> None:
@@ -385,16 +421,24 @@ def test_query_state_parses_active_system_service() -> None:
 
     def runner(command):
         commands.append(tuple(command))
-        return subprocess.CompletedProcess(list(command), 0, stdout="active\n", stderr="")
+        return subprocess.CompletedProcess(
+            list(command), 0, stdout="active\n", stderr=""
+        )
 
     bridge = SystemdAgentBridge(
-        TraySettings(control_mode="service", service_name="iot-agent.service", service_scope="system"),
+        TraySettings(
+            control_mode="service",
+            service_name="iot-agent.service",
+            service_scope="system",
+        ),
         runner=runner,
     )
 
     state = bridge.query_state()
 
-    assert commands == [("systemctl", "show", "iot-agent.service", "--property=ActiveState", "--value")]
+    assert commands == [
+        ("systemctl", "show", "iot-agent.service", "--property=ActiveState", "--value")
+    ]
     assert state.lifecycle is LifecycleState.RUNNING
     assert "systemd service" in (state.detail or "")
 
@@ -404,16 +448,31 @@ def test_query_state_uses_user_systemd_scope() -> None:
 
     def runner(command):
         commands.append(tuple(command))
-        return subprocess.CompletedProcess(list(command), 0, stdout="inactive\n", stderr="")
+        return subprocess.CompletedProcess(
+            list(command), 0, stdout="inactive\n", stderr=""
+        )
 
     bridge = SystemdAgentBridge(
-        TraySettings(control_mode="service", service_name="iot-agent.service", service_scope="user"),
+        TraySettings(
+            control_mode="service",
+            service_name="iot-agent.service",
+            service_scope="user",
+        ),
         runner=runner,
     )
 
     state = bridge.query_state()
 
-    assert commands == [("systemctl", "--user", "show", "iot-agent.service", "--property=ActiveState", "--value")]
+    assert commands == [
+        (
+            "systemctl",
+            "--user",
+            "show",
+            "iot-agent.service",
+            "--property=ActiveState",
+            "--value",
+        )
+    ]
     assert state.lifecycle is LifecycleState.STOPPED
     assert "user" in (state.detail or "")
 
@@ -423,10 +482,16 @@ def test_query_state_parses_running_launchd_job() -> None:
 
     def runner(command):
         commands.append(tuple(command))
-        return subprocess.CompletedProcess(list(command), 0, stdout="state = running\n", stderr="")
+        return subprocess.CompletedProcess(
+            list(command), 0, stdout="state = running\n", stderr=""
+        )
 
     bridge = LaunchdAgentBridge(
-        TraySettings(control_mode="service", service_name="com.example.iot-agent", service_scope="user"),
+        TraySettings(
+            control_mode="service",
+            service_name="com.example.iot-agent",
+            service_scope="user",
+        ),
         runner=runner,
     )
 
@@ -442,7 +507,11 @@ def test_query_state_treats_missing_launchd_job_as_stopped() -> None:
         raise RuntimeError('Could not find service "gui/0/com.example.iot-agent"')
 
     bridge = LaunchdAgentBridge(
-        TraySettings(control_mode="service", service_name="com.example.iot-agent", service_scope="user"),
+        TraySettings(
+            control_mode="service",
+            service_name="com.example.iot-agent",
+            service_scope="user",
+        ),
         runner=runner,
     )
 
@@ -539,9 +608,12 @@ class FakeServiceControlBridge:
             mode=ControlMode.SERVICE,
             lifecycle=self.lifecycle,
             detail="Managing platform service 'iot-agent'.",
-            can_start=self.lifecycle in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
-            can_stop=self.lifecycle in {LifecycleState.RUNNING, LifecycleState.STARTING},
-            can_restart=self.lifecycle in {
+            can_start=self.lifecycle
+            in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
+            can_stop=self.lifecycle
+            in {LifecycleState.RUNNING, LifecycleState.STARTING},
+            can_restart=self.lifecycle
+            in {
                 LifecycleState.RUNNING,
                 LifecycleState.STARTING,
                 LifecycleState.STOPPED,
@@ -644,5 +716,7 @@ def _tray_snapshot() -> TraySnapshot:
             jobs_url="http://127.0.0.1:7310/jobs",
             log_dir=Path("./logs"),
         ),
-        control=ControlSnapshot(mode=ControlMode.MONITOR, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.MONITOR, lifecycle=LifecycleState.RUNNING
+        ),
     )

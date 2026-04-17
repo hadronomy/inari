@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Protocol, Sequence, runtime_checkable
 
 from ..base import DeviceDriver
-from ...printers.types import PrintJobResult, PrinterDevice, PrinterTransport, RenderedDocument
+from ...printers.types import (
+    PrintJobResult,
+    PrinterDevice,
+    PrinterTransport,
+    RenderedDocument,
+)
 
 
 @runtime_checkable

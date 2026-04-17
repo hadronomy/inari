@@ -17,7 +17,14 @@ from .print_jobs import (
     StructuredReceiptContent,
     TextDocumentContent,
 )
-from .printers import CutMode, EscPosCommands, PrintJobResult, PrinterDevice, PrinterTransport, RenderedDocument
+from .printers import (
+    CutMode,
+    EscPosCommands,
+    PrintJobResult,
+    PrinterDevice,
+    PrinterTransport,
+    RenderedDocument,
+)
 from .receipt_renderers import EscPosImageReceiptRenderer, EscPosRenderer
 
 logger = logging.getLogger(__name__)
@@ -64,8 +71,12 @@ class PrinterService:
     ) -> None:
         self.settings = settings
         self.driver_registry = driver_registry
-        self.structured_receipt_renderer = structured_receipt_renderer or EscPosRenderer()
-        self.image_receipt_renderer = image_receipt_renderer or EscPosImageReceiptRenderer()
+        self.structured_receipt_renderer = (
+            structured_receipt_renderer or EscPosRenderer()
+        )
+        self.image_receipt_renderer = (
+            image_receipt_renderer or EscPosImageReceiptRenderer()
+        )
         self.html_renderer = html_renderer
         self.pdf_renderer = pdf_renderer
 
@@ -73,7 +84,11 @@ class PrinterService:
         printers: list[PrinterDevice] = []
         for driver in self._printer_drivers():
             printers.extend(driver.list_devices())
-        return tuple(sorted(printers, key=lambda item: (not item.is_default, item.name.casefold())))
+        return tuple(
+            sorted(
+                printers, key=lambda item: (not item.is_default, item.name.casefold())
+            )
+        )
 
     def get_default_printer_name(self, optional: bool = False) -> str | None:
         configured = self.settings.default_printer_name
@@ -139,7 +154,10 @@ class PrinterService:
                 document_name=content.document_name,
             )
         else:  # pragma: no cover - defensive path
-            raise PrinterServiceError("UNSUPPORTED_PRINT_CONTENT", f"Unsupported print content: {type(content)!r}.")
+            raise PrinterServiceError(
+                "UNSUPPORTED_PRINT_CONTENT",
+                f"Unsupported print content: {type(content)!r}.",
+            )
 
         if job.open_drawer:
             self.open_cash_drawer(printer_name=job.printer_name)
@@ -198,7 +216,9 @@ class PrinterService:
         document_name: str = "Receipt",
     ) -> PrintJobResult:
         selection = self._select_printer(printer_name)
-        resolved_transport = selection.driver.resolve_transport(selection.printer, PrinterTransport(transport))
+        resolved_transport = selection.driver.resolve_transport(
+            selection.printer, PrinterTransport(transport)
+        )
         if resolved_transport is not PrinterTransport.RAW:
             raise PrinterServiceError(
                 "RAW_NOT_SUPPORTED",
@@ -216,7 +236,11 @@ class PrinterService:
             bytes(final_payload),
             document_name=document_name,
         )
-        logger.info("Submitted RAW receipt to %s through %s", result.printer_name, selection.driver.metadata.key)
+        logger.info(
+            "Submitted RAW receipt to %s through %s",
+            result.printer_name,
+            selection.driver.metadata.key,
+        )
         return result
 
     def print_raw_document(
@@ -308,7 +332,9 @@ class PrinterService:
         rendered = self.pdf_renderer.render_pdf(pdf_bytes, document_name=document_name)
         return self.print_rendered_document(rendered, printer_name=printer_name)
 
-    def feed_lines(self, count: int, *, printer_name: str | None = None) -> PrintJobResult:
+    def feed_lines(
+        self, count: int, *, printer_name: str | None = None
+    ) -> PrintJobResult:
         selection = self._select_raw_printer(printer_name)
         return selection.driver.submit_raw_job(
             selection.printer,
@@ -316,7 +342,9 @@ class PrinterService:
             document_name="Feed Lines",
         )
 
-    def feed_dots(self, count: int, *, printer_name: str | None = None) -> PrintJobResult:
+    def feed_dots(
+        self, count: int, *, printer_name: str | None = None
+    ) -> PrintJobResult:
         selection = self._select_raw_printer(printer_name)
         return selection.driver.submit_raw_job(
             selection.printer,
@@ -348,7 +376,9 @@ class PrinterService:
         transport: PrinterTransport | str = PrinterTransport.AUTO,
     ) -> PrintJobResult:
         selection = self._select_printer(printer_name)
-        resolved_transport = selection.driver.resolve_transport(selection.printer, PrinterTransport(transport))
+        resolved_transport = selection.driver.resolve_transport(
+            selection.printer, PrinterTransport(transport)
+        )
 
         if resolved_transport is PrinterTransport.RAW:
             payload = (
@@ -393,7 +423,9 @@ class PrinterService:
 
         for driver in drivers:
             if default_name := driver.get_default_device_name():
-                return SelectedPrinter(driver=driver, printer=driver.get_device(default_name))
+                return SelectedPrinter(
+                    driver=driver, printer=driver.get_device(default_name)
+                )
 
         for driver in drivers:
             devices = tuple(driver.list_devices())

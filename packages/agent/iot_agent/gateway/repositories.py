@@ -47,15 +47,23 @@ class GatewayRepository:
         )
         with self.store.connection() as connection:
             connection.execute(stmt)
-        return self.get_inbound_command(command_id) or _missing_inbound(command_id), True
+        return self.get_inbound_command(command_id) or _missing_inbound(
+            command_id
+        ), True
 
-    def get_inbound_command(self, command_id: str) -> GatewayInboundCommandRecord | None:
-        stmt = select(gateway_inbound_commands_table).where(gateway_inbound_commands_table.c.command_id == command_id)
+    def get_inbound_command(
+        self, command_id: str
+    ) -> GatewayInboundCommandRecord | None:
+        stmt = select(gateway_inbound_commands_table).where(
+            gateway_inbound_commands_table.c.command_id == command_id
+        )
         with self.store.connection() as connection:
             row = connection.execute(stmt).mappings().first()
         return _row_to_inbound(row) if row is not None else None
 
-    def get_inbound_command_for_job(self, job_id: str) -> GatewayInboundCommandRecord | None:
+    def get_inbound_command_for_job(
+        self, job_id: str
+    ) -> GatewayInboundCommandRecord | None:
         stmt = (
             select(gateway_inbound_commands_table)
             .where(gateway_inbound_commands_table.c.job_id == job_id)
@@ -145,10 +153,16 @@ class GatewayRepository:
             connection.execute(stmt)
         return self.get_outbox(message_id) or _missing_outbox(message_id)
 
-    def list_pending_outbox(self, *, limit: int = 128) -> tuple[GatewayOutboxRecord, ...]:
+    def list_pending_outbox(
+        self, *, limit: int = 128
+    ) -> tuple[GatewayOutboxRecord, ...]:
         stmt = (
             select(gateway_outbox_table)
-            .where(gateway_outbox_table.c.state.in_((GatewayOutboxState.PENDING.value, GatewayOutboxState.SENT.value)))
+            .where(
+                gateway_outbox_table.c.state.in_(
+                    (GatewayOutboxState.PENDING.value, GatewayOutboxState.SENT.value)
+                )
+            )
             .order_by(gateway_outbox_table.c.created_at.asc())
             .limit(limit)
         )
@@ -187,7 +201,9 @@ class GatewayRepository:
             connection.execute(stmt)
         return self.get_outbox(message_id)
 
-    def mark_outbox_failed(self, message_id: str, *, detail: str) -> GatewayOutboxRecord | None:
+    def mark_outbox_failed(
+        self, message_id: str, *, detail: str
+    ) -> GatewayOutboxRecord | None:
         now = utc_now()
         stmt = (
             update(gateway_outbox_table)
@@ -203,7 +219,9 @@ class GatewayRepository:
         return self.get_outbox(message_id)
 
     def get_outbox(self, message_id: str) -> GatewayOutboxRecord | None:
-        stmt = select(gateway_outbox_table).where(gateway_outbox_table.c.message_id == message_id)
+        stmt = select(gateway_outbox_table).where(
+            gateway_outbox_table.c.message_id == message_id
+        )
         with self.store.connection() as connection:
             row = connection.execute(stmt).mappings().first()
         return _row_to_outbox(row) if row is not None else None
@@ -220,14 +238,12 @@ class GatewayRepository:
         return _row_to_outbox(row) if row is not None else None
 
     def summary(self) -> dict[str, int]:
-        inbound_stmt = (
-            select(gateway_inbound_commands_table.c.state, func.count().label("total"))
-            .group_by(gateway_inbound_commands_table.c.state)
-        )
-        outbox_stmt = (
-            select(gateway_outbox_table.c.state, func.count().label("total"))
-            .group_by(gateway_outbox_table.c.state)
-        )
+        inbound_stmt = select(
+            gateway_inbound_commands_table.c.state, func.count().label("total")
+        ).group_by(gateway_inbound_commands_table.c.state)
+        outbox_stmt = select(
+            gateway_outbox_table.c.state, func.count().label("total")
+        ).group_by(gateway_outbox_table.c.state)
         with self.store.connection() as connection:
             inbound_rows = connection.execute(inbound_stmt).mappings().all()
             outbox_rows = connection.execute(outbox_stmt).mappings().all()
@@ -249,9 +265,13 @@ def _row_to_inbound(row: Mapping[str, Any]) -> GatewayInboundCommandRecord:
         received_at=normalize_timestamp(str(row["received_at"])) or utc_now(),
         updated_at=normalize_timestamp(str(row["updated_at"])) or utc_now(),
         job_id=str(row["job_id"]) if row["job_id"] is not None else None,
-        response_payload=load_json(str(row["response_json"])) if row["response_json"] is not None else None,
+        response_payload=load_json(str(row["response_json"]))
+        if row["response_json"] is not None
+        else None,
         error_code=str(row["error_code"]) if row["error_code"] is not None else None,
-        error_detail=str(row["error_detail"]) if row["error_detail"] is not None else None,
+        error_detail=str(row["error_detail"])
+        if row["error_detail"] is not None
+        else None,
     )
 
 
@@ -263,9 +283,13 @@ def _row_to_outbox(row: Mapping[str, Any]) -> GatewayOutboxRecord:
         payload=load_json(str(row["payload_json"])),
         created_at=normalize_timestamp(str(row["created_at"])) or utc_now(),
         updated_at=normalize_timestamp(str(row["updated_at"])) or utc_now(),
-        correlation_id=str(row["correlation_id"]) if row["correlation_id"] is not None else None,
+        correlation_id=str(row["correlation_id"])
+        if row["correlation_id"] is not None
+        else None,
         dedupe_key=str(row["dedupe_key"]) if row["dedupe_key"] is not None else None,
-        sent_at=normalize_timestamp(str(row["sent_at"])) if row["sent_at"] is not None else None,
+        sent_at=normalize_timestamp(str(row["sent_at"]))
+        if row["sent_at"] is not None
+        else None,
         acknowledged_at=normalize_timestamp(str(row["acknowledged_at"]))
         if row["acknowledged_at"] is not None
         else None,

@@ -19,12 +19,18 @@ def test_cli_service_install_uses_service_manager(tmp_path, mocker) -> None:
     fake_manager.install.return_value = "Installed the service."
     mocker.patch(
         "iot_agent.cli._service_manager",
-        return_value=(AgentSettings.model_validate({"path_profile": "production"}), tmp_path / "agent.toml", fake_manager),
+        return_value=(
+            AgentSettings.model_validate({"path_profile": "production"}),
+            tmp_path / "agent.toml",
+            fake_manager,
+        ),
     )
 
     from iot_agent.cli import app
 
-    result = CliRunner().invoke(app, ["service", "install", "--config", str(tmp_path / "agent.toml")])
+    result = CliRunner().invoke(
+        app, ["service", "install", "--config", str(tmp_path / "agent.toml")]
+    )
 
     assert result.exit_code == 0, result.output
     assert "Installed the service." in result.output
@@ -43,10 +49,18 @@ def test_windows_service_manager_install_persists_config_path(tmp_path, mocker) 
         }
     )
     fake_win32serviceutil = mocker.Mock()
-    mocker.patch("iot_agent.service.windows.WindowsServiceManager._serviceutil", return_value=fake_win32serviceutil)
+    mocker.patch(
+        "iot_agent.service.windows.WindowsServiceManager._serviceutil",
+        return_value=fake_win32serviceutil,
+    )
     fake_service_class = object()
-    mocker.patch("iot_agent.windows_service.create_windows_service_class", return_value=fake_service_class)
-    persist_config = mocker.patch("iot_agent.windows_service.set_windows_service_config_path")
+    mocker.patch(
+        "iot_agent.windows_service.create_windows_service_class",
+        return_value=fake_service_class,
+    )
+    persist_config = mocker.patch(
+        "iot_agent.windows_service.set_windows_service_config_path"
+    )
 
     from iot_agent.service.windows import WindowsServiceManager
 
@@ -83,7 +97,11 @@ def test_cli_service_status_prints_current_state(tmp_path, mocker) -> None:
     )
     mocker.patch(
         "iot_agent.cli._service_manager",
-        return_value=(AgentSettings.model_validate({"path_profile": "production"}), tmp_path / "agent.toml", fake_manager),
+        return_value=(
+            AgentSettings.model_validate({"path_profile": "production"}),
+            tmp_path / "agent.toml",
+            fake_manager,
+        ),
     )
 
     from iot_agent.cli import app
@@ -104,7 +122,11 @@ def test_cli_print_definition_streams_definition_content(tmp_path, mocker) -> No
     )
     mocker.patch(
         "iot_agent.cli._service_manager",
-        return_value=(AgentSettings.model_validate({"path_profile": "production"}), tmp_path / "agent.toml", fake_manager),
+        return_value=(
+            AgentSettings.model_validate({"path_profile": "production"}),
+            tmp_path / "agent.toml",
+            fake_manager,
+        ),
     )
 
     from iot_agent.cli import app
@@ -121,7 +143,9 @@ def test_cli_config_write_default_omits_schema_header(tmp_path) -> None:
 
     from iot_agent.cli import app
 
-    result = CliRunner().invoke(app, ["config", "write-default", "--config", str(target_path)])
+    result = CliRunner().invoke(
+        app, ["config", "write-default", "--config", str(target_path)]
+    )
 
     assert result.exit_code == 0, result.output
     content = target_path.read_text(encoding="utf-8")
@@ -137,7 +161,9 @@ def test_cli_config_write_default_is_idempotent_without_force(tmp_path) -> None:
 
     from iot_agent.cli import app
 
-    result = CliRunner().invoke(app, ["config", "write-default", "--config", str(target_path)])
+    result = CliRunner().invoke(
+        app, ["config", "write-default", "--config", str(target_path)]
+    )
 
     assert result.exit_code == 1, result.output
     assert target_path.read_text(encoding="utf-8") == "custom = true\n"
@@ -249,7 +275,10 @@ def test_launchd_definition_includes_expected_label_and_args(tmp_path) -> None:
 
     assert definition.format_name == "launchd"
     assert payload["Label"] == "io.iot-agent.service"
-    assert payload["ProgramArguments"][-2:] == ["--config", str(tmp_path / "iot-agent.toml")]
+    assert payload["ProgramArguments"][-2:] == [
+        "--config",
+        str(tmp_path / "iot-agent.toml"),
+    ]
 
 
 def test_launchd_install_writes_plist_and_bootstraps_job(tmp_path, mocker) -> None:

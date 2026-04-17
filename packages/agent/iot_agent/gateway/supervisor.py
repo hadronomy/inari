@@ -46,7 +46,10 @@ class GatewaySupervisor:
             ),
             asyncio.create_task(self._sync_loop(), name="iot-agent-gateway-sync"),
             asyncio.create_task(self._events_loop(), name="iot-agent-gateway-events"),
-            asyncio.create_task(self.runtime_event_forwarder.run_forever(), name="iot-agent-gateway-runtime-forwarder"),
+            asyncio.create_task(
+                self.runtime_event_forwarder.run_forever(),
+                name="iot-agent-gateway-runtime-forwarder",
+            ),
         ]
         self._started = True
 

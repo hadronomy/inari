@@ -67,11 +67,17 @@ class TokenService:
         try:
             claims_set = jwt.decode(token, self._signing_key(), algorithms=["HS256"])
         except Exception as exc:  # pragma: no cover - library error surface
-            raise AgentError("INVALID_ACCESS_TOKEN", "The supplied access token is invalid.", status_code=401) from exc
+            raise AgentError(
+                "INVALID_ACCESS_TOKEN",
+                "The supplied access token is invalid.",
+                status_code=401,
+            ) from exc
         claims = dict(getattr(claims_set, "claims", claims_set))
         self._validate_claims(claims)
         scopes = frozenset(AccessScope(value) for value in claims.get("scope", []))
-        principal_kind = PrincipalKind(str(claims.get("kind", PrincipalKind.API_CLIENT.value)))
+        principal_kind = PrincipalKind(
+            str(claims.get("kind", PrincipalKind.API_CLIENT.value))
+        )
         expires_at = _as_datetime(claims.get("exp"))
         return AuthenticatedPrincipal(
             subject=str(claims.get("sub", "")),
@@ -100,17 +106,31 @@ class TokenService:
     def _validate_claims(self, claims: dict[str, Any]) -> None:
         issuer = str(claims.get("iss", ""))
         if issuer != self.issuer:
-            raise AgentError("INVALID_ACCESS_TOKEN", "The access token issuer is not trusted.", status_code=401)
+            raise AgentError(
+                "INVALID_ACCESS_TOKEN",
+                "The access token issuer is not trusted.",
+                status_code=401,
+            )
         audience = _normalize_audience(claims.get("aud"))
         if audience != self.token_audience:
-            raise AgentError("INVALID_ACCESS_TOKEN", "The access token audience is invalid.", status_code=401)
+            raise AgentError(
+                "INVALID_ACCESS_TOKEN",
+                "The access token audience is invalid.",
+                status_code=401,
+            )
         now = utc_now()
         expires_at = _as_datetime(claims.get("exp"))
         if expires_at is None or expires_at <= now:
-            raise AgentError("ACCESS_TOKEN_EXPIRED", "The access token has expired.", status_code=401)
+            raise AgentError(
+                "ACCESS_TOKEN_EXPIRED", "The access token has expired.", status_code=401
+            )
         not_before = _as_datetime(claims.get("nbf"))
         if not_before is not None and now < not_before:
-            raise AgentError("INVALID_ACCESS_TOKEN", "The access token is not active yet.", status_code=401)
+            raise AgentError(
+                "INVALID_ACCESS_TOKEN",
+                "The access token is not active yet.",
+                status_code=401,
+            )
 
 
 def _as_datetime(value: object) -> datetime | None:

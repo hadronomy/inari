@@ -4,7 +4,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 
-from .dependencies import get_authorization_service, get_device_catalog, get_event_hub, get_gateway_service, get_job_service
+from .dependencies import (
+    get_authorization_service,
+    get_device_catalog,
+    get_event_hub,
+    get_gateway_service,
+    get_job_service,
+)
 from .device_commands import DeviceCommandKind
 from .exceptions import AgentError
 from .gateway.service import GatewayService
@@ -53,7 +59,9 @@ events_router = APIRouter(tags=["events"])
 DeviceCatalogDependency = Annotated[DeviceCatalog, Depends(get_device_catalog)]
 JobServiceDependency = Annotated[JobService, Depends(get_job_service)]
 EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
-AuthorizationServiceDependency = Annotated[AuthorizationService, Depends(get_authorization_service)]
+AuthorizationServiceDependency = Annotated[
+    AuthorizationService, Depends(get_authorization_service)
+]
 GatewayServiceDependency = Annotated[GatewayService, Depends(get_gateway_service)]
 
 
@@ -79,7 +87,9 @@ def _require_scopes(
     return authorization_service.require_scopes(principal, scopes)
 
 
-def _current_principal(authorization_service: AuthorizationService, connection: Request) -> AuthenticatedPrincipal:
+def _current_principal(
+    authorization_service: AuthorizationService, connection: Request
+) -> AuthenticatedPrincipal:
     return authorization_service.authenticate_connection(connection)
 
 
@@ -103,7 +113,9 @@ async def auth_me(
     connection: Request,
 ) -> AuthenticatedPrincipalResponse:
     principal = _current_principal(authorization_service, connection)
-    return AuthenticatedPrincipalResponse(principal=PrincipalResponse.from_principal(principal))
+    return AuthenticatedPrincipalResponse(
+        principal=PrincipalResponse.from_principal(principal)
+    )
 
 
 @gateway_router.get("/identity", response_model=GatewayIdentityResponse)
@@ -130,7 +142,9 @@ async def gateway_upstream_status(
 ) -> GatewayUpstreamStatusResponse:
     principal = _current_principal(authorization_service, connection)
     _require_scopes(authorization_service, principal, AccessScope.ADMIN_READ)
-    return GatewayUpstreamStatusResponse.from_status(gateway_service.get_upstream_status())
+    return GatewayUpstreamStatusResponse.from_status(
+        gateway_service.get_upstream_status()
+    )
 
 
 @system_router.get("/status", response_model=SystemStatusResponse)
@@ -171,7 +185,9 @@ async def get_device(
     _require_scopes(authorization_service, principal, AccessScope.DEVICES_READ)
     device = device_catalog.get_device(device_id)
     if device is None:
-        raise AgentError("DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404)
+        raise AgentError(
+            "DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404
+        )
     return DeviceResourceResponse(device=DeviceResponse.from_domain(device))
 
 
@@ -187,9 +203,13 @@ async def list_device_events(
     _require_scopes(authorization_service, principal, AccessScope.EVENTS_READ)
     device = device_catalog.get_device(device_id)
     if device is None:
-        raise AgentError("DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404)
+        raise AgentError(
+            "DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404
+        )
     events = device_catalog.list_device_events(device_id, limit=limit)
-    return DeviceEventCollectionResponse(events=[RuntimeEventResponse.from_domain(event) for event in events])
+    return DeviceEventCollectionResponse(
+        events=[RuntimeEventResponse.from_domain(event) for event in events]
+    )
 
 
 @jobs_router.post("/print-jobs", response_model=JobResourceResponse, status_code=202)
@@ -205,7 +225,9 @@ async def submit_print_job(
     return JobResourceResponse(job=JobResponse.from_domain(job))
 
 
-@jobs_router.post("/device-commands", response_model=JobResourceResponse, status_code=202)
+@jobs_router.post(
+    "/device-commands", response_model=JobResourceResponse, status_code=202
+)
 async def submit_device_command(
     request: DeviceCommandRequest,
     job_service: JobServiceDependency,
@@ -246,7 +268,9 @@ async def get_job(
     _require_scopes(authorization_service, principal, AccessScope.JOBS_READ)
     job = job_service.get_job(job_id)
     if job is None:
-        raise AgentError("JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404)
+        raise AgentError(
+            "JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404
+        )
     return JobResourceResponse(job=JobResponse.from_domain(job))
 
 
@@ -261,7 +285,9 @@ async def get_job_history(
     _require_scopes(authorization_service, principal, AccessScope.JOBS_READ)
     job = job_service.get_job(job_id)
     if job is None:
-        raise AgentError("JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404)
+        raise AgentError(
+            "JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404
+        )
     attempts = job_service.list_job_attempts(job_id)
     events = job_service.list_job_history(job_id)
     return JobHistoryResponse(

@@ -37,7 +37,9 @@ class BinaryPayload:
             return self.declared_mime_types[0]
         return None
 
-    def with_declared_mime_type(self, mime_type: str | None, *, label: str = "payload") -> BinaryPayload:
+    def with_declared_mime_type(
+        self, mime_type: str | None, *, label: str = "payload"
+    ) -> BinaryPayload:
         normalized = normalize_mime_type(mime_type)
         if normalized is None:
             return self
@@ -51,7 +53,9 @@ class BinaryPayload:
         if normalized in self.declared_mime_types:
             return self
 
-        return replace(self, declared_mime_types=self.declared_mime_types + (normalized,))
+        return replace(
+            self, declared_mime_types=self.declared_mime_types + (normalized,)
+        )
 
 
 def decode_base64_payload(value: str, *, label: str = "payload") -> BinaryPayload:
@@ -84,7 +88,9 @@ def coerce_image_payload(
     label: str,
     declared_mime_type: str | None = None,
 ) -> BinaryPayload:
-    payload = decode_base64_payload(value, label=label).with_declared_mime_type(declared_mime_type, label=label)
+    payload = decode_base64_payload(value, label=label).with_declared_mime_type(
+        declared_mime_type, label=label
+    )
     return validate_binary_payload(
         payload,
         label=label,
@@ -99,7 +105,9 @@ def coerce_pdf_payload(
     label: str,
     declared_mime_type: str | None = None,
 ) -> BinaryPayload:
-    payload = decode_base64_payload(value, label=label).with_declared_mime_type(declared_mime_type, label=label)
+    payload = decode_base64_payload(value, label=label).with_declared_mime_type(
+        declared_mime_type, label=label
+    )
     return validate_binary_payload(
         payload,
         label=label,
@@ -114,7 +122,9 @@ def coerce_raw_payload(
     label: str,
     declared_mime_type: str | None = None,
 ) -> BinaryPayload:
-    return decode_base64_payload(value, label=label).with_declared_mime_type(declared_mime_type, label=label)
+    return decode_base64_payload(value, label=label).with_declared_mime_type(
+        declared_mime_type, label=label
+    )
 
 
 def validate_binary_payload(
@@ -126,13 +136,19 @@ def validate_binary_payload(
     allow_family_match: bool,
 ) -> BinaryPayload:
     for mime_type in payload.declared_mime_types:
-        if not _mime_allowed(mime_type, allowed_mime_types=allowed_mime_types, allowed_mime_prefixes=allowed_mime_prefixes):
+        if not _mime_allowed(
+            mime_type,
+            allowed_mime_types=allowed_mime_types,
+            allowed_mime_prefixes=allowed_mime_prefixes,
+        ):
             raise PrinterServiceError(
                 "INVALID_DECLARED_MIME_TYPE",
                 f"Declared MIME type {mime_type!r} is not valid for {label}.",
             )
 
-    detected_mime_type = payload.detected_type.mime_type if payload.detected_type else None
+    detected_mime_type = (
+        payload.detected_type.mime_type if payload.detected_type else None
+    )
     if detected_mime_type and not _mime_allowed(
         detected_mime_type,
         allowed_mime_types=allowed_mime_types,
@@ -167,7 +183,9 @@ def validate_binary_payload(
 def detect_media_type(content: bytes) -> DetectedMediaType | None:
     try:
         matches = puremagic.magic_string(content)
-    except Exception:  # pragma: no cover - detector failures should not crash request parsing
+    except (
+        Exception
+    ):  # pragma: no cover - detector failures should not crash request parsing
         logger.debug("puremagic could not identify payload", exc_info=True)
         return None
 
@@ -202,7 +220,9 @@ def _parse_data_url(value: str, *, label: str) -> tuple[str | None, str]:
     try:
         header, encoded = value.split(",", 1)
     except ValueError as exc:
-        raise PrinterServiceError("INVALID_DATA_URL", f"Invalid data URL for {label}.") from exc
+        raise PrinterServiceError(
+            "INVALID_DATA_URL", f"Invalid data URL for {label}."
+        ) from exc
 
     metadata = header[5:]
     if not metadata:
@@ -215,7 +235,9 @@ def _parse_data_url(value: str, *, label: str) -> tuple[str | None, str]:
             f"Only base64 data URLs are supported for {label}.",
         )
 
-    declared_mime_type = normalize_mime_type(parts[0]) if parts and "/" in parts[0] else None
+    declared_mime_type = (
+        normalize_mime_type(parts[0]) if parts and "/" in parts[0] else None
+    )
     return declared_mime_type, encoded
 
 

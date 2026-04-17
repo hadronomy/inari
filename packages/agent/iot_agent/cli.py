@@ -9,7 +9,11 @@ from .container import build_container
 from .db import DatabaseMigrationError, DatabaseMigrator
 from .config import AgentSettings, PathProfile, load_settings, write_default_config_file
 from .server import serve as serve_agent
-from .service.manager import build_service_manager, load_service_settings, resolve_service_config_path
+from .service.manager import (
+    build_service_manager,
+    load_service_settings,
+    resolve_service_config_path,
+)
 from .service.models import DEFAULT_SERVICE_SCOPE, ServiceScope
 
 app = typer.Typer(
@@ -18,7 +22,9 @@ app = typer.Typer(
     help="Run the IoT Agent service and manage its runtime database.",
 )
 db_app = typer.Typer(help="Inspect and upgrade the runtime database.")
-service_app = typer.Typer(help="Install and manage the IoT Agent as a platform service.")
+service_app = typer.Typer(
+    help="Install and manage the IoT Agent as a platform service."
+)
 config_app = typer.Typer(help="Generate and write agent configuration files.")
 app.add_typer(db_app, name="db")
 app.add_typer(service_app, name="service")
@@ -62,14 +68,18 @@ def _load_cli_settings(config_path: Path | None) -> AgentSettings:
     return load_settings(config_path=config_path)
 
 
-def _database_migrator(config_path: Path | None) -> tuple[AgentSettings, DatabaseMigrator]:
+def _database_migrator(
+    config_path: Path | None,
+) -> tuple[AgentSettings, DatabaseMigrator]:
     settings = _load_cli_settings(config_path)
     return settings, DatabaseMigrator(settings.runtime_database_path)
 
 
 def _service_manager(config_path: Path | None, scope: ServiceScope):
     settings, resolved_config_path = load_service_settings(config_path)
-    manager = build_service_manager(settings, config_path=resolved_config_path, scope=scope)
+    manager = build_service_manager(
+        settings, config_path=resolved_config_path, scope=scope
+    )
     return settings, resolved_config_path, manager
 
 

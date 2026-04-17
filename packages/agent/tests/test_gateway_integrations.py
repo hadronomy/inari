@@ -14,8 +14,16 @@ from cryptography.x509.oid import NameOID
 from iot_agent.config import AgentSettings
 from iot_agent.gateway.auth_providers import ZitadelServiceAccountAuthProvider
 from iot_agent.gateway.caddy import CaddyControllerProfile
-from iot_agent.gateway.enrollment import GatewayEnrollmentService, UPSTREAM_STEP_CA_OTT_KEY
-from iot_agent.gateway.models import CertificateBootstrapMode, GatewayEnrollmentRecord, MutualTlsMode, StepCaOttBootstrap
+from iot_agent.gateway.enrollment import (
+    GatewayEnrollmentService,
+    UPSTREAM_STEP_CA_OTT_KEY,
+)
+from iot_agent.gateway.models import (
+    CertificateBootstrapMode,
+    GatewayEnrollmentRecord,
+    MutualTlsMode,
+    StepCaOttBootstrap,
+)
 from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
 from iot_agent.security.certificates import CertificateLifecycleService
@@ -67,12 +75,17 @@ async def test_zitadel_auth_provider_exchanges_and_caches_token(tmp_path: Path) 
     assert first["Authorization"] == "Bearer zitadel-token"
     assert second["Authorization"] == "Bearer zitadel-token"
     assert fake_client.post_calls == 1
-    assert fake_client.last_post_data["grant_type"] == "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    assert (
+        fake_client.last_post_data["grant_type"]
+        == "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    )
     assert "openid" in fake_client.last_post_data["scope"]
 
 
 @pytest.mark.anyio
-async def test_enrollment_can_be_authorized_by_provider_without_controller_token(tmp_path: Path) -> None:
+async def test_enrollment_can_be_authorized_by_provider_without_controller_token(
+    tmp_path: Path,
+) -> None:
     identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
     certificate_service = CertificateLifecycleService(
         certificate_path=tmp_path / "upstream-client-cert.pem",
@@ -171,7 +184,9 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     assert record.certificate_bootstrap.mode is CertificateBootstrapMode.STEP_CA_OTT
     assert record.certificate_bootstrap.ott == "ott_bootstrap_token"
     assert secret_store.get_secret(UPSTREAM_STEP_CA_OTT_KEY) == "ott_bootstrap_token"
-    metadata = json.loads((tmp_path / "upstream-enrollment.json").read_text(encoding="utf-8"))
+    metadata = json.loads(
+        (tmp_path / "upstream-enrollment.json").read_text(encoding="utf-8")
+    )
     assert "certificate_bootstrap" in metadata
     assert "ott" not in metadata["certificate_bootstrap"]
 
@@ -182,7 +197,9 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
 
 
 @pytest.mark.anyio
-async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(tmp_path: Path) -> None:
+async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
+    tmp_path: Path,
+) -> None:
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_cert = _issue_certificate(
         subject_name="Example Step CA",
@@ -277,7 +294,9 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(tm
 
 
 @pytest.mark.anyio
-async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(tmp_path: Path) -> None:
+async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(
+    tmp_path: Path,
+) -> None:
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_cert = _issue_certificate(
         subject_name="Example Step CA",
@@ -333,7 +352,9 @@ async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(tm
 
 
 @pytest.mark.anyio
-async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(tmp_path: Path) -> None:
+async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(
+    tmp_path: Path,
+) -> None:
     old_ca_key = ec.generate_private_key(ec.SECP256R1())
     old_ca_cert = _issue_certificate(
         subject_name="Old Step CA",
@@ -351,7 +372,7 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(tmp_pat
         issuer_key=new_ca_key,
         not_valid_after=datetime.now(tz=UTC) + timedelta(days=365),
         is_ca=True,
-        )
+    )
     identity_path = tmp_path / "identity.pem"
     certificate_service = CertificateLifecycleService(
         certificate_path=tmp_path / "upstream-client-cert.pem",
@@ -370,7 +391,9 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(tmp_pat
         identity_service=AgentIdentityService(identity_path=identity_path),
         certificate_service=certificate_service,
         http_client_factory=lambda **kwargs: StepCaHttpClient(
-            root_pem=new_ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+            root_pem=new_ca_cert.public_bytes(serialization.Encoding.PEM).decode(
+                "utf-8"
+            ),
             ca_key=new_ca_key,
             certificate_service=certificate_service,
         ),
@@ -391,10 +414,14 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(tmp_pat
 
     assert certificate is not None
     installed_ca_pem = certificate_service.ca_path.read_text(encoding="utf-8")
-    assert _fingerprint(x509.load_pem_x509_certificate(installed_ca_pem.encode("utf-8"))) == _fingerprint(new_ca_cert)
+    assert _fingerprint(
+        x509.load_pem_x509_certificate(installed_ca_pem.encode("utf-8"))
+    ) == _fingerprint(new_ca_cert)
 
 
-def test_caddy_required_mtls_requires_enrollment_route_or_existing_certificate(tmp_path: Path) -> None:
+def test_caddy_required_mtls_requires_enrollment_route_or_existing_certificate(
+    tmp_path: Path,
+) -> None:
     settings = AgentSettings(
         gateway_mode="managed",
         upstream_base_url="https://controller.example.com",
@@ -463,7 +490,14 @@ class FakeAsyncHttpClient:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         return None
 
-    async def post(self, url: str, *, data: dict[str, str] | None = None, json: dict[str, Any] | None = None, headers=None):
+    async def post(
+        self,
+        url: str,
+        *,
+        data: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        headers=None,
+    ):
         self.post_calls += 1
         self.last_post_headers = dict(headers or {})
         if data is not None:
@@ -502,12 +536,18 @@ class StepCaHttpClient:
             certificate = _issue_certificate_from_csr(csr, self.ca_key)
             return FakeAsyncResponse(
                 {
-                    "crt": certificate.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+                    "crt": certificate.public_bytes(serialization.Encoding.PEM).decode(
+                        "utf-8"
+                    ),
                     "ca": self.root_pem,
                 }
             )
         certificate_path, _, _ = self.certificate_service.current_cert_chain()
-        current_cert = Path(certificate_path).read_text(encoding="utf-8") if certificate_path else self.root_pem
+        current_cert = (
+            Path(certificate_path).read_text(encoding="utf-8")
+            if certificate_path
+            else self.root_pem
+        )
         return FakeAsyncResponse({"crt": current_cert, "ca": self.root_pem})
 
 
@@ -546,7 +586,9 @@ def _issue_certificate(
 ):
     builder = (
         x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_name)]))
+        .subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_name)])
+        )
         .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)]))
         .public_key(subject_key)
         .serial_number(x509.random_serial_number())
@@ -561,7 +603,9 @@ def _issue_certificate_from_csr(csr: x509.CertificateSigningRequest, issuer_key)
     builder = (
         x509.CertificateBuilder()
         .subject_name(csr.subject)
-        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Example Step CA")]))
+        .issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Example Step CA")])
+        )
         .public_key(csr.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))

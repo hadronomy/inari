@@ -5,7 +5,14 @@ from pathlib import Path
 from iot_agent.models import RuntimeEventResponse, SystemStatusResponse
 from iot_agent.version import API_VERSION
 
-from iot_agent_tray.models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot, TrayStatusLevel
+from iot_agent_tray.models import (
+    ControlMode,
+    ControlSnapshot,
+    LifecycleState,
+    TrayLinks,
+    TraySnapshot,
+    TrayStatusLevel,
+)
 
 
 def test_snapshot_from_status_marks_busy_when_queue_is_active() -> None:
@@ -39,7 +46,9 @@ def test_snapshot_from_status_marks_busy_when_queue_is_active() -> None:
     snapshot = TraySnapshot.from_status(
         title="IoT Agent",
         links=_links(),
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
+        ),
         status=status,
     )
 
@@ -53,12 +62,16 @@ def test_snapshot_with_error_preserves_counts_and_marks_offline() -> None:
     snapshot = TraySnapshot.initial(
         title="IoT Agent",
         links=_links(),
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
+        ),
     )
     snapshot = TraySnapshot.from_status(
         title="IoT Agent",
         links=_links(),
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
+        ),
         status=SystemStatusResponse.model_validate(
             {
                 "ok": True,
@@ -88,7 +101,9 @@ def test_snapshot_with_error_preserves_counts_and_marks_offline() -> None:
     )
 
     offline = snapshot.with_error(
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.UNKNOWN),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.UNKNOWN
+        ),
         message="Connection refused",
     )
 
@@ -102,11 +117,15 @@ def test_snapshot_with_error_marks_spawn_startup_as_starting() -> None:
     snapshot = TraySnapshot.initial(
         title="IoT Agent",
         links=_links(),
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING
+        ),
     )
 
     starting = snapshot.with_error(
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING
+        ),
         message="timed out",
     )
 
@@ -142,9 +161,13 @@ def test_tooltip_is_capped_to_windows_limit() -> None:
     snapshot = TraySnapshot.initial(
         title="IoT Agent",
         links=_links(),
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
+        ),
     ).with_error(
-        control=ControlSnapshot(mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING),
+        control=ControlSnapshot(
+            mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
+        ),
         message="The local agent reported a very long startup failure message that should never overflow the Windows tray tooltip limit even when debugging information is present.",
     )
 

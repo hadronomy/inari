@@ -16,7 +16,9 @@ from .models import AgentIdentity
 
 
 class AgentIdentityService:
-    def __init__(self, *, identity_path: Path, certificate_path: Path | None = None) -> None:
+    def __init__(
+        self, *, identity_path: Path, certificate_path: Path | None = None
+    ) -> None:
         self.identity_path = identity_path
         self.certificate_path = certificate_path
         self._cached_identity: AgentIdentity | None = None
@@ -101,7 +103,9 @@ class AgentIdentityService:
                 "kid": key_id,
                 "x": _base64url(raw_public),
             },
-            created_at=datetime.fromtimestamp(self.identity_path.stat().st_mtime, tz=UTC),
+            created_at=datetime.fromtimestamp(
+                self.identity_path.stat().st_mtime, tz=UTC
+            ),
             certificate_pem=certificate_pem,
         )
 

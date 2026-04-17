@@ -4,6 +4,7 @@ Revision ID: 20260414_0001
 Revises:
 Create Date: 2026-04-14 09:30:00
 """
+
 from __future__ import annotations
 
 from alembic import op
@@ -84,7 +85,9 @@ def upgrade() -> None:
         ["state", "next_run_at", "created_at"],
         unique=False,
     )
-    op.create_index("idx_jobs_device_id", "jobs", ["device_id", "created_at"], unique=False)
+    op.create_index(
+        "idx_jobs_device_id", "jobs", ["device_id", "created_at"], unique=False
+    )
 
     op.create_table(
         "job_attempts",

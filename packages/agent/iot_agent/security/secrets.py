@@ -55,7 +55,9 @@ class FileSecretStore:
 
     def _save(self, payload: dict[str, str]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self.path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
 
 class KeyringSecretStore:

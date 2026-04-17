@@ -38,7 +38,9 @@ class Win32PrintAPI(Protocol):
 
     def ClosePrinter(self, handle: Any) -> None: ...
 
-    def StartDocPrinter(self, handle: Any, level: int, document: tuple[str, None, str]) -> int: ...
+    def StartDocPrinter(
+        self, handle: Any, level: int, document: tuple[str, None, str]
+    ) -> int: ...
 
     def EndDocPrinter(self, handle: Any) -> None: ...
 
@@ -65,7 +67,10 @@ class WindowsSpooler:
     def list_printer_names(self) -> tuple[str, ...]:
         api = self._require_api()
         flags = api.PRINTER_ENUM_LOCAL | api.PRINTER_ENUM_CONNECTIONS
-        names = [self._printer_name_from_enum_entry(entry) for entry in api.EnumPrinters(flags)]
+        names = [
+            self._printer_name_from_enum_entry(entry)
+            for entry in api.EnumPrinters(flags)
+        ]
         return tuple(sorted(names, key=str.casefold))
 
     def get_default_printer_name(self, *, optional: bool = False) -> str | None:
@@ -101,7 +106,9 @@ class WindowsSpooler:
             started_doc = False
             started_page = False
             try:
-                job_id = api.StartDocPrinter(handle, 1, (document_name, None, data_type))
+                job_id = api.StartDocPrinter(
+                    handle, 1, (document_name, None, data_type)
+                )
                 started_doc = True
 
                 if use_page_calls:
@@ -121,12 +128,16 @@ class WindowsSpooler:
                     try:
                         api.EndPagePrinter(handle)
                     except Exception:  # pragma: no cover - best effort cleanup
-                        logger.debug("Failed to end page for %s", printer_name, exc_info=True)
+                        logger.debug(
+                            "Failed to end page for %s", printer_name, exc_info=True
+                        )
                 if started_doc:
                     try:
                         api.EndDocPrinter(handle)
                     except Exception:  # pragma: no cover - best effort cleanup
-                        logger.debug("Failed to end document for %s", printer_name, exc_info=True)
+                        logger.debug(
+                            "Failed to end document for %s", printer_name, exc_info=True
+                        )
                 raise PrinterServiceError("PRINT_FAILED", str(exc)) from exc
 
         logger.info(
@@ -151,7 +162,9 @@ class WindowsSpooler:
             try:
                 api.ClosePrinter(handle)
             except Exception:  # pragma: no cover - best effort cleanup
-                logger.debug("Failed to close printer handle for %s", printer_name, exc_info=True)
+                logger.debug(
+                    "Failed to close printer handle for %s", printer_name, exc_info=True
+                )
 
     @staticmethod
     def _printer_name_from_enum_entry(entry: Any) -> str:
@@ -163,14 +176,18 @@ class WindowsSpooler:
         if isinstance(entry, tuple) and len(entry) >= 3 and isinstance(entry[2], str):
             return entry[2]
 
-        raise PrinterServiceError("PRINTER_ENUM_FAILED", f"Unsupported printer enumeration entry: {entry!r}")
+        raise PrinterServiceError(
+            "PRINTER_ENUM_FAILED", f"Unsupported printer enumeration entry: {entry!r}"
+        )
 
     def _require_api(self, *, optional: bool = False) -> Win32PrintAPI | None:
         if self._api is not None:
             return self._api
         if optional:
             return None
-        raise PrinterServiceError("WIN32_UNAVAILABLE", "pywin32 is not available on this machine.")
+        raise PrinterServiceError(
+            "WIN32_UNAVAILABLE", "pywin32 is not available on this machine."
+        )
 
 
 @dataclass(slots=True)
@@ -197,7 +214,11 @@ class WindowsPrinterDriver(PrinterDriver):
             self._build_device(name, is_default=name == default_name)
             for name in self.spooler.list_printer_names()
         ]
-        return tuple(sorted(devices, key=lambda item: (not item.is_default, item.name.casefold())))
+        return tuple(
+            sorted(
+                devices, key=lambda item: (not item.is_default, item.name.casefold())
+            )
+        )
 
     def get_device(self, printer_name: str) -> PrinterDevice:
         default_name = self.get_default_device_name()
@@ -319,10 +340,14 @@ class WindowsPrinterDriver(PrinterDriver):
         )
 
     def _guess_preferred_transport(self, printer_name: str) -> PrinterTransport:
-        return guess_preferred_transport(printer_name, raw_name_hints=self.raw_name_hints)
+        return guess_preferred_transport(
+            printer_name, raw_name_hints=self.raw_name_hints
+        )
 
     @staticmethod
-    def _ensure_transport_supported(printer: PrinterDevice, transport: PrinterTransport) -> None:
+    def _ensure_transport_supported(
+        printer: PrinterDevice, transport: PrinterTransport
+    ) -> None:
         match transport:
             case PrinterTransport.RAW if not printer.supports_raw:
                 raise PrinterServiceError(

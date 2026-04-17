@@ -18,14 +18,20 @@ from ..gateway.models import (
     StepCaOttBootstrap,
     UpstreamCertificateMode,
 )
-from .certificates import CertificateLifecycleService, ManagedCertificate, ManagedCertificateInspection
+from .certificates import (
+    CertificateLifecycleService,
+    ManagedCertificate,
+    ManagedCertificateInspection,
+)
 from .identity import AgentIdentityService
 
 
 class ClientCertificateProvisioner(Protocol):
     mode: UpstreamCertificateMode
 
-    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None: ...
+    async def ensure_certificate(
+        self, enrollment: GatewayEnrollmentRecord | None = None
+    ) -> ManagedCertificate | None: ...
 
 
 class ManagedCertificateProvisioningError(AgentError):
@@ -50,7 +56,9 @@ class ManagedCertificateProvisioningError(AgentError):
 class DisabledCertificateProvisioner:
     mode = UpstreamCertificateMode.NONE
 
-    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None:
+    async def ensure_certificate(
+        self, enrollment: GatewayEnrollmentRecord | None = None
+    ) -> ManagedCertificate | None:
         return None
 
 
@@ -60,7 +68,9 @@ class ControllerCertificateProvisioner:
     def __init__(self, *, certificate_service: CertificateLifecycleService) -> None:
         self.certificate_service = certificate_service
 
-    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None:
+    async def ensure_certificate(
+        self, enrollment: GatewayEnrollmentRecord | None = None
+    ) -> ManagedCertificate | None:
         return self.certificate_service.current_certificate()
 
 
@@ -81,9 +91,13 @@ class StepCaOttCertificateProvisioner:
         self._http_client_factory = http_client_factory or httpx.AsyncClient
         self._lock = asyncio.Lock()
 
-    async def ensure_certificate(self, enrollment: GatewayEnrollmentRecord | None = None) -> ManagedCertificate | None:
+    async def ensure_certificate(
+        self, enrollment: GatewayEnrollmentRecord | None = None
+    ) -> ManagedCertificate | None:
         async with self._lock:
-            bootstrap = enrollment.certificate_bootstrap if enrollment is not None else None
+            bootstrap = (
+                enrollment.certificate_bootstrap if enrollment is not None else None
+            )
             if bootstrap is not None:
                 await self._bootstrap_root_if_needed(bootstrap)
             inspection = self.certificate_service.inspect_current_certificate()
@@ -103,15 +117,23 @@ class StepCaOttCertificateProvisioner:
         ca_path = self.certificate_service.ca_path
         if ca_path is not None and ca_path.exists():
             try:
-                actual_fingerprint = _certificate_fingerprint(ca_path.read_text(encoding="utf-8"))
+                actual_fingerprint = _certificate_fingerprint(
+                    ca_path.read_text(encoding="utf-8")
+                )
             except Exception:
                 actual_fingerprint = None
             else:
-                if actual_fingerprint == _normalize_fingerprint(bootstrap.root_fingerprint):
+                if actual_fingerprint == _normalize_fingerprint(
+                    bootstrap.root_fingerprint
+                ):
                     return
-        root_url = f"{bootstrap.ca_url.rstrip('/')}/1.0/root/{bootstrap.root_fingerprint}"
+        root_url = (
+            f"{bootstrap.ca_url.rstrip('/')}/1.0/root/{bootstrap.root_fingerprint}"
+        )
         try:
-            async with self._http_client_factory(verify=False, timeout=self.settings.gateway_reconnect_delay_seconds) as client:
+            async with self._http_client_factory(
+                verify=False, timeout=self.settings.gateway_reconnect_delay_seconds
+            ) as client:
                 response = await client.get(root_url)
                 response.raise_for_status()
                 root_pem = response.text
@@ -144,7 +166,9 @@ class StepCaOttCertificateProvisioner:
             )
         self.certificate_service.install_certificate_authority(root_pem)
 
-    async def _issue_certificate(self, bootstrap: StepCaOttBootstrap) -> ManagedCertificate:
+    async def _issue_certificate(
+        self, bootstrap: StepCaOttBootstrap
+    ) -> ManagedCertificate:
         identity = self.identity_service.get_or_create_identity()
         subject = bootstrap.subject or identity.agent_id
         uri_sans = bootstrap.authorized_sans or self._requested_sans(identity.agent_id)
@@ -204,7 +228,9 @@ class StepCaOttCertificateProvisioner:
             )
         return installed
 
-    async def _renew_certificate(self, bootstrap: StepCaOttBootstrap | None) -> ManagedCertificate:
+    async def _renew_certificate(
+        self, bootstrap: StepCaOttBootstrap | None
+    ) -> ManagedCertificate:
         certificate_path, key_path, _ = self.certificate_service.current_cert_chain()
         renew_url = self._renew_url(bootstrap)
         if certificate_path is None or key_path is None:
@@ -297,14 +323,21 @@ class StepCaOttCertificateProvisioner:
 
     def _verify_context(self) -> ssl.SSLContext:
         context = ssl.create_default_context()
-        if self.certificate_service.ca_path is not None and self.certificate_service.ca_path.exists():
+        if (
+            self.certificate_service.ca_path is not None
+            and self.certificate_service.ca_path.exists()
+        ):
             context.load_verify_locations(cafile=str(self.certificate_service.ca_path))
         return context
 
-    def _coerce_current_certificate(self, inspection: ManagedCertificateInspection) -> ManagedCertificate | None:
+    def _coerce_current_certificate(
+        self, inspection: ManagedCertificateInspection
+    ) -> ManagedCertificate | None:
         if inspection.error_detail is None:
             return inspection.certificate
-        self.certificate_service.clear_managed_certificate(keep_certificate_authority=True)
+        self.certificate_service.clear_managed_certificate(
+            keep_certificate_authority=True
+        )
         raise ManagedCertificateProvisioningError(
             "STEP_CA_INVALID_LOCAL_CERTIFICATE",
             f"The installed managed client certificate is invalid: {inspection.error_detail}",
@@ -378,7 +411,9 @@ def _parse_certificate_response(response: httpx.Response) -> tuple[str, str | No
 
 def _certificate_fingerprint(certificate_pem: str) -> str:
     certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
-    return sha256(certificate.public_bytes(encoding=serialization.Encoding.DER)).hexdigest()
+    return sha256(
+        certificate.public_bytes(encoding=serialization.Encoding.DER)
+    ).hexdigest()
 
 
 def _normalize_fingerprint(value: str) -> str:

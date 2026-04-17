@@ -27,12 +27,21 @@ class SecurityPolicyService:
 
     def validate_startup(self) -> None:
         host = self.settings.host
-        if self.policy.exposure is GatewayExposure.LOOPBACK and not is_loopback_host(host):
-            raise RuntimeError("Loopback exposure requires binding the agent to a loopback host.")
+        if self.policy.exposure is GatewayExposure.LOOPBACK and not is_loopback_host(
+            host
+        ):
+            raise RuntimeError(
+                "Loopback exposure requires binding the agent to a loopback host."
+            )
         if self.policy.exposure is GatewayExposure.LAN:
             if not self.settings.tls_cert_path or not self.settings.tls_key_path:
-                raise RuntimeError("LAN exposure requires TLS certificate and key paths.")
-        if self.policy.mode is GatewayMode.MANAGED and not self.settings.upstream_base_url:
+                raise RuntimeError(
+                    "LAN exposure requires TLS certificate and key paths."
+                )
+        if (
+            self.policy.mode is GatewayMode.MANAGED
+            and not self.settings.upstream_base_url
+        ):
             raise RuntimeError("Managed gateway mode requires an upstream base URL.")
         validate_caddy_profile(self.settings)
         if self.settings.upstream_auth_mode is UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT:
@@ -44,11 +53,18 @@ class SecurityPolicyService:
                 raise RuntimeError(
                     "ZITADEL auth mode requires either a service-account key file or explicit service user, key id, and private key settings."
                 )
-            if self.settings.zitadel_base_url is None and self.settings.zitadel_token_url is None:
-                raise RuntimeError("ZITADEL auth mode requires a base URL or explicit token URL.")
+            if (
+                self.settings.zitadel_base_url is None
+                and self.settings.zitadel_token_url is None
+            ):
+                raise RuntimeError(
+                    "ZITADEL auth mode requires a base URL or explicit token URL."
+                )
         if self.settings.upstream_certificate_mode is UpstreamCertificateMode.STEP_CA:
             if self.policy.mode is not GatewayMode.MANAGED:
-                raise RuntimeError("step-ca certificate mode requires managed gateway mode.")
+                raise RuntimeError(
+                    "step-ca certificate mode requires managed gateway mode."
+                )
 
     def assert_loopback_client(self, connection: HTTPConnection) -> None:
         client = connection.client

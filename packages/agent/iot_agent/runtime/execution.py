@@ -6,7 +6,13 @@ import logging
 from datetime import timedelta
 
 from ..config import AgentSettings
-from ..device_commands import CutPaper, FeedDots, FeedLines, OpenCashDrawer, PrintTestPage
+from ..device_commands import (
+    CutPaper,
+    FeedDots,
+    FeedLines,
+    OpenCashDrawer,
+    PrintTestPage,
+)
 from ..exceptions import AgentError
 from ..printer_service import PrinterService
 from ..printers import PrintJobResult
@@ -41,7 +47,9 @@ class PrinterOperationExecutor:
     def execute_print(self, operation: QueuedPrintOperation) -> PrintJobResult:
         return self.printer_service.print_job(operation.job)
 
-    def execute_command(self, operation: QueuedDeviceCommandOperation) -> PrintJobResult:
+    def execute_command(
+        self, operation: QueuedDeviceCommandOperation
+    ) -> PrintJobResult:
         printer_name = operation.target.printer_name
         command = operation.command
         match command:
@@ -57,7 +65,9 @@ class PrinterOperationExecutor:
             case FeedDots(count=count):
                 return self.printer_service.feed_dots(count, printer_name=printer_name)
             case CutPaper(mode=mode):
-                return self.printer_service.cut_paper(printer_name=printer_name, mode=mode)
+                return self.printer_service.cut_paper(
+                    printer_name=printer_name, mode=mode
+                )
             case _:
                 raise TypeError(f"Unsupported device command: {type(command)!r}")
 
@@ -112,7 +122,9 @@ class DeviceWorkerPool:
         self._device_queues.clear()
         self._device_workers.clear()
 
-    async def _device_worker(self, device_id: str, queue: asyncio.Queue[str | None]) -> None:
+    async def _device_worker(
+        self, device_id: str, queue: asyncio.Queue[str | None]
+    ) -> None:
         while True:
             job_id = await queue.get()
             if job_id is None:
@@ -255,7 +267,11 @@ class LeaseRecoveryCoordinator:
         while True:
             try:
                 for job in self.job_repository.recover_expired():
-                    event_type = "job.retry_scheduled" if job.state is JobState.RETRY_SCHEDULED else "job.failed"
+                    event_type = (
+                        "job.retry_scheduled"
+                        if job.state is JobState.RETRY_SCHEDULED
+                        else "job.failed"
+                    )
                     await self.job_service.publish_event(event_type, job)
             except Exception:
                 logger.exception("Lease recovery loop failed")
@@ -284,7 +300,9 @@ def _is_retryable(error: AgentError) -> bool:
 def _retry_at(*, base_delay_seconds: int, attempt_number: int, max_delay_seconds: int):
     from .models import utc_now
 
-    delay_seconds = min(max_delay_seconds, base_delay_seconds * (2 ** max(0, attempt_number - 1)))
+    delay_seconds = min(
+        max_delay_seconds, base_delay_seconds * (2 ** max(0, attempt_number - 1))
+    )
     return utc_now() + timedelta(seconds=delay_seconds)
 
 

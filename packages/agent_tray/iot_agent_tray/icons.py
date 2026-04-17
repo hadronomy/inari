@@ -33,6 +33,7 @@ def build_tray_icon(snapshot: TraySnapshot, *, size: int = ICON_SIZE) -> Image.I
 
     return image
 
+
 def build_packaged_app_icon(*, size: int = ICON_SIZE) -> Image.Image:
     glyph_fill = (246, 248, 250, 238)
     glyph_detail = (104, 116, 128, 232)
@@ -234,13 +235,48 @@ def _draw_connector(
 
 def _palette(
     level: TrayStatusLevel,
-) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int], tuple[int, int, int, int]]:
+) -> tuple[
+    tuple[int, int, int, int],
+    tuple[int, int, int, int],
+    tuple[int, int, int, int],
+    tuple[int, int, int, int],
+]:
     palettes = {
-        TrayStatusLevel.ONLINE: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (58, 211, 122, 255)),
-        TrayStatusLevel.BUSY: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (56, 163, 255, 255)),
-        TrayStatusLevel.DEGRADED: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (255, 179, 71, 255)),
-        TrayStatusLevel.OFFLINE: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (240, 87, 113, 255)),
-        TrayStatusLevel.STARTING: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (108, 126, 255, 255)),
-        TrayStatusLevel.STOPPED: ((246, 248, 250, 238), (104, 116, 128, 232), (0, 0, 0, 58), (163, 174, 184, 255)),
+        TrayStatusLevel.ONLINE: (
+            (246, 248, 250, 238),
+            (104, 116, 128, 232),
+            (0, 0, 0, 58),
+            (58, 211, 122, 255),
+        ),
+        TrayStatusLevel.BUSY: (
+            (246, 248, 250, 238),
+            (104, 116, 128, 232),
+            (0, 0, 0, 58),
+            (56, 163, 255, 255),
+        ),
+        TrayStatusLevel.DEGRADED: (
+            (246, 248, 250, 238),
+            (104, 116, 128, 232),
+            (0, 0, 0, 58),
+            (255, 179, 71, 255),
+        ),
+        TrayStatusLevel.OFFLINE: (
+            (246, 248, 250, 238),
+            (104, 116, 128, 232),
+            (0, 0, 0, 58),
+            (240, 87, 113, 255),
+        ),
+        TrayStatusLevel.STARTING: (
+            (246, 248, 250, 238),
+            (104, 116, 128, 232),
+            (0, 0, 0, 58),
+            (108, 126, 255, 255),
+        ),
+        TrayStatusLevel.STOPPED: (
+            (246, 248, 250, 238),
+            (104, 116, 128, 232),
+            (0, 0, 0, 58),
+            (163, 174, 184, 255),
+        ),
     }
     return palettes[level]

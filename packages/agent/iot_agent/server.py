@@ -10,7 +10,9 @@ from .main import create_app
 
 
 class ManagedUvicornServer(uvicorn.Server):
-    def install_signal_handlers(self) -> None:  # pragma: no cover - integration behavior
+    def install_signal_handlers(
+        self,
+    ) -> None:  # pragma: no cover - integration behavior
         return None
 
 

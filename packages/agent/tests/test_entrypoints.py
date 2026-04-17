@@ -28,7 +28,9 @@ def test_cli_serve_accepts_explicit_config_path(tmp_path, mocker) -> None:
         {},
     )()
 
-    mocked_build_container = mocker.patch("iot_agent.cli.build_container", return_value=fake_container)
+    mocked_build_container = mocker.patch(
+        "iot_agent.cli.build_container", return_value=fake_container
+    )
     mocked_serve = mocker.patch("iot_agent.cli.serve_agent")
 
     from iot_agent.cli import app

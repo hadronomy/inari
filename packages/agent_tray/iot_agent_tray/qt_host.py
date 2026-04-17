@@ -62,7 +62,9 @@ class QtTrayHost(TrayHost):
         QTimer.singleShot(0, lambda: self._run_ready_callback(on_ready))
         application.exec()
 
-    def update(self, *, snapshot: TraySnapshot, menu_entries: Sequence[TrayMenuEntry]) -> None:
+    def update(
+        self, *, snapshot: TraySnapshot, menu_entries: Sequence[TrayMenuEntry]
+    ) -> None:
         if self._signals is None:
             return
         self._signals.update_requested.emit(snapshot, list(menu_entries))
@@ -77,7 +79,9 @@ class QtTrayHost(TrayHost):
             return
         self._signals.stop_requested.emit()
 
-    def _apply_update(self, snapshot: TraySnapshot, menu_entries: Sequence[TrayMenuEntry]) -> None:
+    def _apply_update(
+        self, snapshot: TraySnapshot, menu_entries: Sequence[TrayMenuEntry]
+    ) -> None:
         if self._tray_icon is None or self._menu is None:
             return
         self._tray_icon.setIcon(_image_to_qicon(build_tray_icon(snapshot)))
@@ -107,13 +111,17 @@ class QtTrayHost(TrayHost):
         menu = self._menu
         if menu is None:
             return
-        if not self._menu_actions or not _menu_layout_matches(self._menu_actions, menu_entries):
+        if not self._menu_actions or not _menu_layout_matches(
+            self._menu_actions, menu_entries
+        ):
             self._menu_actions = _build_menu_actions(menu, menu_entries)
             return
         _update_menu_actions(menu, self._menu_actions, menu_entries)
 
 
-def _build_menu_actions(menu: QMenu, menu_entries: Sequence[TrayMenuEntry]) -> list[QAction]:
+def _build_menu_actions(
+    menu: QMenu, menu_entries: Sequence[TrayMenuEntry]
+) -> list[QAction]:
     menu.clear()
     actions: list[QAction] = []
     default_action: QAction | None = None
@@ -127,7 +135,9 @@ def _build_menu_actions(menu: QMenu, menu_entries: Sequence[TrayMenuEntry]) -> l
         action.setEnabled(entry.enabled)
         action.setVisible(entry.visible)
         if entry.callback is not None:
-            action.triggered.connect(lambda checked=False, callback=entry.callback: callback())
+            action.triggered.connect(
+                lambda checked=False, callback=entry.callback: callback()
+            )
         menu.addAction(action)
         actions.append(action)
         if entry.default and default_action is None:
@@ -137,7 +147,9 @@ def _build_menu_actions(menu: QMenu, menu_entries: Sequence[TrayMenuEntry]) -> l
     return actions
 
 
-def _update_menu_actions(menu: QMenu, actions: Sequence[QAction], menu_entries: Sequence[TrayMenuEntry]) -> None:
+def _update_menu_actions(
+    menu: QMenu, actions: Sequence[QAction], menu_entries: Sequence[TrayMenuEntry]
+) -> None:
     default_action: QAction | None = None
     for action, entry in zip(actions, menu_entries, strict=True):
         action.setVisible(entry.visible)
@@ -151,10 +163,15 @@ def _update_menu_actions(menu: QMenu, actions: Sequence[QAction], menu_entries: 
         menu.setDefaultAction(default_action)
 
 
-def _menu_layout_matches(actions: Sequence[QAction], menu_entries: Sequence[TrayMenuEntry]) -> bool:
+def _menu_layout_matches(
+    actions: Sequence[QAction], menu_entries: Sequence[TrayMenuEntry]
+) -> bool:
     if len(actions) != len(menu_entries):
         return False
-    return all(action.isSeparator() == entry.separator for action, entry in zip(actions, menu_entries, strict=True))
+    return all(
+        action.isSeparator() == entry.separator
+        for action, entry in zip(actions, menu_entries, strict=True)
+    )
 
 
 def _image_to_qicon(image: Image) -> QIcon:

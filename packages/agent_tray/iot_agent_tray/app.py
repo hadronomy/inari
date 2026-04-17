@@ -10,12 +10,23 @@ import webbrowser
 from pathlib import Path
 from typing import Callable
 
-from iot_agent.models import LiveEventUpdateResponse, LiveSnapshotResponse, RuntimeEventResponse, SystemStatusResponse
+from iot_agent.models import (
+    LiveEventUpdateResponse,
+    LiveSnapshotResponse,
+    RuntimeEventResponse,
+    SystemStatusResponse,
+)
 
 from .bridge import AgentControlBridge, build_control_bridge
 from .client import AgentApiClient
 from .config import TraySettings
-from .models import ControlMode, ControlSnapshot, LifecycleState, TrayLinks, TraySnapshot
+from .models import (
+    ControlMode,
+    ControlSnapshot,
+    LifecycleState,
+    TrayLinks,
+    TraySnapshot,
+)
 from .tray_host import TrayHost, TrayMenuEntry, create_tray_host
 
 logger = logging.getLogger(__name__)
@@ -76,8 +87,14 @@ class AgentTrayApplication:
         self._ensure_local_agent_started()
         self._refresh_snapshot(notify_connection=False)
         self._threads = [
-            threading.Thread(target=self._reconcile_loop, name="iot-agent-tray-reconcile", daemon=True),
-            threading.Thread(target=self._event_loop, name="iot-agent-tray-events", daemon=True),
+            threading.Thread(
+                target=self._reconcile_loop,
+                name="iot-agent-tray-reconcile",
+                daemon=True,
+            ),
+            threading.Thread(
+                target=self._event_loop, name="iot-agent-tray-events", daemon=True
+            ),
         ]
         for thread in self._threads:
             thread.start()
@@ -105,7 +122,9 @@ class AgentTrayApplication:
         logger.info("%s", message)
 
     def _reconcile_loop(self) -> None:
-        while not self._stop_event.wait(self.settings.status_reconcile_interval_seconds):
+        while not self._stop_event.wait(
+            self.settings.status_reconcile_interval_seconds
+        ):
             self._refresh_snapshot()
 
     def _event_loop(self) -> None:
@@ -167,17 +186,26 @@ class AgentTrayApplication:
                 )
 
     def _promote_to_service_bridge_if_available(self) -> None:
-        if self.settings.control_mode != "spawn" or self.bridge.mode is ControlMode.SERVICE:
+        if (
+            self.settings.control_mode != "spawn"
+            or self.bridge.mode is ControlMode.SERVICE
+        ):
             return
         service_settings = self.settings.model_copy(update={"control_mode": "service"})
         candidate = build_control_bridge(service_settings)
         control = candidate.query_state()
         if control.mode is not ControlMode.SERVICE:
             return
-        if control.lifecycle not in {LifecycleState.RUNNING, LifecycleState.STARTING, LifecycleState.STOPPING}:
+        if control.lifecycle not in {
+            LifecycleState.RUNNING,
+            LifecycleState.STARTING,
+            LifecycleState.STOPPING,
+        }:
             return
         self.bridge = candidate
-        logger.info("Detected an active platform service for the reachable agent API; switching tray control mode to service")
+        logger.info(
+            "Detected an active platform service for the reachable agent API; switching tray control mode to service"
+        )
 
     def _apply_status_snapshot(
         self,
@@ -227,7 +255,11 @@ class AgentTrayApplication:
                 TrayMenuEntry("Open Queue", callback=self._open_jobs),
                 TrayMenuEntry("Open Logs", callback=self._open_logs),
                 TrayMenuEntry.separator_item(),
-                TrayMenuEntry("Print Test Page", callback=self._print_test_page, enabled=current_snapshot.connected),
+                TrayMenuEntry(
+                    "Print Test Page",
+                    callback=self._print_test_page,
+                    enabled=current_snapshot.connected,
+                ),
                 TrayMenuEntry("Refresh Now", callback=self._refresh_now),
                 TrayMenuEntry(
                     self._start_label(current_snapshot),
@@ -267,7 +299,9 @@ class AgentTrayApplication:
         self._launch_background(self._refresh_snapshot, name="iot-agent-tray-refresh")
 
     def _print_test_page(self, *_: object) -> None:
-        self._launch_background(self._print_test_page_sync, name="iot-agent-tray-test-page")
+        self._launch_background(
+            self._print_test_page_sync, name="iot-agent-tray-test-page"
+        )
 
     def _start_agent(self, *_: object) -> None:
         self._launch_background(
@@ -283,7 +317,9 @@ class AgentTrayApplication:
 
     def _restart_agent(self, *_: object) -> None:
         self._launch_background(
-            lambda: self._run_control_action(self.bridge.restart, expect_connected=True),
+            lambda: self._run_control_action(
+                self.bridge.restart, expect_connected=True
+            ),
             name="iot-agent-tray-restart",
         )
 
@@ -299,9 +335,14 @@ class AgentTrayApplication:
         try:
             job = self.client.submit_test_page()
         except Exception as exc:
-            self._notify("Unable to queue a test page.", subtitle=_humanize_exception(exc))
+            self._notify(
+                "Unable to queue a test page.", subtitle=_humanize_exception(exc)
+            )
             return
-        self._notify("Queued a printer test page.", subtitle=f"Job {job.job.id} is waiting in the queue.")
+        self._notify(
+            "Queued a printer test page.",
+            subtitle=f"Job {job.job.id} is waiting in the queue.",
+        )
         self._refresh_snapshot(notify_connection=False)
 
     def _run_control_action(
@@ -333,7 +374,9 @@ class AgentTrayApplication:
         if snapshot.connected:
             self._notify("Connected to the local agent.", subtitle=snapshot.queue_line)
             return
-        self._notify("Lost connection to the local agent.", subtitle=snapshot.control_line)
+        self._notify(
+            "Lost connection to the local agent.", subtitle=snapshot.control_line
+        )
 
     def _notify_for_event(self, event: RuntimeEventResponse) -> None:
         if event.event_type == "job.failed":
@@ -372,19 +415,35 @@ class AgentTrayApplication:
 
     @staticmethod
     def _start_label(snapshot: TraySnapshot) -> str:
-        return "Start Service" if snapshot.control.mode is ControlMode.SERVICE else "Start Agent"
+        return (
+            "Start Service"
+            if snapshot.control.mode is ControlMode.SERVICE
+            else "Start Agent"
+        )
 
     @staticmethod
     def _stop_label(snapshot: TraySnapshot) -> str:
-        return "Stop Service" if snapshot.control.mode is ControlMode.SERVICE else "Stop Agent"
+        return (
+            "Stop Service"
+            if snapshot.control.mode is ControlMode.SERVICE
+            else "Stop Agent"
+        )
 
     @staticmethod
     def _restart_label(snapshot: TraySnapshot) -> str:
-        return "Restart Service" if snapshot.control.mode is ControlMode.SERVICE else "Restart Agent"
+        return (
+            "Restart Service"
+            if snapshot.control.mode is ControlMode.SERVICE
+            else "Restart Agent"
+        )
 
 
 def _event_subtitle(event: RuntimeEventResponse) -> str:
-    detail = event.payload.get("error_detail") or event.payload.get("name") or event.payload.get("device_name")
+    detail = (
+        event.payload.get("error_detail")
+        or event.payload.get("name")
+        or event.payload.get("device_name")
+    )
     if isinstance(detail, str) and detail:
         return detail
     return event.event_type.replace(".", " ")
@@ -398,7 +457,11 @@ def _humanize_exception(exc: Exception) -> str:
 
 
 def _connection_failure_message(control, exc: Exception) -> str:
-    if control.mode is ControlMode.SPAWN and control.lifecycle is not None and control.detail:
+    if (
+        control.mode is ControlMode.SPAWN
+        and control.lifecycle is not None
+        and control.detail
+    ):
         if control.lifecycle is not None and "exited with code" in control.detail:
             return control.detail
     return _humanize_exception(exc)
@@ -417,5 +480,7 @@ def _open_path(path: Path) -> None:
             subprocess.run(["xdg-open", str(path)], check=False)
             return
     except Exception:
-        logger.debug("Falling back to browser-based path open for %s", path, exc_info=True)
+        logger.debug(
+            "Falling back to browser-based path open for %s", path, exc_info=True
+        )
     webbrowser.open(path.as_uri())

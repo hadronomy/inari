@@ -124,7 +124,9 @@ class StubJobService:
 
     async def cancel(self, job_id: str) -> JobRecord:
         job = self.jobs[job_id]
-        cancelled = replace(job, state=JobState.CANCELLED, finished_at=utc_now(), updated_at=utc_now())
+        cancelled = replace(
+            job, state=JobState.CANCELLED, finished_at=utc_now(), updated_at=utc_now()
+        )
         self.jobs[job_id] = cancelled
         return cancelled
 
@@ -133,7 +135,9 @@ class StubJobService:
 class StubAuthorizationService:
     issued_tokens: dict[str, AuthenticatedPrincipal] = field(default_factory=dict)
 
-    def issue_loopback_token(self, connection, *, client_name: str, requested_scopes=None):
+    def issue_loopback_token(
+        self, connection, *, client_name: str, requested_scopes=None
+    ):
         scopes = tuple(requested_scopes or tuple(AccessScope))
         expires_at = datetime.now(tz=UTC) + timedelta(hours=1)
         token_value = f"token::{client_name}::{len(self.issued_tokens) + 1}"
@@ -158,17 +162,29 @@ class StubAuthorizationService:
     def authenticate_connection(self, connection):
         authorization = connection.headers.get("authorization")
         if not authorization:
-            raise AgentError("AUTHENTICATION_REQUIRED", "A bearer access token is required for this endpoint.", status_code=401)
+            raise AgentError(
+                "AUTHENTICATION_REQUIRED",
+                "A bearer access token is required for this endpoint.",
+                status_code=401,
+            )
         _, _, token = authorization.partition(" ")
         principal = self.issued_tokens.get(token.strip())
         if principal is None:
-            raise AgentError("INVALID_ACCESS_TOKEN", "The supplied access token is invalid.", status_code=401)
+            raise AgentError(
+                "INVALID_ACCESS_TOKEN",
+                "The supplied access token is invalid.",
+                status_code=401,
+            )
         return principal
 
     def require_scopes(self, principal: AuthenticatedPrincipal, scopes):
         required = tuple(scopes)
         if not principal.has_scopes(required):
-            raise AgentError("INSUFFICIENT_SCOPE", "The access token does not include the required scopes for this endpoint.", status_code=403)
+            raise AgentError(
+                "INSUFFICIENT_SCOPE",
+                "The access token does not include the required scopes for this endpoint.",
+                status_code=403,
+            )
         return principal
 
 
@@ -207,11 +223,15 @@ class StubPrinterService:
 async def async_client_for(container: AgentContainer):
     app = create_app(container=container)
     async with LifespanManager(app):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
             yield client
 
 
-async def auth_headers(client: AsyncClient, *, requested_scopes: tuple[str, ...] | None = None) -> dict[str, str]:
+async def auth_headers(
+    client: AsyncClient, *, requested_scopes: tuple[str, ...] | None = None
+) -> dict[str, str]:
     payload: dict[str, object] = {"client_name": "test-client"}
     if requested_scopes is not None:
         payload["requested_scopes"] = list(requested_scopes)
@@ -221,7 +241,9 @@ async def auth_headers(client: AsyncClient, *, requested_scopes: tuple[str, ...]
     return {"Authorization": f"Bearer {token}"}
 
 
-def sync_auth_headers(client: TestClient, *, requested_scopes: tuple[str, ...] | None = None) -> dict[str, str]:
+def sync_auth_headers(
+    client: TestClient, *, requested_scopes: tuple[str, ...] | None = None
+) -> dict[str, str]:
     payload: dict[str, object] = {"client_name": "test-client"}
     if requested_scopes is not None:
         payload["requested_scopes"] = list(requested_scopes)
@@ -236,7 +258,9 @@ async def test_system_status_reports_device_and_queue_summary(mocker) -> None:
     container = make_test_container(mocker=mocker)
 
     async with async_client_for(container) as client:
-        response = await client.get("/system/status", headers=await auth_headers(client))
+        response = await client.get(
+            "/system/status", headers=await auth_headers(client)
+        )
 
     assert response.status_code == 200
     payload = response.json()
@@ -280,12 +304,16 @@ async def test_list_devices_marks_virtual_windows_printers(mocker) -> None:
         PrinterDevice(
             name="Microsoft Print to PDF",
             driver_key="windows.printers",
-            capabilities=PrinterCapabilities(raw=False, text=True, documents=True, cash_drawer=False),
+            capabilities=PrinterCapabilities(
+                raw=False, text=True, documents=True, cash_drawer=False
+            ),
         ),
         connection_state=DeviceConnectionState.ONLINE,
     )
 
-    async with async_client_for(make_test_container(devices=(device,), mocker=mocker)) as client:
+    async with async_client_for(
+        make_test_container(devices=(device,), mocker=mocker)
+    ) as client:
         response = await client.get("/devices", headers=await auth_headers(client))
 
     assert response.status_code == 200
@@ -335,12 +363,20 @@ async def test_submit_print_job_returns_queued_job_resource(mocker) -> None:
     assert payload["job"]["kind"] == "print_job"
     assert payload["job"]["state"] == "queued"
     assert payload["job"]["target"]["device_name"] == "Kitchen Printer"
-    assert container.job_service.submitted_print_operation.target.printer_name == "Kitchen Printer"
+    assert (
+        container.job_service.submitted_print_operation.target.printer_name
+        == "Kitchen Printer"
+    )
 
 
 @pytest.mark.anyio
 async def test_submit_device_command_returns_queued_job_resource(mocker) -> None:
-    container = make_test_container(job_kind=JobKind.COMMAND, operation="cut_paper", command_kind="cut_paper", mocker=mocker)
+    container = make_test_container(
+        job_kind=JobKind.COMMAND,
+        operation="cut_paper",
+        command_kind="cut_paper",
+        mocker=mocker,
+    )
 
     async with async_client_for(container) as client:
         response = await client.post(
@@ -365,7 +401,9 @@ async def test_job_history_response_includes_attempts_and_events(mocker) -> None
     job_id = next(iter(container.job_service.jobs))
 
     async with async_client_for(container) as client:
-        response = await client.get(f"/jobs/{job_id}/history", headers=await auth_headers(client))
+        response = await client.get(
+            f"/jobs/{job_id}/history", headers=await auth_headers(client)
+        )
 
     assert response.status_code == 200
     payload = response.json()
@@ -407,7 +445,9 @@ async def test_list_jobs_serializes_job_execution_results(mocker) -> None:
 
 def test_events_websocket_connects_successfully(mocker) -> None:
     with TestClient(create_app(container=make_test_container(mocker=mocker))) as client:
-        with client.websocket_connect("/events", headers=sync_auth_headers(client)) as websocket:
+        with client.websocket_connect(
+            "/events", headers=sync_auth_headers(client)
+        ) as websocket:
             payload = websocket.receive_json()
 
     assert payload["kind"] == "snapshot"
@@ -426,7 +466,9 @@ def test_events_websocket_streams_snapshot_backed_updates(mocker) -> None:
     )
 
     with TestClient(create_app(container=container)) as client:
-        with client.websocket_connect("/events", headers=sync_auth_headers(client)) as websocket:
+        with client.websocket_connect(
+            "/events", headers=sync_auth_headers(client)
+        ) as websocket:
             websocket.receive_json()
             anyio.run(container.event_hub.publish, event)
             payload = websocket.receive_json()
@@ -570,7 +612,8 @@ def make_test_container(
 ) -> AgentContainer:
     settings = AgentSettings(
         security_state_dir=mkdtemp(prefix="iot-agent-security-"),
-        runtime_database_path=Path(mkdtemp(prefix="iot-agent-runtime-")) / "runtime.sqlite3",
+        runtime_database_path=Path(mkdtemp(prefix="iot-agent-runtime-"))
+        / "runtime.sqlite3",
     )
     default_device = DeviceRecord.from_printer(
         PrinterDevice(
@@ -578,7 +621,9 @@ def make_test_container(
             driver_key="tests.fake-printers",
             is_default=True,
             preferred_transport=PrinterTransport.RAW,
-            capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+            capabilities=PrinterCapabilities(
+                raw=True, text=True, documents=True, cash_drawer=True
+            ),
         ),
         connection_state=DeviceConnectionState.ONLINE,
     )

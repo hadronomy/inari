@@ -6,7 +6,11 @@ from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .binary_payloads import coerce_image_payload, coerce_pdf_payload, coerce_raw_payload
+from .binary_payloads import (
+    coerce_image_payload,
+    coerce_pdf_payload,
+    coerce_raw_payload,
+)
 from .device_commands import (
     CutPaper as CutPaperDomain,
     DeviceCommandKind,
@@ -27,7 +31,15 @@ from .print_jobs import (
     TextDocumentContent,
 )
 from .printers import CutMode, PrinterTransport
-from .security.models import AccessScope, AgentIdentity, AuthenticatedPrincipal, GatewayExposure, GatewayMode, IssuedToken, PrincipalKind
+from .security.models import (
+    AccessScope,
+    AgentIdentity,
+    AuthenticatedPrincipal,
+    GatewayExposure,
+    GatewayMode,
+    IssuedToken,
+    PrincipalKind,
+)
 from .gateway.models import (
     ManagedCertificateFailureReason,
     ManagedCertificateOperation,
@@ -40,7 +52,11 @@ from .gateway.models import (
     UpstreamEdgeProvider,
     UpstreamStatus,
 )
-from .runtime.operations import DeviceTargetRef, QueuedDeviceCommandOperation, QueuedPrintOperation
+from .runtime.operations import (
+    DeviceTargetRef,
+    QueuedDeviceCommandOperation,
+    QueuedPrintOperation,
+)
 from .runtime.models import (
     DeviceClass,
     DeviceConnectionState,
@@ -191,7 +207,9 @@ class ManagedCertificateStatusResponse(APIModel):
     failed_renewal_count: int = 0
 
     @classmethod
-    def from_status(cls, status: ManagedCertificateStatus) -> ManagedCertificateStatusResponse:
+    def from_status(
+        cls, status: ManagedCertificateStatus
+    ) -> ManagedCertificateStatusResponse:
         return cls(
             state=status.state,
             operation=status.operation,
@@ -275,7 +293,9 @@ class GatewayUpstreamStatusResponse(APIModel):
             failed_event_stream_count=status.failed_event_stream_count,
             successful_event_stream_count=status.successful_event_stream_count,
             certificate_lifecycle=(
-                ManagedCertificateStatusResponse.from_status(status.certificate_lifecycle)
+                ManagedCertificateStatusResponse.from_status(
+                    status.certificate_lifecycle
+                )
                 if status.certificate_lifecycle is not None
                 else None
             ),
@@ -312,18 +332,30 @@ class DeviceDirectorySummaryResponse(APIModel):
     default_device: DefaultDeviceSummaryResponse | None = None
 
     @classmethod
-    def from_devices(cls, devices: list[DeviceRecord]) -> DeviceDirectorySummaryResponse:
+    def from_devices(
+        cls, devices: list[DeviceRecord]
+    ) -> DeviceDirectorySummaryResponse:
         kind_counts: dict[str, int] = {}
         for device in devices:
             kind_counts[device.kind.value] = kind_counts.get(device.kind.value, 0) + 1
         default_device = next((device for device in devices if device.is_default), None)
         return cls(
             count=len(devices),
-            online_count=sum(1 for device in devices if device.connection_state is DeviceConnectionState.ONLINE),
-            offline_count=sum(1 for device in devices if device.connection_state is DeviceConnectionState.OFFLINE),
+            online_count=sum(
+                1
+                for device in devices
+                if device.connection_state is DeviceConnectionState.ONLINE
+            ),
+            offline_count=sum(
+                1
+                for device in devices
+                if device.connection_state is DeviceConnectionState.OFFLINE
+            ),
             kind_counts=kind_counts,
             default_device=(
-                DefaultDeviceSummaryResponse(id=default_device.id, name=default_device.name)
+                DefaultDeviceSummaryResponse(
+                    id=default_device.id, name=default_device.name
+                )
                 if default_device is not None
                 else None
             ),
@@ -365,7 +397,9 @@ class DeviceResponse(APIModel):
                 is_default=device.is_default,
                 preferred_transport=device.preferred_transport,
                 supported_transports=device.supported_transports,
-                capabilities=tuple(PrinterCapability(value) for value in device.capability_keys),
+                capabilities=tuple(
+                    PrinterCapability(value) for value in device.capability_keys
+                ),
             )
         return cls(
             id=device.id,
@@ -485,7 +519,9 @@ class StructuredReceiptContentInput(APIModel):
     document_name: str = "Receipt"
 
     def to_domain(self) -> StructuredReceiptContent:
-        return StructuredReceiptContent(payload=self.data, document_name=self.document_name)
+        return StructuredReceiptContent(
+            payload=self.data, document_name=self.document_name
+        )
 
 
 class ReceiptImageContentInput(APIModel):
@@ -570,7 +606,9 @@ PrintContentInput = Annotated[
 class PrintJobRequest(APIModel):
     content: PrintContentInput
     target: DeviceTargetInput = Field(default_factory=DeviceTargetInput)
-    options: PrintExecutionOptionsInput = Field(default_factory=PrintExecutionOptionsInput)
+    options: PrintExecutionOptionsInput = Field(
+        default_factory=PrintExecutionOptionsInput
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_operation(self) -> QueuedPrintOperation:
@@ -668,14 +706,20 @@ class JobExecutionResultResponse(APIModel):
             target = {}
         return cls(
             target=JobExecutionTargetResponse(
-                device_id=str(target["device_id"]) if target.get("device_id") is not None else None,
+                device_id=str(target["device_id"])
+                if target.get("device_id") is not None
+                else None,
                 printer_name=str(target.get("printer_name", "")),
                 driver_key=str(target.get("driver_key") or target.get("driver") or ""),
                 is_default=bool(target.get("is_default", False)),
             ),
-            transport=PrinterTransport(str(payload.get("transport", PrinterTransport.AUTO.value))),
+            transport=PrinterTransport(
+                str(payload.get("transport", PrinterTransport.AUTO.value))
+            ),
             bytes_written=int(payload.get("bytes_written", 0)),
-            device_job_id=int(payload["device_job_id"]) if payload.get("device_job_id") is not None else None,
+            device_job_id=int(payload["device_job_id"])
+            if payload.get("device_job_id") is not None
+            else None,
         )
 
 
@@ -713,7 +757,9 @@ class JobResponse(APIModel):
         )
         error = None
         if job.last_error_code is not None and job.last_error_detail is not None:
-            error = JobErrorResponse(code=job.last_error_code, detail=job.last_error_detail)
+            error = JobErrorResponse(
+                code=job.last_error_code, detail=job.last_error_detail
+            )
         return cls(
             id=job.id,
             kind=job.kind,
@@ -759,7 +805,9 @@ class JobAttemptResponse(APIModel):
     def from_domain(cls, attempt: JobAttemptRecord) -> JobAttemptResponse:
         error = None
         if attempt.error_code is not None and attempt.error_detail is not None:
-            error = JobErrorResponse(code=attempt.error_code, detail=attempt.error_detail)
+            error = JobErrorResponse(
+                code=attempt.error_code, detail=attempt.error_detail
+            )
         return cls(
             id=attempt.id,
             attempt_number=attempt.attempt_number,

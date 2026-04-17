@@ -23,9 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cups = [
-  "pycups>=2.0.4; platform_system != 'Windows'",
-]
+cups = ["pycups>=2.0.4; platform_system != 'Windows'"]
 
 [dependency-groups]
 dev = [
@@ -38,6 +36,7 @@ dev = [
   "pytest-mock>=3.14.1,<4.0.0",
   "hypothesis>=6.151.0,<7.0.0",
   "pytest-timeout>=2.4.0,<3.0.0",
+  "ruff>=0.15.11",
 ]
 
 [project.scripts]

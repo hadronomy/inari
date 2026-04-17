@@ -21,10 +21,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def install_security_middleware(app: FastAPI, *, policy_service: SecurityPolicyService) -> None:
+def install_security_middleware(
+    app: FastAPI, *, policy_service: SecurityPolicyService
+) -> None:
     trusted_hosts = policy_service.trusted_hosts()
     if trusted_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(trusted_hosts))
-    if policy_service.policy.require_tls and policy_service.settings.https_redirect_enabled:
+    if (
+        policy_service.policy.require_tls
+        and policy_service.settings.https_redirect_enabled
+    ):
         app.add_middleware(HTTPSRedirectMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)

@@ -7,7 +7,12 @@ from typing import Any, Callable
 
 import httpx
 from pydantic import TypeAdapter
-from iot_agent.models import JobResourceResponse, LiveUpdateMessage, SystemStatusResponse, TokenResponse
+from iot_agent.models import (
+    JobResourceResponse,
+    LiveUpdateMessage,
+    SystemStatusResponse,
+    TokenResponse,
+)
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
@@ -31,16 +36,24 @@ class AgentApiClient:
 
     def get_status(self) -> SystemStatusResponse:
         with self._http_client_factory() as client:
-            response = client.get("/system/status", headers=self._authorization_headers(client))
+            response = client.get(
+                "/system/status", headers=self._authorization_headers(client)
+            )
             response.raise_for_status()
         return SystemStatusResponse.model_validate(response.json())
 
-    def submit_test_page(self, *, printer_name: str | None = None) -> JobResourceResponse:
+    def submit_test_page(
+        self, *, printer_name: str | None = None
+    ) -> JobResourceResponse:
         payload: dict[str, object] = {"command": {"kind": "print_test_page"}}
         if printer_name is not None:
             payload["target"] = {"printer_name": printer_name}
         with self._http_client_factory() as client:
-            response = client.post("/device-commands", json=payload, headers=self._authorization_headers(client))
+            response = client.post(
+                "/device-commands",
+                json=payload,
+                headers=self._authorization_headers(client),
+            )
             response.raise_for_status()
         return JobResourceResponse.model_validate(response.json())
 
@@ -54,7 +67,9 @@ class AgentApiClient:
         ) as websocket:
             while not stop_event.is_set():
                 try:
-                    raw_message = websocket.recv(timeout=self.settings.event_timeout_seconds)
+                    raw_message = websocket.recv(
+                        timeout=self.settings.event_timeout_seconds
+                    )
                 except TimeoutError:
                     continue
                 except ConnectionClosed:
@@ -74,7 +89,10 @@ class AgentApiClient:
         return {"Authorization": f"Bearer {token.access_token}"}
 
     def _ensure_token(self, client: httpx.Client | None = None) -> TokenResponse:
-        if self._cached_token is not None and self._cached_token.expires_at > _utc_now() + timedelta(seconds=30):
+        if (
+            self._cached_token is not None
+            and self._cached_token.expires_at > _utc_now() + timedelta(seconds=30)
+        ):
             return self._cached_token
         owns_client = client is None
         active_client = client or self._http_client_factory()

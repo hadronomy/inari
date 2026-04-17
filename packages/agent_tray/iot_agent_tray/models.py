@@ -93,7 +93,9 @@ class TraySnapshot:
     updated_at: datetime | None = None
 
     @classmethod
-    def initial(cls, *, title: str, links: TrayLinks, control: ControlSnapshot) -> TraySnapshot:
+    def initial(
+        cls, *, title: str, links: TrayLinks, control: ControlSnapshot
+    ) -> TraySnapshot:
         return cls(
             title=title,
             links=links,
@@ -133,7 +135,9 @@ class TraySnapshot:
             queue_failed=queue.failed,
             last_error=previous.last_error if previous is not None else None,
             last_event_type=previous.last_event_type if previous is not None else None,
-            last_event_detail=previous.last_event_detail if previous is not None else None,
+            last_event_detail=previous.last_event_detail
+            if previous is not None
+            else None,
             updated_at=utc_now(),
         )
         return replace(snapshot, last_error=None)

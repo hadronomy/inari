@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from dataclasses import replace
 from datetime import timedelta
 
 from ..config import AgentSettings
@@ -17,8 +16,15 @@ from ..gateway.models import (
     UpstreamCertificateMode,
 )
 from ..runtime.models import utc_now
-from .certificate_provisioners import ClientCertificateProvisioner, ManagedCertificateProvisioningError
-from .certificates import CertificateLifecycleService, ManagedCertificate, ManagedCertificateInspection
+from .certificate_provisioners import (
+    ClientCertificateProvisioner,
+    ManagedCertificateProvisioningError,
+)
+from .certificates import (
+    CertificateLifecycleService,
+    ManagedCertificate,
+    ManagedCertificateInspection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +69,10 @@ class ManagedCertificateLifecycleManager:
         enrollment: GatewayEnrollmentRecord | None = None,
         trigger: str = "manual",
     ) -> ManagedCertificate | None:
-        if self.settings.upstream_certificate_mode is not UpstreamCertificateMode.STEP_CA:
+        if (
+            self.settings.upstream_certificate_mode
+            is not UpstreamCertificateMode.STEP_CA
+        ):
             inspection = self.certificate_service.inspect_current_certificate()
             status = self._status_from_observation(
                 inspection,
@@ -75,7 +84,9 @@ class ManagedCertificateLifecycleManager:
             return inspection.certificate
 
         async with self._lock:
-            return await self._ensure_current_locked(enrollment=enrollment, trigger=trigger)
+            return await self._ensure_current_locked(
+                enrollment=enrollment, trigger=trigger
+            )
 
     async def run_forever(self) -> None:
         while True:
@@ -112,7 +123,9 @@ class ManagedCertificateLifecycleManager:
                     "Managed client certificate is invalid during %s; clearing local certificate and re-bootstrapping.",
                     trigger,
                 )
-                self.certificate_service.clear_managed_certificate(keep_certificate_authority=True)
+                self.certificate_service.clear_managed_certificate(
+                    keep_certificate_authority=True
+                )
                 inspection = self.certificate_service.inspect_current_certificate()
             else:
                 self._status = self._status_from_observation(
@@ -153,12 +166,22 @@ class ManagedCertificateLifecycleManager:
                 bootstrap_pending=bootstrap_pending,
                 last_checked_at=now,
                 last_success_at=self._status.last_success_at or now,
-                next_action_at=_renewal_deadline(current, self.settings.step_ca_certificate_renewal_skew_seconds),
+                next_action_at=_renewal_deadline(
+                    current, self.settings.step_ca_certificate_renewal_skew_seconds
+                ),
             )
             return current
 
-        operation = ManagedCertificateOperation.ISSUE if current is None else ManagedCertificateOperation.RENEW
-        active_state = ManagedCertificateState.BOOTSTRAPPING if current is None else ManagedCertificateState.RENEWING
+        operation = (
+            ManagedCertificateOperation.ISSUE
+            if current is None
+            else ManagedCertificateOperation.RENEW
+        )
+        active_state = (
+            ManagedCertificateState.BOOTSTRAPPING
+            if current is None
+            else ManagedCertificateState.RENEWING
+        )
         detail = (
             "Bootstrapping a managed client certificate from step-ca."
             if current is None
@@ -236,7 +259,9 @@ class ManagedCertificateLifecycleManager:
             last_checked_at=now,
             last_operation_at=now,
             last_success_at=now,
-            next_action_at=_renewal_deadline(certificate, self.settings.step_ca_certificate_renewal_skew_seconds),
+            next_action_at=_renewal_deadline(
+                certificate, self.settings.step_ca_certificate_renewal_skew_seconds
+            ),
             successful_issue_count=self._status.successful_issue_count
             + (1 if operation is ManagedCertificateOperation.ISSUE else 0),
             successful_renewal_count=self._status.successful_renewal_count
@@ -253,7 +278,9 @@ class ManagedCertificateLifecycleManager:
         error: ManagedCertificateProvisioningError,
     ) -> ManagedCertificateStatus:
         retry_delay = self._backoff.next_delay() if error.retryable else None
-        next_action_at = now + timedelta(seconds=retry_delay) if retry_delay is not None else now
+        next_action_at = (
+            now + timedelta(seconds=retry_delay) if retry_delay is not None else now
+        )
         current = inspection.certificate
         expired = current is not None and _is_expired(current)
         state = ManagedCertificateState.RENEWAL_FAILED
@@ -305,16 +332,28 @@ class ManagedCertificateLifecycleManager:
         current = inspection.certificate
         return ManagedCertificateStatus(
             state=state,
-            operation=operation if operation is not None else ManagedCertificateOperation.IDLE,
+            operation=operation
+            if operation is not None
+            else ManagedCertificateOperation.IDLE,
             failure_reason=(
-                failure_reason if failure_reason is not None else ManagedCertificateFailureReason.NONE
+                failure_reason
+                if failure_reason is not None
+                else ManagedCertificateFailureReason.NONE
             ),
             detail=detail,
             current_expires_at=current.not_valid_after if current is not None else None,
-            last_checked_at=last_checked_at if last_checked_at is not None else self._status.last_checked_at,
-            last_operation_at=last_operation_at if last_operation_at is not None else self._status.last_operation_at,
-            last_success_at=last_success_at if last_success_at is not None else self._status.last_success_at,
-            last_failure_at=last_failure_at if last_failure_at is not None else self._status.last_failure_at,
+            last_checked_at=last_checked_at
+            if last_checked_at is not None
+            else self._status.last_checked_at,
+            last_operation_at=last_operation_at
+            if last_operation_at is not None
+            else self._status.last_operation_at,
+            last_success_at=last_success_at
+            if last_success_at is not None
+            else self._status.last_success_at,
+            last_failure_at=last_failure_at
+            if last_failure_at is not None
+            else self._status.last_failure_at,
             next_action_at=next_action_at,
             retry_delay_seconds=retry_delay_seconds,
             certificate_present=current is not None,
@@ -323,21 +362,29 @@ class ManagedCertificateLifecycleManager:
             issuer=current.issuer if current is not None else None,
             serial_number=current.serial_number if current is not None else None,
             successful_issue_count=(
-                successful_issue_count if successful_issue_count is not None else self._status.successful_issue_count
+                successful_issue_count
+                if successful_issue_count is not None
+                else self._status.successful_issue_count
             ),
-            failed_issue_count=failed_issue_count if failed_issue_count is not None else self._status.failed_issue_count,
+            failed_issue_count=failed_issue_count
+            if failed_issue_count is not None
+            else self._status.failed_issue_count,
             successful_renewal_count=(
                 successful_renewal_count
                 if successful_renewal_count is not None
                 else self._status.successful_renewal_count
             ),
             failed_renewal_count=(
-                failed_renewal_count if failed_renewal_count is not None else self._status.failed_renewal_count
+                failed_renewal_count
+                if failed_renewal_count is not None
+                else self._status.failed_renewal_count
             ),
         )
 
     def _bootstrap_pending(self, record: GatewayEnrollmentRecord | None) -> bool:
-        return bool(record and record.certificate_bootstrap and record.certificate_bootstrap.ott)
+        return bool(
+            record and record.certificate_bootstrap and record.certificate_bootstrap.ott
+        )
 
     def _sleep_seconds(self) -> float:
         base_delay = max(5.0, self.settings.step_ca_lifecycle_poll_interval_seconds)

@@ -57,12 +57,18 @@ class GatewayEnrollmentService:
 
     async def ensure_enrolled(self) -> GatewayEnrollmentRecord | None:
         existing = self.load_enrollment()
-        if existing is not None and existing.auth_mode is UpstreamAuthMode.CONTROLLER and existing.access_token is None:
+        if (
+            existing is not None
+            and existing.auth_mode is UpstreamAuthMode.CONTROLLER
+            and existing.access_token is None
+        ):
             existing = None
         if existing is not None and not self._should_refresh(existing):
             return existing
-        if existing is not None and existing.refresh_url and (
-            existing.refresh_token or existing.access_token
+        if (
+            existing is not None
+            and existing.refresh_url
+            and (existing.refresh_token or existing.access_token)
         ):
             refreshed = await self._refresh(existing)
             if refreshed is not None:
@@ -87,19 +93,38 @@ class GatewayEnrollmentService:
             refresh_token=refresh_token,
             enrolled_at=_parse_datetime(payload.get("enrolled_at")) or _utc_now(),
             expires_at=_parse_datetime(payload.get("expires_at")),
-            refresh_url=str(payload["refresh_url"]) if payload.get("refresh_url") else None,
-            status_url=str(payload["status_url"]) if payload.get("status_url") else None,
-            events_url=str(payload["events_url"]) if payload.get("events_url") else None,
+            refresh_url=str(payload["refresh_url"])
+            if payload.get("refresh_url")
+            else None,
+            status_url=str(payload["status_url"])
+            if payload.get("status_url")
+            else None,
+            events_url=str(payload["events_url"])
+            if payload.get("events_url")
+            else None,
             granted_scopes=tuple(_parse_scope_values(payload.get("granted_scopes"))),
-            protocol_version=str(payload["protocol_version"]) if payload.get("protocol_version") else None,
-            controller_name=str(payload["controller_name"]) if payload.get("controller_name") else None,
+            protocol_version=str(payload["protocol_version"])
+            if payload.get("protocol_version")
+            else None,
+            controller_name=str(payload["controller_name"])
+            if payload.get("controller_name")
+            else None,
             controller_instance_id=(
-                str(payload["controller_instance_id"]) if payload.get("controller_instance_id") else None
+                str(payload["controller_instance_id"])
+                if payload.get("controller_instance_id")
+                else None
             ),
-            certificate_expires_at=_parse_datetime(payload.get("certificate_expires_at")),
-            auth_mode=UpstreamAuthMode(str(payload.get("auth_mode") or self.settings.upstream_auth_mode.value)),
+            certificate_expires_at=_parse_datetime(
+                payload.get("certificate_expires_at")
+            ),
+            auth_mode=UpstreamAuthMode(
+                str(payload.get("auth_mode") or self.settings.upstream_auth_mode.value)
+            ),
             certificate_mode=UpstreamCertificateMode(
-                str(payload.get("certificate_mode") or self.settings.upstream_certificate_mode.value)
+                str(
+                    payload.get("certificate_mode")
+                    or self.settings.upstream_certificate_mode.value
+                )
             ),
             edge_provider=self.settings.upstream_edge_provider,
             mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
@@ -140,7 +165,9 @@ class GatewayEnrollmentService:
             body = EnrollmentResponsePayload.model_validate(response.json())
         return self._persist_record(body, fallback_agent_id=identity.agent_id)
 
-    async def _refresh(self, record: GatewayEnrollmentRecord) -> GatewayEnrollmentRecord | None:
+    async def _refresh(
+        self, record: GatewayEnrollmentRecord
+    ) -> GatewayEnrollmentRecord | None:
         if not record.refresh_url:
             return None
         refresh_token = record.refresh_token or record.access_token
@@ -159,7 +186,10 @@ class GatewayEnrollmentService:
                 return None
             response.raise_for_status()
             body = EnrollmentResponsePayload.model_validate(response.json())
-        return self._persist_record(body, fallback_agent_id=self.identity_service.get_or_create_identity().agent_id)
+        return self._persist_record(
+            body,
+            fallback_agent_id=self.identity_service.get_or_create_identity().agent_id,
+        )
 
     def _persist_record(
         self,
@@ -167,13 +197,19 @@ class GatewayEnrollmentService:
         *,
         fallback_agent_id: str,
     ) -> GatewayEnrollmentRecord:
-        if self.settings.upstream_auth_mode is UpstreamAuthMode.CONTROLLER and not payload.access_token:
+        if (
+            self.settings.upstream_auth_mode is UpstreamAuthMode.CONTROLLER
+            and not payload.access_token
+        ):
             raise AgentError(
                 "UPSTREAM_ACCESS_TOKEN_MISSING",
                 "The controller did not return an access token for controller-managed upstream auth.",
                 status_code=502,
             )
-        if self.settings.upstream_certificate_mode is UpstreamCertificateMode.CONTROLLER:
+        if (
+            self.settings.upstream_certificate_mode
+            is UpstreamCertificateMode.CONTROLLER
+        ):
             self.certificate_service.install(
                 certificate_pem=payload.certificate_pem,
                 ca_certificate_pem=payload.ca_certificate_pem,
@@ -181,7 +217,8 @@ class GatewayEnrollmentService:
         certificate = self.certificate_service.current_certificate()
         bootstrap = (
             _to_step_ca_bootstrap(payload.certificate_bootstrap)
-            if self.settings.upstream_certificate_mode is UpstreamCertificateMode.STEP_CA
+            if self.settings.upstream_certificate_mode
+            is UpstreamCertificateMode.STEP_CA
             else None
         )
         record = GatewayEnrollmentRecord(
@@ -196,7 +233,9 @@ class GatewayEnrollmentService:
             protocol_version=payload.protocol_version,
             controller_name=payload.controller_name,
             controller_instance_id=payload.controller_instance_id,
-            certificate_expires_at=certificate.not_valid_after if certificate is not None else None,
+            certificate_expires_at=certificate.not_valid_after
+            if certificate is not None
+            else None,
             auth_mode=self.settings.upstream_auth_mode,
             certificate_mode=self.settings.upstream_certificate_mode,
             edge_provider=self.settings.upstream_edge_provider,
@@ -214,9 +253,16 @@ class GatewayEnrollmentService:
         clear_bootstrap_ott: bool,
     ) -> GatewayEnrollmentRecord:
         bootstrap = record.certificate_bootstrap
-        if clear_bootstrap_ott and certificate is not None and bootstrap is not None and bootstrap.ott is not None:
+        if (
+            clear_bootstrap_ott
+            and certificate is not None
+            and bootstrap is not None
+            and bootstrap.ott is not None
+        ):
             bootstrap = replace(bootstrap, ott=None)
-        certificate_expires_at = certificate.not_valid_after if certificate is not None else None
+        certificate_expires_at = (
+            certificate.not_valid_after if certificate is not None else None
+        )
         updated = replace(
             record,
             certificate_expires_at=certificate_expires_at,
@@ -231,11 +277,18 @@ class GatewayEnrollmentService:
         else:
             self.secret_store.delete_secret(UPSTREAM_ACCESS_TOKEN_KEY)
         if record.refresh_token:
-            self.secret_store.set_secret(UPSTREAM_REFRESH_TOKEN_KEY, record.refresh_token)
+            self.secret_store.set_secret(
+                UPSTREAM_REFRESH_TOKEN_KEY, record.refresh_token
+            )
         else:
             self.secret_store.delete_secret(UPSTREAM_REFRESH_TOKEN_KEY)
-        if record.certificate_bootstrap is not None and record.certificate_bootstrap.ott:
-            self.secret_store.set_secret(UPSTREAM_STEP_CA_OTT_KEY, record.certificate_bootstrap.ott)
+        if (
+            record.certificate_bootstrap is not None
+            and record.certificate_bootstrap.ott
+        ):
+            self.secret_store.set_secret(
+                UPSTREAM_STEP_CA_OTT_KEY, record.certificate_bootstrap.ott
+            )
         else:
             self.secret_store.delete_secret(UPSTREAM_STEP_CA_OTT_KEY)
         self._save_enrollment(record)
@@ -248,21 +301,25 @@ class GatewayEnrollmentService:
         bootstrap_payload = raw_payload.get("certificate_bootstrap")
         if isinstance(bootstrap_payload, dict):
             bootstrap_payload.pop("ott", None)
-        payload = {
-            key: _serialize_value(value)
-            for key, value in raw_payload.items()
-        }
-        self.metadata_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        payload = {key: _serialize_value(value) for key, value in raw_payload.items()}
+        self.metadata_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     def _should_refresh(self, record: GatewayEnrollmentRecord) -> bool:
-        if self.settings.upstream_auth_mode is not UpstreamAuthMode.CONTROLLER and record.refresh_url is None:
+        if (
+            self.settings.upstream_auth_mode is not UpstreamAuthMode.CONTROLLER
+            and record.refresh_url is None
+        ):
             return False
         if record.expires_at is None:
             return False
         remaining = (record.expires_at - _utc_now()).total_seconds()
         return remaining <= self.settings.gateway_token_refresh_skew_seconds
 
-    async def upstream_headers(self, enrollment: GatewayEnrollmentRecord | None) -> dict[str, str]:
+    async def upstream_headers(
+        self, enrollment: GatewayEnrollmentRecord | None
+    ) -> dict[str, str]:
         headers = await self.auth_provider.headers_for_upstream(enrollment)
         if headers:
             return headers
@@ -270,7 +327,9 @@ class GatewayEnrollmentService:
             return {"Authorization": f"Bearer {enrollment.access_token}"}
         return {}
 
-    async def handle_auth_failure(self, enrollment: GatewayEnrollmentRecord | None) -> None:
+    async def handle_auth_failure(
+        self, enrollment: GatewayEnrollmentRecord | None
+    ) -> None:
         await self.auth_provider.invalidate()
         if self.settings.upstream_auth_mode is UpstreamAuthMode.CONTROLLER:
             self.clear_enrollment()
@@ -293,7 +352,11 @@ class GatewayEnrollmentService:
         if self.settings.upstream_events_url:
             return self.settings.upstream_events_url.format(agent_id=agent_id)
         if self.settings.upstream_base_url:
-            scheme = "wss" if self.settings.upstream_base_url.startswith("https://") else "ws"
+            scheme = (
+                "wss"
+                if self.settings.upstream_base_url.startswith("https://")
+                else "ws"
+            )
             authority = self.settings.upstream_base_url.split("://", 1)[1]
             return f"{scheme}://{authority}/api/iot-agent/agents/{agent_id}/events"
         return None
@@ -308,9 +371,11 @@ class GatewayEnrollmentService:
         provider_headers = await self.auth_provider.headers_for_enrollment()
         if provider_headers:
             return provider_headers
-        enrollment_token = self.settings.upstream_enrollment_token or self.secret_store.get_secret(
-            UPSTREAM_ENROLLMENT_TOKEN_KEY
-        ) or self.secret_store.get_secret(LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY)
+        enrollment_token = (
+            self.settings.upstream_enrollment_token
+            or self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
+            or self.secret_store.get_secret(LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY)
+        )
         if enrollment_token is None:
             return {}
         return {"Authorization": f"Bearer {enrollment_token}"}
@@ -354,7 +419,9 @@ def _parse_certificate_bootstrap(
 ) -> StepCaOttBootstrap | None:
     if not isinstance(value, dict):
         return None
-    mode = CertificateBootstrapMode(str(value.get("mode") or CertificateBootstrapMode.STEP_CA_OTT.value))
+    mode = CertificateBootstrapMode(
+        str(value.get("mode") or CertificateBootstrapMode.STEP_CA_OTT.value)
+    )
     if mode is not CertificateBootstrapMode.STEP_CA_OTT:
         raise AgentError(
             "UNSUPPORTED_CERTIFICATE_BOOTSTRAP",
@@ -371,7 +438,9 @@ def _parse_certificate_bootstrap(
         expires_at=_parse_datetime(value.get("expires_at")),
         subject=str(value["subject"]) if value.get("subject") else None,
         authorized_sans=tuple(str(item) for item in value.get("authorized_sans") or ()),
-        requires_mutual_tls_after_issuance=bool(value.get("requires_mutual_tls_after_issuance", False)),
+        requires_mutual_tls_after_issuance=bool(
+            value.get("requires_mutual_tls_after_issuance", False)
+        ),
     )
 
 

@@ -6,7 +6,12 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from .models import MutualTlsMode, UpstreamAuthMode, UpstreamCertificateMode, UpstreamEdgeProvider
+from .models import (
+    MutualTlsMode,
+    UpstreamAuthMode,
+    UpstreamCertificateMode,
+    UpstreamEdgeProvider,
+)
 from ..security.models import AccessScope, GatewayExposure, GatewayMode
 from ..version import GATEWAY_PROTOCOL_VERSION, SUPPORTED_GATEWAY_PROTOCOL_VERSIONS
 
@@ -122,7 +127,9 @@ class CertificateBootstrapPayload(GatewayProtocolModel):
 
 
 class EnrollmentRequestPayload(GatewayProtocolModel):
-    protocol: GatewayProtocolDescriptor = Field(default_factory=GatewayProtocolDescriptor)
+    protocol: GatewayProtocolDescriptor = Field(
+        default_factory=GatewayProtocolDescriptor
+    )
     agent_id: str
     key_id: str
     public_jwk: dict[str, Any]
@@ -149,7 +156,9 @@ class EnrollmentResponsePayload(GatewayProtocolModel):
 
 
 class ControllerHelloMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_HELLO] = UpstreamControlMessageType.CONTROLLER_HELLO
+    type: Literal[UpstreamControlMessageType.CONTROLLER_HELLO] = (
+        UpstreamControlMessageType.CONTROLLER_HELLO
+    )
     message_id: str
     protocol_version: str
     controller_name: str | None = None
@@ -157,13 +166,17 @@ class ControllerHelloMessage(GatewayProtocolModel):
 
 
 class ControllerAcknowledgeMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_ACK] = UpstreamControlMessageType.CONTROLLER_ACK
+    type: Literal[UpstreamControlMessageType.CONTROLLER_ACK] = (
+        UpstreamControlMessageType.CONTROLLER_ACK
+    )
     message_id: str
     acknowledged_message_id: str
 
 
 class ControllerPingMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_PING] = UpstreamControlMessageType.CONTROLLER_PING
+    type: Literal[UpstreamControlMessageType.CONTROLLER_PING] = (
+        UpstreamControlMessageType.CONTROLLER_PING
+    )
     message_id: str
     detail: str | None = None
 
@@ -189,7 +202,9 @@ class ControllerExecuteDeviceCommandMessage(GatewayProtocolModel):
 
 
 class ControllerCancelJobMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_CANCEL_JOB] = UpstreamControlMessageType.CONTROLLER_CANCEL_JOB
+    type: Literal[UpstreamControlMessageType.CONTROLLER_CANCEL_JOB] = (
+        UpstreamControlMessageType.CONTROLLER_CANCEL_JOB
+    )
     message_id: str
     command_id: str
     issued_at: datetime | None = None
@@ -210,27 +225,37 @@ CONTROLLER_STREAM_ADAPTER = TypeAdapter(ControllerStreamMessage)
 
 
 class AgentHelloMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_HELLO] = UpstreamControlMessageType.AGENT_HELLO
+    type: Literal[UpstreamControlMessageType.AGENT_HELLO] = (
+        UpstreamControlMessageType.AGENT_HELLO
+    )
     message_id: str
-    protocol: GatewayProtocolDescriptor = Field(default_factory=GatewayProtocolDescriptor)
+    protocol: GatewayProtocolDescriptor = Field(
+        default_factory=GatewayProtocolDescriptor
+    )
     snapshot: GatewaySnapshotPayload
 
 
 class AgentAcknowledgeMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_ACK] = UpstreamControlMessageType.AGENT_ACK
+    type: Literal[UpstreamControlMessageType.AGENT_ACK] = (
+        UpstreamControlMessageType.AGENT_ACK
+    )
     message_id: str
     acknowledged_message_id: str
 
 
 class AgentPongMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_PONG] = UpstreamControlMessageType.AGENT_PONG
+    type: Literal[UpstreamControlMessageType.AGENT_PONG] = (
+        UpstreamControlMessageType.AGENT_PONG
+    )
     message_id: str
     acknowledged_message_id: str
     detail: str | None = None
 
 
 class AgentCommandAcceptedMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_COMMAND_ACCEPTED] = UpstreamControlMessageType.AGENT_COMMAND_ACCEPTED
+    type: Literal[UpstreamControlMessageType.AGENT_COMMAND_ACCEPTED] = (
+        UpstreamControlMessageType.AGENT_COMMAND_ACCEPTED
+    )
     message_id: str
     command_id: str
     accepted_at: datetime
@@ -239,7 +264,9 @@ class AgentCommandAcceptedMessage(GatewayProtocolModel):
 
 
 class AgentCommandRejectedMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_COMMAND_REJECTED] = UpstreamControlMessageType.AGENT_COMMAND_REJECTED
+    type: Literal[UpstreamControlMessageType.AGENT_COMMAND_REJECTED] = (
+        UpstreamControlMessageType.AGENT_COMMAND_REJECTED
+    )
     message_id: str
     command_id: str
     rejected_at: datetime
@@ -248,7 +275,9 @@ class AgentCommandRejectedMessage(GatewayProtocolModel):
 
 
 class AgentRuntimeEventMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_RUNTIME_EVENT] = UpstreamControlMessageType.AGENT_RUNTIME_EVENT
+    type: Literal[UpstreamControlMessageType.AGENT_RUNTIME_EVENT] = (
+        UpstreamControlMessageType.AGENT_RUNTIME_EVENT
+    )
     message_id: str
     occurred_at: datetime
     event: GatewayRuntimeEventPayload
@@ -257,13 +286,17 @@ class AgentRuntimeEventMessage(GatewayProtocolModel):
 
 
 class AgentStatusSnapshotMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_STATUS_SNAPSHOT] = UpstreamControlMessageType.AGENT_STATUS_SNAPSHOT
+    type: Literal[UpstreamControlMessageType.AGENT_STATUS_SNAPSHOT] = (
+        UpstreamControlMessageType.AGENT_STATUS_SNAPSHOT
+    )
     message_id: str
     snapshot: GatewaySnapshotPayload
 
 
 class AgentErrorMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_ERROR] = UpstreamControlMessageType.AGENT_ERROR
+    type: Literal[UpstreamControlMessageType.AGENT_ERROR] = (
+        UpstreamControlMessageType.AGENT_ERROR
+    )
     message_id: str
     occurred_at: datetime
     code: str

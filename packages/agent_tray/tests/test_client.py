@@ -58,7 +58,9 @@ def test_client_fetches_local_token_before_calling_protected_status() -> None:
         )
         client = AgentApiClient(
             settings,
-            http_client_factory=lambda: httpx.Client(base_url=settings.agent_api_base_url),
+            http_client_factory=lambda: httpx.Client(
+                base_url=settings.agent_api_base_url
+            ),
             websocket_connect=lambda *args, **kwargs: FakeWebSocketConnection(kwargs),
         )
 
@@ -67,7 +69,9 @@ def test_client_fetches_local_token_before_calling_protected_status() -> None:
     assert status.service.version == API_VERSION
     assert token_route.called
     assert status_route.called
-    assert status_route.calls.last.request.headers["Authorization"] == "Bearer local-token"
+    assert (
+        status_route.calls.last.request.headers["Authorization"] == "Bearer local-token"
+    )
 
 
 def test_client_reuses_cached_token_for_websocket_stream() -> None:
@@ -94,7 +98,9 @@ def test_client_reuses_cached_token_for_websocket_stream() -> None:
         )
         client = AgentApiClient(
             settings,
-            http_client_factory=lambda: httpx.Client(base_url=settings.agent_api_base_url),
+            http_client_factory=lambda: httpx.Client(
+                base_url=settings.agent_api_base_url
+            ),
             websocket_connect=websocket_connect,
         )
 

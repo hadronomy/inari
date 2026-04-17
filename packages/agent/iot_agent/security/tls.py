@@ -22,12 +22,17 @@ class TlsContextFactory:
         cafile = _path_string(self.settings.tls_ca_path)
         if cafile is not None:
             context.load_verify_locations(cafile=cafile)
-        if self.certificate_service is not None and self.settings.upstream_trust_client_ca:
+        if (
+            self.certificate_service is not None
+            and self.settings.upstream_trust_client_ca
+        ):
             _, _, managed_ca_path = self.certificate_service.current_cert_chain()
             if managed_ca_path is not None:
                 context.load_verify_locations(cafile=managed_ca_path)
         if self.certificate_service is not None:
-            certificate_path, key_path, _ = self.certificate_service.current_cert_chain()
+            certificate_path, key_path, _ = (
+                self.certificate_service.current_cert_chain()
+            )
             if certificate_path is not None and key_path is not None:
                 context.load_cert_chain(certfile=certificate_path, keyfile=key_path)
         return context

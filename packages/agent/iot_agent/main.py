@@ -31,8 +31,12 @@ async def lifespan(app: FastAPI):
         await supervisor.stop()
 
 
-def create_app(settings: AgentSettings | None = None, *, container: AgentContainer | None = None) -> FastAPI:
-    app_container = container or (build_container(settings) if settings is not None else get_default_container())
+def create_app(
+    settings: AgentSettings | None = None, *, container: AgentContainer | None = None
+) -> FastAPI:
+    app_container = container or (
+        build_container(settings) if settings is not None else get_default_container()
+    )
     app_settings = app_container.settings
     if app_container.security_policy_service is not None:
         app_container.security_policy_service.validate_startup()
@@ -52,7 +56,9 @@ def create_app(settings: AgentSettings | None = None, *, container: AgentContain
         allow_headers=["*"],
     )
     if app_container.security_policy_service is not None:
-        install_security_middleware(app, policy_service=app_container.security_policy_service)
+        install_security_middleware(
+            app, policy_service=app_container.security_policy_service
+        )
     app.include_router(router)
 
     @app.get("/docs", include_in_schema=False)
@@ -102,7 +108,9 @@ def create_app(settings: AgentSettings | None = None, *, container: AgentContain
     return app
 
 
-def _validation_error_items(exc: RequestValidationError) -> tuple[ErrorItemPayload, ...]:
+def _validation_error_items(
+    exc: RequestValidationError,
+) -> tuple[ErrorItemPayload, ...]:
     return tuple(
         ErrorItemPayload(
             code=str(item.get("type", "validation_error")),

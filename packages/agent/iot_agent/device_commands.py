@@ -49,11 +49,15 @@ class DeviceCommand:
         for field in fields(cls):
             if field.name in payload:
                 raw_value = payload[field.name]
-                kwargs[field.name] = _decode_value(hints.get(field.name, Any), raw_value)
+                kwargs[field.name] = _decode_value(
+                    hints.get(field.name, Any), raw_value
+                )
                 continue
             if field.default is not MISSING or field.default_factory is not MISSING:
                 continue
-            raise ValueError(f"Device command payload is missing the '{field.name}' field.")
+            raise ValueError(
+                f"Device command payload is missing the '{field.name}' field."
+            )
         return cls(**kwargs)
 
 
@@ -94,7 +98,9 @@ class CutPaper(DeviceCommand):
     kind: ClassVar[DeviceCommandKind] = DeviceCommandKind.CUT_PAPER
 
 
-AnyDeviceCommand: TypeAlias = OpenCashDrawer | PrintTestPage | FeedLines | FeedDots | CutPaper
+AnyDeviceCommand: TypeAlias = (
+    OpenCashDrawer | PrintTestPage | FeedLines | FeedDots | CutPaper
+)
 
 
 def _encode_value(value: Any) -> Any:

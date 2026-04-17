@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from .migrations import DatabaseMigrationError, DatabaseMigrationResult, DatabaseMigrator
+from .migrations import (
+    DatabaseMigrationError,
+    DatabaseMigrationResult,
+    DatabaseMigrator,
+)
 from .schema import (
     create_database_engine,
     device_events_table,

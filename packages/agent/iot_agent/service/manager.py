@@ -8,7 +8,14 @@ from typing import Protocol
 
 from ..config import AgentSettings, load_settings, write_default_config_file
 from ..config_paths import resolve_default_path_bundle
-from .models import DEFAULT_SERVICE_IDENTITY, DEFAULT_SERVICE_SCOPE, ServiceDefinition, ServiceIdentity, ServiceScope, ServiceStatus
+from .models import (
+    DEFAULT_SERVICE_IDENTITY,
+    DEFAULT_SERVICE_SCOPE,
+    ServiceDefinition,
+    ServiceIdentity,
+    ServiceScope,
+    ServiceStatus,
+)
 
 
 class ServiceManager(Protocol):
@@ -63,7 +70,9 @@ def build_service_context(
     identity: ServiceIdentity = DEFAULT_SERVICE_IDENTITY,
     platform_system: str | None = None,
 ) -> ServiceContext:
-    resolved_config_path = resolve_service_config_path(config_path, platform_system=platform_system)
+    resolved_config_path = resolve_service_config_path(
+        config_path, platform_system=platform_system
+    )
     working_directory = (settings.data_dir or resolved_config_path.parent).resolve()
     return ServiceContext(
         settings=settings,
@@ -75,11 +84,15 @@ def build_service_context(
     )
 
 
-def load_service_settings(config_path: Path | str | None = None) -> tuple[AgentSettings, Path]:
+def load_service_settings(
+    config_path: Path | str | None = None,
+) -> tuple[AgentSettings, Path]:
     resolved_config_path = resolve_service_config_path(config_path)
     if resolved_config_path.exists():
         return load_settings(config_path=resolved_config_path), resolved_config_path
-    return AgentSettings.model_validate({"path_profile": "production"}), resolved_config_path
+    return AgentSettings.model_validate(
+        {"path_profile": "production"}
+    ), resolved_config_path
 
 
 def ensure_service_config_file(config_path: Path) -> bool:
@@ -98,7 +111,7 @@ def validate_service_config_file(config_path: Path) -> None:
     if config_path.exists():
         return
     raise RuntimeError(
-        f"Config file not found at {config_path}. Run `iot-agent config write-default --config \"{config_path}\"` first."
+        f'Config file not found at {config_path}. Run `iot-agent config write-default --config "{config_path}"` first.'
     )
 
 

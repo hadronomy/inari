@@ -44,7 +44,9 @@ class EscPosImageReceiptRenderer:
         except Exception as exc:
             message = "Could not decode receipt image."
             if mime_type:
-                message = f"Could not decode receipt image with mime type {mime_type!r}."
+                message = (
+                    f"Could not decode receipt image with mime type {mime_type!r}."
+                )
             raise PrinterServiceError("INVALID_RECEIPT_IMAGE", message) from exc
 
     def _prepare_image(self, image: Image.Image) -> Image.Image:
@@ -59,7 +61,9 @@ class EscPosImageReceiptRenderer:
 
         ratio = self.config.max_width / rgb.width
         resized_height = max(1, int(rgb.height * ratio))
-        return rgb.resize((self.config.max_width, resized_height), Image.Resampling.LANCZOS)
+        return rgb.resize(
+            (self.config.max_width, resized_height), Image.Resampling.LANCZOS
+        )
 
     def _to_monochrome(self, image: Image.Image) -> Image.Image:
         grayscale = image.convert("L")
@@ -72,7 +76,10 @@ class EscPosImageReceiptRenderer:
     @staticmethod
     def _encode_raster(image: Image.Image) -> bytes:
         if image.mode != "1":
-            raise PrinterServiceError("INVALID_RECEIPT_IMAGE", "Receipt image must be converted to 1-bit mode.")
+            raise PrinterServiceError(
+                "INVALID_RECEIPT_IMAGE",
+                "Receipt image must be converted to 1-bit mode.",
+            )
 
         width, height = image.size
         padded_width = ((width + 7) // 8) * 8

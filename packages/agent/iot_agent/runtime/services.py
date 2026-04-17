@@ -2,8 +2,21 @@ from __future__ import annotations
 
 from .discovery import DiscoveryCoordinator
 from .events import EventHub
-from .models import DeviceRecord, JobEventRecord, JobKind, JobRecord, JobState, RuntimeEvent
-from .operations import DeviceTargetRef, QueuedDeviceCommandOperation, QueuedPrintOperation, serialize_device_command_operation, serialize_print_operation
+from .models import (
+    DeviceRecord,
+    JobEventRecord,
+    JobKind,
+    JobRecord,
+    JobState,
+    RuntimeEvent,
+)
+from .operations import (
+    DeviceTargetRef,
+    QueuedDeviceCommandOperation,
+    QueuedPrintOperation,
+    serialize_device_command_operation,
+    serialize_print_operation,
+)
 from .repositories import DeviceRepository, JobRepository
 from ..config import AgentSettings
 from ..exceptions import AgentError
@@ -28,7 +41,9 @@ class DeviceCatalog:
     def get_device(self, device_id: str) -> DeviceRecord | None:
         return self.device_repository.get(device_id)
 
-    def list_device_events(self, device_id: str, *, limit: int = 50) -> tuple[RuntimeEvent, ...]:
+    def list_device_events(
+        self, device_id: str, *, limit: int = 50
+    ) -> tuple[RuntimeEvent, ...]:
         return self.device_repository.list_events(device_id, limit=limit)
 
     async def refresh(self) -> tuple[DeviceRecord, ...]:
@@ -41,7 +56,11 @@ class DeviceCatalog:
                 await self.refresh()
                 device = self.device_repository.get(target.device_id)
             if device is None:
-                raise AgentError("DEVICE_NOT_FOUND", f"Device {target.device_id!r} was not found.", status_code=404)
+                raise AgentError(
+                    "DEVICE_NOT_FOUND",
+                    f"Device {target.device_id!r} was not found.",
+                    status_code=404,
+                )
             return device
 
         selected = self.printer_service.resolve_printer(target.printer_name)
@@ -77,7 +96,9 @@ class JobService:
 
     async def enqueue_print(self, operation: QueuedPrintOperation) -> JobRecord:
         device = await self.device_catalog.resolve_target(operation.target)
-        canonical = operation.with_resolved_printer(device_id=device.id, printer_name=device.name)
+        canonical = operation.with_resolved_printer(
+            device_id=device.id, printer_name=device.name
+        )
         job = self.job_repository.create(
             kind=JobKind.PRINT,
             operation="print_job",
@@ -91,9 +112,13 @@ class JobService:
         await self.publish_event("job.queued", job)
         return job
 
-    async def enqueue_command(self, operation: QueuedDeviceCommandOperation) -> JobRecord:
+    async def enqueue_command(
+        self, operation: QueuedDeviceCommandOperation
+    ) -> JobRecord:
         device = await self.device_catalog.resolve_target(operation.target)
-        canonical = operation.with_resolved_printer(device_id=device.id, printer_name=device.name)
+        canonical = operation.with_resolved_printer(
+            device_id=device.id, printer_name=device.name
+        )
         job = self.job_repository.create(
             kind=JobKind.COMMAND,
             operation=canonical.command.kind.value,
@@ -107,7 +132,9 @@ class JobService:
         await self.publish_event("job.queued", job)
         return job
 
-    def list_jobs(self, *, state: JobState | None = None, limit: int = 100) -> tuple[JobRecord, ...]:
+    def list_jobs(
+        self, *, state: JobState | None = None, limit: int = 100
+    ) -> tuple[JobRecord, ...]:
         return self.job_repository.list(state=state, limit=limit)
 
     def get_job(self, job_id: str) -> JobRecord | None:
@@ -127,7 +154,9 @@ class JobService:
         if job is None:
             current = self.job_repository.get(job_id)
             if current is None:
-                raise AgentError("JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404)
+                raise AgentError(
+                    "JOB_NOT_FOUND", f"Job {job_id!r} was not found.", status_code=404
+                )
             raise AgentError(
                 "JOB_NOT_CANCELLABLE",
                 f"Job {job_id!r} can no longer be cancelled once it is running or finished.",

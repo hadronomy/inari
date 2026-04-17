@@ -7,12 +7,20 @@ import platform
 from .config import AgentSettings, get_settings
 from .db import DatabaseMigrator
 from .drivers import DriverRegistry
-from .drivers.printers import CupsPrinterDriver, RawSocketPrinterDriver, WindowsPrinterDriver, WindowsSpooler
+from .drivers.printers import (
+    CupsPrinterDriver,
+    RawSocketPrinterDriver,
+    WindowsPrinterDriver,
+    WindowsSpooler,
+)
 from .gateway.auth_providers import build_upstream_auth_provider
 from .gateway.connector import GatewayConnector
 from .gateway.enrollment import GatewayEnrollmentService
 from .gateway.repositories import GatewayRepository
-from .gateway.runtime_bridge import GatewayCommandDispatcher, GatewayRuntimeEventForwarder
+from .gateway.runtime_bridge import (
+    GatewayCommandDispatcher,
+    GatewayRuntimeEventForwarder,
+)
 from .gateway.service import GatewayService, GatewaySnapshotBuilder
 from .gateway.supervisor import GatewaySupervisor
 from .printers import PrinterTransport
@@ -20,7 +28,13 @@ from .printer_service import PrinterService
 from .receipt_renderers import EscPosImageReceiptRenderer, EscPosRenderer
 from .runtime.discovery import DiscoveryCoordinator
 from .runtime.events import EventHub
-from .runtime.execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator, PrinterOperationExecutor, RuntimeJobExecutor
+from .runtime.execution import (
+    DeviceWorkerPool,
+    JobScheduler,
+    LeaseRecoveryCoordinator,
+    PrinterOperationExecutor,
+    RuntimeJobExecutor,
+)
 from .runtime.repositories import DeviceRepository, JobRepository
 from .runtime.services import DeviceCatalog, JobService
 from .runtime.store import RuntimeStore
@@ -169,7 +183,9 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         certificate_service=certificate_service,
         auth_provider=upstream_auth_provider,
         metadata_path=security_state_dir / "upstream-enrollment.json",
-        snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
+        snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(
+            mode="json"
+        ),
     )
     certificate_lifecycle_manager = ManagedCertificateLifecycleManager(
         settings=settings,
@@ -183,7 +199,9 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         enrollment_service=enrollment_service,
         certificate_lifecycle_manager=certificate_lifecycle_manager,
         tls_context_factory=tls_context_factory,
-        snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(mode="json"),
+        snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(
+            mode="json"
+        ),
         gateway_repository=gateway_repository,
         command_dispatcher=GatewayCommandDispatcher(
             job_service=job_service,
@@ -230,7 +248,9 @@ def build_container(settings: AgentSettings) -> AgentContainer:
     )
 
 
-def _build_printer_drivers(settings: AgentSettings, *, platform_system: str | None = None) -> tuple:
+def _build_printer_drivers(
+    settings: AgentSettings, *, platform_system: str | None = None
+) -> tuple:
     current_platform = platform_system or platform.system()
     drivers = []
     if current_platform == "Windows":

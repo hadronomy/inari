@@ -21,12 +21,17 @@ from iot_agent.gateway.models import (
 )
 from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
-from iot_agent.security.certificates import CertificateLifecycleService, ManagedCertificate
+from iot_agent.security.certificates import (
+    CertificateLifecycleService,
+    ManagedCertificate,
+)
 from iot_agent.security.identity import AgentIdentityService
 
 
 @pytest.mark.anyio
-async def test_lifecycle_waits_for_bootstrap_when_certificate_is_missing(tmp_path: Path) -> None:
+async def test_lifecycle_waits_for_bootstrap_when_certificate_is_missing(
+    tmp_path: Path,
+) -> None:
     certificate_service = CertificateLifecycleService(
         certificate_path=tmp_path / "upstream-client-cert.pem",
         private_key_path=tmp_path / "identity.pem",
@@ -51,7 +56,9 @@ async def test_lifecycle_waits_for_bootstrap_when_certificate_is_missing(tmp_pat
 
 
 @pytest.mark.anyio
-async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap(tmp_path: Path) -> None:
+async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap(
+    tmp_path: Path,
+) -> None:
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_cert = _issue_certificate(
         subject_name="Example Step CA",
@@ -68,7 +75,9 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
         private_key_path=tmp_path / "identity.pem",
         ca_path=tmp_path / "upstream-ca.pem",
     )
-    certificate_service.certificate_path.write_text("not-a-certificate", encoding="utf-8")
+    certificate_service.certificate_path.write_text(
+        "not-a-certificate", encoding="utf-8"
+    )
     enrollment_service = StubEnrollmentService(
         _enrollment_record(
             certificate_bootstrap=StepCaOttBootstrap(
@@ -112,13 +121,17 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
 
     assert certificate is not None
     assert lifecycle.current_status().state is ManagedCertificateState.VALID
-    assert "BEGIN CERTIFICATE" in certificate_service.certificate_path.read_text(encoding="utf-8")
+    assert "BEGIN CERTIFICATE" in certificate_service.certificate_path.read_text(
+        encoding="utf-8"
+    )
     assert enrollment_service.record.certificate_bootstrap is not None
     assert enrollment_service.record.certificate_bootstrap.ott is None
 
 
 @pytest.mark.anyio
-async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(tmp_path: Path) -> None:
+async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(
+    tmp_path: Path,
+) -> None:
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_cert = _issue_certificate(
         subject_name="Example Step CA",
@@ -140,8 +153,12 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(tmp_
         not_valid_after=datetime.now(tz=UTC) + timedelta(minutes=5),
     )
     certificate_service.install(
-        certificate_pem=current_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
-        ca_certificate_pem=ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+        certificate_pem=current_cert.public_bytes(serialization.Encoding.PEM).decode(
+            "utf-8"
+        ),
+        ca_certificate_pem=ca_cert.public_bytes(serialization.Encoding.PEM).decode(
+            "utf-8"
+        ),
     )
     enrollment_service = StubEnrollmentService(
         _enrollment_record(
@@ -186,7 +203,9 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(tmp_
 
 
 @pytest.mark.anyio
-async def test_lifecycle_serializes_concurrent_issuance_attempts(tmp_path: Path) -> None:
+async def test_lifecycle_serializes_concurrent_issuance_attempts(
+    tmp_path: Path,
+) -> None:
     certificate_service = CertificateLifecycleService(
         certificate_path=tmp_path / "upstream-client-cert.pem",
         private_key_path=tmp_path / "identity.pem",
@@ -243,7 +262,9 @@ class StubEnrollmentService:
             bootstrap = replace(bootstrap, ott=None)
         self.record = replace(
             record,
-            certificate_expires_at=certificate.not_valid_after if certificate is not None else None,
+            certificate_expires_at=certificate.not_valid_after
+            if certificate is not None
+            else None,
             certificate_bootstrap=bootstrap,
         )
         return self.record
@@ -267,7 +288,9 @@ class SlowProvisioner:
         self.calls += 1
         await asyncio.sleep(0.05)
         certificate = _issue_ephemeral_certificate("agt_test")
-        return self.certificate_service.install(certificate_pem=certificate, ca_certificate_pem=None)
+        return self.certificate_service.install(
+            certificate_pem=certificate, ca_certificate_pem=None
+        )
 
 
 class StepCaHttpClient:
@@ -297,12 +320,18 @@ class StepCaHttpClient:
             certificate = _issue_certificate_from_csr(csr, self.ca_key)
             return FakeAsyncResponse(
                 {
-                    "crt": certificate.public_bytes(serialization.Encoding.PEM).decode("utf-8"),
+                    "crt": certificate.public_bytes(serialization.Encoding.PEM).decode(
+                        "utf-8"
+                    ),
                     "ca": self.root_pem,
                 }
             )
         certificate_path, _, _ = self.certificate_service.current_cert_chain()
-        current_cert = Path(certificate_path).read_text(encoding="utf-8") if certificate_path else self.root_pem
+        current_cert = (
+            Path(certificate_path).read_text(encoding="utf-8")
+            if certificate_path
+            else self.root_pem
+        )
         return FakeAsyncResponse({"crt": current_cert, "ca": self.root_pem})
 
 
@@ -357,7 +386,9 @@ def _issue_certificate(
 ):
     builder = (
         x509.CertificateBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_name)]))
+        .subject_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_name)])
+        )
         .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)]))
         .public_key(subject_key)
         .serial_number(x509.random_serial_number())
@@ -382,7 +413,9 @@ def _issue_certificate_from_csr(
     builder = (
         x509.CertificateBuilder()
         .subject_name(csr.subject)
-        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Example Step CA")]))
+        .issuer_name(
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Example Step CA")])
+        )
         .public_key(csr.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))

@@ -41,12 +41,18 @@ def run_migrations_online() -> None:
 
     if hasattr(connectable, "connect"):
         with connectable.connect() as connection:
-            context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+            )
 
             with context.begin_transaction():
                 context.run_migrations()
     else:
-        context.configure(connection=connectable, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connectable, target_metadata=target_metadata, compare_type=True
+        )
 
         with context.begin_transaction():
             context.run_migrations()

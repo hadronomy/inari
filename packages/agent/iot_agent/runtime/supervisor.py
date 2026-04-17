@@ -44,8 +44,12 @@ class RuntimeSupervisor:
             await self.job_service.publish_event("job.recovered", job)
         self._tasks = [
             asyncio.create_task(self._discovery_loop(), name="iot-agent-discovery"),
-            asyncio.create_task(self.job_scheduler.run_forever(), name="iot-agent-scheduler"),
-            asyncio.create_task(self.lease_recovery.run_forever(), name="iot-agent-lease-recovery"),
+            asyncio.create_task(
+                self.job_scheduler.run_forever(), name="iot-agent-scheduler"
+            ),
+            asyncio.create_task(
+                self.lease_recovery.run_forever(), name="iot-agent-lease-recovery"
+            ),
         ]
         self._started = True
 

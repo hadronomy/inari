@@ -5,7 +5,12 @@ from collections.abc import Iterable
 from starlette.requests import HTTPConnection
 
 from ..exceptions import AgentError, ErrorSourcePayload
-from .models import AccessScope, AuthenticatedPrincipal, IssuedToken, LOCAL_OPERATOR_SCOPES
+from .models import (
+    AccessScope,
+    AuthenticatedPrincipal,
+    IssuedToken,
+    LOCAL_OPERATOR_SCOPES,
+)
 from .policies import SecurityPolicyService
 from .tokens import TokenService
 
@@ -32,10 +37,18 @@ class AuthorizationService:
         requested = set(requested_scopes or LOCAL_OPERATOR_SCOPES)
         scopes = tuple(sorted(allowed & requested, key=lambda scope: scope.value))
         if not scopes:
-            raise AgentError("INVALID_SCOPE_REQUEST", "No supported scopes were requested for the local token.", status_code=400)
-        return self.token_service.issue_local_token(client_name=client_name, scopes=scopes)
+            raise AgentError(
+                "INVALID_SCOPE_REQUEST",
+                "No supported scopes were requested for the local token.",
+                status_code=400,
+            )
+        return self.token_service.issue_local_token(
+            client_name=client_name, scopes=scopes
+        )
 
-    def authenticate_connection(self, connection: HTTPConnection) -> AuthenticatedPrincipal:
+    def authenticate_connection(
+        self, connection: HTTPConnection
+    ) -> AuthenticatedPrincipal:
         token = extract_bearer_token(connection)
         if token is None:
             raise AgentError(
@@ -59,7 +72,12 @@ class AuthorizationService:
                 status_code=403,
                 details={
                     "required_scopes": [scope.value for scope in required],
-                    "granted_scopes": [scope.value for scope in sorted(principal.scopes, key=lambda scope: scope.value)],
+                    "granted_scopes": [
+                        scope.value
+                        for scope in sorted(
+                            principal.scopes, key=lambda scope: scope.value
+                        )
+                    ],
                 },
             )
         return principal

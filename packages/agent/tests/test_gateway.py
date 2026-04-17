@@ -11,10 +11,21 @@ from iot_agent.config import AgentSettings
 from iot_agent.gateway.connector import GatewayConnector
 from iot_agent.gateway.models import GatewayEnrollmentRecord, UpstreamConnectionState
 from iot_agent.gateway.repositories import GatewayRepository
-from iot_agent.gateway.runtime_bridge import GatewayCommandDispatcher, GatewayRuntimeEventForwarder
+from iot_agent.gateway.runtime_bridge import (
+    GatewayCommandDispatcher,
+    GatewayRuntimeEventForwarder,
+)
 from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
 from iot_agent.runtime.events import EventHub
-from iot_agent.runtime.models import DeviceConnectionState, DeviceRecord, JobEventRecord, JobKind, JobRecord, JobState, utc_now
+from iot_agent.runtime.models import (
+    DeviceConnectionState,
+    DeviceRecord,
+    JobEventRecord,
+    JobKind,
+    JobRecord,
+    JobState,
+    utc_now,
+)
 from iot_agent.runtime.store import RuntimeStore
 from iot_agent.security.models import AccessScope
 from iot_agent.security.tls import TlsContextFactory
@@ -26,7 +37,9 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
     store = RuntimeStore(_database_path(tmp_path))
     store.initialize()
     connector = GatewayConnector(
-        settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
+        settings=AgentSettings(
+            gateway_mode="managed", upstream_base_url="https://controller.example"
+        ),
         enrollment_service=FakeEnrollmentService(None),
         certificate_lifecycle_manager=None,
         tls_context_factory=TlsContextFactory(AgentSettings()),
@@ -42,7 +55,9 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
 
 
 @pytest.mark.anyio
-async def test_connector_marks_online_after_successful_status_sync(tmp_path: Path) -> None:
+async def test_connector_marks_online_after_successful_status_sync(
+    tmp_path: Path,
+) -> None:
     enrollment = GatewayEnrollmentRecord(
         access_token="upstream-token",
         enrolled_at=utc_now(),
@@ -60,7 +75,9 @@ async def test_connector_marks_online_after_successful_status_sync(tmp_path: Pat
     store = RuntimeStore(_database_path(tmp_path))
     store.initialize()
     connector = GatewayConnector(
-        settings=AgentSettings(gateway_mode="managed", upstream_base_url="https://controller.example"),
+        settings=AgentSettings(
+            gateway_mode="managed", upstream_base_url="https://controller.example"
+        ),
         enrollment_service=FakeEnrollmentService(enrollment),
         certificate_lifecycle_manager=None,
         tls_context_factory=TlsContextFactory(AgentSettings()),
@@ -78,7 +95,9 @@ async def test_connector_marks_online_after_successful_status_sync(tmp_path: Pat
 
 
 @pytest.mark.anyio
-async def test_dispatcher_accepts_remote_print_job_and_persists_response(tmp_path: Path) -> None:
+async def test_dispatcher_accepts_remote_print_job_and_persists_response(
+    tmp_path: Path,
+) -> None:
     store = RuntimeStore(_database_path(tmp_path))
     store.initialize()
     repository = GatewayRepository(store)
@@ -116,7 +135,9 @@ async def test_dispatcher_accepts_remote_print_job_and_persists_response(tmp_pat
 
 
 @pytest.mark.anyio
-async def test_runtime_event_forwarder_enqueues_runtime_event_messages(tmp_path: Path) -> None:
+async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
+    tmp_path: Path,
+) -> None:
     store = RuntimeStore(_database_path(tmp_path))
     store.initialize()
     repository = GatewayRepository(store)
@@ -212,7 +233,9 @@ class StubJobService:
                 driver_key="tests.fake-printers",
                 is_default=True,
                 preferred_transport=PrinterTransport.RAW,
-                capabilities=PrinterCapabilities(raw=True, text=True, documents=True, cash_drawer=True),
+                capabilities=PrinterCapabilities(
+                    raw=True, text=True, documents=True, cash_drawer=True
+                ),
             ),
             connection_state=DeviceConnectionState.ONLINE,
         )
