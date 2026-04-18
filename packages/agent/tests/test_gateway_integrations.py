@@ -24,6 +24,11 @@ from iot_agent.gateway.models import (
     MutualTlsMode,
     StepCaOttBootstrap,
     UpstreamCertificateMode,
+    UpstreamDataPlaneKind,
+    ZenohDataPlaneAuthKind,
+    ZenohDataPlaneConfig,
+    ZenohSerialization,
+    ZenohSessionMode,
     resolve_mutual_tls_policy,
 )
 from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
@@ -72,10 +77,7 @@ async def test_zitadel_auth_provider_exchanges_and_caches_token(tmp_path: Path) 
     )
 
     first = await provider.headers_for_enrollment()
-    second = await provider.headers_for_upstream(None)
-
     assert first["Authorization"] == "Bearer zitadel-token"
-    assert second["Authorization"] == "Bearer zitadel-token"
     assert fake_client.post_calls == 1
     assert (
         fake_client.last_post_data["grant_type"]
@@ -95,20 +97,25 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
         ca_path=tmp_path / "upstream-ca.pem",
     )
     http_client = FakeAsyncHttpClient(
-        response_payload={
-            "protocol_version": GATEWAY_PROTOCOL_VERSION,
-            "controller_name": "Controller",
-            "enrolled_at": "2026-04-12T00:00:00Z",
-            "status_url": "https://controller.example.com/status",
-            "events_url": "wss://controller.example.com/events",
-            "granted_scopes": ["jobs:submit"],
-        }
+        response_payload=_enrollment_response_payload(
+            controller_actions=("jobs:create",),
+            certificate={
+                "mode": "step_ca",
+                "bootstrap": {
+                    "mode": "step_ca_ott",
+                    "ca_url": "https://step-ca.example.com",
+                    "root_fingerprint": "0123abcd",
+                    "ott": "ott_bootstrap_token",
+                },
+            },
+        )
     )
     service = GatewayEnrollmentService(
         settings=AgentSettings(
             gateway_mode="managed",
             upstream_base_url="https://controller.example.com",
             upstream_auth_mode="zitadel_service_account",
+            upstream_certificate_mode="step_ca",
         ),
         identity_service=identity_service,
         secret_store=MemorySecretStore(),
@@ -123,7 +130,8 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
     record = await service.ensure_enrolled()
 
     assert record is not None
-    assert record.access_token is None
+    assert record.data_plane.kind is UpstreamDataPlaneKind.ZENOH
+    assert record.data_plane.namespace == "iot/v1/agents/agt_test"
     assert http_client.last_post_headers["Authorization"] == "Bearer zitadel-token"
 
 
@@ -139,26 +147,23 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     )
     secret_store = MemorySecretStore()
     http_client = FakeAsyncHttpClient(
-        response_payload={
-            "protocol_version": GATEWAY_PROTOCOL_VERSION,
-            "controller_name": "Controller",
-            "access_token": "controller-token",
-            "enrolled_at": "2026-04-13T00:00:00Z",
-            "status_url": "https://controller.example.com/status",
-            "events_url": "wss://controller.example.com/events",
-            "granted_scopes": ["jobs:submit"],
-            "certificate_bootstrap": {
-                "mode": "step_ca_ott",
-                "ca_url": "https://step-ca.example.com",
-                "root_fingerprint": "0123abcd",
-                "ott": "ott_bootstrap_token",
-                "sign_url": "https://step-ca.example.com/1.0/sign",
-                "renew_url": "https://step-ca.example.com/1.0/renew",
-                "subject": "agt_test",
-                "authorized_sans": ["urn:iot-agent:agt_test"],
-                "requires_mutual_tls_after_issuance": True,
+        response_payload=_enrollment_response_payload(
+            controller_actions=("jobs:create",),
+            certificate={
+                "mode": "step_ca",
+                "bootstrap": {
+                    "mode": "step_ca_ott",
+                    "ca_url": "https://step-ca.example.com",
+                    "root_fingerprint": "0123abcd",
+                    "ott": "ott_bootstrap_token",
+                    "sign_url": "https://step-ca.example.com/1.0/sign",
+                    "renew_url": "https://step-ca.example.com/1.0/renew",
+                    "subject": "agt_test",
+                    "authorized_sans": ["urn:iot-agent:agt_test"],
+                    "requires_mutual_tls_after_issuance": True,
+                },
             },
-        }
+        )
     )
     service = GatewayEnrollmentService(
         settings=AgentSettings(
@@ -223,19 +228,9 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
         http_client_factory=lambda **kwargs: FakeAsyncHttpClient(
-            response_payload={
-                "selected_protocol_version": GATEWAY_PROTOCOL_VERSION,
-                "controller": {"name": "Controller"},
-                "auth": {
-                    "mode": "controller",
-                    "access_token": "controller-token",
-                },
-                "links": {
-                    "status": "https://controller.example.com/status",
-                    "events": "wss://controller.example.com/events",
-                },
-                "permissions": {"controller_actions": ["jobs:create"]},
-                "certificate": {
+            response_payload=_enrollment_response_payload(
+                controller_actions=("jobs:create",),
+                certificate={
                     "mode": "step_ca",
                     "bootstrap": {
                         "mode": "step_ca_ott",
@@ -244,8 +239,7 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
                         "ott": "ott_bootstrap_token",
                     },
                 },
-                "enrolled_at": "2026-04-13T00:00:00Z",
-            }
+            )
         ),
     )
 
@@ -278,23 +272,20 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
     )
     secret_store = MemorySecretStore()
     http_client = FakeAsyncHttpClient(
-        response_payload={
-            "protocol_version": GATEWAY_PROTOCOL_VERSION,
-            "controller_name": "Controller",
-            "access_token": "controller-token",
-            "enrolled_at": "2026-04-13T00:00:00Z",
-            "status_url": "https://controller.example.com/status",
-            "events_url": "wss://controller.example.com/events",
-            "granted_scopes": ["jobs:submit"],
-            "certificate_bootstrap": {
-                "mode": "step_ca_ott",
-                "ca_url": "https://step-ca.example.com",
-                "root_fingerprint": _fingerprint(ca_cert),
-                "ott": "ott_bootstrap_token",
-                "sign_url": "https://step-ca.example.com/1.0/sign",
-                "renew_url": "https://step-ca.example.com/1.0/renew",
+        response_payload=_enrollment_response_payload(
+            controller_actions=("jobs:create",),
+            certificate={
+                "mode": "step_ca",
+                "bootstrap": {
+                    "mode": "step_ca_ott",
+                    "ca_url": "https://step-ca.example.com",
+                    "root_fingerprint": _fingerprint(ca_cert),
+                    "ott": "ott_bootstrap_token",
+                    "sign_url": "https://step-ca.example.com/1.0/sign",
+                    "renew_url": "https://step-ca.example.com/1.0/renew",
+                },
             },
-        }
+        )
     )
     provisioner = StepCaOttCertificateProvisioner(
         settings=AgentSettings(
@@ -506,6 +497,17 @@ def test_zitadel_requires_key_material() -> None:
         SecurityPolicyService(settings).validate_startup()
 
 
+def test_managed_gateway_requires_certificate_mode_for_zenoh() -> None:
+    settings = AgentSettings(
+        gateway_mode="managed",
+        upstream_base_url="https://controller.example.com",
+        upstream_certificate_mode="none",
+    )
+
+    with pytest.raises(RuntimeError):
+        SecurityPolicyService(settings).validate_startup()
+
+
 def test_caddy_profile_renders_required_client_auth_snippet() -> None:
     profile = CaddyControllerProfile.from_settings(
         AgentSettings(
@@ -560,9 +562,6 @@ class StaticAuthProvider:
         self.headers = headers
 
     async def headers_for_enrollment(self) -> dict[str, str]:
-        return dict(self.headers)
-
-    async def headers_for_upstream(self, enrollment) -> dict[str, str]:
         return dict(self.headers)
 
     async def invalidate(self) -> None:
@@ -723,10 +722,16 @@ def _enrollment_record(
     certificate_bootstrap: StepCaOttBootstrap | None = None,
 ) -> GatewayEnrollmentRecord:
     return GatewayEnrollmentRecord(
-        access_token="controller-token",
         enrolled_at=datetime.now(tz=UTC),
-        status_url="https://controller.example.com/status",
-        events_url="wss://controller.example.com/events",
+        data_plane=ZenohDataPlaneConfig(
+            kind=UpstreamDataPlaneKind.ZENOH,
+            session_mode=ZenohSessionMode.CLIENT,
+            connect_endpoints=("tls/router.example.com:7447",),
+            namespace="iot/v1/agents/agt_test",
+            serialization=ZenohSerialization.JSON,
+            auth_kind=ZenohDataPlaneAuthKind.MTLS,
+            close_link_on_expiration=True,
+        ),
         protocol_version=GATEWAY_PROTOCOL_VERSION,
         certificate_bootstrap=certificate_bootstrap,
     )
@@ -750,7 +755,6 @@ def _gateway_snapshot_payload() -> dict[str, object]:
             "exposure": "loopback",
             "tls_required": False,
             "edge_provider": "direct",
-            "auth_mode": "controller",
             "certificate_mode": "controller",
             "mutual_tls_mode": "disabled",
             "mutual_tls_enabled": False,
@@ -779,10 +783,36 @@ def _gateway_snapshot_payload() -> dict[str, object]:
         "capabilities": {
             "supported_content_kinds": ["text"],
             "supported_device_commands": ["cut_paper"],
-            "granted_scopes": ["jobs:submit"],
-            "features": ["status_sync"],
-            "transport": "https+wss",
+            "supported_controller_actions": ["jobs:create", "events:read"],
+            "features": ["status_publication", "zenoh_data_plane"],
+            "transport": "https+zenoh",
             "client_certificate_present": False,
         },
         "observability": {},
+    }
+
+
+def _enrollment_response_payload(
+    *,
+    controller_actions: tuple[str, ...] = (),
+    certificate: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "selected_protocol_version": GATEWAY_PROTOCOL_VERSION,
+        "controller": {
+            "name": "Controller",
+            "instance_id": "controller-1",
+        },
+        "permissions": {"controller_actions": list(controller_actions)},
+        "data_plane": {
+            "kind": "zenoh",
+            "session_mode": "client",
+            "connect_endpoints": ["tls/router.example.com:7447"],
+            "namespace": "iot/v1/agents/agt_test",
+            "serialization": "json",
+            "auth": {"kind": "mtls"},
+            "tls": {"close_link_on_expiration": True},
+        },
+        "certificate": certificate,
+        "enrolled_at": "2026-04-13T00:00:00Z",
     }

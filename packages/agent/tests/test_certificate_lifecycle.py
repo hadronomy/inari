@@ -18,6 +18,11 @@ from iot_agent.gateway.models import (
     ManagedCertificateFailureReason,
     ManagedCertificateState,
     StepCaOttBootstrap,
+    UpstreamDataPlaneKind,
+    ZenohDataPlaneAuthKind,
+    ZenohDataPlaneConfig,
+    ZenohSerialization,
+    ZenohSessionMode,
 )
 from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
@@ -453,9 +458,15 @@ def _enrollment_record(
     certificate_bootstrap: StepCaOttBootstrap | None = None,
 ) -> GatewayEnrollmentRecord:
     return GatewayEnrollmentRecord(
-        access_token="controller-token",
         enrolled_at=datetime.now(tz=UTC),
-        status_url="https://controller.example.com/status",
-        events_url="wss://controller.example.com/events",
+        data_plane=ZenohDataPlaneConfig(
+            kind=UpstreamDataPlaneKind.ZENOH,
+            session_mode=ZenohSessionMode.CLIENT,
+            connect_endpoints=("tls/router.example.com:7447",),
+            namespace="iot/v1/agents/agt_test",
+            serialization=ZenohSerialization.JSON,
+            auth_kind=ZenohDataPlaneAuthKind.MTLS,
+            close_link_on_expiration=True,
+        ),
         certificate_bootstrap=certificate_bootstrap,
     )

@@ -166,7 +166,6 @@ class GatewayRepository:
             created_at=timestamp_to_iso(now),
             updated_at=timestamp_to_iso(now),
             sent_at=None,
-            acknowledged_at=None,
             last_error=None,
         )
         with self.store.connection() as connection:
@@ -178,11 +177,7 @@ class GatewayRepository:
     ) -> tuple[GatewayOutboxRecord, ...]:
         stmt = (
             select(gateway_outbox_table)
-            .where(
-                gateway_outbox_table.c.state.in_(
-                    (GatewayOutboxState.PENDING.value, GatewayOutboxState.SENT.value)
-                )
-            )
+            .where(gateway_outbox_table.c.state == GatewayOutboxState.PENDING.value)
             .order_by(gateway_outbox_table.c.created_at.asc())
             .limit(limit)
         )
@@ -200,21 +195,6 @@ class GatewayRepository:
                 sent_at=timestamp_to_iso(now),
                 updated_at=timestamp_to_iso(now),
                 last_error=None,
-            )
-        )
-        with self.store.connection() as connection:
-            connection.execute(stmt)
-        return self.get_outbox(message_id)
-
-    def mark_outbox_acked(self, message_id: str) -> GatewayOutboxRecord | None:
-        now = utc_now()
-        stmt = (
-            update(gateway_outbox_table)
-            .where(gateway_outbox_table.c.message_id == message_id)
-            .values(
-                state=GatewayOutboxState.ACKNOWLEDGED.value,
-                acknowledged_at=timestamp_to_iso(now),
-                updated_at=timestamp_to_iso(now),
             )
         )
         with self.store.connection() as connection:
@@ -310,9 +290,6 @@ def _row_to_outbox(row: Mapping[str, Any]) -> GatewayOutboxRecord:
         dedupe_key=str(row["dedupe_key"]) if row["dedupe_key"] is not None else None,
         sent_at=normalize_timestamp(str(row["sent_at"]))
         if row["sent_at"] is not None
-        else None,
-        acknowledged_at=normalize_timestamp(str(row["acknowledged_at"]))
-        if row["acknowledged_at"] is not None
         else None,
         last_error=str(row["last_error"]) if row["last_error"] is not None else None,
     )

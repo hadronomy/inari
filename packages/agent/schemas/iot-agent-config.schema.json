@@ -77,33 +77,9 @@
           "default": null,
           "title": "Enrollment Url"
         },
-        "events_url": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Events Url"
-        },
         "mutual_tls_mode": {
           "$ref": "#/definitions/MutualTlsMode",
           "default": "optional"
-        },
-        "status_url": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Status Url"
         },
         "step_ca": {
           "$ref": "#/definitions/GatewayStepCaConfig"
@@ -115,6 +91,9 @@
           "default": true,
           "title": "Trust Client Ca",
           "type": "boolean"
+        },
+        "zenoh": {
+          "$ref": "#/definitions/GatewayZenohConfig"
         },
         "zitadel": {
           "$ref": "#/definitions/GatewayZitadelConfig"
@@ -224,16 +203,6 @@
           "title": "Backoff Max Seconds",
           "type": "number"
         },
-        "control_poll_interval_seconds": {
-          "default": 0.5,
-          "title": "Control Poll Interval Seconds",
-          "type": "number"
-        },
-        "event_timeout_seconds": {
-          "default": 30.0,
-          "title": "Event Timeout Seconds",
-          "type": "number"
-        },
         "interval_seconds": {
           "default": 30.0,
           "title": "Interval Seconds",
@@ -244,18 +213,58 @@
           "title": "Outbox Batch Size",
           "type": "integer"
         },
+        "outbox_poll_interval_seconds": {
+          "default": 0.5,
+          "title": "Outbox Poll Interval Seconds",
+          "type": "number"
+        },
         "reconnect_delay_seconds": {
           "default": 5.0,
           "title": "Reconnect Delay Seconds",
           "type": "number"
-        },
-        "token_refresh_skew_seconds": {
-          "default": 300,
-          "title": "Token Refresh Skew Seconds",
-          "type": "integer"
         }
       },
       "title": "GatewaySyncConfig",
+      "type": "object"
+    },
+    "GatewayZenohConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "close_link_on_expiration": {
+          "default": true,
+          "title": "Close Link On Expiration",
+          "type": "boolean"
+        },
+        "connect_endpoints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Connect Endpoints",
+          "type": "array"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Namespace"
+        },
+        "query_timeout_seconds": {
+          "default": 10.0,
+          "title": "Query Timeout Seconds",
+          "type": "number"
+        },
+        "session_mode": {
+          "$ref": "#/definitions/ZenohSessionMode",
+          "default": "client"
+        }
+      },
+      "title": "GatewayZenohConfig",
       "type": "object"
     },
     "GatewayZitadelConfig": {
@@ -830,6 +839,13 @@
         "caddy"
       ],
       "title": "UpstreamEdgeProvider",
+      "type": "string"
+    },
+    "ZenohSessionMode": {
+      "enum": [
+        "client"
+      ],
+      "title": "ZenohSessionMode",
       "type": "string"
     }
   },

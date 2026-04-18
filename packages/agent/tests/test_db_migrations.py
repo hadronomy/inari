@@ -45,8 +45,17 @@ def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(
             "SELECT version_num FROM alembic_version"
         ).fetchone()
         device_count = connection.execute("SELECT COUNT(*) FROM devices").fetchone()
+        outbox_state = connection.execute(
+            "SELECT state FROM gateway_outbox WHERE message_id = ?",
+            ("msg_legacy_ack",),
+        ).fetchone()
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(gateway_outbox)")
+        }
     assert revision == (expected_revision,)
     assert device_count == (1,)
+    assert outbox_state == ("sent",)
+    assert "acknowledged_at" not in columns
 
 
 def test_db_cli_upgrade_and_current_commands(tmp_path: Path) -> None:
@@ -89,6 +98,27 @@ def _create_legacy_database(database_path: Path) -> Path:
                 "raw",
                 "{}",
                 "{}",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO gateway_outbox (
+                message_id, message_type, state, payload_json, correlation_id, dedupe_key,
+                created_at, updated_at, sent_at, acknowledged_at, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "msg_legacy_ack",
+                "agent.runtime.event",
+                "acknowledged",
+                "{}",
+                None,
+                None,
+                "2026-04-13T00:00:00Z",
+                "2026-04-13T00:00:00Z",
+                "2026-04-13T00:00:01Z",
+                "2026-04-13T00:00:02Z",
+                None,
             ),
         )
     return database_path

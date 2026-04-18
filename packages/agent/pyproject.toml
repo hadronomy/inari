@@ -1,6 +1,6 @@
 [project]
 name = "iot-agent"
-version = "1.19.0a1"
+version = "1.20.0a1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,7 +19,7 @@ dependencies = [
   "keyring>=25.7.0",
   "platformdirs>=4.4.0",
   "scalar-fastapi>=1.8.2",
-  "websockets>=16.0",
+  "eclipse-zenoh>=1.9.0,<2.0.0",
 ]
 
 [project.optional-dependencies]

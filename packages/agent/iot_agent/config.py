@@ -27,6 +27,7 @@ from .config_paths import (
 )
 from .gateway.models import (
     MutualTlsMode,
+    ZenohSessionMode,
     UpstreamAuthMode,
     UpstreamCertificateMode,
     UpstreamEdgeProvider,
@@ -67,13 +68,20 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
         "Inbound TLS files for LAN exposure. Loopback-only deployments usually leave these unset.",
     ),
     ("gateway",): (
-        "Managed-mode controller connectivity. Leave commented for standalone/local-only deployments.",
+        "Managed-mode controller connectivity.",
+        "Enrollment stays on HTTPS, while the steady-state managed data plane uses Zenoh.",
     ),
     ("gateway", "bootstrap"): (
         "Bootstrap material used only for first enrollment.",
         "Use a single short-lived controller-issued enrollment token for the initial managed enrollment call.",
     ),
-    ("gateway", "sync"): ("Managed-mode reconnect, polling, and backoff tuning.",),
+    ("gateway", "sync"): (
+        "Managed-mode publication cadence, reconnect timing, and backoff tuning.",
+    ),
+    ("gateway", "zenoh"): (
+        "Zenoh data-plane overrides and local fallback settings.",
+        "The controller normally returns these details during enrollment.",
+    ),
     ("gateway", "zitadel"): (
         "ZITADEL service-account settings for controller authentication.",
     ),
@@ -176,10 +184,6 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("gateway", "enrollment_url"): (
         "Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.",
     ),
-    ("gateway", "status_url"): (
-        "Explicit status endpoint if the controller expects a fixed URL.",
-    ),
-    ("gateway", "events_url"): ("WebSocket control/event endpoint.",),
     ("gateway", "auth_mode"): ("How the agent authenticates to the controller.",),
     ("gateway", "certificate_mode"): (
         "How the agent obtains and refreshes client certificates.",
@@ -198,19 +202,16 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
         "Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.",
     ),
     ("gateway", "sync", "interval_seconds"): (
-        "How often snapshots are pushed to the controller.",
+        "How often the latest gateway status is published onto the managed data plane.",
     ),
     ("gateway", "sync", "reconnect_delay_seconds"): (
-        "Base reconnect delay after controller disconnects.",
-    ),
-    ("gateway", "sync", "event_timeout_seconds"): (
-        "Read timeout for upstream event streams.",
-    ),
-    ("gateway", "sync", "control_poll_interval_seconds"): (
-        "Polling cadence for control-plane maintenance work.",
+        "Base reconnect delay after managed data-plane disconnects.",
     ),
     ("gateway", "sync", "outbox_batch_size"): (
         "Maximum queued outbound messages sent in one batch.",
+    ),
+    ("gateway", "sync", "outbox_poll_interval_seconds"): (
+        "How often the agent flushes queued runtime events and command results onto Zenoh.",
     ),
     ("gateway", "sync", "backoff_base_seconds"): (
         "Starting backoff value for repeated upstream failures.",
@@ -218,8 +219,18 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("gateway", "sync", "backoff_max_seconds"): (
         "Maximum backoff value for repeated upstream failures.",
     ),
-    ("gateway", "sync", "token_refresh_skew_seconds"): (
-        "How early to refresh upstream tokens before expiry.",
+    ("gateway", "zenoh", "session_mode"): ("Zenoh session mode for the agent.",),
+    ("gateway", "zenoh", "connect_endpoints"): (
+        "Explicit Zenoh router endpoints used when you want to override the controller-provided endpoints.",
+    ),
+    ("gateway", "zenoh", "namespace"): (
+        "Explicit Zenoh namespace override for this agent's managed keyspace.",
+    ),
+    ("gateway", "zenoh", "query_timeout_seconds"): (
+        "Timeout used when querying controller-side command history during reconnect recovery.",
+    ),
+    ("gateway", "zenoh", "close_link_on_expiration"): (
+        "Close Zenoh links when the presented client certificate expires.",
     ),
     ("gateway", "zitadel", "base_url"): ("Base URL for your ZITADEL instance.",),
     ("gateway", "zitadel", "token_url"): (
@@ -284,15 +295,13 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
         "gateway",
         "enrollment_url",
     ): "https://bootstrap.controller.example.com/api/iot-agent/enroll",
-    (
-        "gateway",
-        "status_url",
-    ): "https://controller.example.com/api/iot-agent/agents/agt_123/status",
-    (
-        "gateway",
-        "events_url",
-    ): "wss://controller.example.com/api/iot-agent/agents/agt_123/events",
     ("gateway", "bootstrap", "enrollment_token"): "enrollment-token",
+    (
+        "gateway",
+        "zenoh",
+        "connect_endpoints",
+    ): ["tls/router1.example.com:7447", "tls/router2.example.com:7447"],
+    ("gateway", "zenoh", "namespace"): "iot/v1/agents/agt_123",
     ("gateway", "zitadel", "base_url"): "https://zitadel.example.com",
     ("gateway", "zitadel", "token_url"): "https://zitadel.example.com/oauth/v2/token",
     ("gateway", "zitadel", "audience"): "https://controller.example.com",
@@ -473,12 +482,20 @@ class GatewaySyncConfig(BaseModel):
 
     interval_seconds: float = 30.0
     reconnect_delay_seconds: float = 5.0
-    event_timeout_seconds: float = 30.0
-    control_poll_interval_seconds: float = 0.5
     outbox_batch_size: int = 128
+    outbox_poll_interval_seconds: float = 0.5
     backoff_base_seconds: float = 1.0
     backoff_max_seconds: float = 60.0
-    token_refresh_skew_seconds: int = 300
+
+
+class GatewayZenohConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    session_mode: ZenohSessionMode = ZenohSessionMode.CLIENT
+    connect_endpoints: list[str] = Field(default_factory=list)
+    namespace: str | None = None
+    query_timeout_seconds: float = 10.0
+    close_link_on_expiration: bool = True
 
 
 class GatewayBootstrapConfig(BaseModel):
@@ -524,8 +541,6 @@ class GatewayConfig(BaseModel):
 
     base_url: str | None = None
     enrollment_url: str | None = None
-    status_url: str | None = None
-    events_url: str | None = None
     auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
     certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
     edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
@@ -533,6 +548,7 @@ class GatewayConfig(BaseModel):
     trust_client_ca: bool = True
     bootstrap: GatewayBootstrapConfig = Field(default_factory=GatewayBootstrapConfig)
     sync: GatewaySyncConfig = Field(default_factory=GatewaySyncConfig)
+    zenoh: GatewayZenohConfig = Field(default_factory=GatewayZenohConfig)
     zitadel: GatewayZitadelConfig = Field(default_factory=GatewayZitadelConfig)
     step_ca: GatewayStepCaConfig = Field(default_factory=GatewayStepCaConfig)
 
@@ -612,8 +628,6 @@ class AgentConfigFile(BaseModel):
             "tls_ca_path": _resolve_relative_path(self.security.tls.ca_path, base_dir),
             "upstream_base_url": self.gateway.base_url,
             "upstream_enrollment_url": self.gateway.enrollment_url,
-            "upstream_status_url": self.gateway.status_url,
-            "upstream_events_url": self.gateway.events_url,
             "upstream_auth_mode": self.gateway.auth_mode,
             "upstream_certificate_mode": self.gateway.certificate_mode,
             "upstream_edge_provider": self.gateway.edge_provider,
@@ -622,12 +636,15 @@ class AgentConfigFile(BaseModel):
             "upstream_enrollment_token": self.gateway.bootstrap.enrollment_token,
             "gateway_sync_interval_seconds": self.gateway.sync.interval_seconds,
             "gateway_reconnect_delay_seconds": self.gateway.sync.reconnect_delay_seconds,
-            "gateway_event_timeout_seconds": self.gateway.sync.event_timeout_seconds,
-            "gateway_control_poll_interval_seconds": self.gateway.sync.control_poll_interval_seconds,
             "gateway_outbox_batch_size": self.gateway.sync.outbox_batch_size,
+            "gateway_outbox_poll_interval_seconds": self.gateway.sync.outbox_poll_interval_seconds,
             "gateway_backoff_base_seconds": self.gateway.sync.backoff_base_seconds,
             "gateway_backoff_max_seconds": self.gateway.sync.backoff_max_seconds,
-            "gateway_token_refresh_skew_seconds": self.gateway.sync.token_refresh_skew_seconds,
+            "zenoh_session_mode": self.gateway.zenoh.session_mode,
+            "zenoh_connect_endpoints": list(self.gateway.zenoh.connect_endpoints),
+            "zenoh_namespace": self.gateway.zenoh.namespace,
+            "zenoh_query_timeout_seconds": self.gateway.zenoh.query_timeout_seconds,
+            "zenoh_close_link_on_expiration": self.gateway.zenoh.close_link_on_expiration,
             "zitadel_base_url": self.gateway.zitadel.base_url,
             "zitadel_token_url": self.gateway.zitadel.token_url,
             "zitadel_audience": self.gateway.zitadel.audience,
@@ -709,10 +726,13 @@ class AgentSettings(BaseModel):
     job_lease_recovery_interval_seconds: float = 5.0
     upstream_base_url: str | None = None
     upstream_enrollment_url: str | None = None
-    upstream_status_url: str | None = None
-    upstream_events_url: str | None = None
     upstream_enrollment_token: str | None = None
     upstream_trust_client_ca: bool = True
+    zenoh_session_mode: ZenohSessionMode = ZenohSessionMode.CLIENT
+    zenoh_connect_endpoints: list[str] = Field(default_factory=list)
+    zenoh_namespace: str | None = None
+    zenoh_query_timeout_seconds: float = 10.0
+    zenoh_close_link_on_expiration: bool = True
     zitadel_base_url: str | None = None
     zitadel_token_url: str | None = None
     zitadel_audience: str | None = None
@@ -732,12 +752,10 @@ class AgentSettings(BaseModel):
     step_ca_lifecycle_poll_interval_seconds: float = 60.0
     gateway_sync_interval_seconds: float = 30.0
     gateway_reconnect_delay_seconds: float = 5.0
-    gateway_event_timeout_seconds: float = 30.0
-    gateway_control_poll_interval_seconds: float = 0.5
     gateway_outbox_batch_size: int = 128
+    gateway_outbox_poll_interval_seconds: float = 0.5
     gateway_backoff_base_seconds: float = 1.0
     gateway_backoff_max_seconds: float = 60.0
-    gateway_token_refresh_skew_seconds: int = 300
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -773,8 +791,6 @@ class AgentSettings(BaseModel):
     @field_validator(
         "upstream_base_url",
         "upstream_enrollment_url",
-        "upstream_status_url",
-        "upstream_events_url",
         "zitadel_base_url",
         "zitadel_token_url",
         "step_ca_url",
@@ -790,7 +806,10 @@ class AgentSettings(BaseModel):
         return value
 
     @field_validator(
-        "zitadel_requested_scopes", "step_ca_requested_sans", mode="before"
+        "zitadel_requested_scopes",
+        "step_ca_requested_sans",
+        "zenoh_connect_endpoints",
+        mode="before"
     )
     @classmethod
     def normalize_list_values(cls, value: object) -> object:

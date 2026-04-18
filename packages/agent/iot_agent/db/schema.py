@@ -161,7 +161,6 @@ gateway_outbox_table = Table(
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
     Column("sent_at", String),
-    Column("acknowledged_at", String),
     Column("last_error", Text),
 )
 Index(

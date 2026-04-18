@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,8 +11,14 @@ from iot_agent.gateway.connector import GatewayConnector
 from iot_agent.gateway.models import (
     ControllerAction,
     GatewayEnrollmentRecord,
+    UpstreamDataPlaneKind,
     UpstreamConnectionState,
+    ZenohDataPlaneAuthKind,
+    ZenohDataPlaneConfig,
+    ZenohSerialization,
+    ZenohSessionMode,
 )
+from iot_agent.gateway.protocol import AgentStatusSnapshotMessage
 from iot_agent.gateway.repositories import GatewayRepository
 from iot_agent.gateway.runtime_bridge import (
     GatewayCommandDispatcher,
@@ -31,7 +36,6 @@ from iot_agent.runtime.models import (
     utc_now,
 )
 from iot_agent.runtime.store import RuntimeStore
-from iot_agent.security.tls import TlsContextFactory
 from iot_agent.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
@@ -45,11 +49,10 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
         ),
         enrollment_service=FakeEnrollmentService(None),
         certificate_lifecycle_manager=None,
-        tls_context_factory=TlsContextFactory(AgentSettings()),
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
         command_dispatcher=FakeCommandDispatcher(),
-        http_client_factory=lambda **kwargs: FakeAsyncHttpClient(),
+        data_plane_transport=FakeDataPlaneTransport(),
     )
 
     await connector.sync_once()
@@ -61,39 +64,30 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
 async def test_connector_marks_online_after_successful_status_sync(
     tmp_path: Path,
 ) -> None:
-    enrollment = GatewayEnrollmentRecord(
-        access_token="upstream-token",
-        enrolled_at=utc_now(),
-        status_url="https://controller.example/status",
-        events_url="wss://controller.example/events",
-        protocol_version=GATEWAY_PROTOCOL_VERSION,
-    )
-    http_client = FakeAsyncHttpClient(
-        response_payload={
-            "protocol_version": GATEWAY_PROTOCOL_VERSION,
-            "controller_name": "Controller",
-            "controller_instance_id": "controller-1",
-        }
+    enrollment = _enrollment_record(
+        controller_name="Controller",
+        controller_instance_id="controller-1",
     )
     store = RuntimeStore(_database_path(tmp_path))
     store.initialize()
+    transport = FakeDataPlaneTransport()
     connector = GatewayConnector(
         settings=AgentSettings(
             gateway_mode="managed", upstream_base_url="https://controller.example"
         ),
         enrollment_service=FakeEnrollmentService(enrollment),
         certificate_lifecycle_manager=None,
-        tls_context_factory=TlsContextFactory(AgentSettings()),
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
         command_dispatcher=FakeCommandDispatcher(),
-        http_client_factory=lambda **kwargs: http_client,
+        data_plane_transport=transport,
     )
 
     await connector.sync_once()
 
     assert connector.current_status().state is UpstreamConnectionState.ONLINE
-    assert http_client.requests[0][0] == "https://controller.example/status"
+    assert len(transport.status_messages) == 1
+    assert isinstance(transport.status_messages[0], AgentStatusSnapshotMessage)
     assert connector.current_status().controller_name == "Controller"
 
 
@@ -108,9 +102,7 @@ async def test_dispatcher_accepts_remote_print_job_and_persists_response(
         job_service=StubJobService(),
         gateway_repository=repository,
     )
-    enrollment = GatewayEnrollmentRecord(
-        access_token="token",
-        enrolled_at=utc_now(),
+    enrollment = _enrollment_record(
         controller_actions=(ControllerAction.JOBS_CREATE,),
     )
     from iot_agent.gateway.protocol import ControllerSubmitPrintJobMessage
@@ -120,6 +112,7 @@ async def test_dispatcher_accepts_remote_print_job_and_persists_response(
             "type": "controller.command.submit_print_job",
             "message_id": "msg_1",
             "command_id": "cmd_1",
+            "sequence": 1,
             "payload": {
                 "content": {"kind": "text", "text": "Hello gateway"},
                 "target": {"printer_name": "Kitchen Printer"},
@@ -175,14 +168,10 @@ class FakeEnrollmentService:
     def __init__(self, record: GatewayEnrollmentRecord | None) -> None:
         self.record = record
         self.invalidations = 0
+        self.certificate_service = _NullCertificateService()
 
     async def ensure_enrolled(self):
         return self.record
-
-    async def upstream_headers(self, enrollment):
-        if enrollment is None or enrollment.access_token is None:
-            return {}
-        return {"Authorization": f"Bearer {enrollment.access_token}"}
 
     async def handle_auth_failure(self, enrollment) -> None:
         self.invalidations += 1
@@ -199,33 +188,39 @@ class FakeCommandDispatcher:
         return None
 
 
-class FakeAsyncHttpClient:
-    def __init__(self, response_payload: dict[str, object] | None = None) -> None:
-        self.requests: list[tuple[str, dict[str, object], dict[str, str]]] = []
-        self.response_payload = response_payload or {}
+class FakeDataPlaneTransport:
+    def __init__(self) -> None:
+        self.status_messages = []
+        self.publications = []
+        self.closed = False
 
-    async def __aenter__(self) -> FakeAsyncHttpClient:
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def run_forever(
+        self,
+        *,
+        enrollment,
+        last_applied_controller_sequence,
+        on_connected,
+        on_command,
+    ) -> None:
+        del enrollment, last_applied_controller_sequence, on_command
+        await on_connected()
         return None
 
-    async def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]):
-        self.requests.append((url, json, headers))
-        return FakeAsyncResponse(self.response_payload)
+    async def publish_status(self, *, enrollment, message) -> None:
+        del enrollment
+        self.status_messages.append(message)
+
+    async def publish_publications(self, *, enrollment, messages) -> None:
+        del enrollment
+        self.publications.extend(messages)
+
+    async def close(self) -> None:
+        self.closed = True
 
 
-class FakeAsyncResponse:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self.payload = payload
-        self.status_code = 200
-        self.content = json.dumps(payload).encode("utf-8") if payload else b""
-
-    def raise_for_status(self) -> None:
+class _NullCertificateService:
+    def current_certificate(self):
         return None
-
-    def json(self) -> dict[str, object]:
-        return dict(self.payload)
 
 
 class StubJobService:
@@ -279,6 +274,7 @@ def _database_path(temp_dir: Path) -> Path:
 
 def _snapshot_provider() -> dict[str, object]:
     return {
+        "generated_at": utc_now().isoformat(),
         "protocol": {
             "version": GATEWAY_PROTOCOL_VERSION,
             "supported_versions": [GATEWAY_PROTOCOL_VERSION],
@@ -289,7 +285,6 @@ def _snapshot_provider() -> dict[str, object]:
             "exposure": "loopback",
             "tls_required": False,
             "edge_provider": "direct",
-            "auth_mode": "controller",
             "certificate_mode": "controller",
             "mutual_tls_mode": "disabled",
             "mutual_tls_enabled": False,
@@ -309,10 +304,34 @@ def _snapshot_provider() -> dict[str, object]:
         "capabilities": {
             "supported_content_kinds": ["text"],
             "supported_device_commands": ["cut_paper"],
-            "granted_scopes": ["jobs:submit"],
-            "features": ["status_sync"],
-            "transport": "https+wss",
+            "supported_controller_actions": ["jobs:create", "events:read"],
+            "features": ["status_publication", "zenoh_data_plane"],
+            "transport": "https+zenoh",
             "client_certificate_present": False,
         },
         "observability": {},
     }
+
+
+def _enrollment_record(
+    *,
+    controller_actions: tuple[ControllerAction, ...] = (),
+    controller_name: str | None = None,
+    controller_instance_id: str | None = None,
+) -> GatewayEnrollmentRecord:
+    return GatewayEnrollmentRecord(
+        enrolled_at=utc_now(),
+        data_plane=ZenohDataPlaneConfig(
+            kind=UpstreamDataPlaneKind.ZENOH,
+            session_mode=ZenohSessionMode.CLIENT,
+            connect_endpoints=("tls/router.example.com:7447",),
+            namespace="iot/v1/agents/agt_test",
+            serialization=ZenohSerialization.JSON,
+            auth_kind=ZenohDataPlaneAuthKind.MTLS,
+            close_link_on_expiration=True,
+        ),
+        controller_actions=controller_actions,
+        protocol_version=GATEWAY_PROTOCOL_VERSION,
+        controller_name=controller_name,
+        controller_instance_id=controller_instance_id,
+    )

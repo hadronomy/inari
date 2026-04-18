@@ -2,58 +2,66 @@
 
 This guide documents the managed gateway stacks the agent now supports directly:
 
-- Caddy as the public HTTPS/WSS edge in front of the controller
-- ZITADEL as the identity provider for controller and agent bearer auth
-- step-ca as the private CA for short-lived client certificates
+- `HTTPS` enrollment into the controller
+- `Zenoh` as the steady-state managed data plane
+- `step-ca` as the private CA for short-lived client certificates
+- optional `ZITADEL` enrollment auth
+- optional `Caddy` in front of the controller’s HTTP enrollment surface
 
-Use this document together with [gateway_protocol.md](./gateway_protocol.md).
+Use this together with [gateway_protocol.md](./gateway_protocol.md).
 
 ## Design Overview
 
-The current recommended production shape is:
+The recommended production shape is:
 
 ```text
-IoT Agent -> HTTPS / WSS -> Caddy -> Controller
-    |                           ^
-    |                           |
-    |---- bearer tokens ------- ZITADEL
+                 HTTPS enrollment
+IoT Agent ---------------------------------> Controller HTTP API
+    |                                               ^
+    |                                               |
+    |---- enrollment auth ------------------------ ZITADEL (optional)
     |
-    |---- client certificate -- step-ca
+    |---- step-ca OTT bootstrap ------------------ Controller
+    |---- client certificate issue/renew --------- step-ca
+    |
+    |==== Zenoh TLS + mTLS data plane ==========> Zenoh Router(s) ==> Controller workers
 ```
 
-The agent stays the local edge gateway. It does not require an external hardware gateway.
+The agent remains the local edge gateway. It does not require an external hardware gateway.
 
-For production bootstrap, the recommended certificate path is:
+The steady-state managed path is:
 
-1. installer provides a short-lived controller-issued enrollment token
-2. agent enrolls with the controller
-3. controller validates policy and mints a short-lived step-ca OTT
-4. agent exchanges that OTT with step-ca for its first client certificate
-5. later renewals use `/1.0/renew`
+1. installer provides a short-lived controller-issued `enrollment_token`
+2. agent enrolls with the controller over `HTTPS`
+3. controller returns Zenoh connection details and, when configured, step-ca bootstrap material
+4. agent obtains its first managed client certificate from step-ca
+5. agent opens a Zenoh session in `client` mode using TLS + client certificate
+6. status, commands, and runtime events move over Zenoh
+7. later renewals use `/1.0/renew`
 
 ## Supported Modes
 
 ### 1. Controller-Issued Enrollment Tokens
 
-Use when the controller owns enrollment and token lifecycle itself.
+Use when the controller owns enrollment policy directly.
 
 ```env
 IOT_AGENT_GATEWAY_MODE=managed
 IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
 IOT_AGENT_UPSTREAM_AUTH_MODE=controller
 IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
-IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=controller
 ```
 
 In this mode:
 
-- enrollment uses the controller-issued enrollment token
-- the controller returns `access_token`
-- the controller may optionally return a client certificate
+- enrollment uses the controller-issued `enrollment_token`
+- the controller returns the Zenoh data-plane configuration
+- the controller may optionally return a controller-installed client certificate
+- or it may return step-ca bootstrap data for certificate issuance
 
 ### 2. ZITADEL Service Account Auth
 
-Use when the controller trusts bearer tokens issued by ZITADEL.
+Use when enrollment is authorized through ZITADEL instead of a controller-issued bearer token.
 
 ```env
 IOT_AGENT_GATEWAY_MODE=managed
@@ -61,18 +69,18 @@ IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
 IOT_AGENT_UPSTREAM_AUTH_MODE=zitadel_service_account
 IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
 IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-IOT_AGENT_ZITADEL_REQUESTED_SCOPES=openid,events:read,jobs:submit,commands:execute
+IOT_AGENT_ZITADEL_REQUESTED_SCOPES=openid,events:read,jobs:create,commands:execute
 ```
 
 In this mode:
 
 - the agent signs a private-key JWT assertion with the ZITADEL service-account key
 - the agent exchanges that assertion for an OAuth access token
-- the controller may omit `access_token` from the enrollment response
+- the controller trusts that enrollment request and still returns the Zenoh data-plane contract
 
 ### 3. step-ca Client Certificates
 
-Use when the controller edge expects the agent to present a short-lived client certificate.
+Use when the managed data plane is expected to require mTLS after certificate issuance.
 
 ```env
 IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
@@ -82,73 +90,45 @@ IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 
 In this mode:
 
-- the controller returns `certificate_bootstrap` with a short-lived step-ca OTT
+- the controller returns step-ca bootstrap data in the enrollment response
 - the agent bootstraps the step-ca root certificate
-- the agent requests a client certificate from `/1.0/sign` using that OTT
-- the agent renews it via `/1.0/renew`
+- the agent requests its first client certificate from `/1.0/sign`
+- the agent later renews through `/1.0/renew`
 - the agent does not store a shared CA provisioner key locally
 
-Optional overrides:
+Optional local overrides:
 
 - `IOT_AGENT_STEP_CA_URL`
 - `IOT_AGENT_STEP_CA_SIGN_URL`
 - `IOT_AGENT_STEP_CA_RENEW_URL`
 - `IOT_AGENT_STEP_CA_ROOT_FINGERPRINT`
 
-Those are mainly useful for controlled environments where you want the agent to keep local fallback knowledge of the CA endpoints. The preferred production path is to let the controller return those values in `certificate_bootstrap`.
+These are mainly useful as explicit fallback knowledge of the CA. The preferred production path is to let the controller return the bootstrap details during enrollment.
 
-## Caddy Edge Profile
+## Caddy And HTTP Edge
 
-The agent now understands a Caddy-focused edge profile:
+If you use Caddy, it normally fronts the controller’s HTTP enrollment API rather than the Zenoh data plane itself.
+
+Example:
 
 ```env
 IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
 IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=optional
 ```
 
-Or for strict mTLS:
+Or for the recommended post-issuance posture:
 
 ```env
 IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
-IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=required
+IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=optional
 IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
 IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/iot-agent/enroll
 ```
 
-When strict Caddy mTLS is enabled, the agent validates its own startup configuration and refuses to run if it has no way to obtain a client certificate.
-The bootstrap enrollment URL is how the agent gets that first certificate before the normal mTLS-protected controller endpoints take over.
+That means:
 
-### Example Caddyfile
-
-Optional client certificates:
-
-```caddyfile
-controller.example.com {
-    tls {
-        client_auth {
-            mode verify_if_given
-            trusted_ca_cert_file /etc/caddy/step-ca-root.pem
-        }
-    }
-
-    reverse_proxy 127.0.0.1:8080
-}
-```
-
-Required client certificates:
-
-```caddyfile
-controller.example.com {
-    tls {
-        client_auth {
-            mode require_and_verify
-            trusted_ca_cert_file /etc/caddy/step-ca-root.pem
-        }
-    }
-
-    reverse_proxy 127.0.0.1:8080
-}
-```
+- HTTP enrollment remains reachable before the first managed client certificate exists
+- once the certificate has been issued, the Zenoh data plane can require mTLS
 
 ## Recommended Production Combination
 
@@ -158,7 +138,7 @@ The cleanest stack is:
 IOT_AGENT_GATEWAY_MODE=managed
 IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
 IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
-IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=required
+IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=optional
 IOT_AGENT_UPSTREAM_AUTH_MODE=zitadel_service_account
 IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
 IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
@@ -169,7 +149,8 @@ IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 
 That gives you:
 
-- HTTPS/WSS edge protection through Caddy
-- bearer auth and authorization through ZITADEL
+- HTTPS enrollment protection through Caddy or another HTTP edge
+- enrollment authorization through ZITADEL or a controller-issued enrollment token
 - short-lived client certificates through step-ca without shipping a shared CA provisioner key to every agent
+- Zenoh as the managed data plane for status, commands, and runtime events
 - a local agent that still runs fully as its own gateway

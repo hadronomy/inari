@@ -1,13 +1,12 @@
 ---
 title: Gateway Protocol
-summary: Draft managed-mode protocol specification for the controller <-> iot-agent boundary.
+summary: Managed-mode protocol specification for the controller <-> iot-agent boundary over HTTPS enrollment and a Zenoh data plane.
 status: draft
-protocol_version: "2026-04-14"
-agent_api_version: "1.19.0a1"
+protocol_version: "2026-04-18"
+agent_api_version: "1.20.0a1"
 transport:
   enrollment: https
-  status_sync: https
-  control_stream: wss
+  data_plane: zenoh
 audience:
   - controller authors
   - agent implementers
@@ -16,9 +15,15 @@ audience:
 
 # Gateway Protocol
 
-This document is the protocol draft for the managed-mode controller `<->` agent boundary.
+This document defines the managed-mode protocol boundary between:
 
-It describes the managed gateway contract with explicit wire semantics. The current codebase now implements the major enrollment, auth, replay, resume, and certificate-lifecycle rules described here; the remaining gaps are mostly future refinements around payload ergonomics and further snapshot slimming.
+- the local `iot-agent` process acting as the edge gateway
+- an external controller service
+
+The current protocol uses:
+
+- outbound `HTTPS` for enrollment
+- outbound `Zenoh` for the steady-state managed data plane
 
 Use this together with:
 
@@ -28,27 +33,19 @@ Use this together with:
 ## 1. Document Status
 
 - Protocol status: `draft`
-- Protocol version: `2026-04-14`
-- Transport model:
-  - enrollment: outbound `HTTPS`
-  - status sync: outbound `HTTPS`
-  - control stream: outbound `WSS`
+- Protocol version: `2026-04-18`
 - Agent role: protocol client
 - Controller role: protocol server
 
-### 1.1 Draft Meaning
-
-This document remains slightly ahead of the current implementation in a few areas, especially:
+This document describes the contract implemented by the current codebase. A few future-facing areas remain intentionally open, especially:
 
 - lighter long-lived status documents instead of repeated full snapshots
-- `content_ref` style handling for larger print payloads
-- a fully standardized controller-side error envelope
-
-Where implementation details are still in motion, treat the code as the immediate source of truth.
+- large-payload `content_ref` handling
+- controller-side durable receipts for agent publications
 
 ## 2. Normative Language
 
-The key words `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` in this document are to be interpreted as described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
+The key words `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` in this document are to be interpreted as described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174).
 
 ## 3. Goals
 
@@ -56,32 +53,26 @@ This protocol covers:
 
 - managed enrollment
 - short-lived controller-issued `enrollment_token` bootstrap
-- controller-managed or external bearer authentication
+- controller-authorized command execution
 - controller-issued step-ca OTT bootstrap for client certificates
-- optional controller-installed client certificates
-- periodic gateway status synchronization
-- durable controller-to-agent command delivery
-- durable agent-to-controller event delivery
-- replay-safe acknowledgement
-- reconnect and resume behavior
+- Zenoh-based status publication, command delivery, and runtime event publication
+- reconnect and command-history recovery
 - protocol version selection
 
 This protocol does not cover:
 
 - local hardware drivers such as Windows spooler, USB, serial, or raw ESC/POS transport
-- the agent’s local HTTP API for desktop clients
+- the agent’s local HTTP and local WebSocket APIs for desktop clients
 - multi-controller coordination for one agent identity
 
 ## 4. Design Principles
 
-The protocol is built around these principles:
-
-1. The agent connects outward to the controller.
-2. The controller is authoritative for enrollment policy.
-3. Authentication and certificate bootstrap are separate concerns.
-4. Reliability must survive reconnects and duplicate delivery.
-5. The wire contract must not depend on the agent’s internal REST payload shapes.
-6. Stable identifiers are preferred over user-facing names.
+1. The agent always connects outward.
+2. Enrollment and the long-lived data plane are separate concerns.
+3. The wire contract must not depend on internal REST request bodies.
+4. Stable identifiers are preferred over user-facing names.
+5. Reliability must survive reconnects and duplicate delivery.
+6. After a managed client certificate has been issued, the recommended production posture is mTLS-required data-plane connectivity.
 
 ## 5. Terminology
 
@@ -92,86 +83,64 @@ The protocol is built around these principles:
 : The external service coordinating one or more managed agents.
 
 `enrollment_token`
-: A short-lived controller-issued bearer credential used only for initial enrollment.
-
-`access_token`
-: The bearer token used for normal controller traffic after enrollment.
-
-`refresh_token`
-: A controller-issued token used only to refresh a controller-issued `access_token`.
+: A short-lived controller-issued bearer credential used only for the initial enrollment call.
 
 `message_id`
-: The transport-level deduplication key for an individual protocol message.
+: The transport-level identifier for one agent publication.
 
 `command_id`
-: The idempotency key for a controller command.
+: The idempotency key for one controller command.
 
 `sequence`
 : A per-agent controller command cursor used for replay and resume.
 
-## 6. Transport
+`namespace`
+: The Zenoh keyspace root assigned to one managed agent, for example `iot/v1/agents/agt_123`.
 
-The agent uses three outbound channels:
-
-- enrollment over `HTTPS`
-- status sync over `HTTPS`
-- control stream over `WSS`
-
-The controller MUST NOT require inbound agent connections initiated from outside the agent host.
-
-## 7. Trust And Identity
+## 6. Trust And Identity
 
 Managed mode uses an outbound trust model:
 
-1. The agent validates the controller TLS certificate.
-2. The controller authenticates the agent with bearer credentials, a client certificate, or both.
-3. The agent has a persistent logical identity:
-   - `agent_id`
-   - `key_id`
-   - `public_jwk`
-   - `csr_pem`
-   - optional `certificate_pem`
+1. The agent validates the controller TLS certificate during enrollment.
+2. The controller validates the agent’s enrollment credential during enrollment.
+3. The controller may bootstrap a managed client certificate through step-ca.
+4. The steady-state Zenoh data plane uses TLS with client-certificate authentication.
 
-### 7.1 Identity Binding Rules
+The agent has a persistent logical identity consisting of:
+
+- `agent_id`
+- `key_id`
+- `public_jwk`
+- `csr_pem`
+- optional `certificate_pem`
+
+### 6.1 Identity Binding Rules
 
 The controller SHOULD enforce these bindings:
 
 - `csr_pem` public key MUST match `public_jwk`
-- any returned client certificate MUST match the CSR public key
+- any issued client certificate MUST match the CSR public key
 - the agent certificate identity MUST bind to `agent_id`
-- if `authorized_sans` are supplied in certificate bootstrap, the issued certificate MUST NOT contain SANs outside that set
+- if `authorized_sans` are supplied, the issued certificate MUST NOT contain SANs outside that set
 
-## 8. Protocol Version Selection
+## 7. Protocol Version Selection
 
-Version advertisement alone is not enough. The controller MUST explicitly select a protocol version.
-
-### 8.1 Agent Advertisement
+The controller MUST explicitly select a protocol version during enrollment.
 
 The agent advertises:
 
 - `protocol.version`
 - `protocol.supported_versions`
 
-### 8.2 Controller Selection
-
-The controller MUST return:
+The controller responds with:
 
 - `selected_protocol_version`
 
-The selected version MUST be one of the versions advertised by the agent.
+The selected version MUST be one of the versions advertised by the agent. If there is no mutually supported version, the controller MUST reject enrollment and the agent MUST NOT continue to managed operation.
 
-If there is no mutually supported version:
+## 8. Enrollment
 
-- the controller MUST reject enrollment
-- the agent MUST NOT continue to normal managed operation
-
-### 8.3 Control Stream Revalidation
-
-The controller SHOULD repeat the selected protocol version in `controller.hello`, and the agent SHOULD validate it again on control-stream startup.
-
-## 9. Enrollment
-
-### 9.1 Request
+### 8.1 Request
 
 The standard enrollment request is:
 
@@ -188,8 +157,8 @@ Request body:
 ```json
 {
   "protocol": {
-    "version": "2026-04-14",
-    "supported_versions": ["2026-04-14"]
+    "version": "2026-04-18",
+    "supported_versions": ["2026-04-18"]
   },
   "agent_id": "agt_123",
   "key_id": "kid_123",
@@ -209,35 +178,23 @@ Request body:
 }
 ```
 
-### 9.2 Request Rules
+### 8.2 Request Rules
 
 - `agent_id`, `key_id`, `public_jwk`, and `csr_pem` are required
-- `certificate_pem` is optional and represents the currently installed client certificate, if any
+- `certificate_pem` is optional and represents the currently installed managed client certificate, if any
 - the request snapshot is advisory state, not a source of granted permissions
-- request-side capabilities SHOULD describe what the agent supports, not what the controller has already granted
+- request-side capabilities describe what the agent supports, not what the controller has already granted
 
-### 9.3 Response
+### 8.3 Response
 
 The recommended enrollment response shape is:
 
 ```json
 {
-  "selected_protocol_version": "2026-04-14",
+  "selected_protocol_version": "2026-04-18",
   "controller": {
     "name": "Acme IoT Controller",
     "instance_id": "controller-01"
-  },
-  "auth": {
-    "mode": "controller",
-    "access_token": "opaque-access-token",
-    "refresh_token": "opaque-refresh-token",
-    "token_type": "Bearer",
-    "expires_at": "2026-04-18T11:00:02Z"
-  },
-  "links": {
-    "refresh": "https://controller.example/api/iot-agent/agents/agt_123/refresh",
-    "status": "https://controller.example/api/iot-agent/agents/agt_123/status",
-    "events": "wss://controller.example/api/iot-agent/agents/agt_123/events"
   },
   "permissions": {
     "controller_actions": [
@@ -249,6 +206,22 @@ The recommended enrollment response shape is:
       "commands:execute"
     ]
   },
+  "data_plane": {
+    "kind": "zenoh",
+    "session_mode": "client",
+    "connect_endpoints": [
+      "tls/router1.example.com:7447",
+      "tls/router2.example.com:7447"
+    ],
+    "namespace": "iot/v1/agents/agt_123",
+    "serialization": "json",
+    "auth": {
+      "kind": "mtls"
+    },
+    "tls": {
+      "close_link_on_expiration": true
+    }
+  },
   "certificate": {
     "mode": "step_ca",
     "client_certificate_pem": null,
@@ -260,7 +233,6 @@ The recommended enrollment response shape is:
       "ott": "step-ca-one-time-token",
       "sign_url": "https://ca.example.com/1.0/sign",
       "renew_url": "https://ca.example.com/1.0/renew",
-      "expires_at": "2026-04-18T10:05:02Z",
       "subject": "agt_123",
       "authorized_sans": ["urn:iot-agent:agt_123"],
       "requires_mutual_tls_after_issuance": true
@@ -270,33 +242,33 @@ The recommended enrollment response shape is:
 }
 ```
 
-### 9.4 Response Rules
+### 8.4 Response Rules
 
 - `selected_protocol_version` is required
-- `controller.name` and `controller.instance_id` are optional but strongly recommended
-- `auth.mode` is required
-- `links.status` and `links.events` are required unless a stable derivation rule has already been agreed
 - `permissions.controller_actions` defines what the controller is allowed to ask the agent to do
+- `data_plane.kind` MUST be `zenoh`
+- `data_plane.connect_endpoints` and `data_plane.namespace` are required unless a local override is explicitly configured
 - `certificate` is optional
 - `certificate.bootstrap` is optional
 
-### 9.5 Enrollment Sequence With step-ca Enabled
-
-The recommended managed enrollment flow with step-ca enabled is:
+### 8.5 Enrollment Sequence With step-ca Enabled
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Installer
     participant Agent
-    participant Controller
     participant StepCA as step-ca
+    box Server (Axum + Zenoh)
+        participant Controller as API
+        participant Router as Router
+    end
 
     Installer->>Agent: Provide short-lived enrollment_token
     Agent->>Controller: POST /api/iot-agent/enroll<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
     Controller->>Controller: Validate enrollment policy<br/>Select protocol version<br/>Grant controller actions
     Controller->>Controller: Mint short-lived step-ca OTT
-    Controller-->>Agent: Enrollment response<br/>auth + links + certificate.bootstrap(step_ca_ott)
+    Controller-->>Agent: Enrollment response<br/>data_plane + certificate.bootstrap(step_ca_ott)
 
     Agent->>StepCA: Fetch root CA
     StepCA-->>Agent: Root certificate
@@ -306,347 +278,105 @@ sequenceDiagram
     StepCA-->>Agent: Client certificate + CA bundle
     Agent->>Agent: Install managed client certificate
 
-    Note over Agent,Controller: Steady-state traffic uses bearer auth + client cert.
-
-    Agent->>Controller: Status sync<br/>Bearer access_token<br/>Client cert presented
-    Agent->>Controller: Control stream<br/>Bearer access_token<br/>Client cert presented
-    Agent->>StepCA: Later renewal<br/>POST /1.0/renew with client cert
+    Agent->>Router: Open Zenoh session<br/>TLS + client certificate
+    Agent->>Router: Publish status and presence
+    Router-->>Agent: Deliver live commands
+    Agent->>StepCA: Later renewal via /1.0/renew
 ```
 
-The key transition is that bootstrap enrollment can happen before a client certificate exists, while normal steady-state controller traffic is expected to use the issued client certificate once enrollment has completed successfully. In the recommended production posture, the controller edge then requires mTLS for that steady-state traffic.
+The key transition is:
 
-## 10. Authentication
+- bootstrap happens over `HTTPS` before a client certificate exists
+- steady-state data-plane traffic happens over Zenoh using the issued client certificate
 
-The protocol supports two ongoing auth modes.
+## 9. Zenoh Data Plane
 
-### 10.1 Controller-Managed Auth
+### 9.1 Session Model
 
-In `controller` mode:
+The agent opens one Zenoh session in `client` mode to one or more configured routers.
 
-- enrollment uses `Authorization: Bearer <enrollment-token>`
-- the controller returns `access_token`
-- the controller MAY return `refresh_token`
-- subsequent status sync and control-stream requests use `Authorization: Bearer <access_token>`
+The current implementation uses:
 
-Recommended response shape:
+- TLS transport
+- client certificates for authentication
+- JSON payload serialization
+- Zenoh liveliness for presence
+- Zenoh query/reply for command-history recovery
 
-```json
-{
-  "auth": {
-    "mode": "controller",
-    "access_token": "opaque-access-token",
-    "refresh_token": "opaque-refresh-token",
-    "token_type": "Bearer",
-    "expires_at": "2026-04-18T11:00:02Z"
-  }
-}
-```
-
-### 10.2 External Auth Provider
-
-In `zitadel_service_account` mode:
-
-- the controller MAY omit `access_token`
-- the agent obtains its own access token from ZITADEL
-- the controller still returns enrollment metadata and links
+### 9.2 Keyspace
 
-Recommended response shape:
-
-```json
-{
-  "auth": {
-    "mode": "zitadel_service_account",
-    "issuer": "https://zitadel.example.com",
-    "token_endpoint": "https://zitadel.example.com/oauth/v2/token",
-    "audience": "https://controller.example.com"
-  }
-}
-```
+Within the agent namespace, the protocol uses these keys:
 
-### 10.3 Auth Rules
+| Purpose | Key |
+|---|---|
+| Presence | `{namespace}/presence` |
+| Latest status snapshot | `{namespace}/status/latest` |
+| Live controller commands | `{namespace}/commands/live` |
+| Command history query root | `{namespace}/commands/history` |
+| Accepted command results | `{namespace}/results/{command_id}` |
+| Runtime events | `{namespace}/events/{message_id}` |
+| Agent errors | `{namespace}/errors/{message_id}` |
 
-- `enrollment_token` is only for initial enrollment
-- `enrollment_token` MUST NOT be used for normal status sync or control-stream traffic after enrollment
-- `refresh_token` SHOULD be used only for refresh
-- if the controller uses `controller` mode, it MUST provide `access_token`
-- if the controller uses `zitadel_service_account` mode, it SHOULD identify that mode explicitly
+For an agent with namespace `iot/v1/agents/agt_123`, that becomes:
 
-## 11. Token Refresh
+- `iot/v1/agents/agt_123/presence`
+- `iot/v1/agents/agt_123/status/latest`
+- `iot/v1/agents/agt_123/commands/live`
+- `iot/v1/agents/agt_123/commands/history`
+- `iot/v1/agents/agt_123/results/cmd_456`
+- `iot/v1/agents/agt_123/events/gevt_789`
 
-Controller-managed token refresh applies only when `auth.mode == controller`.
+### 9.3 Presence
 
-Refresh request:
+The agent SHOULD maintain a Zenoh liveliness token at `{namespace}/presence`.
 
-```http
-POST <links.refresh>
-Authorization: Bearer <refresh-token>
-Content-Type: application/json
-```
+Presence is advisory. It is not a substitute for application-level command recovery.
 
-Request body:
+### 9.4 Status Publication
 
-```json
-{
-  "selected_protocol_version": "2026-04-14",
-  "agent_id": "agt_123"
-}
-```
+The agent periodically publishes an `agent.status.snapshot` document to `{namespace}/status/latest`.
 
-### 11.1 Refresh Rules
+The current implementation publishes the full `GatewaySnapshotPayload`. A future revision MAY introduce a lighter status document, but the key and publication semantics remain the same.
 
-- refresh MUST use `refresh_token`, not `access_token`
-- refresh response SHOULD reuse the `auth` block shape from enrollment
-- if refresh returns `401` or `403`, the agent MUST discard its controller-managed enrollment state and return to an unenrolled state
+### 9.5 Live Commands
 
-## 12. Links
+The controller publishes live commands to `{namespace}/commands/live`.
 
-The controller SHOULD return a `links` object rather than relying on implicit derivation.
-
-Recommended shape:
-
-```json
-{
-  "links": {
-    "status": "https://controller.example/api/iot-agent/agents/agt_123/status",
-    "events": "wss://controller.example/api/iot-agent/agents/agt_123/events",
-    "refresh": "https://controller.example/api/iot-agent/agents/agt_123/refresh"
-  }
-}
-```
-
-If link derivation is used, it MUST be stable and documented.
-
-## 13. Certificates
-
-Certificate-related data belongs under a single `certificate` object in the enrollment response.
-
-### 13.1 Certificate Shape
-
-```json
-{
-  "certificate": {
-    "mode": "step_ca",
-    "client_certificate_pem": null,
-    "ca_certificate_pem": null,
-    "bootstrap": {
-      "mode": "step_ca_ott",
-      "ca_url": "https://ca.example.com",
-      "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "ott": "step-ca-one-time-token",
-      "sign_url": "https://ca.example.com/1.0/sign",
-      "renew_url": "https://ca.example.com/1.0/renew",
-      "expires_at": "2026-04-18T10:05:02Z",
-      "subject": "agt_123",
-      "authorized_sans": ["urn:iot-agent:agt_123"],
-      "requires_mutual_tls_after_issuance": true
-    }
-  }
-}
-```
-
-### 13.2 Certificate Mode
-
-`certificate.mode` SHOULD be one of:
-
-- `none`
-- `controller`
-- `step_ca`
-
-`certificate.bootstrap.mode` SHOULD identify the bootstrap mechanism, for example:
-
-- `step_ca_ott`
-
-### 13.3 step-ca Rules
-
-For `step_ca` mode:
-
-- `root_fingerprint` MUST be `SHA-256` lowercase hexadecimal without separators
-- the agent MUST verify the fetched root against that fingerprint
-- the agent MUST use its CSR when requesting the first certificate
-- the resulting certificate MUST match the CSR public key
-- the agent SHOULD renew through `/1.0/renew`
-- the OTT SHOULD be short-lived, single-use, and agent-scoped
-
-### 13.4 Bearer And Client Certificate Interaction
-
-If the deployment uses both bearer auth and mTLS:
-
-- the controller SHOULD treat them as two complementary authentication factors
-- if the certificate identity and bearer identity disagree, the controller SHOULD reject the connection
-
-### 13.5 Recommended Production Posture
-
-For managed deployments using controller-installed or step-ca-issued client certificates:
-
-- initial enrollment MAY complete with bearer auth before a client certificate exists
-- after a managed client certificate has been issued, production deployments SHOULD require mTLS for normal status-sync and control-stream traffic
-- deployments following this posture SHOULD expose an explicit bootstrap enrollment URL when the normal controller edge requires client certificates
-- an explicit deployment choice to keep mTLS optional after certificate issuance is allowed, but it is not the recommended production default
-
-## 14. Snapshot Model
-
-The agent currently sends a large `GatewaySnapshotPayload`. That remains acceptable for:
-
-- enrollment
-- reconnect
-- explicit state refresh
-
-For long-lived operation, the protocol SHOULD distinguish:
-
-- `identity`
-- `capabilities`
-- `status`
-- `observability`
-
-The protocol SHOULD evolve toward lighter periodic status refreshes rather than always resending the full snapshot.
-
-## 15. Status Sync
-
-Status sync is a periodic outbound `HTTPS` request from the agent to `links.status`.
-
-```http
-POST <links.status>
-Authorization: Bearer <access-token>
-X-IoT-Agent-Protocol-Version: 2026-04-14
-Content-Type: application/json
-```
-
-The request body is the current snapshot or a future lighter status document.
-
-### 15.1 Status Sync Response
-
-The controller MAY return a body with controller metadata such as:
-
-- `selected_protocol_version`
-- `controller.name`
-- `controller.instance_id`
-
-### 15.2 Failure Handling
-
-- `401` or `403`: the agent MUST treat the auth as invalid
-- transport or server error: the agent SHOULD enter a retrying state with backoff
-
-## 16. Control Stream
-
-The control stream is an outbound WebSocket connection from the agent to the controller.
-
-```http
-GET <links.events>
-Authorization: Bearer <access-token>
-```
-
-### 16.1 Connection Sequence
-
-1. The agent connects to the controller WebSocket.
-2. The agent sends `agent.hello`.
-3. The controller sends `controller.hello`.
-4. Both sides validate the selected protocol version.
-5. Normal command and event traffic begins.
-
-### 16.2 Agent Hello
-
-Recommended shape:
-
-```json
-{
-  "type": "agent.hello",
-  "message_id": "ghello_1",
-  "selected_protocol_version": "2026-04-14",
-  "supported_versions": ["2026-04-14"],
-  "last_applied_controller_sequence": 104,
-  "snapshot": { "...GatewaySnapshotPayload..." }
-}
-```
-
-### 16.3 Controller Hello
-
-Recommended shape:
-
-```json
-{
-  "type": "controller.hello",
-  "message_id": "hello_1",
-  "selected_protocol_version": "2026-04-14",
-  "resume_from_sequence": 105,
-  "controller": {
-    "name": "Acme IoT Controller",
-    "instance_id": "controller-01"
-  }
-}
-```
-
-### 16.4 Heartbeats
-
-Application-level ping/pong MAY be used, but if present they SHOULD exist for a specific reason such as protocol-level health semantics rather than merely duplicating WebSocket transport keepalive.
-
-If the agent sends periodic state heartbeats, they SHOULD be based on elapsed time since the last state heartbeat, not only on lack of inbound controller traffic.
-
-## 17. Reliable Delivery And Resume
-
-### 17.1 Controller Commands
-
-Controller commands SHOULD carry:
+Commands MUST carry:
 
 - `message_id`
 - `command_id`
 - `sequence`
 
-`command_id` is the idempotency key.
+The agent subscribes to the live command key and dispatches commands as they arrive.
 
-`sequence` is the per-agent replay cursor.
+### 9.6 History Recovery
 
-### 17.2 Agent Outbound Messages
+On reconnect, the agent queries:
 
-Agent-originated durable messages carry:
-
-- `message_id`
-
-The agent MAY resend an unacknowledged message after reconnect.
-
-### 17.3 Resume Rules
-
-On reconnect:
-
-- the agent SHOULD send `last_applied_controller_sequence`
-- the controller SHOULD replay commands after that sequence
-
-This gives the protocol recoverable stream semantics instead of best-effort duplicate suppression only.
-
-## 18. Acknowledgement Semantics
-
-The controller acknowledges agent-originated durable messages with:
-
-```json
-{
-  "type": "controller.ack",
-  "message_id": "ack_1",
-  "acknowledged_message_id": "gevt_123"
-}
+```text
+{namespace}/commands/history?from_sequence=<last_applied_controller_sequence + 1>
 ```
 
-### 18.1 Ack Meaning
+The controller returns the ordered list of commands whose `sequence` is greater than the agent’s last applied sequence.
 
-`controller.ack` MUST mean that the controller has durably persisted the referenced message or committed it to an equivalent exactly-once processing state.
+This recovery path is required. Live delivery alone is not sufficient.
 
-It MUST NOT mean merely:
+### 9.7 Agent Publications
 
-- parsed
-- observed
-- buffered in memory only
+The agent publishes these message types to the data plane:
 
-## 19. Commands
+- `agent.status.snapshot`
+- `agent.command.accepted`
+- `agent.command.rejected`
+- `agent.runtime.event`
+- `agent.error`
 
-The controller may request:
+The current implementation persists outbound publications locally and clears them after a successful Zenoh publish. Controller-side durable receipts are reserved for a future revision.
 
-- print jobs
-- device commands
-- job cancellation
+## 10. Commands
 
-The protocol SHOULD define command payloads as protocol-native schemas even if they currently map closely to the agent’s local HTTP API.
-
-### 19.1 Submit Print Job
-
-Recommended shape:
+### 10.1 Submit Print Job
 
 ```json
 {
@@ -676,9 +406,7 @@ Recommended shape:
 }
 ```
 
-### 19.2 Execute Device Command
-
-Recommended shape:
+### 10.2 Execute Device Command
 
 ```json
 {
@@ -703,9 +431,7 @@ Recommended shape:
 }
 ```
 
-### 19.3 Cancel Job
-
-Recommended shape:
+### 10.3 Cancel Job
 
 ```json
 {
@@ -718,21 +444,73 @@ Recommended shape:
 }
 ```
 
-## 20. Stable Identifiers
+### 10.4 Targeting Rules
 
-The controller SHOULD prefer:
+The controller SHOULD prefer `device_id` over `printer_name`.
 
-- `device_id`
+`printer_name` MAY remain as a convenience fallback for manually-authored or diagnostic commands, but it SHOULD NOT be the primary identifier for durable automation.
 
-over:
+## 11. Reliability Model
 
-- `printer_name`
+### 11.1 Controller To Agent
 
-`printer_name` MAY remain as a convenience fallback for debugging or human-authored commands, but it SHOULD NOT be the primary identifier for durable automation.
+- `command_id` is the idempotency key
+- `sequence` is the replay cursor
+- the agent MUST persist enough local state to reject duplicate commands and resume after reconnect
 
-## 21. Permissions
+### 11.2 Agent To Controller
 
-The current scope model is too coarse. A cleaner permission model is:
+- `message_id` identifies one publication
+- the agent persists publications locally before publish
+- the current implementation treats successful Zenoh publish as sufficient to clear the local outbox
+
+### 11.3 Resume Rules
+
+On reconnect:
+
+1. the agent loads `last_applied_controller_sequence`
+2. the agent queries command history from the next sequence
+3. the agent applies recovered commands in order
+4. the agent resumes the live command subscription
+
+## 12. Certificates And mTLS
+
+Certificate-related data lives under the `certificate` object in the enrollment response.
+
+### 12.1 Modes
+
+`certificate.mode` SHOULD be one of:
+
+- `none`
+- `controller`
+- `step_ca`
+
+`certificate.bootstrap.mode` currently supports:
+
+- `step_ca_ott`
+
+### 12.2 step-ca Rules
+
+For `step_ca` mode:
+
+- `root_fingerprint` MUST be `SHA-256` lowercase hexadecimal without separators
+- the agent MUST verify the fetched root against that fingerprint
+- the agent MUST use its CSR when requesting the first certificate
+- the resulting certificate MUST match the CSR public key
+- the agent SHOULD renew through `/1.0/renew`
+- the OTT SHOULD be short-lived, single-use, and agent-scoped
+
+### 12.3 Recommended Production Posture
+
+For managed deployments using step-ca:
+
+- initial enrollment MAY complete before a client certificate exists
+- after a managed client certificate has been issued, production deployments SHOULD require mTLS on the Zenoh data plane
+- keeping mTLS optional after certificate issuance is an explicit deployment choice, not the recommended production default
+
+## 13. Permissions
+
+The controller permission model is:
 
 - `system:read`
 - `devices:read`
@@ -741,9 +519,9 @@ The current scope model is too coarse. A cleaner permission model is:
 - `jobs:cancel`
 - `commands:execute`
 
-The protocol SHOULD describe these as controller permissions or controller actions, not as request-side granted state in the enrollment snapshot.
+These permissions constrain what the controller is allowed to ask the agent to do. They are not request-side granted state in the enrollment snapshot.
 
-## 22. Large Payload Handling
+## 14. Large Payload Handling
 
 Inline payloads are acceptable for:
 
@@ -751,78 +529,55 @@ Inline payloads are acceptable for:
 - small receipts
 - small device commands
 
-For larger job content such as:
+For larger content such as PDF, HTML, or large images, the protocol SHOULD introduce `content_ref` so the data plane remains responsive and replay remains manageable.
 
-- PDF
-- HTML
-- large images
+## 15. Deployment Notes
 
-the protocol SHOULD support `content_ref` so the control stream stays responsive and replay remains manageable.
+### 15.1 Controller HTTP Edge
 
-## 23. Error Handling
+The enrollment endpoint SHOULD use `HTTPS`. A controller may place Axum behind a traditional HTTP edge such as Caddy for this enrollment surface.
 
-The current implementation does not yet define a fully standardized controller-side error envelope.
+### 15.2 Zenoh Routers
 
-The protocol SHOULD eventually standardize:
+The recommended production shape is:
 
-- enrollment error codes
-- refresh error codes
-- status sync rejection codes
-- control-stream close and rejection reasons
+- HTTP enrollment handled by the controller
+- Zenoh routers handling the managed data plane
+- agent sessions in Zenoh `client` mode
+- TLS with client certificates on the Zenoh transport
 
-## 24. Deployment Notes
+### 15.3 Bootstrap URL
 
-### 24.1 Caddy
+If the normal managed data plane requires mTLS, the deployment SHOULD expose an enrollment path that remains reachable before the first managed client certificate has been issued.
 
-When the controller is fronted by Caddy:
-
-- enrollment and status sync SHOULD use `HTTPS`
-- the control stream SHOULD use `WSS`
-- mTLS MAY be optional or required
-
-If strict client certificate validation is enabled, the deployment SHOULD expose a bootstrap enrollment URL that is reachable before the first client certificate is issued.
-
-### 24.2 step-ca
-
-The preferred production pattern is:
-
-1. installer supplies `enrollment_token`
-2. controller validates policy
-3. controller returns `certificate.bootstrap`
-4. agent bootstraps trust and obtains the first client certificate
-5. agent later renews through step-ca
-
-## 25. Controller Compatibility Checklist
+## 16. Controller Compatibility Checklist
 
 A controller is compatible with this draft if it:
 
 1. exposes the enrollment endpoint
-2. validates the `enrollment_token` or clearly documents external enrollment auth
+2. validates the `enrollment_token` or clearly documents delegated enrollment auth
 3. explicitly selects a protocol version
-4. returns a clear `auth.mode`
-5. returns stable `links`
-6. accepts periodic status sync
-7. exposes a `WSS` control-stream endpoint
-8. sends `controller.hello`
-9. uses unique `command_id` values
-10. treats agent `message_id` values as idempotency keys
-11. sends `controller.ack` only after durable processing state
-12. if using `step_ca`, returns certificate bootstrap data rather than requiring the agent to hold a CA-authorizing provisioner secret
+4. returns a Zenoh `data_plane` block with stable endpoints and namespace
+5. returns controller permissions
+6. if using `step_ca`, returns certificate bootstrap data rather than requiring a shared CA-authorizing secret on the agent
+7. publishes live commands with unique `command_id` and monotonically increasing `sequence`
+8. answers command-history queries for reconnect recovery
+9. consumes agent status, results, runtime events, and errors from the documented keyspace
 
-## 26. Implementation Notes
+## 17. Implementation Notes
 
-The current codebase implements the core wire contract in this draft, including:
+The current codebase implements the core contract in this document, including:
 
+- HTTPS enrollment with `enrollment_token`
 - explicit `selected_protocol_version`
-- nested enrollment `auth`, `links`, `permissions`, and `certificate` structures
-- refresh-token-only controller refresh
-- controller command `sequence` handling with persisted resume state
+- nested enrollment `permissions`, `data_plane`, and `certificate` structures
+- Zenoh-backed status publication, live command delivery, and history recovery
 - protocol-native command payload models
 - explicit controller-action permissions
 - managed step-ca certificate lifecycle supervision
 
-Remaining future-facing areas include:
+Future work remains around:
 
-- replacing periodic full snapshots with lighter long-lived status documents
-- adding a standardized `content_ref` flow for large print payloads
-- defining a richer standardized controller-side error envelope
+- standardized controller-side durable receipts for agent publications
+- lighter steady-state status documents
+- `content_ref` for large payloads
