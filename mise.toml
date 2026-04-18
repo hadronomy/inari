@@ -1,4 +1,5 @@
 [tools]
+just = "latest"
 "pipx:marimo" = { version = "latest", recomended = "" }
 typst = "0.14.2"
 tinymist = "0.14.2"
