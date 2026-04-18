@@ -4,10 +4,10 @@ from pathlib import Path
 import subprocess
 
 
-from iot_agent.models import SystemStatusResponse
-from iot_agent.version import API_VERSION
-from iot_agent_tray.app import AgentTrayApplication
-from iot_agent_tray.bridge import (
+from inari.models import SystemStatusResponse
+from inari.version import API_VERSION
+from inari_tray.app import AgentTrayApplication
+from inari_tray.bridge import (
     LaunchdAgentBridge,
     MonitorAgentBridge,
     SpawnedProcessAgentBridge,
@@ -15,16 +15,16 @@ from iot_agent_tray.bridge import (
     UnsupportedServiceAgentBridge,
     build_control_bridge,
 )
-from iot_agent_tray.config import TraySettings
-from iot_agent_tray.models import (
+from inari_tray.config import TraySettings
+from inari_tray.models import (
     ControlMode,
     ControlSnapshot,
     LifecycleState,
     TrayLinks,
     TraySnapshot,
 )
-from iot_agent_tray.qt_host import QtTrayHost
-from iot_agent_tray.tray_host import TrayMenuEntry, create_tray_host
+from inari_tray.qt_host import QtTrayHost
+from inari_tray.tray_host import TrayMenuEntry, create_tray_host
 
 
 def test_run_bootstraps_host_and_background_threads() -> None:
@@ -39,7 +39,7 @@ def test_run_bootstraps_host_and_background_threads() -> None:
     application.run()
 
     assert host.run_called is True
-    assert host.initial_snapshot.title == "IoT Agent"
+    assert host.initial_snapshot.title == "Inari"
     assert any(entry.label == "Open API Docs" for entry in host.initial_menu_entries)
     assert len(application._threads) == 2
     application._stop_event.set()
@@ -70,7 +70,7 @@ def test_setup_background_promotes_to_service_mode_when_api_is_reachable_and_ser
     bridge = FakeControlBridge()
     service_bridge = FakeServiceControlBridge()
     build_bridge = mocker.patch(
-        "iot_agent_tray.app.build_control_bridge", return_value=service_bridge
+        "inari_tray.app.build_control_bridge", return_value=service_bridge
     )
     application = AgentTrayApplication(
         TraySettings(control_mode="spawn", auto_start_agent=True),
@@ -92,7 +92,7 @@ def test_setup_background_promotes_to_service_mode_when_api_is_reachable_and_ser
 def test_refresh_snapshot_keeps_spawn_mode_when_service_is_not_running(mocker) -> None:
     bridge = FakeControlBridge()
     service_bridge = FakeServiceControlBridge(lifecycle=LifecycleState.STOPPED)
-    mocker.patch("iot_agent_tray.app.build_control_bridge", return_value=service_bridge)
+    mocker.patch("inari_tray.app.build_control_bridge", return_value=service_bridge)
     application = AgentTrayApplication(
         TraySettings(control_mode="spawn", auto_start_agent=True),
         client=FakeTrayClient(),
@@ -119,7 +119,7 @@ def test_apply_snapshot_swallow_tray_host_update_errors(caplog) -> None:
         message="x" * 256,
     )
 
-    with caplog.at_level("ERROR", logger="iot_agent_tray.app"):
+    with caplog.at_level("ERROR", logger="inari_tray.app"):
         application._apply_snapshot(snapshot)
 
     assert application.snapshot.last_error == "x" * 256
@@ -185,11 +185,11 @@ def test_settings_derive_related_agent_urls() -> None:
 
 
 def test_settings_default_service_name_tracks_platform_defaults(monkeypatch) -> None:
-    monkeypatch.setattr("iot_agent.service.models.platform.system", lambda: "Linux")
+    monkeypatch.setattr("inari.service.models.platform.system", lambda: "Linux")
 
     settings = TraySettings()
 
-    assert settings.service_name == "iot-agent.service"
+    assert settings.service_name == "inari.service"
     assert settings.service_scope == "system"
 
 
@@ -200,16 +200,16 @@ def test_create_tray_host_uses_qt_backend() -> None:
 
 
 def test_apply_update_keeps_menu_live_while_visible(mocker) -> None:
-    host = QtTrayHost(title="IoT Agent")
+    host = QtTrayHost(title="Inari")
     host._tray_icon = FakeQtTrayIcon()
     host._menu = FakeQtMenu(visible=True)
     host._menu_actions = [object()]
     snapshot = _tray_snapshot()
     menu_entries = [TrayMenuEntry("Refresh Now")]
 
-    mocker.patch("iot_agent_tray.qt_host._image_to_qicon", return_value=object())
-    mocker.patch("iot_agent_tray.qt_host._menu_layout_matches", return_value=True)
-    update_menu_actions = mocker.patch("iot_agent_tray.qt_host._update_menu_actions")
+    mocker.patch("inari_tray.qt_host._image_to_qicon", return_value=object())
+    mocker.patch("inari_tray.qt_host._menu_layout_matches", return_value=True)
+    update_menu_actions = mocker.patch("inari_tray.qt_host._update_menu_actions")
 
     host._apply_update(snapshot, menu_entries)
 
@@ -221,14 +221,14 @@ def test_apply_update_keeps_menu_live_while_visible(mocker) -> None:
 
 
 def test_apply_update_rebuilds_menu_when_layout_changes(mocker) -> None:
-    host = QtTrayHost(title="IoT Agent")
+    host = QtTrayHost(title="Inari")
     host._tray_icon = FakeQtTrayIcon()
     host._menu = FakeQtMenu(visible=False)
     menu_entries = [TrayMenuEntry("Open Logs")]
 
-    mocker.patch("iot_agent_tray.qt_host._image_to_qicon", return_value=object())
+    mocker.patch("inari_tray.qt_host._image_to_qicon", return_value=object())
     build_menu_actions = mocker.patch(
-        "iot_agent_tray.qt_host._build_menu_actions", return_value=["action"]
+        "inari_tray.qt_host._build_menu_actions", return_value=["action"]
     )
 
     host._apply_update(_tray_snapshot(), menu_entries)
@@ -332,25 +332,25 @@ def test_spawned_process_bridge_shutdown_stops_managed_process_by_default() -> N
 def test_spawned_process_bridge_prefers_same_interpreter_module_launch(mocker) -> None:
     bridge = SpawnedProcessAgentBridge(TraySettings(control_mode="spawn"))
 
-    mocker.patch("iot_agent_tray.bridge._supports_module_launch", return_value=True)
+    mocker.patch("inari_tray.bridge._supports_module_launch", return_value=True)
     command = bridge._resolve_launch_command()
 
-    assert command == (bridge_module_sys_executable(), "-m", "iot_agent")
+    assert command == (bridge_module_sys_executable(), "-m", "inari")
 
 
 def test_spawned_process_bridge_falls_back_to_console_script(mocker) -> None:
     bridge = SpawnedProcessAgentBridge(TraySettings(control_mode="spawn"))
 
-    mocker.patch("iot_agent_tray.bridge._supports_module_launch", return_value=False)
+    mocker.patch("inari_tray.bridge._supports_module_launch", return_value=False)
     mocker.patch(
-        "iot_agent_tray.bridge.shutil.which",
+        "inari_tray.bridge.shutil.which",
         side_effect=lambda name: (
-            "C:/bin/iot-agent.exe" if name == "iot-agent" else None
+            "C:/bin/inari.exe" if name == "inari" else None
         ),
     )
     command = bridge._resolve_launch_command()
 
-    assert command == ("C:/bin/iot-agent.exe",)
+    assert command == ("C:/bin/inari.exe",)
 
 
 def test_spawned_process_bridge_uses_uv_workspace_fallback(mocker) -> None:
@@ -359,13 +359,13 @@ def test_spawned_process_bridge_uses_uv_workspace_fallback(mocker) -> None:
         working_directory=Path("C:/repo"),
     )
 
-    mocker.patch("iot_agent_tray.bridge._supports_module_launch", return_value=False)
+    mocker.patch("inari_tray.bridge._supports_module_launch", return_value=False)
     mocker.patch(
-        "iot_agent_tray.bridge.shutil.which",
+        "inari_tray.bridge.shutil.which",
         side_effect=lambda name: "C:/bin/uv.exe" if name == "uv" else None,
     )
     mocker.patch(
-        "iot_agent_tray.bridge._detect_agent_workspace",
+        "inari_tray.bridge._detect_agent_workspace",
         return_value=Path("C:/repo/packages/agent"),
     )
     command = bridge._resolve_launch_command()
@@ -375,7 +375,7 @@ def test_spawned_process_bridge_uses_uv_workspace_fallback(mocker) -> None:
         "run",
         "--directory",
         "C:\\repo\\packages\\agent",
-        "iot-agent",
+        "inari",
     )
 
 
@@ -390,7 +390,7 @@ def test_build_control_bridge_uses_monitor_fallback() -> None:
 
 def test_build_control_bridge_selects_systemd_service_on_linux() -> None:
     bridge = build_control_bridge(
-        TraySettings(control_mode="service", service_name="iot-agent.service"),
+        TraySettings(control_mode="service", service_name="inari.service"),
         platform_name="Linux",
     )
 
@@ -399,7 +399,7 @@ def test_build_control_bridge_selects_systemd_service_on_linux() -> None:
 
 def test_build_control_bridge_selects_launchd_service_on_macos() -> None:
     bridge = build_control_bridge(
-        TraySettings(control_mode="service", service_name="com.example.iot-agent"),
+        TraySettings(control_mode="service", service_name="com.example.inari"),
         platform_name="Darwin",
     )
 
@@ -428,7 +428,7 @@ def test_query_state_parses_active_system_service() -> None:
     bridge = SystemdAgentBridge(
         TraySettings(
             control_mode="service",
-            service_name="iot-agent.service",
+            service_name="inari.service",
             service_scope="system",
         ),
         runner=runner,
@@ -437,7 +437,7 @@ def test_query_state_parses_active_system_service() -> None:
     state = bridge.query_state()
 
     assert commands == [
-        ("systemctl", "show", "iot-agent.service", "--property=ActiveState", "--value")
+        ("systemctl", "show", "inari.service", "--property=ActiveState", "--value")
     ]
     assert state.lifecycle is LifecycleState.RUNNING
     assert "systemd service" in (state.detail or "")
@@ -455,7 +455,7 @@ def test_query_state_uses_user_systemd_scope() -> None:
     bridge = SystemdAgentBridge(
         TraySettings(
             control_mode="service",
-            service_name="iot-agent.service",
+            service_name="inari.service",
             service_scope="user",
         ),
         runner=runner,
@@ -468,7 +468,7 @@ def test_query_state_uses_user_systemd_scope() -> None:
             "systemctl",
             "--user",
             "show",
-            "iot-agent.service",
+            "inari.service",
             "--property=ActiveState",
             "--value",
         )
@@ -489,7 +489,7 @@ def test_query_state_parses_running_launchd_job() -> None:
     bridge = LaunchdAgentBridge(
         TraySettings(
             control_mode="service",
-            service_name="com.example.iot-agent",
+            service_name="com.example.inari",
             service_scope="user",
         ),
         runner=runner,
@@ -497,19 +497,19 @@ def test_query_state_parses_running_launchd_job() -> None:
 
     state = bridge.query_state()
 
-    assert commands == [("launchctl", "print", "gui/0/com.example.iot-agent")]
+    assert commands == [("launchctl", "print", "gui/0/com.example.inari")]
     assert state.lifecycle is LifecycleState.RUNNING
     assert "launchd job" in (state.detail or "")
 
 
 def test_query_state_treats_missing_launchd_job_as_stopped() -> None:
     def runner(command):
-        raise RuntimeError('Could not find service "gui/0/com.example.iot-agent"')
+        raise RuntimeError('Could not find service "gui/0/com.example.inari"')
 
     bridge = LaunchdAgentBridge(
         TraySettings(
             control_mode="service",
-            service_name="com.example.iot-agent",
+            service_name="com.example.inari",
             service_scope="user",
         ),
         runner=runner,
@@ -607,7 +607,7 @@ class FakeServiceControlBridge:
         return ControlSnapshot(
             mode=ControlMode.SERVICE,
             lifecycle=self.lifecycle,
-            detail="Managing platform service 'iot-agent'.",
+            detail="Managing platform service 'inari'.",
             can_start=self.lifecycle
             in {LifecycleState.STOPPED, LifecycleState.UNKNOWN},
             can_stop=self.lifecycle
@@ -630,7 +630,7 @@ class FakeTrayClient:
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": API_VERSION},
+                "service": {"name": "Inari", "version": API_VERSION},
                 "devices": {
                     "count": 0,
                     "online_count": 0,
@@ -708,7 +708,7 @@ def bridge_module_sys_executable() -> str:
 
 def _tray_snapshot() -> TraySnapshot:
     return TraySnapshot.initial(
-        title="IoT Agent",
+        title="Inari",
         links=TrayLinks(
             api_base_url="http://127.0.0.1:7310",
             docs_url="http://127.0.0.1:7310/docs",

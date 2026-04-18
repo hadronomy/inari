@@ -11,8 +11,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from iot_agent.config import AgentSettings
-from iot_agent.gateway.models import (
+from inari.config import AgentSettings
+from inari.gateway.models import (
     CertificateBootstrapMode,
     GatewayEnrollmentRecord,
     ManagedCertificateFailureReason,
@@ -24,13 +24,13 @@ from iot_agent.gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
-from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
-from iot_agent.security.certificates import (
+from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
+from inari.security.certificate_provisioners import StepCaOttCertificateProvisioner
+from inari.security.certificates import (
     CertificateLifecycleService,
     ManagedCertificate,
 )
-from iot_agent.security.identity import AgentIdentityService
+from inari.security.identity import AgentIdentityService
 
 
 @pytest.mark.anyio

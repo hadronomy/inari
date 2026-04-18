@@ -1,9 +1,9 @@
-#:schema ./schemas/iot-agent-config.schema.json
+#:schema ./schemas/inari-config.schema.json
 
-# Generated configuration template for iot-agent.
+# Generated configuration template for inari.
 # Uncomment only the settings you want to override.
 # Commented values show the built-in default or a recommended example.
-# Environment variables with the IOT_AGENT_ prefix still override file values.
+# Environment variables with the INARI_ prefix still override file values.
 
 # Schema version for this TOML format.
 config_version = 1
@@ -38,7 +38,7 @@ config_version = 1
 # Directory for temporary files.
 # temp_dir = "./tmp"
 # SQLite database file path.
-# runtime_database = "./data/iot-agent.sqlite3"
+# runtime_database = "./data/inari.sqlite3"
 # Directory for identities, enrollment state, and fallback local secrets.
 # security_state_dir = "./data/security"
 
@@ -105,16 +105,16 @@ config_version = 1
 # Redirect HTTP to HTTPS when LAN TLS is enabled.
 # https_redirect_enabled = true
 # OS credential store namespace used by the agent.
-# secret_store_service_name = "iot-agent"
+# secret_store_service_name = "inari"
 
 # Short-lived tokens issued to local clients like the tray.
 [security.local_tokens]
 # Lifetime of locally issued bearer tokens in seconds.
 # ttl_seconds = 3600
 # Audience claim for locally issued tokens.
-# audience = "iot-agent.local"
+# audience = "inari.local"
 # Issuer claim for locally issued tokens.
-# issuer = "iot-agent.local"
+# issuer = "inari.local"
 
 # Inbound TLS files for LAN exposure. Loopback-only deployments usually leave these unset.
 [security.tls]
@@ -131,7 +131,7 @@ config_version = 1
 # Base URL for the external controller.
 # base_url = "https://controller.example.com"
 # Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.
-# enrollment_url = "https://bootstrap.controller.example.com/api/iot-agent/enroll"
+# enrollment_url = "https://bootstrap.controller.example.com/api/inari/enroll"
 # How the agent authenticates to the controller.
 # auth_mode = "controller"
 # How the agent obtains and refreshes client certificates.

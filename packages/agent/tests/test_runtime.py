@@ -7,32 +7,32 @@ from typing import ClassVar
 
 import pytest
 
-from iot_agent.config import AgentSettings
-from iot_agent.drivers import DeviceKind, DriverMetadata, DriverRegistry
-from iot_agent.drivers.printers.base import PrinterDriver
-from iot_agent.models import PrintJobRequest
-from iot_agent.printer_service import PrinterService
-from iot_agent.printers import (
+from inari.config import AgentSettings
+from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
+from inari.drivers.printers.base import PrinterDriver
+from inari.models import PrintJobRequest
+from inari.printer_service import PrinterService
+from inari.printers import (
     PrintJobResult,
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
     RenderedDocument,
 )
-from iot_agent.runtime.discovery import DiscoveryCoordinator
-from iot_agent.runtime.events import EventHub
-from iot_agent.runtime.execution import (
+from inari.runtime.discovery import DiscoveryCoordinator
+from inari.runtime.events import EventHub
+from inari.runtime.execution import (
     DeviceWorkerPool,
     JobScheduler,
     LeaseRecoveryCoordinator,
     PrinterOperationExecutor,
     RuntimeJobExecutor,
 )
-from iot_agent.runtime.models import JobRecord, JobState
-from iot_agent.runtime.repositories import DeviceRepository, JobRepository
-from iot_agent.runtime.services import DeviceCatalog, JobService
-from iot_agent.runtime.store import RuntimeStore
-from iot_agent.runtime.supervisor import RuntimeSupervisor
+from inari.runtime.models import JobRecord, JobState
+from inari.runtime.repositories import DeviceRepository, JobRepository
+from inari.runtime.services import DeviceCatalog, JobService
+from inari.runtime.store import RuntimeStore
+from inari.runtime.supervisor import RuntimeSupervisor
 
 
 @dataclass(slots=True)

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import subprocess
 
-from iot_agent.config import AgentSettings, NetworkPrinterConfig
-from iot_agent.di.drivers import build_printer_drivers
-from iot_agent.drivers.printers import (
+from inari.config import AgentSettings, NetworkPrinterConfig
+from inari.di.drivers import build_printer_drivers
+from inari.drivers.printers import (
     CupsPrinterDriver,
     RawSocketPrinterDriver,
     WindowsPrinterDriver,
 )
-from iot_agent.printers import PrinterTransport
+from inari.printers import PrinterTransport
 
 
 def test_list_devices_and_send_raw_payload() -> None:
@@ -91,7 +91,7 @@ def test_list_devices_from_cups_api_and_submit_raw_job_with_lp(mocker) -> None:
         device for device in devices if device.name == "Receipt Printer"
     )
 
-    mocker.patch("iot_agent.drivers.printers.cups.subprocess.run", side_effect=fake_run)
+    mocker.patch("inari.drivers.printers.cups.subprocess.run", side_effect=fake_run)
     result = driver.submit_raw_job(receipt_printer, b"receipt", document_name="Receipt")
 
     assert [device.name for device in devices] == ["Office Printer", "Receipt Printer"]

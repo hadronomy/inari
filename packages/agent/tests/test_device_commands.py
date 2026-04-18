@@ -4,15 +4,15 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from iot_agent.device_commands import (
+from inari.device_commands import (
     CutPaper,
     DeviceCommand,
     FeedDots,
     FeedLines,
     PrintTestPage,
 )
-from iot_agent.printers import CutMode, PrinterTransport
-from iot_agent.runtime.operations import (
+from inari.printers import CutMode, PrinterTransport
+from inari.runtime.operations import (
     DeviceTargetRef,
     QueuedDeviceCommandOperation,
     deserialize_device_command_operation,

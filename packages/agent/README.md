@@ -1,4 +1,4 @@
-# IoT Agent
+# Inari
 
 Extensible local hardware bridge for POS and local devices.
 
@@ -47,7 +47,7 @@ For the managed controller protocol draft, see [docs/gateway_protocol.md](../../
 ## Layout
 
 ```text
-iot_agent/
+inari/
   api.py
   binary_payloads.py
   container.py
@@ -106,7 +106,7 @@ Failures now use a single problem-details-style envelope across service errors, 
 ```json
 {
   "ok": false,
-  "type": "urn:iot-agent:error:mime-type-mismatch",
+  "type": "urn:inari:error:mime-type-mismatch",
   "title": "MIME Type Mismatch",
   "status": 400,
   "code": "MIME_TYPE_MISMATCH",
@@ -205,19 +205,19 @@ If you want the native CUPS Python binding in a local environment, install the p
 From the repository root:
 
 ```powershell
-uv run --directory packages/agent iot-agent
+uv run --directory packages/agent inari
 ```
 
 Or from inside `packages/agent`:
 
 ```powershell
-uv run iot-agent
+uv run inari
 ```
 
 To run with an explicit TOML config:
 
 ```powershell
-uv run --directory packages/agent iot-agent serve --config .\config\iot-agent.toml
+uv run --directory packages/agent inari serve --config .\config\inari.toml
 ```
 
 ## Service Management
@@ -227,30 +227,30 @@ The agent can now install and manage itself as a native platform service without
 Recommended first-run flow:
 
 ```powershell
-uv run --directory packages/agent iot-agent config write-default
-uv run --directory packages/agent iot-agent service print-definition
-uv run --directory packages/agent iot-agent service install
-uv run --directory packages/agent iot-agent service start
-uv run --directory packages/agent iot-agent service status
+uv run --directory packages/agent inari config write-default
+uv run --directory packages/agent inari service print-definition
+uv run --directory packages/agent inari service install
+uv run --directory packages/agent inari service start
+uv run --directory packages/agent inari service status
 ```
 
 Available commands:
 
 ```powershell
-uv run --directory packages/agent iot-agent service install
-uv run --directory packages/agent iot-agent service uninstall
-uv run --directory packages/agent iot-agent service start
-uv run --directory packages/agent iot-agent service stop
-uv run --directory packages/agent iot-agent service restart
-uv run --directory packages/agent iot-agent service status
-uv run --directory packages/agent iot-agent service print-definition
+uv run --directory packages/agent inari service install
+uv run --directory packages/agent inari service uninstall
+uv run --directory packages/agent inari service start
+uv run --directory packages/agent inari service stop
+uv run --directory packages/agent inari service restart
+uv run --directory packages/agent inari service status
+uv run --directory packages/agent inari service print-definition
 ```
 
 Platform defaults:
 
-- Windows: `IoTAgentService`
-- Linux: `iot-agent.service`
-- macOS: `io.iot-agent.service`
+- Windows: `InariService`
+- Linux: `inari.service`
+- macOS: `io.inari.service`
 
 Linux and macOS also support `--scope user` when you want a per-user service instead of the default system scope.
 
@@ -266,12 +266,12 @@ The runtime database now uses versioned Alembic migrations on top of SQLAlchemy 
 Operational commands:
 
 ```powershell
-uv run --directory packages/agent iot-agent db current
-uv run --directory packages/agent iot-agent db upgrade
-uv run --directory packages/agent iot-agent db backup
+uv run --directory packages/agent inari db current
+uv run --directory packages/agent inari db upgrade
+uv run --directory packages/agent inari db backup
 ```
 
-For developer migration work inside `packages/agent`, the repo also includes [alembic.ini](./alembic.ini), which points at the packaged migration environment under `iot_agent/db/alembic`. Its `sqlalchemy.url` is an explicit developer placeholder, not the authoritative runtime database location; the agent injects the real configured database URL in code during startup and `iot-agent db ...` commands.
+For developer migration work inside `packages/agent`, the repo also includes [alembic.ini](./alembic.ini), which points at the packaged migration environment under `inari/db/alembic`. Its `sqlalchemy.url` is an explicit developer placeholder, not the authoritative runtime database location; the agent injects the real configured database URL in code during startup and `inari db ...` commands.
 
 ## Test
 
@@ -286,7 +286,7 @@ The agent now supports a TOML-first configuration flow. The recommended setup is
 1. generate the schema and example config
 2. copy or adapt `config.example.toml`
 3. run the agent with `--config`
-4. use `IOT_AGENT_*` environment variables only for overrides and secrets
+4. use `INARI_*` environment variables only for overrides and secrets
 
 Config resolution order is:
 
@@ -294,25 +294,25 @@ Config resolution order is:
 2. the selected TOML file
 3. a sibling `*.local.toml` override file
 4. `.env`
-5. `IOT_AGENT_*` environment variables
+5. `INARI_*` environment variables
 
-You can also point the agent at a config file with `IOT_AGENT_CONFIG` when passing `--config` is not convenient.
+You can also point the agent at a config file with `INARI_CONFIG` when passing `--config` is not convenient.
 
 Generate the schema and example file from the package directory:
 
 ```powershell
-uv run --directory packages/agent iot-agent-generate-config
+uv run --directory packages/agent inari-generate-config
 ```
 
 Write a production-oriented default runtime config directly to the platform service path:
 
 ```powershell
-uv run --directory packages/agent iot-agent config write-default
+uv run --directory packages/agent inari config write-default
 ```
 
 That writes:
 
-- [schemas/iot-agent-config.schema.json](./schemas/iot-agent-config.schema.json)
+- [schemas/inari-config.schema.json](./schemas/inari-config.schema.json)
 - [config.example.toml](./config.example.toml)
 
 `config.example.toml` includes a Taplo schema reference, so editors that support Taplo can validate and autocomplete the file directly.
@@ -320,7 +320,7 @@ That writes:
 Example config:
 
 ```toml
-#:schema ./schemas/iot-agent-config.schema.json
+#:schema ./schemas/inari-config.schema.json
 
 config_version = 1
 
@@ -355,11 +355,11 @@ gateway_mode = "standalone"
 gateway_exposure = "loopback"
 allow_loopback_bootstrap = true
 https_redirect_enabled = true
-secret_store_service_name = "iot-agent"
+secret_store_service_name = "inari"
 
 [security.local_tokens]
 ttl_seconds = 3600
-audience = "iot-agent.local"
+audience = "inari.local"
 
 [gateway]
 auth_mode = "controller"
@@ -389,9 +389,9 @@ issued.
 
 Production defaults are:
 
-- Windows: `C:\ProgramData\IoT Agent\config.toml` plus `data`, `logs`, and `tmp` directories under `C:\ProgramData\IoT Agent`
-- Linux: `/etc/iot-agent/config.toml`, `/var/lib/iot-agent/data`, `/var/log/iot-agent`, and `/var/cache/iot-agent`
-- macOS: `/Library/Application Support/IoT Agent/config.toml`, `/Library/Application Support/IoT Agent/data`, `/Library/Logs/IoT Agent`, and `/Library/Application Support/IoT Agent/tmp`
+- Windows: `C:\ProgramData\Inari\config.toml` plus `data`, `logs`, and `tmp` directories under `C:\ProgramData\Inari`
+- Linux: `/etc/inari/config.toml`, `/var/lib/inari/data`, `/var/log/inari`, and `/var/cache/inari`
+- macOS: `/Library/Application Support/Inari/config.toml`, `/Library/Application Support/Inari/data`, `/Library/Logs/Inari`, and `/Library/Application Support/Inari/tmp`
 
 You can still override any specific path explicitly with:
 
@@ -401,13 +401,13 @@ directory = "/custom/logs"
 
 [paths]
 profile = "production"
-data_dir = "/srv/iot-agent"
-temp_dir = "/srv/iot-agent/tmp"
+data_dir = "/srv/inari"
+temp_dir = "/srv/inari/tmp"
 ```
 
 ## Environment Overrides
 
-Flat `IOT_AGENT_*` environment variables still work as the final override layer on top of TOML. That is especially useful for:
+Flat `INARI_*` environment variables still work as the final override layer on top of TOML. That is especially useful for:
 
 - secrets
 - CI
@@ -415,13 +415,13 @@ Flat `IOT_AGENT_*` environment variables still work as the final override layer 
 - containerized deployments
 
 ```env
-IOT_AGENT_ALLOWED_ORIGINS=http://127.0.0.1:8069,http://localhost:8069
-IOT_AGENT_LOG_LEVEL=INFO
-IOT_AGENT_PATH_PROFILE=production
-IOT_AGENT_DEFAULT_PRINTER_NAME=EPSON TM-T20III
-IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
-IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
+INARI_ALLOWED_ORIGINS=http://127.0.0.1:8069,http://localhost:8069
+INARI_LOG_LEVEL=INFO
+INARI_PATH_PROFILE=production
+INARI_DEFAULT_PRINTER_NAME=EPSON TM-T20III
+INARI_ZITADEL_BASE_URL=https://zitadel.example.com
+INARI_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
+INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
-For controller-issued step-ca bootstrap, the controller can return the CA URL, fingerprint, sign URL, and renew URL dynamically, so those values do not need to be preconfigured on every agent. `IOT_AGENT_STEP_CA_URL`, `IOT_AGENT_STEP_CA_SIGN_URL`, `IOT_AGENT_STEP_CA_RENEW_URL`, and `IOT_AGENT_STEP_CA_ROOT_FINGERPRINT` remain available as explicit overrides when you want local fallback knowledge of the CA.
+For controller-issued step-ca bootstrap, the controller can return the CA URL, fingerprint, sign URL, and renew URL dynamically, so those values do not need to be preconfigured on every agent. `INARI_STEP_CA_URL`, `INARI_STEP_CA_SIGN_URL`, `INARI_STEP_CA_RENEW_URL`, and `INARI_STEP_CA_ROOT_FINGERPRINT` remain available as explicit overrides when you want local fallback knowledge of the CA.

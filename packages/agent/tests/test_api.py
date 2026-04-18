@@ -12,15 +12,15 @@ from asgi_lifespan import LifespanManager
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
-from iot_agent.config import AgentSettings
-from iot_agent.container import AgentContainer
-from iot_agent.drivers import DriverRegistry
-from iot_agent.exceptions import AgentError
-from iot_agent.gateway.models import UpstreamConnectionState, UpstreamStatus
-from iot_agent.main import create_app
-from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
-from iot_agent.runtime.events import EventHub
-from iot_agent.runtime.models import (
+from inari.config import AgentSettings
+from inari.container import AgentContainer
+from inari.drivers import DriverRegistry
+from inari.exceptions import AgentError
+from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
+from inari.main import create_app
+from inari.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from inari.runtime.events import EventHub
+from inari.runtime.models import (
     DeviceConnectionState,
     DeviceRecord,
     JobAttemptRecord,
@@ -30,7 +30,7 @@ from iot_agent.runtime.models import (
     JobState,
     utc_now,
 )
-from iot_agent.security.models import (
+from inari.security.models import (
     AccessScope,
     AgentIdentity,
     AuthenticatedPrincipal,
@@ -39,7 +39,7 @@ from iot_agent.security.models import (
     IssuedToken,
     PrincipalKind,
 )
-from iot_agent.version import API_VERSION
+from inari.version import API_VERSION
 
 
 @dataclass(slots=True)
@@ -146,7 +146,7 @@ class StubAuthorizationService:
             principal_kind=PrincipalKind.LOCAL_CLIENT,
             scopes=frozenset(scopes),
             issuer="urn:test:issuer",
-            audience="iot-agent.local",
+            audience="inari.local",
             token_id=token_value,
             expires_at=expires_at,
         )
@@ -451,7 +451,7 @@ def test_events_websocket_connects_successfully(mocker) -> None:
             payload = websocket.receive_json()
 
     assert payload["kind"] == "snapshot"
-    assert payload["status"]["service"]["name"] == "IoT Agent"
+    assert payload["status"]["service"]["name"] == "Inari"
     assert payload["status"]["queue"]["queued"] == 1
 
 
@@ -488,7 +488,7 @@ async def test_validation_errors_use_unified_problem_details_shape(mocker) -> No
     payload = response.json()
     assert payload["ok"] is False
     assert payload["code"] == "REQUEST_VALIDATION_FAILED"
-    assert payload["type"] == "urn:iot-agent:error:request-validation-failed"
+    assert payload["type"] == "urn:inari:error:request-validation-failed"
     assert payload["errors"][0]["source"]["pointer"] == "/content"
 
 
@@ -513,7 +513,7 @@ async def test_agent_errors_use_unified_problem_details_shape(mocker) -> None:
     assert payload["ok"] is False
     assert payload["code"] == "DEVICE_NOT_FOUND"
     assert payload["title"] == "Device Not Found"
-    assert payload["type"] == "urn:iot-agent:error:device-not-found"
+    assert payload["type"] == "urn:inari:error:device-not-found"
 
 
 @pytest.mark.anyio
@@ -611,8 +611,8 @@ def make_test_container(
     mocker,
 ) -> AgentContainer:
     settings = AgentSettings(
-        security_state_dir=mkdtemp(prefix="iot-agent-security-"),
-        runtime_database_path=Path(mkdtemp(prefix="iot-agent-runtime-"))
+        security_state_dir=mkdtemp(prefix="inari-security-"),
+        runtime_database_path=Path(mkdtemp(prefix="inari-runtime-"))
         / "runtime.sqlite3",
     )
     default_device = DeviceRecord.from_printer(

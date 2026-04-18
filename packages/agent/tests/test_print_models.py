@@ -5,10 +5,10 @@ import base64
 import pytest
 from pydantic import ValidationError
 
-from iot_agent.binary_payloads import coerce_image_payload, coerce_pdf_payload
-from iot_agent.exceptions import PrinterServiceError
-from iot_agent.models import DeviceCommandRequest, PrintJobRequest
-from iot_agent.print_jobs import ReceiptImageContent, TextDocumentContent
+from inari.binary_payloads import coerce_image_payload, coerce_pdf_payload
+from inari.exceptions import PrinterServiceError
+from inari.models import DeviceCommandRequest, PrintJobRequest
+from inari.print_jobs import ReceiptImageContent, TextDocumentContent
 
 
 def test_image_payload_accepts_data_url_and_detects_mime() -> None:

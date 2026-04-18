@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from iot_agent.config import AgentSettings
-from iot_agent.security.identity import AgentIdentityService
-from iot_agent.security.models import AccessScope, GatewayExposure
-from iot_agent.security.policies import SecurityPolicyService
-from iot_agent.security.secrets import MemorySecretStore
-from iot_agent.security.tokens import TokenService
+from inari.config import AgentSettings
+from inari.security.identity import AgentIdentityService
+from inari.security.models import AccessScope, GatewayExposure
+from inari.security.policies import SecurityPolicyService
+from inari.security.secrets import MemorySecretStore
+from inari.security.tokens import TokenService
 
 
 def test_identity_is_stable_across_reloads(tmp_path: Path) -> None:
@@ -31,7 +31,7 @@ def test_token_service_round_trips_local_token(tmp_path: Path) -> None:
         secret_store=MemorySecretStore(),
         identity_service=identity_service,
         token_ttl_seconds=3600,
-        token_audience="iot-agent.local",
+        token_audience="inari.local",
     )
 
     token = token_service.issue_local_token(

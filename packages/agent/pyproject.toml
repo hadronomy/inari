@@ -1,5 +1,5 @@
 [project]
-name = "iot-agent"
+name = "inari"
 version = "1.20.0a1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
@@ -41,9 +41,9 @@ dev = [
 ]
 
 [project.scripts]
-iot-agent = "iot_agent.cli:main"
-iot-agent-windows-service = "iot_agent.windows_service:main"
-iot-agent-generate-config = "iot_agent.config:generate_schema_main"
+inari = "inari.cli:main"
+inari-windows-service = "inari.windows_service:main"
+inari-generate-config = "inari.config:generate_schema_main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -51,8 +51,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["iot_agent*"]
+include = ["inari*"]
 exclude = ["notebooks*", "tests*"]
 
 [tool.setuptools.package-data]
-iot_agent = ["db/alembic/script.py.mako"]
+inari = ["db/alembic/script.py.mako"]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from iot_agent.receipt_renderers import EscPosRenderer, EscPosRendererConfig
+from inari.receipt_renderers import EscPosRenderer, EscPosRendererConfig
 
 
 def test_render_basic_receipt() -> None:

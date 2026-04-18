@@ -1,6 +1,6 @@
 ---
 title: Gateway Protocol
-summary: Managed-mode protocol specification for the controller <-> iot-agent boundary over HTTPS enrollment and a Zenoh data plane.
+summary: Managed-mode protocol specification for the controller <-> inari boundary over HTTPS enrollment and a Zenoh data plane.
 status: draft
 protocol_version: "2026-04-18"
 agent_api_version: "1.20.0a1"
@@ -17,7 +17,7 @@ audience:
 
 This document defines the managed-mode protocol boundary between:
 
-- the local `iot-agent` process acting as the edge gateway
+- the local `inari` process acting as the edge gateway
 - an external controller service
 
 The current protocol uses:
@@ -28,7 +28,7 @@ The current protocol uses:
 Use this together with:
 
 - [managed_gateway_stacks.md](./managed_gateway_stacks.md)
-- [packages/agent/iot_agent/gateway/protocol.py](../packages/agent/iot_agent/gateway/protocol.py)
+- [packages/agent/inari/gateway/protocol.py](../packages/agent/inari/gateway/protocol.py)
 
 ## 1. Document Status
 
@@ -77,7 +77,7 @@ This protocol does not cover:
 ## 5. Terminology
 
 `agent`
-: The local `iot-agent` process acting as the managed edge gateway.
+: The local `inari` process acting as the managed edge gateway.
 
 `controller`
 : The external service coordinating one or more managed agents.
@@ -145,7 +145,7 @@ The selected version MUST be one of the versions advertised by the agent. If the
 The standard enrollment request is:
 
 ```http
-POST /api/iot-agent/enroll
+POST /api/inari/enroll
 Authorization: Bearer <enrollment-token>
 Content-Type: application/json
 ```
@@ -234,7 +234,7 @@ The recommended enrollment response shape is:
       "sign_url": "https://ca.example.com/1.0/sign",
       "renew_url": "https://ca.example.com/1.0/renew",
       "subject": "agt_123",
-      "authorized_sans": ["urn:iot-agent:agt_123"],
+      "authorized_sans": ["urn:inari:agt_123"],
       "requires_mutual_tls_after_issuance": true
     }
   },
@@ -265,7 +265,7 @@ sequenceDiagram
     end
 
     Installer->>Agent: Provide short-lived enrollment_token
-    Agent->>Controller: POST /api/iot-agent/enroll<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
+    Agent->>Controller: POST /api/inari/enroll<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
     Controller->>Controller: Validate enrollment policy<br/>Select protocol version<br/>Grant controller actions
     Controller->>Controller: Mint short-lived step-ca OTT
     Controller-->>Agent: Enrollment response<br/>data_plane + certificate.bootstrap(step_ca_ott)

@@ -4,8 +4,8 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "albatross",
-    "iot-agent",
-    "iot-agent-tray",
+    "inari",
+    "inari-tray",
 ]
 
 [[package]]
@@ -498,7 +498,7 @@ wheels = [
 ]
 
 [[package]]
-name = "iot-agent"
+name = "inari"
 version = "1.20.0a1"
 source = { editable = "packages/agent" }
 dependencies = [
@@ -577,12 +577,12 @@ dev = [
 ]
 
 [[package]]
-name = "iot-agent-tray"
+name = "inari-tray"
 version = "0.3.1a1"
 source = { editable = "packages/agent_tray" }
 dependencies = [
     { name = "httpx" },
-    { name = "iot-agent" },
+    { name = "inari" },
     { name = "pillow" },
     { name = "pydantic-settings" },
     { name = "pyside6" },
@@ -606,7 +606,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "iot-agent", editable = "packages/agent" },
+    { name = "inari", editable = "packages/agent" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
     { name = "pyside6", specifier = ">=6.9.1" },

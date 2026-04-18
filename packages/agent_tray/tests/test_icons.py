@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from iot_agent_tray.icons import ICON_SIZE, build_tray_icon
-from iot_agent_tray.models import (
+from inari_tray.icons import ICON_SIZE, build_tray_icon
+from inari_tray.models import (
     ControlMode,
     ControlSnapshot,
     LifecycleState,
@@ -22,7 +22,7 @@ def _snapshot(*, level: TrayStatusLevel) -> TraySnapshot:
         log_dir=Path("logs"),
     )
     return TraySnapshot(
-        title="IoT Agent",
+        title="Inari",
         links=links,
         control=ControlSnapshot(
             mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING

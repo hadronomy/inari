@@ -6,9 +6,9 @@ from threading import Event
 import httpx
 import respx
 
-from iot_agent.version import API_VERSION
-from iot_agent_tray.client import AgentApiClient
-from iot_agent_tray.config import TraySettings
+from inari.version import API_VERSION
+from inari_tray.client import AgentApiClient
+from inari_tray.config import TraySettings
 
 
 def test_client_fetches_local_token_before_calling_protected_status() -> None:
@@ -22,7 +22,7 @@ def test_client_fetches_local_token_before_calling_protected_status() -> None:
                     "token_type": "Bearer",
                     "expires_at": "2099-01-01T00:00:00Z",
                     "scopes": ["system:read", "devices:read"],
-                    "subject": "local:iot-agent-tray",
+                    "subject": "local:inari-tray",
                     "principal_kind": "local_client",
                 },
             )
@@ -33,7 +33,7 @@ def test_client_fetches_local_token_before_calling_protected_status() -> None:
                 json={
                     "ok": True,
                     "status": "healthy",
-                    "service": {"name": "IoT Agent", "version": API_VERSION},
+                    "service": {"name": "Inari", "version": API_VERSION},
                     "devices": {
                         "count": 0,
                         "online_count": 0,
@@ -91,7 +91,7 @@ def test_client_reuses_cached_token_for_websocket_stream() -> None:
                     "token_type": "Bearer",
                     "expires_at": "2099-01-01T00:00:00Z",
                     "scopes": ["system:read", "devices:read", "events:read"],
-                    "subject": "local:iot-agent-tray",
+                    "subject": "local:inari-tray",
                     "principal_kind": "local_client",
                 },
             )
@@ -130,7 +130,7 @@ class FakeWebSocketConnection:
                 "status": {
                     "ok": True,
                     "status": "healthy",
-                    "service": {"name": "IoT Agent", "version": API_VERSION},
+                    "service": {"name": "Inari", "version": API_VERSION},
                     "devices": {
                         "count": 0,
                         "online_count": 0,

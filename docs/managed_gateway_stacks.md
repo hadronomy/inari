@@ -16,7 +16,7 @@ The recommended production shape is:
 
 ```text
                  HTTPS enrollment
-IoT Agent ---------------------------------> Controller HTTP API
+Inari ---------------------------------> Controller HTTP API
     |                                               ^
     |                                               |
     |---- enrollment auth ------------------------ ZITADEL (optional)
@@ -46,10 +46,10 @@ The steady-state managed path is:
 Use when the controller owns enrollment policy directly.
 
 ```env
-IOT_AGENT_GATEWAY_MODE=managed
-IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
-IOT_AGENT_UPSTREAM_AUTH_MODE=controller
-IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
+INARI_GATEWAY_MODE=managed
+INARI_UPSTREAM_BASE_URL=https://controller.example.com
+INARI_UPSTREAM_AUTH_MODE=controller
+INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
 In this mode:
@@ -64,12 +64,12 @@ In this mode:
 Use when enrollment is authorized through ZITADEL instead of a controller-issued bearer token.
 
 ```env
-IOT_AGENT_GATEWAY_MODE=managed
-IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
-IOT_AGENT_UPSTREAM_AUTH_MODE=zitadel_service_account
-IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
-IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-IOT_AGENT_ZITADEL_REQUESTED_SCOPES=openid,events:read,jobs:create,commands:execute
+INARI_GATEWAY_MODE=managed
+INARI_UPSTREAM_BASE_URL=https://controller.example.com
+INARI_UPSTREAM_AUTH_MODE=zitadel_service_account
+INARI_ZITADEL_BASE_URL=https://zitadel.example.com
+INARI_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
+INARI_ZITADEL_REQUESTED_SCOPES=openid,events:read,jobs:create,commands:execute
 ```
 
 In this mode:
@@ -83,9 +83,9 @@ In this mode:
 Use when the managed data plane is expected to require mTLS after certificate issuance.
 
 ```env
-IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
-IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/iot-agent/enroll
-IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
+INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
+INARI_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/inari/enroll
+INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
 In this mode:
@@ -98,10 +98,10 @@ In this mode:
 
 Optional local overrides:
 
-- `IOT_AGENT_STEP_CA_URL`
-- `IOT_AGENT_STEP_CA_SIGN_URL`
-- `IOT_AGENT_STEP_CA_RENEW_URL`
-- `IOT_AGENT_STEP_CA_ROOT_FINGERPRINT`
+- `INARI_STEP_CA_URL`
+- `INARI_STEP_CA_SIGN_URL`
+- `INARI_STEP_CA_RENEW_URL`
+- `INARI_STEP_CA_ROOT_FINGERPRINT`
 
 These are mainly useful as explicit fallback knowledge of the CA. The preferred production path is to let the controller return the bootstrap details during enrollment.
 
@@ -112,17 +112,17 @@ If you use Caddy, it normally fronts the controller’s HTTP enrollment API rath
 Example:
 
 ```env
-IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
-IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=optional
+INARI_UPSTREAM_EDGE_PROVIDER=caddy
+INARI_UPSTREAM_MUTUAL_TLS_MODE=optional
 ```
 
 Or for the recommended post-issuance posture:
 
 ```env
-IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
-IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=optional
-IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
-IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/iot-agent/enroll
+INARI_UPSTREAM_EDGE_PROVIDER=caddy
+INARI_UPSTREAM_MUTUAL_TLS_MODE=optional
+INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
+INARI_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/inari/enroll
 ```
 
 That means:
@@ -135,16 +135,16 @@ That means:
 The cleanest stack is:
 
 ```env
-IOT_AGENT_GATEWAY_MODE=managed
-IOT_AGENT_UPSTREAM_BASE_URL=https://controller.example.com
-IOT_AGENT_UPSTREAM_EDGE_PROVIDER=caddy
-IOT_AGENT_UPSTREAM_MUTUAL_TLS_MODE=optional
-IOT_AGENT_UPSTREAM_AUTH_MODE=zitadel_service_account
-IOT_AGENT_ZITADEL_BASE_URL=https://zitadel.example.com
-IOT_AGENT_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-IOT_AGENT_UPSTREAM_CERTIFICATE_MODE=step_ca
-IOT_AGENT_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/iot-agent/enroll
-IOT_AGENT_UPSTREAM_ENROLLMENT_TOKEN=replace-me
+INARI_GATEWAY_MODE=managed
+INARI_UPSTREAM_BASE_URL=https://controller.example.com
+INARI_UPSTREAM_EDGE_PROVIDER=caddy
+INARI_UPSTREAM_MUTUAL_TLS_MODE=optional
+INARI_UPSTREAM_AUTH_MODE=zitadel_service_account
+INARI_ZITADEL_BASE_URL=https://zitadel.example.com
+INARI_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
+INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
+INARI_UPSTREAM_ENROLLMENT_URL=https://bootstrap.controller.example.com/api/inari/enroll
+INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
 ```
 
 That gives you:

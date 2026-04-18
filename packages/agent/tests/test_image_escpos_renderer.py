@@ -4,7 +4,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from iot_agent.receipt_renderers import (
+from inari.receipt_renderers import (
     EscPosImageReceiptRenderer,
     EscPosImageReceiptRendererConfig,
 )

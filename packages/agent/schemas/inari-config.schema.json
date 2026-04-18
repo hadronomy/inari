@@ -1,0 +1,886 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "CorsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_origins": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Origins",
+          "type": "array"
+        }
+      },
+      "title": "CorsConfig",
+      "type": "object"
+    },
+    "GatewayBootstrapConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enrollment_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enrollment Token"
+        }
+      },
+      "title": "GatewayBootstrapConfig",
+      "type": "object"
+    },
+    "GatewayConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_mode": {
+          "$ref": "#/definitions/UpstreamAuthMode",
+          "default": "controller"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
+        },
+        "bootstrap": {
+          "$ref": "#/definitions/GatewayBootstrapConfig"
+        },
+        "certificate_mode": {
+          "$ref": "#/definitions/UpstreamCertificateMode",
+          "default": "controller"
+        },
+        "edge_provider": {
+          "$ref": "#/definitions/UpstreamEdgeProvider",
+          "default": "direct"
+        },
+        "enrollment_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enrollment Url"
+        },
+        "mutual_tls_mode": {
+          "$ref": "#/definitions/MutualTlsMode",
+          "default": "optional"
+        },
+        "step_ca": {
+          "$ref": "#/definitions/GatewayStepCaConfig"
+        },
+        "sync": {
+          "$ref": "#/definitions/GatewaySyncConfig"
+        },
+        "trust_client_ca": {
+          "default": true,
+          "title": "Trust Client Ca",
+          "type": "boolean"
+        },
+        "zenoh": {
+          "$ref": "#/definitions/GatewayZenohConfig"
+        },
+        "zitadel": {
+          "$ref": "#/definitions/GatewayZitadelConfig"
+        }
+      },
+      "title": "GatewayConfig",
+      "type": "object"
+    },
+    "GatewayExposure": {
+      "enum": [
+        "loopback",
+        "lan"
+      ],
+      "title": "GatewayExposure",
+      "type": "string"
+    },
+    "GatewayMode": {
+      "enum": [
+        "standalone",
+        "managed"
+      ],
+      "title": "GatewayMode",
+      "type": "string"
+    },
+    "GatewayStepCaConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "certificate_renewal_skew_seconds": {
+          "default": 3600,
+          "title": "Certificate Renewal Skew Seconds",
+          "type": "integer"
+        },
+        "lifecycle_poll_interval_seconds": {
+          "default": 60.0,
+          "title": "Lifecycle Poll Interval Seconds",
+          "type": "number"
+        },
+        "renew_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Renew Url"
+        },
+        "requested_sans": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requested Sans",
+          "type": "array"
+        },
+        "root_fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Fingerprint"
+        },
+        "sign_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sign Url"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "GatewayStepCaConfig",
+      "type": "object"
+    },
+    "GatewaySyncConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff_base_seconds": {
+          "default": 1.0,
+          "title": "Backoff Base Seconds",
+          "type": "number"
+        },
+        "backoff_max_seconds": {
+          "default": 60.0,
+          "title": "Backoff Max Seconds",
+          "type": "number"
+        },
+        "interval_seconds": {
+          "default": 30.0,
+          "title": "Interval Seconds",
+          "type": "number"
+        },
+        "outbox_batch_size": {
+          "default": 128,
+          "title": "Outbox Batch Size",
+          "type": "integer"
+        },
+        "outbox_poll_interval_seconds": {
+          "default": 0.5,
+          "title": "Outbox Poll Interval Seconds",
+          "type": "number"
+        },
+        "reconnect_delay_seconds": {
+          "default": 5.0,
+          "title": "Reconnect Delay Seconds",
+          "type": "number"
+        }
+      },
+      "title": "GatewaySyncConfig",
+      "type": "object"
+    },
+    "GatewayZenohConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "close_link_on_expiration": {
+          "default": true,
+          "title": "Close Link On Expiration",
+          "type": "boolean"
+        },
+        "connect_endpoints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Connect Endpoints",
+          "type": "array"
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Namespace"
+        },
+        "query_timeout_seconds": {
+          "default": 10.0,
+          "title": "Query Timeout Seconds",
+          "type": "number"
+        },
+        "session_mode": {
+          "$ref": "#/definitions/ZenohSessionMode",
+          "default": "client"
+        }
+      },
+      "title": "GatewayZenohConfig",
+      "type": "object"
+    },
+    "GatewayZitadelConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_algorithm": {
+          "default": "RS256",
+          "title": "Assertion Algorithm",
+          "type": "string"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audience"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
+        },
+        "key_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key Id"
+        },
+        "private_key_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Private Key Path"
+        },
+        "requested_scopes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requested Scopes",
+          "type": "array"
+        },
+        "service_account_key_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Account Key Path"
+        },
+        "service_user_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service User Id"
+        },
+        "token_refresh_skew_seconds": {
+          "default": 120,
+          "title": "Token Refresh Skew Seconds",
+          "type": "integer"
+        },
+        "token_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Url"
+        }
+      },
+      "title": "GatewayZitadelConfig",
+      "type": "object"
+    },
+    "LoggingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Directory"
+        },
+        "level": {
+          "default": "INFO",
+          "enum": [
+            "CRITICAL",
+            "ERROR",
+            "WARNING",
+            "INFO",
+            "DEBUG"
+          ],
+          "title": "Level",
+          "type": "string"
+        }
+      },
+      "title": "LoggingConfig",
+      "type": "object"
+    },
+    "MutualTlsMode": {
+      "enum": [
+        "disabled",
+        "optional",
+        "required"
+      ],
+      "title": "MutualTlsMode",
+      "type": "string"
+    },
+    "NetworkPrinterConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cash_drawer": {
+          "default": true,
+          "title": "Cash Drawer",
+          "type": "boolean"
+        },
+        "document_enabled": {
+          "default": false,
+          "title": "Document Enabled",
+          "type": "boolean"
+        },
+        "encoding": {
+          "default": "utf-8",
+          "title": "Encoding",
+          "type": "string"
+        },
+        "host": {
+          "title": "Host",
+          "type": "string"
+        },
+        "is_default": {
+          "default": false,
+          "title": "Is Default",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "port": {
+          "default": 9100,
+          "title": "Port",
+          "type": "integer"
+        },
+        "preferred_transport": {
+          "default": "raw",
+          "enum": [
+            "auto",
+            "raw",
+            "text",
+            "document"
+          ],
+          "title": "Preferred Transport",
+          "type": "string"
+        },
+        "text_enabled": {
+          "default": false,
+          "title": "Text Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "host"
+      ],
+      "title": "NetworkPrinterConfig",
+      "type": "object"
+    },
+    "PathsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "data_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data Dir"
+        },
+        "profile": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "development",
+            "production"
+          ],
+          "title": "Profile",
+          "type": "string"
+        },
+        "runtime_database": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Database"
+        },
+        "security_state_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Security State Dir"
+        },
+        "temp_dir": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Temp Dir"
+        }
+      },
+      "title": "PathsConfig",
+      "type": "object"
+    },
+    "PrintingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default_printer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Printer Name"
+        },
+        "default_transport": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "raw",
+            "text",
+            "document"
+          ],
+          "title": "Default Transport",
+          "type": "string"
+        },
+        "html_enabled": {
+          "default": true,
+          "title": "Html Enabled",
+          "type": "boolean"
+        },
+        "network_printers": {
+          "items": {
+            "$ref": "#/definitions/NetworkPrinterConfig"
+          },
+          "title": "Network Printers",
+          "type": "array"
+        }
+      },
+      "title": "PrintingConfig",
+      "type": "object"
+    },
+    "RuntimeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "discovery": {
+          "$ref": "#/definitions/RuntimeDiscoveryConfig"
+        },
+        "jobs": {
+          "$ref": "#/definitions/RuntimeJobsConfig"
+        },
+        "scheduler": {
+          "$ref": "#/definitions/RuntimeSchedulerConfig"
+        }
+      },
+      "title": "RuntimeConfig",
+      "type": "object"
+    },
+    "RuntimeDiscoveryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "poll_interval_seconds": {
+          "default": 3.0,
+          "title": "Poll Interval Seconds",
+          "type": "number"
+        }
+      },
+      "title": "RuntimeDiscoveryConfig",
+      "type": "object"
+    },
+    "RuntimeJobsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatch_lease_seconds": {
+          "default": 15,
+          "title": "Dispatch Lease Seconds",
+          "type": "integer"
+        },
+        "execution_lease_seconds": {
+          "default": 30,
+          "title": "Execution Lease Seconds",
+          "type": "integer"
+        },
+        "execution_timeout_seconds": {
+          "default": 60.0,
+          "title": "Execution Timeout Seconds",
+          "type": "number"
+        },
+        "heartbeat_interval_seconds": {
+          "default": 5.0,
+          "title": "Heartbeat Interval Seconds",
+          "type": "number"
+        },
+        "lease_recovery_interval_seconds": {
+          "default": 5.0,
+          "title": "Lease Recovery Interval Seconds",
+          "type": "number"
+        },
+        "max_attempts": {
+          "default": 3,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "retry_base_delay_seconds": {
+          "default": 2,
+          "title": "Retry Base Delay Seconds",
+          "type": "integer"
+        },
+        "retry_max_delay_seconds": {
+          "default": 30,
+          "title": "Retry Max Delay Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "RuntimeJobsConfig",
+      "type": "object"
+    },
+    "RuntimeSchedulerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_size": {
+          "default": 32,
+          "title": "Batch Size",
+          "type": "integer"
+        },
+        "poll_interval_seconds": {
+          "default": 0.5,
+          "title": "Poll Interval Seconds",
+          "type": "number"
+        }
+      },
+      "title": "RuntimeSchedulerConfig",
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_loopback_bootstrap": {
+          "default": true,
+          "title": "Allow Loopback Bootstrap",
+          "type": "boolean"
+        },
+        "gateway_exposure": {
+          "$ref": "#/definitions/GatewayExposure",
+          "default": "loopback"
+        },
+        "gateway_mode": {
+          "$ref": "#/definitions/GatewayMode",
+          "default": "standalone"
+        },
+        "https_redirect_enabled": {
+          "default": true,
+          "title": "Https Redirect Enabled",
+          "type": "boolean"
+        },
+        "local_tokens": {
+          "$ref": "#/definitions/SecurityLocalTokenConfig"
+        },
+        "secret_store_service_name": {
+          "default": "inari",
+          "title": "Secret Store Service Name",
+          "type": "string"
+        },
+        "tls": {
+          "$ref": "#/definitions/SecurityTlsConfig"
+        }
+      },
+      "title": "SecurityConfig",
+      "type": "object"
+    },
+    "SecurityLocalTokenConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "default": "inari.local",
+          "title": "Audience",
+          "type": "string"
+        },
+        "issuer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Issuer"
+        },
+        "ttl_seconds": {
+          "default": 3600,
+          "title": "Ttl Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "SecurityLocalTokenConfig",
+      "type": "object"
+    },
+    "SecurityTlsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "ca_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ca Path"
+        },
+        "cert_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cert Path"
+        },
+        "key_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key Path"
+        }
+      },
+      "title": "SecurityTlsConfig",
+      "type": "object"
+    },
+    "ServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "default": "127.0.0.1",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 7310,
+          "title": "Port",
+          "type": "integer"
+        },
+        "trusted_hosts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trusted Hosts",
+          "type": "array"
+        }
+      },
+      "title": "ServerConfig",
+      "type": "object"
+    },
+    "UpstreamAuthMode": {
+      "enum": [
+        "controller",
+        "zitadel_service_account"
+      ],
+      "title": "UpstreamAuthMode",
+      "type": "string"
+    },
+    "UpstreamCertificateMode": {
+      "enum": [
+        "none",
+        "controller",
+        "step_ca"
+      ],
+      "title": "UpstreamCertificateMode",
+      "type": "string"
+    },
+    "UpstreamEdgeProvider": {
+      "enum": [
+        "direct",
+        "caddy"
+      ],
+      "title": "UpstreamEdgeProvider",
+      "type": "string"
+    },
+    "ZenohSessionMode": {
+      "enum": [
+        "client"
+      ],
+      "title": "ZenohSessionMode",
+      "type": "string"
+    }
+  },
+  "description": "Schema for the Inari TOML configuration file.",
+  "properties": {
+    "config_version": {
+      "default": 1,
+      "title": "Config Version",
+      "type": "integer"
+    },
+    "cors": {
+      "$ref": "#/definitions/CorsConfig"
+    },
+    "gateway": {
+      "$ref": "#/definitions/GatewayConfig"
+    },
+    "logging": {
+      "$ref": "#/definitions/LoggingConfig"
+    },
+    "paths": {
+      "$ref": "#/definitions/PathsConfig"
+    },
+    "printing": {
+      "$ref": "#/definitions/PrintingConfig"
+    },
+    "runtime": {
+      "$ref": "#/definitions/RuntimeConfig"
+    },
+    "security": {
+      "$ref": "#/definitions/SecurityConfig"
+    },
+    "server": {
+      "$ref": "#/definitions/ServerConfig"
+    }
+  },
+  "title": "AgentConfigFile",
+  "type": "object"
+}

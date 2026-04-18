@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from iot_agent.config import clear_settings_cache
+from inari.config import clear_settings_cache
 
 
 @pytest.fixture(autouse=True)

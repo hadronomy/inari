@@ -1,6 +1,6 @@
-# IoT Agent Tray
+# Inari Tray
 
-Cross-platform tray companion for the `iot-agent` package.
+Cross-platform tray companion for the `inari` package.
 
 The tray app is intentionally separate from the headless agent service:
 
@@ -21,7 +21,7 @@ The tray is now WebSocket-first for live state:
 From the repository root:
 
 ```powershell
-uv run --directory packages/agent_tray iot-agent-tray
+uv run --directory packages/agent_tray inari-tray
 ```
 
 The tray expects a desktop session with a visible system tray available to Qt.
@@ -29,20 +29,20 @@ The tray expects a desktop session with a visible system tray available to Qt.
 ## Environment
 
 ```env
-IOT_AGENT_TRAY_AGENT_API_BASE_URL=http://127.0.0.1:7310
-IOT_AGENT_TRAY_CONTROL_MODE=spawn
-IOT_AGENT_TRAY_SERVICE_SCOPE=system
-IOT_AGENT_TRAY_AUTO_START_AGENT=true
-IOT_AGENT_TRAY_AUTH_CLIENT_NAME=iot-agent-tray
-IOT_AGENT_TRAY_STATUS_RECONCILE_INTERVAL_SECONDS=30
-IOT_AGENT_TRAY_EVENT_RECONNECT_DELAY_SECONDS=3
-IOT_AGENT_TRAY_LOG_LEVEL=INFO
-IOT_AGENT_TRAY_LOG_DIR=./logs
+INARI_TRAY_AGENT_API_BASE_URL=http://127.0.0.1:7310
+INARI_TRAY_CONTROL_MODE=spawn
+INARI_TRAY_SERVICE_SCOPE=system
+INARI_TRAY_AUTO_START_AGENT=true
+INARI_TRAY_AUTH_CLIENT_NAME=inari-tray
+INARI_TRAY_STATUS_RECONCILE_INTERVAL_SECONDS=30
+INARI_TRAY_EVENT_RECONNECT_DELAY_SECONDS=3
+INARI_TRAY_LOG_LEVEL=INFO
+INARI_TRAY_LOG_DIR=./logs
 ```
 
 Control modes:
 
-- `spawn`: the tray starts and stops a local `iot-agent` background process, and auto-starts it on tray launch by default
+- `spawn`: the tray starts and stops a local `inari` background process, and auto-starts it on tray launch by default
 - `service`: the tray controls a platform service
   - Windows: Service Control Manager
   - Linux: `systemctl`
@@ -51,9 +51,9 @@ Control modes:
 
 In `service` mode, the tray now defaults to the same platform-native service identifier that the agent CLI installs:
 
-- Windows: `IoTAgentService`
-- Linux: `iot-agent.service`
-- macOS: `io.iot-agent.service`
+- Windows: `InariService`
+- Linux: `inari.service`
+- macOS: `io.inari.service`
 
 When `spawn` mode cannot boot the local agent, the tray writes the launcher output to `logs/agent-launch.log` so early startup failures are visible even before the agent itself configures logging.
 
@@ -62,6 +62,6 @@ By default, quitting the tray also stops the tray-managed local agent process in
 ## Platform Notes
 
 - Windows service mode uses the configured service name directly.
-- Linux service mode expects a `systemd` unit name such as `iot-agent.service`.
-- macOS service mode expects a `launchd` label such as `io.iot-agent.service`.
+- Linux service mode expects a `systemd` unit name such as `inari.service`.
+- macOS service mode expects a `launchd` label such as `io.inari.service`.
 - Opening the log directory uses the platform-native opener when available: `start`, `xdg-open`, or `open`.

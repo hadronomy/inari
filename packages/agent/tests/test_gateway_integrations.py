@@ -11,14 +11,14 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
-from iot_agent.config import AgentSettings
-from iot_agent.gateway.auth_providers import ZitadelServiceAccountAuthProvider
-from iot_agent.gateway.caddy import CaddyControllerProfile
-from iot_agent.gateway.enrollment import (
+from inari.config import AgentSettings
+from inari.gateway.auth_providers import ZitadelServiceAccountAuthProvider
+from inari.gateway.caddy import CaddyControllerProfile
+from inari.gateway.enrollment import (
     GatewayEnrollmentService,
     UPSTREAM_STEP_CA_OTT_KEY,
 )
-from iot_agent.gateway.models import (
+from inari.gateway.models import (
     CertificateBootstrapMode,
     GatewayEnrollmentRecord,
     MutualTlsMode,
@@ -31,14 +31,14 @@ from iot_agent.gateway.models import (
     ZenohSessionMode,
     resolve_mutual_tls_policy,
 )
-from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
-from iot_agent.security.certificates import CertificateLifecycleService
-from iot_agent.security.identity import AgentIdentityService
-from iot_agent.security.policies import SecurityPolicyService
-from iot_agent.security.secrets import MemorySecretStore
-from iot_agent.security.tls import TlsContextFactory
-from iot_agent.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
+from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
+from inari.security.certificate_provisioners import StepCaOttCertificateProvisioner
+from inari.security.certificates import CertificateLifecycleService
+from inari.security.identity import AgentIdentityService
+from inari.security.policies import SecurityPolicyService
+from inari.security.secrets import MemorySecretStore
+from inari.security.tls import TlsContextFactory
+from inari.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
 @pytest.mark.anyio
@@ -159,7 +159,7 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
                     "sign_url": "https://step-ca.example.com/1.0/sign",
                     "renew_url": "https://step-ca.example.com/1.0/renew",
                     "subject": "agt_test",
-                    "authorized_sans": ["urn:iot-agent:agt_test"],
+                    "authorized_sans": ["urn:inari:agt_test"],
                     "requires_mutual_tls_after_issuance": True,
                 },
             },
@@ -389,7 +389,7 @@ async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(
             sign_url="https://step-ca.example.com/1.0/sign",
             renew_url="https://step-ca.example.com/1.0/renew",
             subject="agt_test",
-            authorized_sans=("urn:iot-agent:agt_test",),
+            authorized_sans=("urn:inari:agt_test",),
             requires_mutual_tls_after_issuance=True,
         )
     )
@@ -745,7 +745,7 @@ def _gateway_snapshot_payload() -> dict[str, object]:
             "supported_versions": [GATEWAY_PROTOCOL_VERSION],
         },
         "service": {
-            "name": "IoT Agent",
+            "name": "Inari",
             "version": API_VERSION,
             "agent_id": "agt_test",
             "key_id": "kid_test",

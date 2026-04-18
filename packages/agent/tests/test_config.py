@@ -6,18 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from iot_agent.config import (
+from inari.config import (
     AgentSettings,
     generate_taplo_schema,
     load_settings,
     render_example_toml,
     write_generated_config_artifacts,
 )
-from iot_agent.config_paths import resolve_default_path_bundle
+from inari.config_paths import resolve_default_path_bundle
 
 
 def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
-    config_path = tmp_path / "iot-agent.toml"
+    config_path = tmp_path / "inari.toml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -75,7 +75,7 @@ def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
 
 
 def test_load_settings_derives_runtime_paths_from_data_dir(tmp_path: Path) -> None:
-    config_path = tmp_path / "iot-agent.toml"
+    config_path = tmp_path / "inari.toml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -91,13 +91,13 @@ def test_load_settings_derives_runtime_paths_from_data_dir(tmp_path: Path) -> No
     assert settings.data_dir == (tmp_path / "state").resolve()
     assert (
         settings.runtime_database_path
-        == (tmp_path / "state/iot-agent.sqlite3").resolve()
+        == (tmp_path / "state/inari.sqlite3").resolve()
     )
     assert settings.security_state_dir == (tmp_path / "state/security").resolve()
 
 
 def test_load_settings_reads_network_printers_from_toml(tmp_path: Path) -> None:
-    config_path = tmp_path / "iot-agent.toml"
+    config_path = tmp_path / "inari.toml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -138,7 +138,7 @@ def test_load_settings_reads_network_printers_from_toml(tmp_path: Path) -> None:
 def test_load_settings_reads_network_printers_from_env_json() -> None:
     settings = load_settings(
         environ={
-            "IOT_AGENT_NETWORK_PRINTERS": json.dumps(
+            "INARI_NETWORK_PRINTERS": json.dumps(
                 [
                     {
                         "name": "Back Bar Printer",
@@ -165,8 +165,8 @@ def test_default_gateway_mutual_tls_mode_is_optional() -> None:
 
 
 def test_load_settings_merges_local_override_file(tmp_path: Path) -> None:
-    config_path = tmp_path / "iot-agent.toml"
-    local_path = tmp_path / "iot-agent.local.toml"
+    config_path = tmp_path / "inari.toml"
+    local_path = tmp_path / "inari.local.toml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -199,7 +199,7 @@ def test_load_settings_merges_local_override_file(tmp_path: Path) -> None:
 
 
 def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
-    config_path = tmp_path / "iot-agent.toml"
+    config_path = tmp_path / "inari.toml"
     config_path.write_text(
         textwrap.dedent(
             """
@@ -216,9 +216,9 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
     settings = load_settings(
         config_path=config_path,
         environ={
-            "IOT_AGENT_LOG_LEVEL": "DEBUG",
-            "IOT_AGENT_DEFAULT_PRINTER_NAME": "Bar Printer",
-            "IOT_AGENT_TRUSTED_HOSTS": '["127.0.0.1", "localhost"]',
+            "INARI_LOG_LEVEL": "DEBUG",
+            "INARI_DEFAULT_PRINTER_NAME": "Bar Printer",
+            "INARI_TRUSTED_HOSTS": '["127.0.0.1", "localhost"]',
         },
     )
 
@@ -231,7 +231,7 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
 def test_load_settings_accepts_legacy_gateway_bootstrap_field_names(
     tmp_path: Path, legacy_field: str
 ) -> None:
-    config_path = tmp_path / "iot-agent.toml"
+    config_path = tmp_path / "inari.toml"
     config_path.write_text(
         textwrap.dedent(
             f"""
@@ -250,8 +250,8 @@ def test_load_settings_accepts_legacy_gateway_bootstrap_field_names(
 @pytest.mark.parametrize(
     "env_name",
     [
-        "IOT_AGENT_UPSTREAM_BOOTSTRAP_TOKEN",
-        "IOT_AGENT_UPSTREAM_ENROLLMENT_CODE",
+        "INARI_UPSTREAM_BOOTSTRAP_TOKEN",
+        "INARI_UPSTREAM_ENROLLMENT_CODE",
     ],
 )
 def test_load_settings_maps_legacy_bootstrap_env_names(env_name: str) -> None:
@@ -277,7 +277,7 @@ def test_load_settings_uses_development_defaults_inside_workspace(
     assert settings.temp_dir == (tmp_path / "tmp").resolve()
     assert (
         settings.runtime_database_path
-        == (tmp_path / "data/iot-agent.sqlite3").resolve()
+        == (tmp_path / "data/inari.sqlite3").resolve()
     )
     assert settings.security_state_dir == (tmp_path / "data/security").resolve()
 
@@ -289,7 +289,7 @@ def test_load_settings_can_force_production_defaults(tmp_path: Path) -> None:
 
     settings = load_settings(
         cwd=tmp_path,
-        environ={"IOT_AGENT_PATH_PROFILE": "production"},
+        environ={"INARI_PATH_PROFILE": "production"},
     )
 
     assert settings.path_profile == "production"
@@ -312,7 +312,7 @@ def test_generate_taplo_schema_is_draft4_compatible() -> None:
 def test_render_example_toml_includes_schema_header_and_sections() -> None:
     rendered = render_example_toml()
 
-    assert "#:schema ./schemas/iot-agent-config.schema.json" in rendered
+    assert "#:schema ./schemas/inari-config.schema.json" in rendered
     assert "[server]" in rendered
     assert "[paths]" in rendered
     assert "[gateway.sync]" in rendered
@@ -333,7 +333,7 @@ def test_render_example_toml_includes_schema_header_and_sections() -> None:
 def test_write_generated_config_artifacts_writes_schema_and_example(
     tmp_path: Path,
 ) -> None:
-    schema_path = tmp_path / "schemas" / "iot-agent-config.schema.json"
+    schema_path = tmp_path / "schemas" / "inari-config.schema.json"
     example_path = tmp_path / "config.example.toml"
 
     write_generated_config_artifacts(
@@ -347,7 +347,7 @@ def test_write_generated_config_artifacts_writes_schema_and_example(
         '"$schema": "http://json-schema.org/draft-04/schema#"'
         in schema_path.read_text(encoding="utf-8")
     )
-    assert "#:schema ./schemas/iot-agent-config.schema.json" in example_path.read_text(
+    assert "#:schema ./schemas/inari-config.schema.json" in example_path.read_text(
         encoding="utf-8"
     )
 

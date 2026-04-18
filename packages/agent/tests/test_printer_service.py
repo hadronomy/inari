@@ -5,14 +5,14 @@ from typing import Any, ClassVar, Mapping
 
 import pytest
 
-from iot_agent.binary_payloads import BinaryPayload
-from iot_agent.config import AgentSettings
-from iot_agent.drivers import DeviceKind, DriverMetadata, DriverRegistry
-from iot_agent.drivers.printers.base import PrinterDriver
-from iot_agent.exceptions import PrinterServiceError
-from iot_agent.print_jobs import PrintJob, ReceiptImageContent
-from iot_agent.printer_service import PrinterService
-from iot_agent.printers import (
+from inari.binary_payloads import BinaryPayload
+from inari.config import AgentSettings
+from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
+from inari.drivers.printers.base import PrinterDriver
+from inari.exceptions import PrinterServiceError
+from inari.print_jobs import PrintJob, ReceiptImageContent
+from inari.printer_service import PrinterService
+from inari.printers import (
     PrintJobResult,
     PrinterCapabilities,
     PrinterDevice,

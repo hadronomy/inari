@@ -103,8 +103,8 @@ Platform model:
 
 Current standard:
 
-- `packages/agent/iot_agent/container.py` is the composition root
-- `packages/agent/iot_agent/di/` holds provider modules
+- `packages/agent/inari/container.py` is the composition root
+- `packages/agent/inari/di/` holds provider modules
 - `dishka` assembles the graph
 - business code should not become framework-colored
 

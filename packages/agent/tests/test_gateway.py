@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from iot_agent.config import AgentSettings
-from iot_agent.gateway.connector import GatewayConnector
-from iot_agent.gateway.models import (
+from inari.config import AgentSettings
+from inari.gateway.connector import GatewayConnector
+from inari.gateway.models import (
     ControllerAction,
     GatewayEnrollmentRecord,
     UpstreamDataPlaneKind,
@@ -18,15 +18,15 @@ from iot_agent.gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
-from iot_agent.gateway.protocol import AgentStatusSnapshotMessage
-from iot_agent.gateway.repositories import GatewayRepository
-from iot_agent.gateway.runtime_bridge import (
+from inari.gateway.protocol import AgentStatusSnapshotMessage
+from inari.gateway.repositories import GatewayRepository
+from inari.gateway.runtime_bridge import (
     GatewayCommandDispatcher,
     GatewayRuntimeEventForwarder,
 )
-from iot_agent.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
-from iot_agent.runtime.events import EventHub
-from iot_agent.runtime.models import (
+from inari.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from inari.runtime.events import EventHub
+from inari.runtime.models import (
     DeviceConnectionState,
     DeviceRecord,
     JobEventRecord,
@@ -35,8 +35,8 @@ from iot_agent.runtime.models import (
     JobState,
     utc_now,
 )
-from iot_agent.runtime.store import RuntimeStore
-from iot_agent.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
+from inari.runtime.store import RuntimeStore
+from inari.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
 @pytest.mark.anyio
@@ -105,7 +105,7 @@ async def test_dispatcher_accepts_remote_print_job_and_persists_response(
     enrollment = _enrollment_record(
         controller_actions=(ControllerAction.JOBS_CREATE,),
     )
-    from iot_agent.gateway.protocol import ControllerSubmitPrintJobMessage
+    from inari.gateway.protocol import ControllerSubmitPrintJobMessage
 
     message = ControllerSubmitPrintJobMessage.model_validate(
         {
@@ -279,7 +279,7 @@ def _snapshot_provider() -> dict[str, object]:
             "version": GATEWAY_PROTOCOL_VERSION,
             "supported_versions": [GATEWAY_PROTOCOL_VERSION],
         },
-        "service": {"name": "IoT Agent", "version": API_VERSION},
+        "service": {"name": "Inari", "version": API_VERSION},
         "security": {
             "mode": "managed",
             "exposure": "loopback",

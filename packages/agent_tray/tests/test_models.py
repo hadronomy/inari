@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from iot_agent.models import RuntimeEventResponse, SystemStatusResponse
-from iot_agent.version import API_VERSION
+from inari.models import RuntimeEventResponse, SystemStatusResponse
+from inari.version import API_VERSION
 
-from iot_agent_tray.models import (
+from inari_tray.models import (
     ControlMode,
     ControlSnapshot,
     LifecycleState,
@@ -20,7 +20,7 @@ def test_snapshot_from_status_marks_busy_when_queue_is_active() -> None:
         {
             "ok": True,
             "status": "healthy",
-            "service": {"name": "IoT Agent", "version": API_VERSION},
+            "service": {"name": "Inari", "version": API_VERSION},
             "devices": {
                 "count": 2,
                 "online_count": 2,
@@ -44,7 +44,7 @@ def test_snapshot_from_status_marks_busy_when_queue_is_active() -> None:
     )
 
     snapshot = TraySnapshot.from_status(
-        title="IoT Agent",
+        title="Inari",
         links=_links(),
         control=ControlSnapshot(
             mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
@@ -60,14 +60,14 @@ def test_snapshot_from_status_marks_busy_when_queue_is_active() -> None:
 
 def test_snapshot_with_error_preserves_counts_and_marks_offline() -> None:
     snapshot = TraySnapshot.initial(
-        title="IoT Agent",
+        title="Inari",
         links=_links(),
         control=ControlSnapshot(
             mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
         ),
     )
     snapshot = TraySnapshot.from_status(
-        title="IoT Agent",
+        title="Inari",
         links=_links(),
         control=ControlSnapshot(
             mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING
@@ -76,7 +76,7 @@ def test_snapshot_with_error_preserves_counts_and_marks_offline() -> None:
             {
                 "ok": True,
                 "status": "healthy",
-                "service": {"name": "IoT Agent", "version": API_VERSION},
+                "service": {"name": "Inari", "version": API_VERSION},
                 "devices": {
                     "count": 1,
                     "online_count": 1,
@@ -115,7 +115,7 @@ def test_snapshot_with_error_preserves_counts_and_marks_offline() -> None:
 
 def test_snapshot_with_error_marks_spawn_startup_as_starting() -> None:
     snapshot = TraySnapshot.initial(
-        title="IoT Agent",
+        title="Inari",
         links=_links(),
         control=ControlSnapshot(
             mode=ControlMode.SPAWN, lifecycle=LifecycleState.STARTING
@@ -136,7 +136,7 @@ def test_snapshot_with_error_marks_spawn_startup_as_starting() -> None:
 
 def test_snapshot_with_event_captures_humanized_detail() -> None:
     snapshot = TraySnapshot.initial(
-        title="IoT Agent",
+        title="Inari",
         links=_links(),
         control=ControlSnapshot(mode=ControlMode.MONITOR),
     )
@@ -159,7 +159,7 @@ def test_snapshot_with_event_captures_humanized_detail() -> None:
 
 def test_tooltip_is_capped_to_windows_limit() -> None:
     snapshot = TraySnapshot.initial(
-        title="IoT Agent",
+        title="Inari",
         links=_links(),
         control=ControlSnapshot(
             mode=ControlMode.SPAWN, lifecycle=LifecycleState.RUNNING

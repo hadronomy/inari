@@ -5,8 +5,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from iot_agent.cli import app
-from iot_agent.db.migrations import DatabaseMigrator
+from inari.cli import app
+from inari.db.migrations import DatabaseMigrator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -125,7 +125,7 @@ def _create_legacy_database(database_path: Path) -> Path:
 
 
 def _write_config(tmp_path: Path) -> Path:
-    config_path = tmp_path / "iot-agent.toml"
+    config_path = tmp_path / "inari.toml"
     config_path.write_text(
         '[paths]\ndata_dir = "."\nruntime_database = "./runtime.sqlite3"\n',
         encoding="utf-8",

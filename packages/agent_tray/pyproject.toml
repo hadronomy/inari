@@ -1,11 +1,11 @@
 [project]
-name = "iot-agent-tray"
+name = "inari-tray"
 version = "0.3.1a1"
-description = "Cross-platform tray companion for the IoT Agent"
+description = "Cross-platform tray companion for the Inari"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28.1",
-  "iot-agent",
+  "inari",
   "pillow>=12.2.0",
   "pydantic-settings>=2.13.1",
   "PySide6>=6.9.1",
@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.scripts]
-iot-agent-tray = "iot_agent_tray.main:main"
+inari-tray = "inari_tray.main:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -35,8 +35,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["iot_agent_tray*"]
+include = ["inari_tray*"]
 exclude = ["tests*"]
 
 [tool.uv.sources]
-iot-agent = { workspace = true }
+inari = { workspace = true }
