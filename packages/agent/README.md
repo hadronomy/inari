@@ -21,17 +21,18 @@ For the managed controller protocol draft, see [docs/gateway_protocol.md](../../
 - platform-specific printer backends isolated from the application layer
 - coherent HTTP API split into `system`, `devices`, `jobs`, and live `events`
 - built-in gateway mode so the agent can operate as its own secure local edge node
-- scoped bearer-token auth for HTTP and WebSocket endpoints
+- scoped bearer-token auth for local HTTP and WebSocket endpoints
 - local loopback token bootstrap for desktop companions such as the tray app
-- managed upstream enrollment, token refresh, and outbound status sync over HTTPS/WSS
+- managed upstream enrollment over HTTPS plus a Zenoh-based managed data plane
 - controller protocol version negotiation plus durable upstream inbox/outbox persistence
-- upstream command acknowledgement, replay-safe deduplication, and runtime event forwarding
+- replay-safe controller command deduplication, history recovery, and runtime event forwarding
 - optional managed client-certificate installation for outbound mTLS
 - ZITADEL service-account auth with private-key JWT for managed controller access
 - controller-issued enrollment-token bootstrap for seamless managed installs
 - step-ca-backed client-certificate bootstrap, issuance, and renewal through controller-issued one-time tokens
 - dedicated managed certificate lifecycle supervision with renewal, rebootstrap, and failure-state reporting
-- Caddy-compatible controller edge profile with optional or required mTLS
+- Zenoh-backed managed status publication, command delivery, and liveliness presence
+- Caddy-compatible HTTP enrollment edge profile with optional or required mTLS after certificate issuance
 - cross-platform printer discovery through Windows spooler and CUPS
 - raw TCP socket printer support for receipt and ESC/POS-style devices
 - generic print-job endpoint with typed content kinds and nested device targeting
@@ -84,7 +85,7 @@ Primary endpoints:
 
 Interactive API docs are served with Scalar at `GET /docs`.
 
-The operational API is now authenticated. Local desktop clients obtain a short-lived bearer token from `POST /auth/local-token` over loopback, then use that token for protected HTTP and WebSocket calls. By default the agent runs in standalone, loopback-only gateway mode, so it does not need any external gateway to broker local device connections.
+The operational API is now authenticated. Local desktop clients obtain a short-lived bearer token from `POST /auth/local-token` over loopback, then use that token for protected HTTP and local WebSocket calls. By default the agent runs in standalone, loopback-only gateway mode, so it does not need any external gateway to broker local device connections.
 
 When managed mode uses `step_ca`, `GET /gateway/upstream/status` also reports a nested `certificate_lifecycle` object that explains whether the managed client certificate is healthy, renewing, waiting for bootstrap, expired, or needs rebootstrap after a failed renewal.
 
@@ -171,7 +172,7 @@ Queued job responses expose the agent-managed job resource immediately, and the 
 - `cryptography` for persistent agent identity material
 - `joserfc` for signed local bearer tokens
 - `keyring` with resilient local fallback for secret storage
-- `websockets` for the managed upstream control stream
+- `eclipse-zenoh` for the managed upstream data plane
 - SQLite-backed runtime store for devices, jobs, attempts, and events
 - SQLite-backed gateway inbox/outbox for upstream command audit and replay
 - background discovery polling plus lease-based job recovery
@@ -192,12 +193,12 @@ If you want the native CUPS Python binding in a local environment, install the p
 - LAN exposure requires TLS certificate and key material at startup
 - protected routes are scope-based rather than all-or-nothing
 - the tray and other local clients use short-lived local bearer tokens
-- managed mode adds outbound enrollment, token refresh, status sync, and a controller protocol without changing the local runtime model
-- the upstream boundary now persists inbound commands and outbound event messages for replay-safe delivery
-- negotiated controller protocol versions and optional client certificates harden the managed control plane
-- managed auth can come from controller-issued tokens or ZITADEL service accounts
+- managed mode adds outbound enrollment plus a Zenoh-based controller protocol without changing the local runtime model
+- the upstream boundary persists inbound commands and outbound publications for replay-safe delivery and reconnect recovery
+- negotiated controller protocol versions and managed client certificates harden the managed data plane
+- managed enrollment auth can come from a controller-issued enrollment token or ZITADEL service accounts
 - managed client certificates can come from controller enrollment or controller-issued step-ca OTT bootstrap
-- Caddy edge mode validates HTTPS/WSS and mTLS expectations early at startup
+- Caddy edge mode validates the HTTP enrollment surface, while Zenoh routers carry the steady-state managed data plane
 
 ## Run
 

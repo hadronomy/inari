@@ -45,7 +45,12 @@ class GatewaySupervisor:
                 else []
             ),
             asyncio.create_task(self._sync_loop(), name="iot-agent-gateway-sync"),
-            asyncio.create_task(self._events_loop(), name="iot-agent-gateway-events"),
+            asyncio.create_task(
+                self._data_plane_loop(), name="iot-agent-gateway-data-plane"
+            ),
+            asyncio.create_task(
+                self._outbox_loop(), name="iot-agent-gateway-outbox"
+            ),
             asyncio.create_task(
                 self.runtime_event_forwarder.run_forever(),
                 name="iot-agent-gateway-runtime-forwarder",
@@ -61,6 +66,7 @@ class GatewaySupervisor:
         for task in self._tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        await self.connector.close()
         self._tasks.clear()
         self._started = False
 
@@ -80,7 +86,7 @@ class GatewaySupervisor:
                 await self.connector._update_status(retry_delay_seconds=delay)  # noqa: SLF001
                 await asyncio.sleep(delay)
 
-    async def _events_loop(self) -> None:
+    async def _data_plane_loop(self) -> None:
         backoff = _Backoff(
             base_delay=self.settings.gateway_backoff_base_seconds,
             max_delay=self.settings.gateway_backoff_max_seconds,
@@ -90,12 +96,28 @@ class GatewaySupervisor:
                 await self.connector.listen_once()
                 delay = max(
                     self.settings.gateway_reconnect_delay_seconds,
-                    self.settings.gateway_control_poll_interval_seconds,
+                    self.settings.gateway_outbox_poll_interval_seconds,
                 )
                 backoff.reset()
                 await asyncio.sleep(delay)
             except Exception:
-                logger.exception("Gateway event stream loop failed")
+                logger.exception("Gateway data-plane loop failed")
+                delay = backoff.next_delay()
+                await self.connector._update_status(retry_delay_seconds=delay)  # noqa: SLF001
+                await asyncio.sleep(delay)
+
+    async def _outbox_loop(self) -> None:
+        backoff = _Backoff(
+            base_delay=self.settings.gateway_backoff_base_seconds,
+            max_delay=self.settings.gateway_backoff_max_seconds,
+        )
+        while True:
+            try:
+                await self.connector.flush_outbox_once()
+                backoff.reset()
+                await asyncio.sleep(self.settings.gateway_outbox_poll_interval_seconds)
+            except Exception:
+                logger.exception("Gateway outbox loop failed")
                 delay = backoff.next_delay()
                 await self.connector._update_status(retry_delay_seconds=delay)  # noqa: SLF001
                 await asyncio.sleep(delay)

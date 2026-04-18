@@ -28,7 +28,6 @@ class GatewayInboundCommandState(StrEnum):
 class GatewayOutboxState(StrEnum):
     PENDING = "pending"
     SENT = "sent"
-    ACKNOWLEDGED = "acknowledged"
 
 
 class UpstreamAuthMode(StrEnum):
@@ -45,6 +44,22 @@ class UpstreamCertificateMode(StrEnum):
 class UpstreamEdgeProvider(StrEnum):
     DIRECT = "direct"
     CADDY = "caddy"
+
+
+class UpstreamDataPlaneKind(StrEnum):
+    ZENOH = "zenoh"
+
+
+class ZenohSessionMode(StrEnum):
+    CLIENT = "client"
+
+
+class ZenohDataPlaneAuthKind(StrEnum):
+    MTLS = "mtls"
+
+
+class ZenohSerialization(StrEnum):
+    JSON = "json"
 
 
 class MutualTlsMode(StrEnum):
@@ -139,24 +154,25 @@ class MutualTlsPolicy:
 
 
 @dataclass(slots=True, frozen=True)
+class ZenohDataPlaneConfig:
+    kind: UpstreamDataPlaneKind
+    session_mode: ZenohSessionMode
+    connect_endpoints: tuple[str, ...]
+    namespace: str
+    serialization: ZenohSerialization = ZenohSerialization.JSON
+    auth_kind: ZenohDataPlaneAuthKind = ZenohDataPlaneAuthKind.MTLS
+    close_link_on_expiration: bool = True
+
+
+@dataclass(slots=True, frozen=True)
 class GatewayEnrollmentRecord:
-    access_token: str | None
     enrolled_at: datetime
-    expires_at: datetime | None = None
-    refresh_token: str | None = None
-    token_type: str = "Bearer"
-    refresh_url: str | None = None
-    status_url: str | None = None
-    events_url: str | None = None
+    data_plane: ZenohDataPlaneConfig
     controller_actions: tuple[ControllerAction, ...] = ()
     protocol_version: str | None = None
     controller_name: str | None = None
     controller_instance_id: str | None = None
     certificate_expires_at: datetime | None = None
-    auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
-    auth_issuer: str | None = None
-    auth_token_endpoint: str | None = None
-    auth_audience: str | None = None
     certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
     edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
     mutual_tls_mode: MutualTlsMode = MutualTlsMode.OPTIONAL
@@ -194,31 +210,30 @@ class UpstreamStatus:
     mode: GatewayMode
     state: UpstreamConnectionState
     base_url: str | None = None
-    status_url: str | None = None
-    events_url: str | None = None
+    data_plane_kind: UpstreamDataPlaneKind | None = None
+    data_plane_namespace: str | None = None
+    data_plane_session_mode: ZenohSessionMode | None = None
     enrolled_at: datetime | None = None
-    last_sync_at: datetime | None = None
-    last_event_at: datetime | None = None
+    last_status_published_at: datetime | None = None
+    last_data_plane_activity_at: datetime | None = None
     last_command_at: datetime | None = None
     last_command_id: str | None = None
     last_applied_controller_sequence: int | None = None
-    controller_resume_from_sequence: int | None = None
     detail: str | None = None
     last_error: str | None = None
     protocol_version: str | None = None
     controller_name: str | None = None
     controller_instance_id: str | None = None
-    auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
     certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
     edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
     mutual_tls_mode: MutualTlsMode = MutualTlsMode.OPTIONAL
     client_certificate_present: bool = False
     certificate_bootstrap_pending: bool = False
     retry_delay_seconds: float | None = None
-    failed_sync_count: int = 0
-    successful_sync_count: int = 0
-    failed_event_stream_count: int = 0
-    successful_event_stream_count: int = 0
+    failed_status_publication_count: int = 0
+    successful_status_publication_count: int = 0
+    failed_data_plane_connection_count: int = 0
+    successful_data_plane_connection_count: int = 0
     certificate_lifecycle: ManagedCertificateStatus | None = None
 
 
@@ -249,7 +264,6 @@ class GatewayOutboxRecord:
     correlation_id: str | None = None
     dedupe_key: str | None = None
     sent_at: datetime | None = None
-    acknowledged_at: datetime | None = None
     last_error: str | None = None
 
 

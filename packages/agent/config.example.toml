@@ -125,16 +125,13 @@ config_version = 1
 # Optional custom CA bundle trusted by the agent.
 # ca_path = "./certs/ca.crt"
 
-# Managed-mode controller connectivity. Leave commented for standalone/local-only deployments.
+# Managed-mode controller connectivity.
+# Enrollment stays on HTTPS, while the steady-state managed data plane uses Zenoh.
 [gateway]
 # Base URL for the external controller.
 # base_url = "https://controller.example.com"
 # Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.
 # enrollment_url = "https://bootstrap.controller.example.com/api/iot-agent/enroll"
-# Explicit status endpoint if the controller expects a fixed URL.
-# status_url = "https://controller.example.com/api/iot-agent/agents/agt_123/status"
-# WebSocket control/event endpoint.
-# events_url = "wss://controller.example.com/api/iot-agent/agents/agt_123/events"
 # How the agent authenticates to the controller.
 # auth_mode = "controller"
 # How the agent obtains and refreshes client certificates.
@@ -153,24 +150,34 @@ config_version = 1
 # Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.
 # enrollment_token = "enrollment-token"
 
-# Managed-mode reconnect, polling, and backoff tuning.
+# Managed-mode publication cadence, reconnect timing, and backoff tuning.
 [gateway.sync]
-# How often snapshots are pushed to the controller.
+# How often the latest gateway status is published onto the managed data plane.
 # interval_seconds = 30.0
-# Base reconnect delay after controller disconnects.
+# Base reconnect delay after managed data-plane disconnects.
 # reconnect_delay_seconds = 5.0
-# Read timeout for upstream event streams.
-# event_timeout_seconds = 30.0
-# Polling cadence for control-plane maintenance work.
-# control_poll_interval_seconds = 0.5
 # Maximum queued outbound messages sent in one batch.
 # outbox_batch_size = 128
+# How often the agent flushes queued runtime events and command results onto Zenoh.
+# outbox_poll_interval_seconds = 0.5
 # Starting backoff value for repeated upstream failures.
 # backoff_base_seconds = 1.0
 # Maximum backoff value for repeated upstream failures.
 # backoff_max_seconds = 60.0
-# How early to refresh upstream tokens before expiry.
-# token_refresh_skew_seconds = 300
+
+# Zenoh data-plane overrides and local fallback settings.
+# The controller normally returns these details during enrollment.
+[gateway.zenoh]
+# Zenoh session mode for the agent.
+# session_mode = "client"
+# Explicit Zenoh router endpoints used when you want to override the controller-provided endpoints.
+# connect_endpoints = ["tls/router1.example.com:7447", "tls/router2.example.com:7447"]
+# Explicit Zenoh namespace override for this agent's managed keyspace.
+# namespace = "iot/v1/agents/agt_123"
+# Timeout used when querying controller-side command history during reconnect recovery.
+# query_timeout_seconds = 10.0
+# Close Zenoh links when the presented client certificate expires.
+# close_link_on_expiration = true
 
 # ZITADEL service-account settings for controller authentication.
 [gateway.zitadel]

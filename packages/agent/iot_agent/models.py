@@ -46,11 +46,12 @@ from .gateway.models import (
     ManagedCertificateState,
     ManagedCertificateStatus,
     MutualTlsMode,
-    UpstreamAuthMode,
     UpstreamCertificateMode,
     UpstreamConnectionState,
+    UpstreamDataPlaneKind,
     UpstreamEdgeProvider,
     UpstreamStatus,
+    ZenohSessionMode,
 )
 from .runtime.operations import (
     DeviceTargetRef,
@@ -238,31 +239,30 @@ class GatewayUpstreamStatusResponse(APIModel):
     mode: GatewayMode
     state: UpstreamConnectionState
     base_url: str | None = None
-    status_url: str | None = None
-    events_url: str | None = None
+    data_plane_kind: UpstreamDataPlaneKind | None = None
+    data_plane_namespace: str | None = None
+    data_plane_session_mode: ZenohSessionMode | None = None
     enrolled_at: datetime | None = None
-    last_sync_at: datetime | None = None
-    last_event_at: datetime | None = None
+    last_status_published_at: datetime | None = None
+    last_data_plane_activity_at: datetime | None = None
     last_command_at: datetime | None = None
     last_command_id: str | None = None
     last_applied_controller_sequence: int | None = None
-    controller_resume_from_sequence: int | None = None
     detail: str | None = None
     last_error: str | None = None
     protocol_version: str | None = None
     controller_name: str | None = None
     controller_instance_id: str | None = None
-    auth_mode: UpstreamAuthMode
     certificate_mode: UpstreamCertificateMode
     edge_provider: UpstreamEdgeProvider
     mutual_tls_mode: MutualTlsMode
     client_certificate_present: bool = False
     certificate_bootstrap_pending: bool = False
     retry_delay_seconds: float | None = None
-    failed_sync_count: int = 0
-    successful_sync_count: int = 0
-    failed_event_stream_count: int = 0
-    successful_event_stream_count: int = 0
+    failed_status_publication_count: int = 0
+    successful_status_publication_count: int = 0
+    failed_data_plane_connection_count: int = 0
+    successful_data_plane_connection_count: int = 0
     certificate_lifecycle: ManagedCertificateStatusResponse | None = None
 
     @classmethod
@@ -271,31 +271,30 @@ class GatewayUpstreamStatusResponse(APIModel):
             mode=status.mode,
             state=status.state,
             base_url=status.base_url,
-            status_url=status.status_url,
-            events_url=status.events_url,
+            data_plane_kind=status.data_plane_kind,
+            data_plane_namespace=status.data_plane_namespace,
+            data_plane_session_mode=status.data_plane_session_mode,
             enrolled_at=status.enrolled_at,
-            last_sync_at=status.last_sync_at,
-            last_event_at=status.last_event_at,
+            last_status_published_at=status.last_status_published_at,
+            last_data_plane_activity_at=status.last_data_plane_activity_at,
             last_command_at=status.last_command_at,
             last_command_id=status.last_command_id,
             last_applied_controller_sequence=status.last_applied_controller_sequence,
-            controller_resume_from_sequence=status.controller_resume_from_sequence,
             detail=status.detail,
             last_error=status.last_error,
             protocol_version=status.protocol_version,
             controller_name=status.controller_name,
             controller_instance_id=status.controller_instance_id,
-            auth_mode=status.auth_mode,
             certificate_mode=status.certificate_mode,
             edge_provider=status.edge_provider,
             mutual_tls_mode=status.mutual_tls_mode,
             client_certificate_present=status.client_certificate_present,
             certificate_bootstrap_pending=status.certificate_bootstrap_pending,
             retry_delay_seconds=status.retry_delay_seconds,
-            failed_sync_count=status.failed_sync_count,
-            successful_sync_count=status.successful_sync_count,
-            failed_event_stream_count=status.failed_event_stream_count,
-            successful_event_stream_count=status.successful_event_stream_count,
+            failed_status_publication_count=status.failed_status_publication_count,
+            successful_status_publication_count=status.successful_status_publication_count,
+            failed_data_plane_connection_count=status.failed_data_plane_connection_count,
+            successful_data_plane_connection_count=status.successful_data_plane_connection_count,
             certificate_lifecycle=(
                 ManagedCertificateStatusResponse.from_status(
                     status.certificate_lifecycle

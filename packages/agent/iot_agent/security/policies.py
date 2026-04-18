@@ -43,6 +43,14 @@ class SecurityPolicyService:
             and not self.settings.upstream_base_url
         ):
             raise RuntimeError("Managed gateway mode requires an upstream base URL.")
+        if (
+            self.policy.mode is GatewayMode.MANAGED
+            and self.settings.upstream_certificate_mode
+            is UpstreamCertificateMode.NONE
+        ):
+            raise RuntimeError(
+                "Managed gateway mode requires a certificate mode of 'controller' or 'step_ca' for the Zenoh data plane."
+            )
         validate_caddy_profile(self.settings)
         if self.settings.upstream_auth_mode is UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT:
             if self.settings.zitadel_service_account_key_path is None and (

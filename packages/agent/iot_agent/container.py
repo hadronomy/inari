@@ -15,6 +15,7 @@ from .drivers.printers import (
 )
 from .gateway.auth_providers import build_upstream_auth_provider
 from .gateway.connector import GatewayConnector
+from .gateway.data_plane import ZenohGatewayTransport
 from .gateway.enrollment import GatewayEnrollmentService
 from .gateway.repositories import GatewayRepository
 from .gateway.runtime_bridge import (
@@ -198,7 +199,6 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         settings=settings,
         enrollment_service=enrollment_service,
         certificate_lifecycle_manager=certificate_lifecycle_manager,
-        tls_context_factory=tls_context_factory,
         snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(
             mode="json"
         ),
@@ -206,6 +206,10 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         command_dispatcher=GatewayCommandDispatcher(
             job_service=job_service,
             gateway_repository=gateway_repository,
+        ),
+        data_plane_transport=ZenohGatewayTransport(
+            settings=settings,
+            certificate_service=certificate_service,
         ),
     )
     gateway_service = GatewayService(

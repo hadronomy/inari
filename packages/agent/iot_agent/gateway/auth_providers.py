@@ -11,7 +11,7 @@ from joserfc import jwk, jwt
 
 from ..config import AgentSettings
 from ..exceptions import AgentError
-from .models import GatewayEnrollmentRecord, UpstreamAuthMode
+from .models import UpstreamAuthMode
 
 ZITADEL_ASSERTION_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 
@@ -31,25 +31,14 @@ class UpstreamAuthProvider(Protocol):
 
     async def headers_for_enrollment(self) -> dict[str, str]: ...
 
-    async def headers_for_upstream(
-        self, enrollment: GatewayEnrollmentRecord | None
-    ) -> dict[str, str]: ...
-
     async def invalidate(self) -> None: ...
 
 
-class ControllerAccessTokenAuthProvider:
+class NoopEnrollmentAuthProvider:
     mode = UpstreamAuthMode.CONTROLLER
 
     async def headers_for_enrollment(self) -> dict[str, str]:
         return {}
-
-    async def headers_for_upstream(
-        self, enrollment: GatewayEnrollmentRecord | None
-    ) -> dict[str, str]:
-        if enrollment is None or enrollment.access_token is None:
-            return {}
-        return UpstreamAuthorization(access_token=enrollment.access_token).as_headers()
 
     async def invalidate(self) -> None:
         return None
@@ -105,11 +94,6 @@ class ZitadelServiceAccountAuthProvider:
         self._lock = asyncio.Lock()
 
     async def headers_for_enrollment(self) -> dict[str, str]:
-        return (await self._authorization()).as_headers()
-
-    async def headers_for_upstream(
-        self, enrollment: GatewayEnrollmentRecord | None
-    ) -> dict[str, str]:
         return (await self._authorization()).as_headers()
 
     async def invalidate(self) -> None:
@@ -201,7 +185,7 @@ def build_upstream_auth_provider(
             settings=settings,
             http_client_factory=http_client_factory,
         )
-    return ControllerAccessTokenAuthProvider()
+    return NoopEnrollmentAuthProvider()
 
 
 def _is_expiring(expires_at: datetime | None, *, skew_seconds: int) -> bool:

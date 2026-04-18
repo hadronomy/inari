@@ -79,7 +79,6 @@ class GatewaySnapshotBuilder:
                 exposure=self.settings.gateway_exposure,
                 tls_required=self.security_policy_service.policy.require_tls,
                 edge_provider=self.settings.upstream_edge_provider,
-                auth_mode=self.settings.upstream_auth_mode,
                 certificate_mode=self.settings.upstream_certificate_mode,
                 mutual_tls_mode=mutual_tls_policy.effective_mode,
                 mutual_tls_enabled=mutual_tls_policy.enabled
@@ -116,14 +115,14 @@ class GatewaySnapshotBuilder:
                 ),
                 supported_controller_actions=SUPPORTED_CONTROLLER_ACTIONS,
                 features=(
-                    "status_sync",
-                    "control_stream",
-                    "command_ack",
-                    "event_replay",
+                    "zenoh_data_plane",
+                    "status_publication",
+                    "command_history_recovery",
+                    "liveliness_presence",
                     "runtime_event_forwarding",
-                    "token_refresh",
                     "certificate_rotation",
                     "protocol_negotiation",
+                    "https_enrollment",
                     *(
                         ("enrollment_token_bootstrap",)
                         if self.settings.upstream_enrollment_token
@@ -133,6 +132,11 @@ class GatewaySnapshotBuilder:
                         ("zitadel_private_key_jwt",)
                         if self.settings.upstream_auth_mode.value
                         == "zitadel_service_account"
+                        else ()
+                    ),
+                    *(
+                        ("controller_enrollment_http_auth",)
+                        if self.settings.upstream_auth_mode.value == "controller"
                         else ()
                     ),
                     *(

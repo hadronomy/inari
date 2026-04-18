@@ -4,15 +4,17 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from ..gateway.models import (
     ControllerAction,
     MutualTlsMode,
-    UpstreamAuthMode,
     UpstreamCertificateMode,
+    UpstreamDataPlaneKind,
     UpstreamEdgeProvider,
-    parse_controller_actions,
+    ZenohDataPlaneAuthKind,
+    ZenohSerialization,
+    ZenohSessionMode,
 )
 from ..printers import CutMode, PrinterTransport
 from ..security.models import GatewayExposure, GatewayMode
@@ -23,16 +25,10 @@ class GatewayProtocolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
-class UpstreamControlMessageType(StrEnum):
-    CONTROLLER_HELLO = "controller.hello"
-    CONTROLLER_ACK = "controller.ack"
-    CONTROLLER_PING = "controller.ping"
+class GatewayMessageType(StrEnum):
     CONTROLLER_SUBMIT_PRINT_JOB = "controller.command.submit_print_job"
     CONTROLLER_EXECUTE_DEVICE_COMMAND = "controller.command.execute_device_command"
     CONTROLLER_CANCEL_JOB = "controller.command.cancel_job"
-    AGENT_HELLO = "agent.hello"
-    AGENT_ACK = "agent.ack"
-    AGENT_PONG = "agent.pong"
     AGENT_COMMAND_ACCEPTED = "agent.command.accepted"
     AGENT_COMMAND_REJECTED = "agent.command.rejected"
     AGENT_RUNTIME_EVENT = "agent.runtime.event"
@@ -50,22 +46,8 @@ class GatewayCapabilityDescriptor(GatewayProtocolModel):
     supported_device_commands: tuple[str, ...]
     supported_controller_actions: tuple[ControllerAction, ...]
     features: tuple[str, ...]
-    transport: str = "https+wss"
+    transport: str = "https+zenoh"
     client_certificate_present: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_legacy_shape(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        if "supported_controller_actions" in value:
-            return value
-        normalized = dict(value)
-        normalized["supported_controller_actions"] = list(
-            parse_controller_actions(normalized.get("granted_scopes"))
-        )
-        normalized.pop("granted_scopes", None)
-        return normalized
 
 
 class GatewaySecurityDescriptor(GatewayProtocolModel):
@@ -73,7 +55,6 @@ class GatewaySecurityDescriptor(GatewayProtocolModel):
     exposure: GatewayExposure
     tls_required: bool
     edge_provider: UpstreamEdgeProvider
-    auth_mode: UpstreamAuthMode
     certificate_mode: UpstreamCertificateMode
     mutual_tls_mode: MutualTlsMode
     mutual_tls_enabled: bool
@@ -149,35 +130,30 @@ class EnrollmentCertificatePayload(GatewayProtocolModel):
     bootstrap: CertificateBootstrapPayload | None = None
 
 
-class EnrollmentLinksPayload(GatewayProtocolModel):
-    refresh: str | None = None
-    status: str | None = None
-    events: str | None = None
-
-
 class EnrollmentPermissionsPayload(GatewayProtocolModel):
     controller_actions: tuple[ControllerAction, ...] = ()
 
 
-class ControllerManagedAuthPayload(GatewayProtocolModel):
-    mode: Literal["controller"] = "controller"
-    access_token: str
-    refresh_token: str | None = None
-    token_type: str = "Bearer"
-    expires_at: datetime | None = None
+class EnrollmentDataPlaneAuthPayload(GatewayProtocolModel):
+    kind: ZenohDataPlaneAuthKind = ZenohDataPlaneAuthKind.MTLS
 
 
-class ZitadelServiceAccountAuthPayload(GatewayProtocolModel):
-    mode: Literal["zitadel_service_account"] = "zitadel_service_account"
-    issuer: str | None = None
-    token_endpoint: str | None = None
-    audience: str | None = None
+class EnrollmentDataPlaneTlsPayload(GatewayProtocolModel):
+    close_link_on_expiration: bool = True
 
 
-EnrollmentAuthPayload = Annotated[
-    ControllerManagedAuthPayload | ZitadelServiceAccountAuthPayload,
-    Field(discriminator="mode"),
-]
+class EnrollmentDataPlanePayload(GatewayProtocolModel):
+    kind: UpstreamDataPlaneKind = UpstreamDataPlaneKind.ZENOH
+    session_mode: ZenohSessionMode = ZenohSessionMode.CLIENT
+    connect_endpoints: tuple[str, ...]
+    namespace: str
+    serialization: ZenohSerialization = ZenohSerialization.JSON
+    auth: EnrollmentDataPlaneAuthPayload = Field(
+        default_factory=EnrollmentDataPlaneAuthPayload
+    )
+    tls: EnrollmentDataPlaneTlsPayload = Field(
+        default_factory=EnrollmentDataPlaneTlsPayload
+    )
 
 
 class EnrollmentRequestPayload(GatewayProtocolModel):
@@ -195,225 +171,12 @@ class EnrollmentRequestPayload(GatewayProtocolModel):
 class EnrollmentResponsePayload(GatewayProtocolModel):
     selected_protocol_version: str = GATEWAY_PROTOCOL_VERSION
     controller: GatewayControllerInfo | None = None
-    auth: EnrollmentAuthPayload
-    links: EnrollmentLinksPayload = Field(default_factory=EnrollmentLinksPayload)
     permissions: EnrollmentPermissionsPayload = Field(
         default_factory=EnrollmentPermissionsPayload
     )
+    data_plane: EnrollmentDataPlanePayload
     certificate: EnrollmentCertificatePayload | None = None
     enrolled_at: datetime
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_legacy_shape(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        if "auth" in value or "links" in value or "controller" in value:
-            return value
-
-        normalized = dict(value)
-        auth_mode = str(
-            normalized.get("auth_mode")
-            or (
-                UpstreamAuthMode.CONTROLLER.value
-                if normalized.get("access_token") or normalized.get("refresh_token")
-                else UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT.value
-            )
-        )
-        if auth_mode == UpstreamAuthMode.CONTROLLER.value:
-            normalized["auth"] = {
-                "mode": auth_mode,
-                "access_token": normalized.get("access_token"),
-                "refresh_token": normalized.get("refresh_token"),
-                "token_type": normalized.get("token_type") or "Bearer",
-                "expires_at": normalized.get("expires_at"),
-            }
-        else:
-            normalized["auth"] = {
-                "mode": auth_mode,
-                "issuer": normalized.get("auth_issuer"),
-                "token_endpoint": normalized.get("auth_token_endpoint"),
-                "audience": normalized.get("auth_audience"),
-            }
-        normalized["selected_protocol_version"] = (
-            normalized.get("selected_protocol_version")
-            or normalized.get("protocol_version")
-            or GATEWAY_PROTOCOL_VERSION
-        )
-        normalized["controller"] = {
-            "name": normalized.get("controller_name"),
-            "instance_id": normalized.get("controller_instance_id"),
-        }
-        normalized["links"] = {
-            "refresh": normalized.get("refresh_url"),
-            "status": normalized.get("status_url"),
-            "events": normalized.get("events_url"),
-        }
-        normalized["permissions"] = {
-            "controller_actions": list(
-                parse_controller_actions(normalized.get("granted_scopes"))
-            )
-        }
-        certificate_mode = normalized.get("certificate_mode")
-        has_certificate_fields = any(
-            normalized.get(field)
-            for field in ("certificate_pem", "ca_certificate_pem", "certificate_bootstrap")
-        )
-        if certificate_mode or has_certificate_fields:
-            normalized["certificate"] = {
-                "mode": certificate_mode
-                or (
-                    UpstreamCertificateMode.STEP_CA.value
-                    if normalized.get("certificate_bootstrap")
-                    else UpstreamCertificateMode.CONTROLLER.value
-                ),
-                "client_certificate_pem": normalized.get("certificate_pem"),
-                "ca_certificate_pem": normalized.get("ca_certificate_pem"),
-                "bootstrap": normalized.get("certificate_bootstrap"),
-            }
-        for legacy_key in (
-            "auth_mode",
-            "access_token",
-            "refresh_token",
-            "token_type",
-            "expires_at",
-            "protocol_version",
-            "controller_name",
-            "controller_instance_id",
-            "refresh_url",
-            "status_url",
-            "events_url",
-            "granted_scopes",
-            "certificate_mode",
-            "certificate_pem",
-            "ca_certificate_pem",
-            "certificate_bootstrap",
-            "auth_issuer",
-            "auth_token_endpoint",
-            "auth_audience",
-        ):
-            normalized.pop(legacy_key, None)
-        return normalized
-
-
-class RefreshRequestPayload(GatewayProtocolModel):
-    selected_protocol_version: str = GATEWAY_PROTOCOL_VERSION
-    agent_id: str
-
-
-class RefreshResponsePayload(GatewayProtocolModel):
-    selected_protocol_version: str = GATEWAY_PROTOCOL_VERSION
-    controller: GatewayControllerInfo | None = None
-    auth: EnrollmentAuthPayload
-    links: EnrollmentLinksPayload = Field(default_factory=EnrollmentLinksPayload)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_legacy_shape(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        if "auth" in value or "controller" in value:
-            return value
-        normalized = dict(value)
-        auth_mode = str(
-            normalized.get("auth_mode")
-            or (
-                UpstreamAuthMode.CONTROLLER.value
-                if normalized.get("access_token") or normalized.get("refresh_token")
-                else UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT.value
-            )
-        )
-        if auth_mode == UpstreamAuthMode.CONTROLLER.value:
-            normalized["auth"] = {
-                "mode": auth_mode,
-                "access_token": normalized.get("access_token"),
-                "refresh_token": normalized.get("refresh_token"),
-                "token_type": normalized.get("token_type") or "Bearer",
-                "expires_at": normalized.get("expires_at"),
-            }
-        else:
-            normalized["auth"] = {
-                "mode": auth_mode,
-                "issuer": normalized.get("auth_issuer"),
-                "token_endpoint": normalized.get("auth_token_endpoint"),
-                "audience": normalized.get("auth_audience"),
-            }
-        normalized["selected_protocol_version"] = (
-            normalized.get("selected_protocol_version")
-            or normalized.get("protocol_version")
-            or GATEWAY_PROTOCOL_VERSION
-        )
-        normalized["controller"] = {
-            "name": normalized.get("controller_name"),
-            "instance_id": normalized.get("controller_instance_id"),
-        }
-        normalized["links"] = {
-            "refresh": normalized.get("refresh_url"),
-            "status": normalized.get("status_url"),
-            "events": normalized.get("events_url"),
-        }
-        for legacy_key in (
-            "auth_mode",
-            "access_token",
-            "refresh_token",
-            "token_type",
-            "expires_at",
-            "protocol_version",
-            "controller_name",
-            "controller_instance_id",
-            "refresh_url",
-            "status_url",
-            "events_url",
-            "auth_issuer",
-            "auth_token_endpoint",
-            "auth_audience",
-        ):
-            normalized.pop(legacy_key, None)
-        return normalized
-
-
-class ControllerHelloMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_HELLO] = (
-        UpstreamControlMessageType.CONTROLLER_HELLO
-    )
-    message_id: str
-    selected_protocol_version: str
-    resume_from_sequence: int | None = None
-    controller: GatewayControllerInfo | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_legacy_shape(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        if "selected_protocol_version" in value or "controller" in value:
-            return value
-        normalized = dict(value)
-        normalized["selected_protocol_version"] = normalized.get("protocol_version")
-        normalized["controller"] = {
-            "name": normalized.get("controller_name"),
-            "instance_id": normalized.get("controller_instance_id"),
-        }
-        normalized.pop("protocol_version", None)
-        normalized.pop("controller_name", None)
-        normalized.pop("controller_instance_id", None)
-        return normalized
-
-
-class ControllerAcknowledgeMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_ACK] = (
-        UpstreamControlMessageType.CONTROLLER_ACK
-    )
-    message_id: str
-    acknowledged_message_id: str
-
-
-class ControllerPingMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_PING] = (
-        UpstreamControlMessageType.CONTROLLER_PING
-    )
-    message_id: str
-    detail: str | None = None
 
 
 class GatewayCommandTargetPayload(GatewayProtocolModel):
@@ -481,8 +244,12 @@ GatewayPrintContentPayload = Annotated[
 
 class ControllerSubmitPrintJobPayload(GatewayProtocolModel):
     content: GatewayPrintContentPayload
-    target: GatewayCommandTargetPayload = Field(default_factory=GatewayCommandTargetPayload)
-    options: GatewayPrintOptionsPayload = Field(default_factory=GatewayPrintOptionsPayload)
+    target: GatewayCommandTargetPayload = Field(
+        default_factory=GatewayCommandTargetPayload
+    )
+    options: GatewayPrintOptionsPayload = Field(
+        default_factory=GatewayPrintOptionsPayload
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -521,88 +288,65 @@ GatewayDeviceCommandPayload = Annotated[
 
 
 class ControllerExecuteDeviceCommandPayload(GatewayProtocolModel):
-    target: GatewayCommandTargetPayload = Field(default_factory=GatewayCommandTargetPayload)
+    target: GatewayCommandTargetPayload = Field(
+        default_factory=GatewayCommandTargetPayload
+    )
     command: GatewayDeviceCommandPayload
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ControllerSubmitPrintJobMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_SUBMIT_PRINT_JOB] = (
-        UpstreamControlMessageType.CONTROLLER_SUBMIT_PRINT_JOB
+    type: Literal[GatewayMessageType.CONTROLLER_SUBMIT_PRINT_JOB] = (
+        GatewayMessageType.CONTROLLER_SUBMIT_PRINT_JOB
     )
     message_id: str
     command_id: str
-    sequence: int | None = Field(default=None, ge=1)
+    sequence: int = Field(ge=1)
     issued_at: datetime | None = None
     payload: ControllerSubmitPrintJobPayload
 
 
 class ControllerExecuteDeviceCommandMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_EXECUTE_DEVICE_COMMAND] = (
-        UpstreamControlMessageType.CONTROLLER_EXECUTE_DEVICE_COMMAND
+    type: Literal[GatewayMessageType.CONTROLLER_EXECUTE_DEVICE_COMMAND] = (
+        GatewayMessageType.CONTROLLER_EXECUTE_DEVICE_COMMAND
     )
     message_id: str
     command_id: str
-    sequence: int | None = Field(default=None, ge=1)
+    sequence: int = Field(ge=1)
     issued_at: datetime | None = None
     payload: ControllerExecuteDeviceCommandPayload
 
 
 class ControllerCancelJobMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.CONTROLLER_CANCEL_JOB] = (
-        UpstreamControlMessageType.CONTROLLER_CANCEL_JOB
+    type: Literal[GatewayMessageType.CONTROLLER_CANCEL_JOB] = (
+        GatewayMessageType.CONTROLLER_CANCEL_JOB
     )
     message_id: str
     command_id: str
-    sequence: int | None = Field(default=None, ge=1)
+    sequence: int = Field(ge=1)
     issued_at: datetime | None = None
     job_id: str
 
 
-ControllerStreamMessage = Annotated[
-    ControllerHelloMessage
-    | ControllerAcknowledgeMessage
-    | ControllerPingMessage
-    | ControllerSubmitPrintJobMessage
+ControllerCommandMessage = Annotated[
+    ControllerSubmitPrintJobMessage
     | ControllerExecuteDeviceCommandMessage
     | ControllerCancelJobMessage,
     Field(discriminator="type"),
 ]
 
-CONTROLLER_STREAM_ADAPTER = TypeAdapter(ControllerStreamMessage)
+CONTROLLER_COMMAND_ADAPTER = TypeAdapter(ControllerCommandMessage)
+CONTROLLER_COMMAND_LIST_ADAPTER = TypeAdapter(list[ControllerCommandMessage])
 
 
-class AgentHelloMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_HELLO] = (
-        UpstreamControlMessageType.AGENT_HELLO
-    )
-    message_id: str
+class ControllerCommandHistoryPayload(GatewayProtocolModel):
     selected_protocol_version: str = GATEWAY_PROTOCOL_VERSION
-    supported_versions: tuple[str, ...] = SUPPORTED_GATEWAY_PROTOCOL_VERSIONS
-    last_applied_controller_sequence: int | None = None
-    snapshot: GatewaySnapshotPayload
-
-
-class AgentAcknowledgeMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_ACK] = (
-        UpstreamControlMessageType.AGENT_ACK
-    )
-    message_id: str
-    acknowledged_message_id: str
-
-
-class AgentPongMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_PONG] = (
-        UpstreamControlMessageType.AGENT_PONG
-    )
-    message_id: str
-    acknowledged_message_id: str
-    detail: str | None = None
+    commands: tuple[ControllerCommandMessage, ...] = ()
 
 
 class AgentCommandAcceptedMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_COMMAND_ACCEPTED] = (
-        UpstreamControlMessageType.AGENT_COMMAND_ACCEPTED
+    type: Literal[GatewayMessageType.AGENT_COMMAND_ACCEPTED] = (
+        GatewayMessageType.AGENT_COMMAND_ACCEPTED
     )
     message_id: str
     command_id: str
@@ -612,8 +356,8 @@ class AgentCommandAcceptedMessage(GatewayProtocolModel):
 
 
 class AgentCommandRejectedMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_COMMAND_REJECTED] = (
-        UpstreamControlMessageType.AGENT_COMMAND_REJECTED
+    type: Literal[GatewayMessageType.AGENT_COMMAND_REJECTED] = (
+        GatewayMessageType.AGENT_COMMAND_REJECTED
     )
     message_id: str
     command_id: str
@@ -623,8 +367,8 @@ class AgentCommandRejectedMessage(GatewayProtocolModel):
 
 
 class AgentRuntimeEventMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_RUNTIME_EVENT] = (
-        UpstreamControlMessageType.AGENT_RUNTIME_EVENT
+    type: Literal[GatewayMessageType.AGENT_RUNTIME_EVENT] = (
+        GatewayMessageType.AGENT_RUNTIME_EVENT
     )
     message_id: str
     occurred_at: datetime
@@ -634,17 +378,15 @@ class AgentRuntimeEventMessage(GatewayProtocolModel):
 
 
 class AgentStatusSnapshotMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_STATUS_SNAPSHOT] = (
-        UpstreamControlMessageType.AGENT_STATUS_SNAPSHOT
+    type: Literal[GatewayMessageType.AGENT_STATUS_SNAPSHOT] = (
+        GatewayMessageType.AGENT_STATUS_SNAPSHOT
     )
     message_id: str
     snapshot: GatewaySnapshotPayload
 
 
 class AgentErrorMessage(GatewayProtocolModel):
-    type: Literal[UpstreamControlMessageType.AGENT_ERROR] = (
-        UpstreamControlMessageType.AGENT_ERROR
-    )
+    type: Literal[GatewayMessageType.AGENT_ERROR] = GatewayMessageType.AGENT_ERROR
     message_id: str
     occurred_at: datetime
     code: str
@@ -653,11 +395,8 @@ class AgentErrorMessage(GatewayProtocolModel):
     retriable: bool = False
 
 
-AgentStreamMessage = Annotated[
-    AgentHelloMessage
-    | AgentAcknowledgeMessage
-    | AgentPongMessage
-    | AgentCommandAcceptedMessage
+AgentPublicationMessage = Annotated[
+    AgentCommandAcceptedMessage
     | AgentCommandRejectedMessage
     | AgentRuntimeEventMessage
     | AgentStatusSnapshotMessage
@@ -665,4 +404,4 @@ AgentStreamMessage = Annotated[
     Field(discriminator="type"),
 ]
 
-AGENT_STREAM_ADAPTER = TypeAdapter(AgentStreamMessage)
+AGENT_PUBLICATION_ADAPTER = TypeAdapter(AgentPublicationMessage)
