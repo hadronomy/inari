@@ -14,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from inari.config import AgentSettings
 from inari.container import AgentContainer
-from inari.drivers import DriverRegistry
+from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
 from inari.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.main import create_app
@@ -70,6 +70,7 @@ class StubDatabaseMigrator:
 class StubDeviceCatalog:
     devices: tuple[DeviceRecord, ...]
     device_events: tuple[JobEventRecord, ...] = ()
+    driver_metadata: dict[str, DriverMetadata] = field(default_factory=dict)
 
     def list_devices(self) -> tuple[DeviceRecord, ...]:
         return self.devices
@@ -79,6 +80,14 @@ class StubDeviceCatalog:
 
     def list_device_events(self, device_id: str, *, limit: int = 50):
         return self.device_events[:limit]
+
+    def get_driver_metadata(
+        self, *, kind: DeviceKind, driver_key: str
+    ) -> DriverMetadata | None:
+        metadata = self.driver_metadata.get(driver_key)
+        if metadata is None or metadata.kind is not kind:
+            return None
+        return metadata
 
 
 @dataclass(slots=True)
@@ -291,11 +300,18 @@ async def test_list_devices_uses_semantically_refined_shape(mocker) -> None:
     }
     device = payload["devices"][0]
     assert device["driver_key"] == "tests.fake-printers"
+    assert device["driver"] == {
+        "key": "tests.fake-printers",
+        "display_name": "Test Printer Driver",
+        "kind": "printer",
+        "platform": "test",
+    }
     assert device["device_class"] == "physical"
     assert device["connection"]["state"] == "online"
     assert "observed_at" in device["connection"]
     assert device["printer"]["supported_transports"] == ["raw", "text", "document"]
     assert device["printer"]["capabilities"] == ["cash_drawer"]
+    assert device["metadata"]["source"] == "tests"
 
 
 @pytest.mark.anyio
@@ -624,6 +640,7 @@ def make_test_container(
             capabilities=PrinterCapabilities(
                 raw=True, text=True, documents=True, cash_drawer=True
             ),
+            metadata={"source": "tests"},
         ),
         connection_state=DeviceConnectionState.ONLINE,
     )
@@ -669,7 +686,17 @@ def make_test_container(
         driver_registry=DriverRegistry(drivers=()),
         printer_service=mocker.Mock(spec=StubPrinterService),
         event_hub=EventHub(),
-        device_catalog=StubDeviceCatalog(devices=devices),
+        device_catalog=StubDeviceCatalog(
+            devices=devices,
+            driver_metadata={
+                "tests.fake-printers": DriverMetadata(
+                    key="tests.fake-printers",
+                    display_name="Test Printer Driver",
+                    kind=DeviceKind.PRINTER,
+                    platform="test",
+                )
+            },
+        ),
         job_service=StubJobService(
             jobs={job.id: job},
             queue_counts_payload={"queued": 1},

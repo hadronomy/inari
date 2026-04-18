@@ -195,6 +195,10 @@ class CupsPrinterDriver(PrinterDriver):
                 documents=True,
                 cash_drawer=supports_raw,
             ),
+            metadata={
+                "source": "cups",
+                **({"device_uri": device_uri} if device_uri else {}),
+            },
         )
 
     def _list_printer_attributes(self) -> Mapping[str, Mapping[str, Any]]:

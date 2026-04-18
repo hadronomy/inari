@@ -19,7 +19,7 @@ from .device_commands import (
     OpenCashDrawer as OpenCashDrawerDomain,
     PrintTestPage as PrintTestPageDomain,
 )
-from .drivers import DeviceKind
+from .drivers import DeviceKind, DriverMetadata
 from .print_jobs import (
     HtmlDocumentContent,
     PdfDocumentContent,
@@ -383,17 +383,40 @@ class PrinterDetailsResponse(APIModel):
     capabilities: tuple[PrinterCapability, ...] = ()
 
 
+class DriverResponse(APIModel):
+    key: str
+    display_name: str
+    kind: DeviceKind
+    platform: str
+
+    @classmethod
+    def from_metadata(cls, metadata: DriverMetadata) -> DriverResponse:
+        return cls(
+            key=metadata.key,
+            display_name=metadata.display_name,
+            kind=metadata.kind,
+            platform=metadata.platform,
+        )
+
+
 class DeviceResponse(APIModel):
     id: str
     kind: DeviceKind
     device_class: DeviceClass
     name: str
     driver_key: str
+    driver: DriverResponse | None = None
     connection: DeviceConnectionResponse
     printer: PrinterDetailsResponse | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def from_domain(cls, device: DeviceRecord) -> DeviceResponse:
+    def from_domain(
+        cls,
+        device: DeviceRecord,
+        *,
+        driver_metadata: DriverMetadata | None = None,
+    ) -> DeviceResponse:
         printer_details: PrinterDetailsResponse | None = None
         if device.kind is DeviceKind.PRINTER:
             printer_details = PrinterDetailsResponse(
@@ -410,6 +433,11 @@ class DeviceResponse(APIModel):
             device_class=device.device_class,
             name=device.name,
             driver_key=device.driver_key,
+            driver=(
+                DriverResponse.from_metadata(driver_metadata)
+                if driver_metadata is not None
+                else None
+            ),
             connection=DeviceConnectionResponse(
                 state=device.connection_state,
                 first_seen_at=device.first_seen_at,
@@ -417,6 +445,7 @@ class DeviceResponse(APIModel):
                 observed_at=device.observed_at,
             ),
             printer=printer_details,
+            metadata=dict(device.metadata),
         )
 
 

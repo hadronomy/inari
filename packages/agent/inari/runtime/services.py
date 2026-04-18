@@ -19,6 +19,7 @@ from .operations import (
 )
 from .repositories import DeviceRepository, JobRepository
 from ..config import AgentSettings
+from ..drivers import DeviceKind, DriverMetadata
 from ..exceptions import AgentError
 from ..printer_service import PrinterService
 
@@ -40,6 +41,16 @@ class DeviceCatalog:
 
     def get_device(self, device_id: str) -> DeviceRecord | None:
         return self.device_repository.get(device_id)
+
+    def get_driver_metadata(
+        self, *, kind: DeviceKind, driver_key: str
+    ) -> DriverMetadata | None:
+        for driver in self.discovery.driver_registry.drivers_for(
+            kind, available_only=False
+        ):
+            if driver.metadata.key == driver_key:
+                return driver.metadata
+        return None
 
     def list_device_events(
         self, device_id: str, *, limit: int = 50

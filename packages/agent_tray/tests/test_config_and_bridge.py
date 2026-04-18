@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 
 
-from inari.models import SystemStatusResponse
+from inari.models import RuntimeEventResponse, SystemStatusResponse
 from inari.version import API_VERSION
 from inari_tray.app import AgentTrayApplication
 from inari_tray.bridge import (
@@ -41,6 +41,9 @@ def test_run_bootstraps_host_and_background_threads() -> None:
     assert host.run_called is True
     assert host.initial_snapshot.title == "Inari"
     assert any(entry.label == "Open API Docs" for entry in host.initial_menu_entries)
+    assert any(
+        entry.label == "Open Device Center" for entry in host.initial_menu_entries
+    )
     assert len(application._threads) == 2
     application._stop_event.set()
     for thread in application._threads:
@@ -139,6 +142,104 @@ def test_quit_tray_stops_host() -> None:
 
     application._quit_tray()
 
+    assert host.stopped is True
+
+
+def test_open_device_center_uses_native_presenter() -> None:
+    device_center = FakeDeviceCenter()
+    application = AgentTrayApplication(
+        TraySettings(),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=FakeTrayHost(),
+        device_center=device_center,
+    )
+
+    application._open_device_center()
+
+    assert device_center.show_calls == 1
+
+
+def test_lazy_device_center_receives_current_snapshot_on_creation() -> None:
+    created: list[FakeDeviceCenter] = []
+
+    def factory(*args, **kwargs):
+        center = FakeDeviceCenter()
+        created.append(center)
+        return center
+
+    application = AgentTrayApplication(
+        TraySettings(),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=FakeTrayHost(),
+        device_center_factory=factory,
+    )
+
+    application._open_device_center()
+
+    assert len(created) == 1
+    assert created[0].snapshots[-1] == application.snapshot
+
+
+def test_apply_snapshot_forwards_to_device_center() -> None:
+    device_center = FakeDeviceCenter()
+    application = AgentTrayApplication(
+        TraySettings(),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=FakeTrayHost(),
+        device_center=device_center,
+    )
+
+    snapshot = application.snapshot.with_error(
+        control=ControlSnapshot(mode=ControlMode.MONITOR),
+        message="Connection refused",
+    )
+    application._apply_snapshot(snapshot)
+
+    assert device_center.snapshots[-1] == snapshot
+
+
+def test_forward_runtime_event_to_device_center() -> None:
+    device_center = FakeDeviceCenter()
+    application = AgentTrayApplication(
+        TraySettings(),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=FakeTrayHost(),
+        device_center=device_center,
+    )
+    event = RuntimeEventResponse.model_validate(
+        {
+            "sequence": 4,
+            "resource_kind": "device",
+            "resource_id": "dev_printer",
+            "event_type": "device.connected",
+            "occurred_at": "2026-04-18T10:05:00Z",
+            "payload": {"name": "Kitchen Printer"},
+        }
+    )
+
+    application._forward_runtime_event(event)
+
+    assert device_center.events == [event]
+
+
+def test_quit_tray_closes_device_center() -> None:
+    host = FakeTrayHost()
+    device_center = FakeDeviceCenter()
+    application = AgentTrayApplication(
+        TraySettings(),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=host,
+        device_center=device_center,
+    )
+
+    application._quit_tray()
+
+    assert device_center.closed is True
     assert host.stopped is True
 
 
@@ -344,9 +445,7 @@ def test_spawned_process_bridge_falls_back_to_console_script(mocker) -> None:
     mocker.patch("inari_tray.bridge._supports_module_launch", return_value=False)
     mocker.patch(
         "inari_tray.bridge.shutil.which",
-        side_effect=lambda name: (
-            "C:/bin/inari.exe" if name == "inari" else None
-        ),
+        side_effect=lambda name: "C:/bin/inari.exe" if name == "inari" else None,
     )
     command = bridge._resolve_launch_command()
 
@@ -549,11 +648,13 @@ class FakeTrayHost:
         self.initial_snapshot = None
         self.initial_menu_entries: list[TrayMenuEntry] = []
         self.updated_snapshot = None
+        self.activate_callback = None
 
-    def run(self, *, snapshot, menu_entries, on_ready) -> None:
+    def run(self, *, snapshot, menu_entries, on_ready, on_activate=None) -> None:
         self.run_called = True
         self.initial_snapshot = snapshot
         self.initial_menu_entries = list(menu_entries)
+        self.activate_callback = on_activate
         on_ready()
 
     def update(self, *, snapshot, menu_entries) -> None:
@@ -570,6 +671,26 @@ class FakeTrayHost:
 class FailingTrayHost(FakeTrayHost):
     def update(self, *, snapshot, menu_entries) -> None:
         raise ValueError("Tray host update failed")
+
+
+class FakeDeviceCenter:
+    def __init__(self) -> None:
+        self.show_calls = 0
+        self.closed = False
+        self.snapshots: list[TraySnapshot] = []
+        self.events: list[RuntimeEventResponse] = []
+
+    def show(self) -> None:
+        self.show_calls += 1
+
+    def update_connection_snapshot(self, snapshot: TraySnapshot) -> None:
+        self.snapshots.append(snapshot)
+
+    def handle_runtime_event(self, event: RuntimeEventResponse) -> None:
+        self.events.append(event)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeControlBridge:

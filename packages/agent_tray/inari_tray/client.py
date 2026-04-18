@@ -8,6 +8,8 @@ from typing import Any, Callable
 import httpx
 from pydantic import TypeAdapter
 from inari.models import (
+    DeviceDirectoryResponse,
+    DeviceEventCollectionResponse,
     JobResourceResponse,
     LiveUpdateMessage,
     SystemStatusResponse,
@@ -42,12 +44,63 @@ class AgentApiClient:
             response.raise_for_status()
         return SystemStatusResponse.model_validate(response.json())
 
+    def list_devices(self) -> DeviceDirectoryResponse:
+        with self._http_client_factory() as client:
+            response = client.get(
+                "/devices", headers=self._authorization_headers(client)
+            )
+            response.raise_for_status()
+        return DeviceDirectoryResponse.model_validate(response.json())
+
+    def list_device_events(
+        self, device_id: str, *, limit: int = 50
+    ) -> DeviceEventCollectionResponse:
+        with self._http_client_factory() as client:
+            response = client.get(
+                f"/devices/{device_id}/events",
+                params={"limit": limit},
+                headers=self._authorization_headers(client),
+            )
+            response.raise_for_status()
+        return DeviceEventCollectionResponse.model_validate(response.json())
+
     def submit_test_page(
-        self, *, printer_name: str | None = None
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
     ) -> JobResourceResponse:
         payload: dict[str, object] = {"command": {"kind": "print_test_page"}}
+        target: dict[str, object] = {}
+        if device_id is not None:
+            target["device_id"] = device_id
         if printer_name is not None:
-            payload["target"] = {"printer_name": printer_name}
+            target["printer_name"] = printer_name
+        if target:
+            payload["target"] = target
+        with self._http_client_factory() as client:
+            response = client.post(
+                "/device-commands",
+                json=payload,
+                headers=self._authorization_headers(client),
+            )
+            response.raise_for_status()
+        return JobResourceResponse.model_validate(response.json())
+
+    def open_cash_drawer(
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
+    ) -> JobResourceResponse:
+        payload: dict[str, object] = {"command": {"kind": "open_cash_drawer"}}
+        target: dict[str, object] = {}
+        if device_id is not None:
+            target["device_id"] = device_id
+        if printer_name is not None:
+            target["printer_name"] = printer_name
+        if target:
+            payload["target"] = target
         with self._http_client_factory() as client:
             response = client.post(
                 "/device-commands",

@@ -20,6 +20,7 @@ from inari.models import (
 from .bridge import AgentControlBridge, build_control_bridge
 from .client import AgentApiClient
 from .config import TraySettings
+from .device_center import DeviceCenterPresenter, create_device_center
 from .models import (
     ControlMode,
     ControlSnapshot,
@@ -40,11 +41,17 @@ class AgentTrayApplication:
         client: AgentApiClient | None = None,
         bridge: AgentControlBridge | None = None,
         host: TrayHost | None = None,
+        device_center: DeviceCenterPresenter | None = None,
+        device_center_factory: Callable[..., DeviceCenterPresenter] | None = None,
     ) -> None:
         self.settings = settings
         self.client = client or AgentApiClient(settings)
         self.bridge = bridge or build_control_bridge(settings)
         self.host = host
+        self._device_center = device_center
+        self._device_center_factory = (
+            device_center_factory or self._default_device_center_factory
+        )
         self.links = TrayLinks(
             api_base_url=settings.agent_api_base_url,
             docs_url=settings.agent_docs_url,
@@ -80,6 +87,7 @@ class AgentTrayApplication:
             snapshot=snapshot,
             menu_entries=self._build_menu(snapshot),
             on_ready=self._setup_background,
+            on_activate=self._open_device_center,
         )
 
     def _setup_background(self) -> None:
@@ -149,6 +157,7 @@ class AgentTrayApplication:
                             event=message.event,
                             notify_connection=True,
                         )
+                        self._forward_runtime_event(message.event)
                         self._notify_for_event(message.event)
                         if self._stop_event.is_set():
                             return
@@ -232,6 +241,8 @@ class AgentTrayApplication:
     def _apply_snapshot(self, snapshot: TraySnapshot) -> None:
         with self._snapshot_lock:
             self._snapshot = snapshot
+        if self._device_center is not None:
+            self._device_center.update_connection_snapshot(snapshot)
         if self.host is None:
             return
         try:
@@ -251,7 +262,10 @@ class AgentTrayApplication:
             [
                 TrayMenuEntry.separator_item(),
                 TrayMenuEntry("Open API Docs", callback=self._open_docs, default=True),
-                TrayMenuEntry("Open Devices", callback=self._open_devices),
+                TrayMenuEntry(
+                    "Open Device Center",
+                    callback=self._open_device_center,
+                ),
                 TrayMenuEntry("Open Queue", callback=self._open_jobs),
                 TrayMenuEntry("Open Logs", callback=self._open_logs),
                 TrayMenuEntry.separator_item(),
@@ -285,8 +299,8 @@ class AgentTrayApplication:
     def _open_docs(self, *_: object) -> None:
         webbrowser.open(self.links.docs_url)
 
-    def _open_devices(self, *_: object) -> None:
-        webbrowser.open(self.links.devices_url)
+    def _open_device_center(self, *_: object) -> None:
+        self._get_device_center().show()
 
     def _open_jobs(self, *_: object) -> None:
         webbrowser.open(self.links.jobs_url)
@@ -299,9 +313,7 @@ class AgentTrayApplication:
         self._launch_background(self._refresh_snapshot, name="inari-tray-refresh")
 
     def _print_test_page(self, *_: object) -> None:
-        self._launch_background(
-            self._print_test_page_sync, name="inari-tray-test-page"
-        )
+        self._launch_background(self._print_test_page_sync, name="inari-tray-test-page")
 
     def _start_agent(self, *_: object) -> None:
         self._launch_background(
@@ -326,6 +338,8 @@ class AgentTrayApplication:
     def _quit_tray(self, *_: object) -> None:
         self._stop_event.set()
         try:
+            if self._device_center is not None:
+                self._device_center.close()
             self.bridge.shutdown()
         finally:
             if self.host is not None:
@@ -400,6 +414,35 @@ class AgentTrayApplication:
     def _launch_background(self, target: Callable[[], None], *, name: str) -> None:
         thread = threading.Thread(target=target, name=name, daemon=True)
         thread.start()
+
+    def _forward_runtime_event(self, event: RuntimeEventResponse) -> None:
+        if self._device_center is None:
+            return
+        self._device_center.handle_runtime_event(event)
+
+    def _get_device_center(self) -> DeviceCenterPresenter:
+        if self._device_center is None:
+            self._device_center = self._device_center_factory(
+                self.settings,
+                client=self.client,
+                notify=self._notify_from_device_center,
+            )
+            self._device_center.update_connection_snapshot(self.snapshot)
+        return self._device_center
+
+    def _notify_from_device_center(
+        self, title: str, subtitle: str | None = None
+    ) -> None:
+        self._notify(title, subtitle=subtitle)
+
+    @staticmethod
+    def _default_device_center_factory(
+        settings: TraySettings,
+        *,
+        client: AgentApiClient,
+        notify: Callable[[str, str | None], None] | None = None,
+    ) -> DeviceCenterPresenter:
+        return create_device_center(settings, client=client, notify=notify)
 
     @staticmethod
     def _can_start(snapshot: TraySnapshot) -> bool:

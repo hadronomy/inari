@@ -30,6 +30,7 @@ class TrayHost(Protocol):
         snapshot: TraySnapshot,
         menu_entries: Sequence[TrayMenuEntry],
         on_ready: Callable[[], None],
+        on_activate: Callable[[], None] | None = None,
     ) -> None: ...
 
     def update(

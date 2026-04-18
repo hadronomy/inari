@@ -37,6 +37,7 @@ class QtTrayHost(TrayHost):
         snapshot: TraySnapshot,
         menu_entries: Sequence[TrayMenuEntry],
         on_ready: Callable[[], None],
+        on_activate: Callable[[], None] | None = None,
     ) -> None:
         application = QApplication.instance()
         if application is None:
@@ -56,6 +57,10 @@ class QtTrayHost(TrayHost):
         self._tray_icon = tray_icon
         self._menu = menu
         tray_icon.setContextMenu(menu)
+        if on_activate is not None:
+            tray_icon.activated.connect(
+                lambda reason: self._handle_activation(reason, on_activate)
+            )
         self._apply_update(snapshot, list(menu_entries))
         tray_icon.setVisible(True)
         tray_icon.show()
@@ -106,6 +111,18 @@ class QtTrayHost(TrayHost):
         if application is None:
             return
         application.quit()
+
+    @staticmethod
+    def _handle_activation(
+        reason: QSystemTrayIcon.ActivationReason,
+        callback: Callable[[], None],
+    ) -> None:
+        if reason not in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        }:
+            return
+        callback()
 
     def _sync_menu(self, menu_entries: Sequence[TrayMenuEntry]) -> None:
         menu = self._menu

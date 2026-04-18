@@ -136,6 +136,7 @@ class DeviceRecord:
                 "cash_drawer": printer.supports_cash_drawer,
             },
             metadata={
+                **dict(printer.metadata),
                 "device_class": infer_device_class(
                     kind=DeviceKind.PRINTER, name=printer.name
                 ).value,

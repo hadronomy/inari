@@ -159,6 +159,16 @@ async def system_status(
     return build_system_status_response(device_catalog, job_service)
 
 
+def _device_response(device_catalog: DeviceCatalog, device) -> DeviceResponse:
+    return DeviceResponse.from_domain(
+        device,
+        driver_metadata=device_catalog.get_driver_metadata(
+            kind=device.kind,
+            driver_key=device.driver_key,
+        ),
+    )
+
+
 @devices_router.get("", response_model=DeviceDirectoryResponse)
 async def list_devices(
     device_catalog: DeviceCatalogDependency,
@@ -169,7 +179,7 @@ async def list_devices(
     _require_scopes(authorization_service, principal, AccessScope.DEVICES_READ)
     devices = list(device_catalog.list_devices())
     return DeviceDirectoryResponse(
-        devices=[DeviceResponse.from_domain(device) for device in devices],
+        devices=[_device_response(device_catalog, device) for device in devices],
         summary=DeviceDirectorySummaryResponse.from_devices(devices),
     )
 
@@ -188,7 +198,7 @@ async def get_device(
         raise AgentError(
             "DEVICE_NOT_FOUND", f"Device {device_id!r} was not found.", status_code=404
         )
-    return DeviceResourceResponse(device=DeviceResponse.from_domain(device))
+    return DeviceResourceResponse(device=_device_response(device_catalog, device))
 
 
 @devices_router.get("/{device_id}/events", response_model=DeviceEventCollectionResponse)

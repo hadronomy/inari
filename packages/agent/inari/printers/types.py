@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any, Mapping
 
 
 class PrinterTransport(StrEnum):
@@ -31,6 +32,7 @@ class PrinterDevice:
     is_default: bool = False
     preferred_transport: PrinterTransport = PrinterTransport.DOCUMENT
     capabilities: PrinterCapabilities = field(default_factory=PrinterCapabilities)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def supports_raw(self) -> bool:

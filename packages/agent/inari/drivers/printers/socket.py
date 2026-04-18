@@ -116,6 +116,12 @@ class RawSocketPrinterDriver(PrinterDriver):
                 documents=config.document_enabled,
                 cash_drawer=config.cash_drawer,
             ),
+            metadata={
+                "source": "network_config",
+                "host": config.host,
+                "port": config.port,
+                "encoding": config.encoding,
+            },
         )
 
     def _require_config(self, printer_name: str) -> NetworkPrinterConfig:

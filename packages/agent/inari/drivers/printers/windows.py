@@ -337,6 +337,10 @@ class WindowsPrinterDriver(PrinterDriver):
                 documents=True,
                 cash_drawer=supports_raw,
             ),
+            metadata={
+                "source": "windows_spooler",
+                "queue_name": printer_name,
+            },
         )
 
     def _guess_preferred_transport(self, printer_name: str) -> PrinterTransport:
