@@ -12,7 +12,7 @@ The agent now runs on top of a proper runtime layer with:
 - persisted job and device history
 - built-in gateway identity, scoped local auth, and optional managed upstream mode
 
-For the current external controller contract, see [docs/gateway_protocol.md](../../docs/gateway_protocol.md). For supported deployment stacks with Caddy, ZITADEL, and step-ca, see [docs/managed_gateway_stacks.md](../../docs/managed_gateway_stacks.md).
+For the managed controller protocol draft, see [docs/gateway_protocol.md](../../docs/gateway_protocol.md). For supported deployment stacks with Caddy, ZITADEL, and step-ca, see [docs/managed_gateway_stacks.md](../../docs/managed_gateway_stacks.md).
 
 ## Highlights
 
@@ -364,7 +364,7 @@ audience = "iot-agent.local"
 auth_mode = "controller"
 certificate_mode = "controller"
 edge_provider = "direct"
-mutual_tls_mode = "disabled"
+mutual_tls_mode = "optional"
 trust_client_ca = true
 
 [gateway.zitadel]
@@ -374,6 +374,11 @@ requested_scopes = ["openid"]
 [gateway.step_ca]
 requested_sans = []
 ```
+
+For managed deployments, `mutual_tls_mode = "optional"` is the recommended starting posture.
+That keeps first enrollment workable before a client certificate exists, while allowing the
+agent and controller edge to tighten to required mTLS once a managed certificate has been
+issued.
 
 `[paths] profile` controls how unset storage paths are derived:
 

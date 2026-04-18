@@ -7,11 +7,11 @@ from ..runtime.services import DeviceCatalog, JobService
 from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from ..security.certificates import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
-from ..security.models import UPSTREAM_AGENT_SCOPES
 from ..security.policies import SecurityPolicyService
 from ..version import API_VERSION, SERVICE_NAME
 from .caddy import CaddyControllerProfile
 from .connector import GatewayConnector
+from .models import SUPPORTED_CONTROLLER_ACTIONS, resolve_mutual_tls_policy
 from .protocol import (
     GatewayCapabilityDescriptor,
     GatewayDeviceSummary,
@@ -59,6 +59,11 @@ class GatewaySnapshotBuilder:
             if self.certificate_lifecycle_manager is not None
             else None
         )
+        mutual_tls_policy = resolve_mutual_tls_policy(
+            self.settings.upstream_mutual_tls_mode,
+            certificate_mode=self.settings.upstream_certificate_mode,
+            client_certificate_present=certificate is not None,
+        )
 
         return GatewaySnapshotPayload(
             generated_at=utc_now(),
@@ -76,8 +81,9 @@ class GatewaySnapshotBuilder:
                 edge_provider=self.settings.upstream_edge_provider,
                 auth_mode=self.settings.upstream_auth_mode,
                 certificate_mode=self.settings.upstream_certificate_mode,
-                mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
-                mutual_tls_enabled=certificate is not None,
+                mutual_tls_mode=mutual_tls_policy.effective_mode,
+                mutual_tls_enabled=mutual_tls_policy.enabled
+                and certificate is not None,
                 certificate_expires_at=certificate.not_valid_after
                 if certificate is not None
                 else None,
@@ -108,7 +114,7 @@ class GatewaySnapshotBuilder:
                 supported_device_commands=tuple(
                     kind.value for kind in DeviceCommandKind
                 ),
-                granted_scopes=UPSTREAM_AGENT_SCOPES,
+                supported_controller_actions=SUPPORTED_CONTROLLER_ACTIONS,
                 features=(
                     "status_sync",
                     "control_stream",

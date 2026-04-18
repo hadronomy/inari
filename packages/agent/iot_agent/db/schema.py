@@ -126,6 +126,7 @@ gateway_inbound_commands_table = Table(
     metadata,
     Column("command_id", String, primary_key=True),
     Column("message_id", String, nullable=False),
+    Column("sequence", Integer),
     Column("message_type", String, nullable=False),
     Column("state", String, nullable=False),
     Column("payload_json", Text, nullable=False),
@@ -140,6 +141,12 @@ Index(
     "idx_gateway_inbound_job_id",
     gateway_inbound_commands_table.c.job_id,
     gateway_inbound_commands_table.c.updated_at.desc(),
+)
+Index(
+    "idx_gateway_inbound_sequence",
+    gateway_inbound_commands_table.c.sequence,
+    unique=True,
+    sqlite_where=gateway_inbound_commands_table.c.sequence.is_not(None),
 )
 
 gateway_outbox_table = Table(

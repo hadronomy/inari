@@ -188,7 +188,8 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
         "Controller edge layout. `caddy` enables stricter profile validation.",
     ),
     ("gateway", "mutual_tls_mode"): (
-        "Whether client certificates are disabled, optional, or required upstream.",
+        "Whether upstream client-certificate authentication is disabled, optional, or required.",
+        "Recommended production posture: keep this `optional` for bootstrap, then let the connection harden to required once a managed client certificate has been issued.",
     ),
     ("gateway", "trust_client_ca"): (
         "Trust the managed CA bundle for outbound TLS validation.",
@@ -528,7 +529,7 @@ class GatewayConfig(BaseModel):
     auth_mode: UpstreamAuthMode = UpstreamAuthMode.CONTROLLER
     certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
     edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
-    mutual_tls_mode: MutualTlsMode = MutualTlsMode.DISABLED
+    mutual_tls_mode: MutualTlsMode = MutualTlsMode.OPTIONAL
     trust_client_ca: bool = True
     bootstrap: GatewayBootstrapConfig = Field(default_factory=GatewayBootstrapConfig)
     sync: GatewaySyncConfig = Field(default_factory=GatewaySyncConfig)
@@ -666,7 +667,7 @@ class AgentSettings(BaseModel):
         UpstreamCertificateMode.CONTROLLER
     )
     upstream_edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
-    upstream_mutual_tls_mode: MutualTlsMode = MutualTlsMode.DISABLED
+    upstream_mutual_tls_mode: MutualTlsMode = MutualTlsMode.OPTIONAL
     allowed_origins: list[str] = Field(
         default_factory=lambda: [
             "http://127.0.0.1:8069",

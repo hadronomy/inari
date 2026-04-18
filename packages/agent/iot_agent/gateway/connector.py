@@ -19,14 +19,17 @@ from ..security.tls import TlsContextFactory
 from .enrollment import GatewayEnrollmentService
 from .models import (
     GatewayEnrollmentRecord,
+    MutualTlsPolicy,
     UpstreamCertificateMode,
     UpstreamConnectionState,
     UpstreamStatus,
+    resolve_mutual_tls_policy,
 )
 from .protocol import (
     AgentAcknowledgeMessage,
     AgentHelloMessage,
     AgentPongMessage,
+    AgentStatusSnapshotMessage,
     CONTROLLER_STREAM_ADAPTER,
     ControllerAcknowledgeMessage,
     ControllerCancelJobMessage,
@@ -64,6 +67,11 @@ class GatewayConnector:
         self.command_dispatcher = command_dispatcher
         self._http_client_factory = http_client_factory or httpx.AsyncClient
         self._websocket_connect_factory = websocket_connect_factory or websocket_connect
+        mutual_tls_policy = resolve_mutual_tls_policy(
+            settings.upstream_mutual_tls_mode,
+            certificate_mode=settings.upstream_certificate_mode,
+            client_certificate_present=False,
+        )
         self._status = UpstreamStatus(
             mode=settings.gateway_mode,
             state=(
@@ -78,9 +86,11 @@ class GatewayConnector:
             auth_mode=settings.upstream_auth_mode,
             certificate_mode=settings.upstream_certificate_mode,
             edge_provider=settings.upstream_edge_provider,
-            mutual_tls_mode=settings.upstream_mutual_tls_mode,
+            mutual_tls_mode=mutual_tls_policy.effective_mode,
+            last_applied_controller_sequence=gateway_repository.last_applied_controller_sequence(),
         )
         self._lock = asyncio.Lock()
+        self._last_snapshot_sent_at = utc_now()
 
     async def sync_once(self) -> None:
         if self.settings.gateway_mode is not GatewayMode.MANAGED:
@@ -132,6 +142,10 @@ class GatewayConnector:
             enrollment,
             client_certificate_present=client_certificate_present,
         )
+        mutual_tls_policy = self._mutual_tls_policy(
+            enrollment,
+            client_certificate_present=client_certificate_present,
+        )
         try:
             async with self._http_client_factory(
                 verify=self.tls_context_factory.create_outbound_context(),
@@ -143,7 +157,8 @@ class GatewayConnector:
                     headers={
                         **headers,
                         "X-IoT-Agent-Protocol-Version": str(
-                            snapshot.get("protocol", {}).get("version", "")
+                            enrollment.protocol_version
+                            or snapshot.get("protocol", {}).get("version", "")
                         ),
                     },
                 )
@@ -175,24 +190,17 @@ class GatewayConnector:
             status_url=enrollment.status_url,
             events_url=enrollment.events_url,
             last_error=None,
-            protocol_version=str(
-                response_payload.get("protocol_version")
-                or enrollment.protocol_version
-                or ""
-            ),
-            controller_name=str(
-                response_payload.get("controller_name")
-                or enrollment.controller_name
-                or ""
-            ),
-            controller_instance_id=str(
-                response_payload.get("controller_instance_id")
-                or enrollment.controller_instance_id
-                or ""
-            ),
+            protocol_version=_selected_protocol_version(response_payload)
+            or enrollment.protocol_version,
+            controller_name=_controller_name(response_payload)
+            or enrollment.controller_name,
+            controller_instance_id=_controller_instance_id(response_payload)
+            or enrollment.controller_instance_id,
             client_certificate_present=client_certificate_present,
             certificate_bootstrap_pending=certificate_bootstrap_pending,
+            mutual_tls_mode=mutual_tls_policy.effective_mode,
             successful_sync_count=self._status.successful_sync_count + 1,
+            last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
         )
 
     async def listen_once(self) -> None:
@@ -217,6 +225,10 @@ class GatewayConnector:
             enrollment,
             client_certificate_present=client_certificate_present,
         )
+        mutual_tls_policy = self._mutual_tls_policy(
+            enrollment,
+            client_certificate_present=client_certificate_present,
+        )
         await self._update_status(
             state=UpstreamConnectionState.CONNECTING,
             detail="Connecting to the upstream control stream.",
@@ -228,6 +240,8 @@ class GatewayConnector:
             controller_instance_id=enrollment.controller_instance_id,
             client_certificate_present=client_certificate_present,
             certificate_bootstrap_pending=certificate_bootstrap_pending,
+            mutual_tls_mode=mutual_tls_policy.effective_mode,
+            last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
         )
         headers = await self.enrollment_service.upstream_headers(enrollment)
         try:
@@ -242,10 +256,19 @@ class GatewayConnector:
                     json.dumps(
                         AgentHelloMessage(
                             message_id=_message_id("ghello"),
+                            selected_protocol_version=enrollment.protocol_version
+                            or self.snapshot_provider()["protocol"]["version"],
+                            supported_versions=tuple(
+                                self.snapshot_provider()["protocol"][
+                                    "supported_versions"
+                                ]
+                            ),
+                            last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
                             snapshot=self.snapshot_provider(),
                         ).model_dump(mode="json")
                     )
                 )
+                self._last_snapshot_sent_at = utc_now()
                 await self._update_status(
                     state=UpstreamConnectionState.ONLINE,
                     detail="Connected to the upstream control stream.",
@@ -255,8 +278,10 @@ class GatewayConnector:
                     last_error=None,
                     client_certificate_present=client_certificate_present,
                     certificate_bootstrap_pending=certificate_bootstrap_pending,
+                    mutual_tls_mode=mutual_tls_policy.effective_mode,
                     successful_event_stream_count=self._status.successful_event_stream_count
                     + 1,
+                    last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
                 )
                 sender = asyncio.create_task(
                     self._send_outbox_loop(websocket), name="iot-agent-gateway-outbox"
@@ -265,8 +290,12 @@ class GatewayConnector:
                     self._receive_loop(websocket, enrollment),
                     name="iot-agent-gateway-receiver",
                 )
+                heartbeat = asyncio.create_task(
+                    self._send_snapshot_heartbeat_loop(websocket),
+                    name="iot-agent-gateway-heartbeat",
+                )
                 done, pending = await asyncio.wait(
-                    {sender, receiver},
+                    {sender, receiver, heartbeat},
                     return_when=asyncio.FIRST_EXCEPTION,
                 )
                 for task in pending:
@@ -324,7 +353,6 @@ class GatewayConnector:
                     timeout=self.settings.gateway_event_timeout_seconds,
                 )
             except asyncio.TimeoutError:
-                await self._send_snapshot(websocket)
                 continue
             if isinstance(raw_message, bytes):
                 raw_message = raw_message.decode("utf-8")
@@ -335,6 +363,7 @@ class GatewayConnector:
     async def _handle_message(
         self, message, websocket, enrollment: GatewayEnrollmentRecord
     ) -> None:
+        await self._update_status(last_event_at=utc_now())
         if isinstance(message, ControllerAcknowledgeMessage):
             self.gateway_repository.mark_outbox_acked(message.acknowledged_message_id)
             return
@@ -350,13 +379,23 @@ class GatewayConnector:
             )
             return
         if isinstance(message, ControllerHelloMessage):
+            selected_protocol_version = message.selected_protocol_version
             if (
-                message.protocol_version
+                selected_protocol_version
                 not in self.snapshot_provider()["protocol"]["supported_versions"]
             ):
                 raise AgentError(
                     "UPSTREAM_PROTOCOL_MISMATCH",
-                    f"Controller protocol version {message.protocol_version!r} is not supported.",
+                    f"Controller protocol version {selected_protocol_version!r} is not supported.",
+                    status_code=409,
+                )
+            if (
+                enrollment.protocol_version is not None
+                and selected_protocol_version != enrollment.protocol_version
+            ):
+                raise AgentError(
+                    "UPSTREAM_PROTOCOL_MISMATCH",
+                    f"Controller selected protocol version {selected_protocol_version!r}, but enrollment negotiated {enrollment.protocol_version!r}.",
                     status_code=409,
                 )
             await websocket.send(
@@ -368,9 +407,14 @@ class GatewayConnector:
                 )
             )
             await self._update_status(
-                protocol_version=message.protocol_version,
-                controller_name=message.controller_name,
-                controller_instance_id=message.controller_instance_id,
+                protocol_version=selected_protocol_version,
+                controller_name=message.controller.name
+                if message.controller is not None
+                else None,
+                controller_instance_id=message.controller.instance_id
+                if message.controller is not None
+                else None,
+                controller_resume_from_sequence=message.resume_from_sequence,
             )
             return
         if isinstance(message, ControllerSubmitPrintJobMessage):
@@ -388,6 +432,7 @@ class GatewayConnector:
         await self._update_status(
             last_command_at=utc_now(),
             last_command_id=getattr(message, "command_id", None),
+            last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
         )
 
     async def _send_outbox_loop(self, websocket) -> None:
@@ -412,13 +457,22 @@ class GatewayConnector:
         snapshot = self.snapshot_provider()
         await websocket.send(
             json.dumps(
-                {
-                    "type": "agent.status.snapshot",
-                    "message_id": _message_id("gsnap"),
-                    "snapshot": snapshot,
-                }
+                AgentStatusSnapshotMessage(
+                    message_id=_message_id("gsnap"),
+                    snapshot=snapshot,
+                ).model_dump(mode="json")
             )
         )
+        self._last_snapshot_sent_at = utc_now()
+
+    async def _send_snapshot_heartbeat_loop(self, websocket) -> None:
+        interval = max(self.settings.gateway_event_timeout_seconds, 1.0)
+        while True:
+            await asyncio.sleep(interval)
+            if (
+                utc_now() - self._last_snapshot_sent_at
+            ).total_seconds() >= interval:
+                await self._send_snapshot(websocket)
 
     async def _update_status(self, **changes: object) -> None:
         async with self._lock:
@@ -439,8 +493,53 @@ class GatewayConnector:
             return False
         return enrollment is not None
 
+    def _mutual_tls_policy(
+        self,
+        enrollment: GatewayEnrollmentRecord | None,
+        *,
+        client_certificate_present: bool,
+    ) -> MutualTlsPolicy:
+        return resolve_mutual_tls_policy(
+            enrollment.mutual_tls_mode if enrollment is not None else self.settings.upstream_mutual_tls_mode,
+            certificate_mode=(
+                enrollment.certificate_mode
+                if enrollment is not None
+                else self.settings.upstream_certificate_mode
+            ),
+            client_certificate_present=client_certificate_present,
+            certificate_bootstrap=(
+                enrollment.certificate_bootstrap if enrollment is not None else None
+            ),
+        )
+
 
 def _message_id(prefix: str) -> str:
     from uuid import uuid4
 
     return f"{prefix}_{uuid4().hex}"
+
+
+def _selected_protocol_version(payload: dict[str, Any]) -> str | None:
+    if payload.get("selected_protocol_version") is not None:
+        return str(payload["selected_protocol_version"])
+    if payload.get("protocol_version") is not None:
+        return str(payload["protocol_version"])
+    return None
+
+
+def _controller_name(payload: dict[str, Any]) -> str | None:
+    controller = payload.get("controller")
+    if isinstance(controller, dict) and controller.get("name") is not None:
+        return str(controller["name"])
+    if payload.get("controller_name") is not None:
+        return str(payload["controller_name"])
+    return None
+
+
+def _controller_instance_id(payload: dict[str, Any]) -> str | None:
+    controller = payload.get("controller")
+    if isinstance(controller, dict) and controller.get("instance_id") is not None:
+        return str(controller["instance_id"])
+    if payload.get("controller_instance_id") is not None:
+        return str(payload["controller_instance_id"])
+    return None

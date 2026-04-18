@@ -141,8 +141,9 @@ config_version = 1
 # certificate_mode = "controller"
 # Controller edge layout. `caddy` enables stricter profile validation.
 # edge_provider = "direct"
-# Whether client certificates are disabled, optional, or required upstream.
-# mutual_tls_mode = "disabled"
+# Whether upstream client-certificate authentication is disabled, optional, or required.
+# Recommended production posture: keep this `optional` for bootstrap, then let the connection harden to required once a managed client certificate has been issued.
+# mutual_tls_mode = "optional"
 # Trust the managed CA bundle for outbound TLS validation.
 # trust_client_ca = true
 

@@ -12,14 +12,19 @@ from ..models import (
 )
 from ..runtime.events import EventHub
 from ..runtime.services import JobService
-from ..security.models import AccessScope
-from .models import GatewayEnrollmentRecord, GatewayInboundCommandState
+from .models import (
+    ControllerAction,
+    GatewayEnrollmentRecord,
+    GatewayInboundCommandState,
+)
 from .protocol import (
     AgentCommandAcceptedMessage,
     AgentCommandRejectedMessage,
+    ControllerExecuteDeviceCommandPayload,
     AgentRuntimeEventMessage,
     ControllerCancelJobMessage,
     ControllerExecuteDeviceCommandMessage,
+    ControllerSubmitPrintJobPayload,
     ControllerSubmitPrintJobMessage,
 )
 from .repositories import GatewayRepository
@@ -44,9 +49,9 @@ class GatewayCommandDispatcher:
         await self._handle_job_submission(
             message=message,
             enrollment=enrollment,
-            required_scope=AccessScope.JOBS_SUBMIT,
+            required_action=ControllerAction.JOBS_CREATE,
             enqueue=lambda: self.job_service.enqueue_print(
-                PrintJobRequest.model_validate(message.payload).to_operation()
+                _protocol_print_job_request(message.payload).to_operation()
             ),
         )
 
@@ -59,9 +64,9 @@ class GatewayCommandDispatcher:
         await self._handle_job_submission(
             message=message,
             enrollment=enrollment,
-            required_scope=AccessScope.COMMANDS_EXECUTE,
+            required_action=ControllerAction.COMMANDS_EXECUTE,
             enqueue=lambda: self.job_service.enqueue_command(
-                DeviceCommandRequest.model_validate(message.payload).to_operation()
+                _protocol_device_command_request(message.payload).to_operation()
             ),
         )
 
@@ -71,10 +76,11 @@ class GatewayCommandDispatcher:
         *,
         enrollment: GatewayEnrollmentRecord,
     ) -> None:
-        self._require_scope(enrollment, AccessScope.JOBS_SUBMIT)
+        self._require_action(enrollment, ControllerAction.JOBS_CANCEL)
         record, created = self.gateway_repository.record_inbound_command(
             command_id=message.command_id,
             message_id=message.message_id,
+            sequence=message.sequence,
             message_type=message.type,
             payload=message.model_dump(mode="json"),
         )
@@ -111,13 +117,14 @@ class GatewayCommandDispatcher:
         message: ControllerSubmitPrintJobMessage
         | ControllerExecuteDeviceCommandMessage,
         enrollment: GatewayEnrollmentRecord,
-        required_scope: AccessScope,
+        required_action: ControllerAction,
         enqueue,
     ) -> None:
-        self._require_scope(enrollment, required_scope)
+        self._require_action(enrollment, required_action)
         record, created = self.gateway_repository.record_inbound_command(
             command_id=message.command_id,
             message_id=message.message_id,
+            sequence=message.sequence,
             message_type=message.type,
             payload=message.model_dump(mode="json"),
         )
@@ -150,14 +157,14 @@ class GatewayCommandDispatcher:
             dedupe_key=f"command-accepted:{message.command_id}",
         )
 
-    def _require_scope(
-        self, enrollment: GatewayEnrollmentRecord, scope: AccessScope
+    def _require_action(
+        self, enrollment: GatewayEnrollmentRecord, action: ControllerAction
     ) -> None:
-        granted = set(enrollment.granted_scopes)
-        if scope not in granted:
+        permitted = set(enrollment.controller_actions)
+        if action not in permitted:
             raise AgentError(
                 "UPSTREAM_SCOPE_DENIED",
-                f"The upstream controller is not authorized for scope {scope.value!r}.",
+                f"The upstream controller is not authorized for action {action.value!r}.",
                 status_code=403,
             )
 
@@ -249,3 +256,32 @@ def _message_id(prefix: str) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def _protocol_print_job_request(payload: ControllerSubmitPrintJobPayload) -> PrintJobRequest:
+    return PrintJobRequest.model_validate(
+        {
+            "content": payload.content.model_dump(mode="json"),
+            "target": {
+                "device_id": payload.target.device_id,
+                "printer_name": payload.target.printer_name,
+            },
+            "options": payload.options.model_dump(mode="json"),
+            "metadata": dict(payload.metadata),
+        }
+    )
+
+
+def _protocol_device_command_request(
+    payload: ControllerExecuteDeviceCommandPayload,
+) -> DeviceCommandRequest:
+    return DeviceCommandRequest.model_validate(
+        {
+            "target": {
+                "device_id": payload.target.device_id,
+                "printer_name": payload.target.printer_name,
+            },
+            "command": payload.command.model_dump(mode="json"),
+            "metadata": dict(payload.metadata),
+        }
+    )
