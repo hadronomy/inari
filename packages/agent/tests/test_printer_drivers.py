@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 
 from iot_agent.config import AgentSettings, NetworkPrinterConfig
-from iot_agent.container import _build_printer_drivers
+from iot_agent.di.drivers import build_printer_drivers
 from iot_agent.drivers.printers import (
     CupsPrinterDriver,
     RawSocketPrinterDriver,
@@ -102,21 +102,21 @@ def test_list_devices_from_cups_api_and_submit_raw_job_with_lp(mocker) -> None:
 
 
 def test_build_printer_drivers_uses_windows_driver_on_windows() -> None:
-    drivers = _build_printer_drivers(AgentSettings(), platform_system="Windows")
+    drivers = build_printer_drivers(AgentSettings(), platform_system="Windows")
 
     assert any(isinstance(driver, WindowsPrinterDriver) for driver in drivers)
     assert not any(isinstance(driver, CupsPrinterDriver) for driver in drivers)
 
 
 def test_build_printer_drivers_uses_cups_driver_on_linux() -> None:
-    drivers = _build_printer_drivers(AgentSettings(), platform_system="Linux")
+    drivers = build_printer_drivers(AgentSettings(), platform_system="Linux")
 
     assert any(isinstance(driver, CupsPrinterDriver) for driver in drivers)
     assert not any(isinstance(driver, WindowsPrinterDriver) for driver in drivers)
 
 
 def test_build_printer_drivers_uses_cups_driver_on_macos() -> None:
-    drivers = _build_printer_drivers(AgentSettings(), platform_system="Darwin")
+    drivers = build_printer_drivers(AgentSettings(), platform_system="Darwin")
 
     assert any(isinstance(driver, CupsPrinterDriver) for driver in drivers)
     assert not any(isinstance(driver, WindowsPrinterDriver) for driver in drivers)
@@ -129,6 +129,6 @@ def test_build_printer_drivers_includes_raw_socket_driver_when_configured() -> N
         ]
     )
 
-    drivers = _build_printer_drivers(settings, platform_system="Linux")
+    drivers = build_printer_drivers(settings, platform_system="Linux")
 
     assert any(isinstance(driver, RawSocketPrinterDriver) for driver in drivers)
