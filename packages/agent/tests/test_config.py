@@ -158,6 +158,12 @@ def test_load_settings_reads_network_printers_from_env_json() -> None:
     assert settings.network_printers[0].text_enabled is True
 
 
+def test_default_gateway_mutual_tls_mode_is_optional() -> None:
+    settings = load_settings(environ={})
+
+    assert settings.upstream_mutual_tls_mode.value == "optional"
+
+
 def test_load_settings_merges_local_override_file(tmp_path: Path) -> None:
     config_path = tmp_path / "iot-agent.toml"
     local_path = tmp_path / "iot-agent.local.toml"

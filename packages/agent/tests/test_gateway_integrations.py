@@ -23,6 +23,8 @@ from iot_agent.gateway.models import (
     GatewayEnrollmentRecord,
     MutualTlsMode,
     StepCaOttBootstrap,
+    UpstreamCertificateMode,
+    resolve_mutual_tls_policy,
 )
 from iot_agent.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from iot_agent.security.certificate_provisioners import StepCaOttCertificateProvisioner
@@ -194,6 +196,64 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     assert reloaded is not None
     assert reloaded.certificate_bootstrap is not None
     assert reloaded.certificate_bootstrap.ott == "ott_bootstrap_token"
+
+
+@pytest.mark.anyio
+async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
+    tmp_path: Path,
+) -> None:
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    certificate_service = CertificateLifecycleService(
+        certificate_path=tmp_path / "upstream-client-cert.pem",
+        private_key_path=tmp_path / "identity.pem",
+        ca_path=tmp_path / "upstream-ca.pem",
+    )
+    service = GatewayEnrollmentService(
+        settings=AgentSettings(
+            gateway_mode="managed",
+            upstream_base_url="https://controller.example.com",
+            upstream_certificate_mode="step_ca",
+            upstream_enrollment_token="bootstrap-token",
+        ),
+        identity_service=identity_service,
+        secret_store=MemorySecretStore(),
+        tls_context_factory=TlsContextFactory(AgentSettings()),
+        certificate_service=certificate_service,
+        auth_provider=StaticAuthProvider({}),
+        metadata_path=tmp_path / "upstream-enrollment.json",
+        snapshot_provider=_gateway_snapshot_payload,
+        http_client_factory=lambda **kwargs: FakeAsyncHttpClient(
+            response_payload={
+                "selected_protocol_version": GATEWAY_PROTOCOL_VERSION,
+                "controller": {"name": "Controller"},
+                "auth": {
+                    "mode": "controller",
+                    "access_token": "controller-token",
+                },
+                "links": {
+                    "status": "https://controller.example.com/status",
+                    "events": "wss://controller.example.com/events",
+                },
+                "permissions": {"controller_actions": ["jobs:create"]},
+                "certificate": {
+                    "mode": "step_ca",
+                    "bootstrap": {
+                        "mode": "step_ca_ott",
+                        "ca_url": "https://step-ca.example.com",
+                        "root_fingerprint": "0123abcd",
+                        "ott": "ott_bootstrap_token",
+                    },
+                },
+                "enrolled_at": "2026-04-13T00:00:00Z",
+            }
+        ),
+    )
+
+    record = await service.ensure_enrolled()
+
+    assert record is not None
+    assert record.certificate_bootstrap is not None
+    assert record.certificate_bootstrap.requires_mutual_tls_after_issuance is True
 
 
 @pytest.mark.anyio
@@ -458,6 +518,39 @@ def test_caddy_profile_renders_required_client_auth_snippet() -> None:
 
     assert "client_auth" in rendered
     assert "require_and_verify" in rendered
+
+
+def test_optional_mutual_tls_promotes_to_required_after_certificate_issuance() -> None:
+    policy = resolve_mutual_tls_policy(
+        MutualTlsMode.OPTIONAL,
+        certificate_mode=UpstreamCertificateMode.STEP_CA,
+        client_certificate_present=True,
+        certificate_bootstrap=StepCaOttBootstrap(
+            mode=CertificateBootstrapMode.STEP_CA_OTT,
+            ca_url="https://ca.example.com",
+            root_fingerprint="0123abcd",
+        ),
+    )
+
+    assert policy.effective_mode is MutualTlsMode.REQUIRED
+    assert policy.requires_client_certificate is True
+
+
+def test_optional_mutual_tls_respects_explicit_post_issuance_opt_out() -> None:
+    policy = resolve_mutual_tls_policy(
+        MutualTlsMode.OPTIONAL,
+        certificate_mode=UpstreamCertificateMode.STEP_CA,
+        client_certificate_present=True,
+        certificate_bootstrap=StepCaOttBootstrap(
+            mode=CertificateBootstrapMode.STEP_CA_OTT,
+            ca_url="https://ca.example.com",
+            root_fingerprint="0123abcd",
+            requires_mutual_tls_after_issuance=False,
+        ),
+    )
+
+    assert policy.effective_mode is MutualTlsMode.OPTIONAL
+    assert policy.requires_client_certificate is False
 
 
 class StaticAuthProvider:

@@ -91,7 +91,7 @@
         },
         "mutual_tls_mode": {
           "$ref": "#/definitions/MutualTlsMode",
-          "default": "disabled"
+          "default": "optional"
         },
         "status_url": {
           "anyOf": [

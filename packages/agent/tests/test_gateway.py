@@ -9,7 +9,11 @@ import pytest
 
 from iot_agent.config import AgentSettings
 from iot_agent.gateway.connector import GatewayConnector
-from iot_agent.gateway.models import GatewayEnrollmentRecord, UpstreamConnectionState
+from iot_agent.gateway.models import (
+    ControllerAction,
+    GatewayEnrollmentRecord,
+    UpstreamConnectionState,
+)
 from iot_agent.gateway.repositories import GatewayRepository
 from iot_agent.gateway.runtime_bridge import (
     GatewayCommandDispatcher,
@@ -27,7 +31,6 @@ from iot_agent.runtime.models import (
     utc_now,
 )
 from iot_agent.runtime.store import RuntimeStore
-from iot_agent.security.models import AccessScope
 from iot_agent.security.tls import TlsContextFactory
 from iot_agent.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
@@ -108,7 +111,7 @@ async def test_dispatcher_accepts_remote_print_job_and_persists_response(
     enrollment = GatewayEnrollmentRecord(
         access_token="token",
         enrolled_at=utc_now(),
-        granted_scopes=(AccessScope.JOBS_SUBMIT,),
+        controller_actions=(ControllerAction.JOBS_CREATE,),
     )
     from iot_agent.gateway.protocol import ControllerSubmitPrintJobMessage
 

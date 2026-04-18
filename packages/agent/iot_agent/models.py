@@ -245,6 +245,8 @@ class GatewayUpstreamStatusResponse(APIModel):
     last_event_at: datetime | None = None
     last_command_at: datetime | None = None
     last_command_id: str | None = None
+    last_applied_controller_sequence: int | None = None
+    controller_resume_from_sequence: int | None = None
     detail: str | None = None
     last_error: str | None = None
     protocol_version: str | None = None
@@ -276,6 +278,8 @@ class GatewayUpstreamStatusResponse(APIModel):
             last_event_at=status.last_event_at,
             last_command_at=status.last_command_at,
             last_command_id=status.last_command_id,
+            last_applied_controller_sequence=status.last_applied_controller_sequence,
+            controller_resume_from_sequence=status.controller_resume_from_sequence,
             detail=status.detail,
             last_error=status.last_error,
             protocol_version=status.protocol_version,

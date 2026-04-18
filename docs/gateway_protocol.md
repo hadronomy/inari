@@ -1,120 +1,179 @@
+---
+title: Gateway Protocol
+summary: Draft managed-mode protocol specification for the controller <-> iot-agent boundary.
+status: draft
+protocol_version: "2026-04-14"
+agent_api_version: "1.19.0a1"
+transport:
+  enrollment: https
+  status_sync: https
+  control_stream: wss
+audience:
+  - controller authors
+  - agent implementers
+  - deployment engineers
+---
+
 # Gateway Protocol
 
-This document defines the current managed-mode contract between:
+This document is the protocol draft for the managed-mode controller `<->` agent boundary.
 
-- the local `iot-agent` process acting as the edge gateway
-- an external IoT controller service
+It describes the managed gateway contract with explicit wire semantics. The current codebase now implements the major enrollment, auth, replay, resume, and certificate-lifecycle rules described here; the remaining gaps are mostly future refinements around payload ergonomics and further snapshot slimming.
 
-This is the Boundary 2 protocol: controller `<->` agent/gateway.
+Use this together with:
 
-## Status
+- [managed_gateway_stacks.md](./managed_gateway_stacks.md)
+- [packages/agent/iot_agent/gateway/protocol.py](../packages/agent/iot_agent/gateway/protocol.py)
 
+## 1. Document Status
+
+- Protocol status: `draft`
 - Protocol version: `2026-04-14`
-- Agent API version at time of writing: `1.19.0a1`
-- Transport model: outbound `HTTPS` for enrollment and status sync, outbound `WSS` for the control stream
+- Transport model:
+  - enrollment: outbound `HTTPS`
+  - status sync: outbound `HTTPS`
+  - control stream: outbound `WSS`
+- Agent role: protocol client
+- Controller role: protocol server
 
-The agent is the client in this relationship. The controller is the server.
+### 1.1 Draft Meaning
 
-## Goals
+This document remains slightly ahead of the current implementation in a few areas, especially:
 
-The protocol covers:
+- lighter long-lived status documents instead of repeated full snapshots
+- `content_ref` style handling for larger print payloads
+- a fully standardized controller-side error envelope
 
-- enrollment
-- controller-issued enrollment-token bootstrap
-- external access-token bootstrap
+Where implementation details are still in motion, treat the code as the immediate source of truth.
+
+## 2. Normative Language
+
+The key words `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` in this document are to be interpreted as described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119).
+
+## 3. Goals
+
+This protocol covers:
+
+- managed enrollment
+- short-lived controller-issued `enrollment_token` bootstrap
+- controller-managed or external bearer authentication
 - controller-issued step-ca OTT bootstrap for client certificates
-- optional controller-installed client-certificate installation
-- periodic status synchronization
-- persistent controller-to-agent commands
-- persistent agent-to-controller event delivery
-- protocol negotiation
-- replay-safe acknowledgements
+- optional controller-installed client certificates
+- periodic gateway status synchronization
+- durable controller-to-agent command delivery
+- durable agent-to-controller event delivery
+- replay-safe acknowledgement
+- reconnect and resume behavior
+- protocol version selection
 
-The protocol does not attempt to model raw device links such as Windows spooler, USB, or serial transport. Those stay inside the agent.
+This protocol does not cover:
 
-## Trust Model
+- local hardware drivers such as Windows spooler, USB, serial, or raw ESC/POS transport
+- the agent’s local HTTP API for desktop clients
+- multi-controller coordination for one agent identity
+
+## 4. Design Principles
+
+The protocol is built around these principles:
+
+1. The agent connects outward to the controller.
+2. The controller is authoritative for enrollment policy.
+3. Authentication and certificate bootstrap are separate concerns.
+4. Reliability must survive reconnects and duplicate delivery.
+5. The wire contract must not depend on the agent’s internal REST payload shapes.
+6. Stable identifiers are preferred over user-facing names.
+
+## 5. Terminology
+
+`agent`
+: The local `iot-agent` process acting as the managed edge gateway.
+
+`controller`
+: The external service coordinating one or more managed agents.
+
+`enrollment_token`
+: A short-lived controller-issued bearer credential used only for initial enrollment.
+
+`access_token`
+: The bearer token used for normal controller traffic after enrollment.
+
+`refresh_token`
+: A controller-issued token used only to refresh a controller-issued `access_token`.
+
+`message_id`
+: The transport-level deduplication key for an individual protocol message.
+
+`command_id`
+: The idempotency key for a controller command.
+
+`sequence`
+: A per-agent controller command cursor used for replay and resume.
+
+## 6. Transport
+
+The agent uses three outbound channels:
+
+- enrollment over `HTTPS`
+- status sync over `HTTPS`
+- control stream over `WSS`
+
+The controller MUST NOT require inbound agent connections initiated from outside the agent host.
+
+## 7. Trust And Identity
 
 Managed mode uses an outbound trust model:
 
-1. The agent connects outward to the controller.
-2. The agent verifies the controller TLS certificate.
-3. The controller authenticates the agent with one of:
-   - a bootstrap bearer token plus controller-issued access token
-   - an external bearer token provider such as ZITADEL
-4. The controller edge may additionally authenticate the agent with a client certificate, for example through Caddy mTLS.
-5. Client certificates may be:
-   - installed by the controller during enrollment
-   - provisioned directly from a private CA such as step-ca
+1. The agent validates the controller TLS certificate.
+2. The controller authenticates the agent with bearer credentials, a client certificate, or both.
+3. The agent has a persistent logical identity:
+   - `agent_id`
+   - `key_id`
+   - `public_jwk`
+   - `csr_pem`
+   - optional `certificate_pem`
 
-### Authentication Materials
+### 7.1 Identity Binding Rules
 
-The agent may use four credential types across the lifecycle:
+The controller SHOULD enforce these bindings:
 
-- `enrollment token`
-  Short-lived controller-issued bootstrap credential used only for initial enrollment.
-- `access token`
-  Used for status sync and control-stream authentication. This may be controller-issued or obtained from an external identity provider.
-- `refresh token`
-  Used to renew a controller-issued access token before expiry, if the controller provides one.
-- `client certificate`
-  Optional. If configured or provided, the agent installs it locally and presents it on outbound TLS connections.
+- `csr_pem` public key MUST match `public_jwk`
+- any returned client certificate MUST match the CSR public key
+- the agent certificate identity MUST bind to `agent_id`
+- if `authorized_sans` are supplied in certificate bootstrap, the issued certificate MUST NOT contain SANs outside that set
 
-### Agent Identity
+## 8. Protocol Version Selection
 
-The agent has a persistent identity consisting of:
+Version advertisement alone is not enough. The controller MUST explicitly select a protocol version.
 
-- `agent_id`
-- `key_id`
-- `public_jwk`
-- `csr_pem`
-- optional `certificate_pem`
+### 8.1 Agent Advertisement
 
-The controller should treat `agent_id` as the stable logical identity of the gateway installation.
+The agent advertises:
 
-## Default URLs
+- `protocol.version`
+- `protocol.supported_versions`
 
-If the controller only provides `upstream_base_url`, the agent derives these default endpoints:
+### 8.2 Controller Selection
 
-- enrollment:
-  `/api/iot-agent/enroll`
-- status sync:
-  `/api/iot-agent/agents/{agent_id}/status`
-- control stream:
-  `/api/iot-agent/agents/{agent_id}/events`
+The controller MUST return:
 
-The controller may override the status, events, and refresh URLs explicitly in the enrollment response.
+- `selected_protocol_version`
 
-## Protocol Version Negotiation
+The selected version MUST be one of the versions advertised by the agent.
 
-The current protocol version is:
+If there is no mutually supported version:
 
-```text
-2026-04-14
-```
+- the controller MUST reject enrollment
+- the agent MUST NOT continue to normal managed operation
 
-The agent sends its version in:
+### 8.3 Control Stream Revalidation
 
-- enrollment payload:
-  `protocol.version`
-- status sync header:
-  `X-IoT-Agent-Protocol-Version`
-- WebSocket hello:
-  `agent.hello.protocol.version`
+The controller SHOULD repeat the selected protocol version in `controller.hello`, and the agent SHOULD validate it again on control-stream startup.
 
-The controller sends its version in:
+## 9. Enrollment
 
-- enrollment response:
-  `protocol_version`
-- WebSocket hello:
-  `controller.hello.protocol_version`
+### 9.1 Request
 
-If the controller announces a version not listed in the agent snapshot’s `protocol.supported_versions`, the agent treats that as a protocol mismatch and will not continue normal control-stream operation.
-
-## Enrollment
-
-### Request
-
-The agent enrolls with:
+The standard enrollment request is:
 
 ```http
 POST /api/iot-agent/enroll
@@ -122,7 +181,7 @@ Authorization: Bearer <enrollment-token>
 Content-Type: application/json
 ```
 
-The `Authorization` header is optional only when the installation uses an external auth provider such as ZITADEL for enrollment.
+The `Authorization` header MAY be omitted only when enrollment authentication is delegated to an external provider such as ZITADEL.
 
 Request body:
 
@@ -132,175 +191,195 @@ Request body:
     "version": "2026-04-14",
     "supported_versions": ["2026-04-14"]
   },
-  "agent_id": "agt_123...",
-  "key_id": "kid_123...",
+  "agent_id": "agt_123",
+  "key_id": "kid_123",
   "public_jwk": {
     "kty": "OKP",
     "crv": "Ed25519",
     "alg": "EdDSA",
     "use": "sig",
-    "kid": "kid_123...",
+    "kid": "kid_123",
     "x": "..."
   },
   "certificate_pem": null,
   "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n",
   "snapshot": {
-    "generated_at": "2026-04-12T10:00:00Z",
-    "protocol": {
-      "version": "2026-04-14",
-      "supported_versions": ["2026-04-14"]
-    },
-    "service": {
-      "name": "IoT Agent",
-      "version": "1.19.0a1",
-      "agent_id": "agt_123...",
-      "key_id": "kid_123..."
-    },
-    "security": {
-      "mode": "managed",
-      "exposure": "loopback",
-      "tls_required": false,
-      "mutual_tls_enabled": false,
-      "certificate_expires_at": null
-    },
-    "runtime": {
-      "queue": {
-        "total": 0,
-        "queued": 0,
-        "dispatched": 0,
-        "running": 0,
-        "retry_scheduled": 0,
-        "succeeded": 0,
-        "failed": 0,
-        "cancelled": 0
-      },
-      "devices": {
-        "count": 1,
-        "online_count": 1,
-        "offline_count": 0,
-        "kind_counts": {
-          "printer": 1
-        },
-        "default_device_id": "dev_123...",
-        "default_device_name": "Kitchen Printer"
-      }
-    },
-    "capabilities": {
-      "supported_content_kinds": ["structured_receipt", "receipt_image", "text", "html", "pdf", "raw"],
-      "supported_device_commands": ["open_cash_drawer", "print_test_page", "feed_lines", "feed_dots", "cut_paper"],
-      "granted_scopes": ["system:read", "devices:read", "events:read", "jobs:read", "jobs:submit", "commands:execute"],
-      "features": [
-        "status_sync",
-        "control_stream",
-        "command_ack",
-        "event_replay",
-        "runtime_event_forwarding",
-        "token_refresh",
-        "certificate_rotation",
-        "protocol_negotiation"
-      ],
-      "transport": "https+wss",
-      "client_certificate_present": false
-    },
-    "observability": {
-      "gateway": {},
-      "runtime": {
-        "queue_states": {}
-      }
-    }
+    "...": "GatewaySnapshotPayload"
   }
 }
 ```
 
-### Response
+### 9.2 Request Rules
 
-Successful enrollment returns:
+- `agent_id`, `key_id`, `public_jwk`, and `csr_pem` are required
+- `certificate_pem` is optional and represents the currently installed client certificate, if any
+- the request snapshot is advisory state, not a source of granted permissions
+- request-side capabilities SHOULD describe what the agent supports, not what the controller has already granted
+
+### 9.3 Response
+
+The recommended enrollment response shape is:
 
 ```json
 {
-  "protocol_version": "2026-04-14",
-  "controller_name": "Acme IoT Controller",
-  "controller_instance_id": "controller-01",
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "enrolled_at": "2026-04-12T10:00:02Z",
-  "expires_at": "2026-04-12T11:00:02Z",
-  "refresh_url": "https://controller.example/api/iot-agent/agents/agt_123/refresh",
-  "status_url": "https://controller.example/api/iot-agent/agents/agt_123/status",
-  "events_url": "wss://controller.example/api/iot-agent/agents/agt_123/events",
-  "granted_scopes": [
-    "system:read",
-    "devices:read",
-    "events:read",
-    "jobs:read",
-    "jobs:submit",
-    "commands:execute"
-  ],
-  "certificate_bootstrap": {
-    "mode": "step_ca_ott",
-    "ca_url": "https://ca.example.com",
-    "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    "ott": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9...",
-    "sign_url": "https://ca.example.com/1.0/sign",
-    "renew_url": "https://ca.example.com/1.0/renew",
-    "expires_at": "2026-04-12T10:05:02Z",
-    "subject": "agt_123",
-    "authorized_sans": ["urn:iot-agent:agt_123"],
-    "requires_mutual_tls_after_issuance": true
+  "selected_protocol_version": "2026-04-14",
+  "controller": {
+    "name": "Acme IoT Controller",
+    "instance_id": "controller-01"
+  },
+  "auth": {
+    "mode": "controller",
+    "access_token": "opaque-access-token",
+    "refresh_token": "opaque-refresh-token",
+    "token_type": "Bearer",
+    "expires_at": "2026-04-18T11:00:02Z"
+  },
+  "links": {
+    "refresh": "https://controller.example/api/iot-agent/agents/agt_123/refresh",
+    "status": "https://controller.example/api/iot-agent/agents/agt_123/status",
+    "events": "wss://controller.example/api/iot-agent/agents/agt_123/events"
+  },
+  "permissions": {
+    "controller_actions": [
+      "system:read",
+      "devices:read",
+      "events:read",
+      "jobs:create",
+      "jobs:cancel",
+      "commands:execute"
+    ]
+  },
+  "certificate": {
+    "mode": "step_ca",
+    "client_certificate_pem": null,
+    "ca_certificate_pem": null,
+    "bootstrap": {
+      "mode": "step_ca_ott",
+      "ca_url": "https://ca.example.com",
+      "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ott": "step-ca-one-time-token",
+      "sign_url": "https://ca.example.com/1.0/sign",
+      "renew_url": "https://ca.example.com/1.0/renew",
+      "expires_at": "2026-04-18T10:05:02Z",
+      "subject": "agt_123",
+      "authorized_sans": ["urn:iot-agent:agt_123"],
+      "requires_mutual_tls_after_issuance": true
+    }
+  },
+  "enrolled_at": "2026-04-18T10:00:02Z"
+}
+```
+
+### 9.4 Response Rules
+
+- `selected_protocol_version` is required
+- `controller.name` and `controller.instance_id` are optional but strongly recommended
+- `auth.mode` is required
+- `links.status` and `links.events` are required unless a stable derivation rule has already been agreed
+- `permissions.controller_actions` defines what the controller is allowed to ask the agent to do
+- `certificate` is optional
+- `certificate.bootstrap` is optional
+
+### 9.5 Enrollment Sequence With step-ca Enabled
+
+The recommended managed enrollment flow with step-ca enabled is:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Installer
+    participant Agent
+    participant Controller
+    participant StepCA as step-ca
+
+    Installer->>Agent: Provide short-lived enrollment_token
+    Agent->>Controller: POST /api/iot-agent/enroll<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
+    Controller->>Controller: Validate enrollment policy<br/>Select protocol version<br/>Grant controller actions
+    Controller->>Controller: Mint short-lived step-ca OTT
+    Controller-->>Agent: Enrollment response<br/>auth + links + certificate.bootstrap(step_ca_ott)
+
+    Agent->>StepCA: Fetch root CA
+    StepCA-->>Agent: Root certificate
+    Agent->>Agent: Verify root_fingerprint
+
+    Agent->>StepCA: POST /1.0/sign<br/>OTT + CSR
+    StepCA-->>Agent: Client certificate + CA bundle
+    Agent->>Agent: Install managed client certificate
+
+    Note over Agent,Controller: Steady-state traffic uses bearer auth + client cert.
+
+    Agent->>Controller: Status sync<br/>Bearer access_token<br/>Client cert presented
+    Agent->>Controller: Control stream<br/>Bearer access_token<br/>Client cert presented
+    Agent->>StepCA: Later renewal<br/>POST /1.0/renew with client cert
+```
+
+The key transition is that bootstrap enrollment can happen before a client certificate exists, while normal steady-state controller traffic is expected to use the issued client certificate once enrollment has completed successfully. In the recommended production posture, the controller edge then requires mTLS for that steady-state traffic.
+
+## 10. Authentication
+
+The protocol supports two ongoing auth modes.
+
+### 10.1 Controller-Managed Auth
+
+In `controller` mode:
+
+- enrollment uses `Authorization: Bearer <enrollment-token>`
+- the controller returns `access_token`
+- the controller MAY return `refresh_token`
+- subsequent status sync and control-stream requests use `Authorization: Bearer <access_token>`
+
+Recommended response shape:
+
+```json
+{
+  "auth": {
+    "mode": "controller",
+    "access_token": "opaque-access-token",
+    "refresh_token": "opaque-refresh-token",
+    "token_type": "Bearer",
+    "expires_at": "2026-04-18T11:00:02Z"
   }
 }
 ```
 
-### Enrollment Rules
+### 10.2 External Auth Provider
 
-- `Authorization: Bearer <enrollment-token>` is the standard bootstrap path for controller-managed enrollment.
-- `access_token` is required only when the controller is responsible for ongoing bearer authentication.
-- `access_token` may be omitted when the agent uses an external auth provider such as ZITADEL.
-- `refresh_token` is optional.
-- `status_url` and `events_url` are optional if the agent can derive them.
-- `granted_scopes` determine what remote actions the controller is allowed to request.
-- `certificate_pem` and `ca_certificate_pem` are optional.
-- `certificate_bootstrap` is optional, but it is the recommended production bootstrap for `step_ca` client-certificate mode.
+In `zitadel_service_account` mode:
 
-If the controller provides a certificate, the agent installs it and may use it on future outbound TLS connections.
+- the controller MAY omit `access_token`
+- the agent obtains its own access token from ZITADEL
+- the controller still returns enrollment metadata and links
 
-If the controller provides `certificate_bootstrap`, the agent:
+Recommended response shape:
 
-1. validates the step-ca root certificate fingerprint
-2. calls `/1.0/sign` with its CSR and the controller-issued one-time token
-3. installs the returned client certificate
-4. later renews with `/1.0/renew`
+```json
+{
+  "auth": {
+    "mode": "zitadel_service_account",
+    "issuer": "https://zitadel.example.com",
+    "token_endpoint": "https://zitadel.example.com/oauth/v2/token",
+    "audience": "https://controller.example.com"
+  }
+}
+```
 
-The one-time token should be short-lived, single-use, and scoped to the specific agent identity and allowed SAN set.
+### 10.3 Auth Rules
 
-## Controller Auth Modes
+- `enrollment_token` is only for initial enrollment
+- `enrollment_token` MUST NOT be used for normal status sync or control-stream traffic after enrollment
+- `refresh_token` SHOULD be used only for refresh
+- if the controller uses `controller` mode, it MUST provide `access_token`
+- if the controller uses `zitadel_service_account` mode, it SHOULD identify that mode explicitly
 
-The current agent supports two managed auth modes:
+## 11. Token Refresh
 
-- `controller`
-  The agent enrolls with a controller-issued `enrollment_token`. The controller returns `access_token` and optionally `refresh_token` during enrollment. The agent uses those credentials for status sync and the control stream.
-- `zitadel_service_account`
-  The agent obtains bearer tokens directly from ZITADEL using a service account and private-key JWT. In this mode the controller may omit `access_token` from the enrollment response.
-
-Controllers should document which auth mode an agent installation is expected to use.
-
-## Token Refresh
-
-Controller-managed token refresh only applies when the controller issued the access token.
-
-If the agent has:
-
-- an enrollment record
-- a `refresh_url`
-- and either a `refresh_token` or at least the current `access_token`
-
-then it may refresh credentials before token expiry.
+Controller-managed token refresh applies only when `auth.mode == controller`.
 
 Refresh request:
 
 ```http
-POST <refresh_url>
-Authorization: Bearer <refresh-token-or-access-token>
+POST <links.refresh>
+Authorization: Bearer <refresh-token>
 Content-Type: application/json
 ```
 
@@ -308,158 +387,274 @@ Request body:
 
 ```json
 {
-  "protocol_version": "2026-04-14",
-  "agent_id": "agt_123..."
+  "selected_protocol_version": "2026-04-14",
+  "agent_id": "agt_123"
 }
 ```
 
-Refresh response uses the same body shape as the enrollment response.
+### 11.1 Refresh Rules
 
-If refresh returns `401` or `403`, the agent clears its stored enrollment and returns to an unenrolled state.
+- refresh MUST use `refresh_token`, not `access_token`
+- refresh response SHOULD reuse the `auth` block shape from enrollment
+- if refresh returns `401` or `403`, the agent MUST discard its controller-managed enrollment state and return to an unenrolled state
 
-When the agent uses an external auth provider such as ZITADEL, the bearer token lifecycle is handled by that provider instead of the controller refresh endpoint.
+## 12. Links
 
-## Status Sync
+The controller SHOULD return a `links` object rather than relying on implicit derivation.
 
-### Request
+Recommended shape:
 
-The agent periodically sends a snapshot to the controller:
+```json
+{
+  "links": {
+    "status": "https://controller.example/api/iot-agent/agents/agt_123/status",
+    "events": "wss://controller.example/api/iot-agent/agents/agt_123/events",
+    "refresh": "https://controller.example/api/iot-agent/agents/agt_123/refresh"
+  }
+}
+```
+
+If link derivation is used, it MUST be stable and documented.
+
+## 13. Certificates
+
+Certificate-related data belongs under a single `certificate` object in the enrollment response.
+
+### 13.1 Certificate Shape
+
+```json
+{
+  "certificate": {
+    "mode": "step_ca",
+    "client_certificate_pem": null,
+    "ca_certificate_pem": null,
+    "bootstrap": {
+      "mode": "step_ca_ott",
+      "ca_url": "https://ca.example.com",
+      "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "ott": "step-ca-one-time-token",
+      "sign_url": "https://ca.example.com/1.0/sign",
+      "renew_url": "https://ca.example.com/1.0/renew",
+      "expires_at": "2026-04-18T10:05:02Z",
+      "subject": "agt_123",
+      "authorized_sans": ["urn:iot-agent:agt_123"],
+      "requires_mutual_tls_after_issuance": true
+    }
+  }
+}
+```
+
+### 13.2 Certificate Mode
+
+`certificate.mode` SHOULD be one of:
+
+- `none`
+- `controller`
+- `step_ca`
+
+`certificate.bootstrap.mode` SHOULD identify the bootstrap mechanism, for example:
+
+- `step_ca_ott`
+
+### 13.3 step-ca Rules
+
+For `step_ca` mode:
+
+- `root_fingerprint` MUST be `SHA-256` lowercase hexadecimal without separators
+- the agent MUST verify the fetched root against that fingerprint
+- the agent MUST use its CSR when requesting the first certificate
+- the resulting certificate MUST match the CSR public key
+- the agent SHOULD renew through `/1.0/renew`
+- the OTT SHOULD be short-lived, single-use, and agent-scoped
+
+### 13.4 Bearer And Client Certificate Interaction
+
+If the deployment uses both bearer auth and mTLS:
+
+- the controller SHOULD treat them as two complementary authentication factors
+- if the certificate identity and bearer identity disagree, the controller SHOULD reject the connection
+
+### 13.5 Recommended Production Posture
+
+For managed deployments using controller-installed or step-ca-issued client certificates:
+
+- initial enrollment MAY complete with bearer auth before a client certificate exists
+- after a managed client certificate has been issued, production deployments SHOULD require mTLS for normal status-sync and control-stream traffic
+- deployments following this posture SHOULD expose an explicit bootstrap enrollment URL when the normal controller edge requires client certificates
+- an explicit deployment choice to keep mTLS optional after certificate issuance is allowed, but it is not the recommended production default
+
+## 14. Snapshot Model
+
+The agent currently sends a large `GatewaySnapshotPayload`. That remains acceptable for:
+
+- enrollment
+- reconnect
+- explicit state refresh
+
+For long-lived operation, the protocol SHOULD distinguish:
+
+- `identity`
+- `capabilities`
+- `status`
+- `observability`
+
+The protocol SHOULD evolve toward lighter periodic status refreshes rather than always resending the full snapshot.
+
+## 15. Status Sync
+
+Status sync is a periodic outbound `HTTPS` request from the agent to `links.status`.
 
 ```http
-POST <status_url>
+POST <links.status>
 Authorization: Bearer <access-token>
 X-IoT-Agent-Protocol-Version: 2026-04-14
 Content-Type: application/json
 ```
 
-The request body is the same `GatewaySnapshotPayload` shape used during enrollment.
+The request body is the current snapshot or a future lighter status document.
 
-### Response
+### 15.1 Status Sync Response
 
-The current implementation treats the response body as optional.
+The controller MAY return a body with controller metadata such as:
 
-If present, the response may include:
+- `selected_protocol_version`
+- `controller.name`
+- `controller.instance_id`
 
-- `protocol_version`
-- `controller_name`
-- `controller_instance_id`
+### 15.2 Failure Handling
 
-Those fields are used only to enrich controller status on the agent side.
+- `401` or `403`: the agent MUST treat the auth as invalid
+- transport or server error: the agent SHOULD enter a retrying state with backoff
 
-### Status Sync Failure Handling
+## 16. Control Stream
 
-- `401` or `403`:
-  The agent clears enrollment and enters `auth_failed`.
-- transport or server error:
-  The agent enters `recovering` and retries later.
-
-## Control Stream
-
-The control stream is an outbound WebSocket connection from the agent to the controller:
+The control stream is an outbound WebSocket connection from the agent to the controller.
 
 ```http
-GET <events_url>
+GET <links.events>
 Authorization: Bearer <access-token>
 ```
 
-The stream is full-duplex.
-
-### Connection Sequence
+### 16.1 Connection Sequence
 
 1. The agent connects to the controller WebSocket.
-2. The agent immediately sends `agent.hello`.
-3. The controller should send `controller.hello`.
-4. The agent validates the announced controller protocol version.
+2. The agent sends `agent.hello`.
+3. The controller sends `controller.hello`.
+4. Both sides validate the selected protocol version.
 5. Normal command and event traffic begins.
 
-### Agent Hello
+### 16.2 Agent Hello
 
-Sent immediately after WebSocket connection:
+Recommended shape:
 
 ```json
 {
   "type": "agent.hello",
-  "message_id": "ghello_...",
-  "protocol": {
-    "version": "2026-04-14",
-    "supported_versions": ["2026-04-14"]
-  },
+  "message_id": "ghello_1",
+  "selected_protocol_version": "2026-04-14",
+  "supported_versions": ["2026-04-14"],
+  "last_applied_controller_sequence": 104,
   "snapshot": { "...GatewaySnapshotPayload..." }
 }
 ```
 
-### Controller Hello
+### 16.3 Controller Hello
 
-Expected from the controller:
+Recommended shape:
 
 ```json
 {
   "type": "controller.hello",
   "message_id": "hello_1",
-  "protocol_version": "2026-04-14",
-  "controller_name": "Acme IoT Controller",
-  "controller_instance_id": "controller-01"
+  "selected_protocol_version": "2026-04-14",
+  "resume_from_sequence": 105,
+  "controller": {
+    "name": "Acme IoT Controller",
+    "instance_id": "controller-01"
+  }
 }
 ```
 
-If the controller protocol version is unsupported, the agent treats that as a protocol mismatch and does not continue normal operation.
+### 16.4 Heartbeats
 
-### Ping / Pong
+Application-level ping/pong MAY be used, but if present they SHOULD exist for a specific reason such as protocol-level health semantics rather than merely duplicating WebSocket transport keepalive.
 
-Controller ping:
+If the agent sends periodic state heartbeats, they SHOULD be based on elapsed time since the last state heartbeat, not only on lack of inbound controller traffic.
 
-```json
-{
-  "type": "controller.ping",
-  "message_id": "ping_1",
-  "detail": "health-check"
-}
-```
+## 17. Reliable Delivery And Resume
 
-Agent pong:
+### 17.1 Controller Commands
 
-```json
-{
-  "type": "agent.pong",
-  "message_id": "gpong_...",
-  "acknowledged_message_id": "ping_1",
-  "detail": "health-check"
-}
-```
-
-### Passive Snapshot Heartbeat
-
-If no controller message is received before the agent’s event timeout, the agent sends:
-
-```json
-{
-  "type": "agent.status.snapshot",
-  "message_id": "gsnap_...",
-  "snapshot": { "...GatewaySnapshotPayload..." }
-}
-```
-
-Controllers should treat this as a keepalive plus state refresh.
-
-## Controller-to-Agent Commands
-
-The controller may send three command types.
-
-All command messages must contain:
+Controller commands SHOULD carry:
 
 - `message_id`
 - `command_id`
+- `sequence`
 
-`command_id` is the idempotency key for inbound command execution.
+`command_id` is the idempotency key.
 
-### Submit Print Job
+`sequence` is the per-agent replay cursor.
+
+### 17.2 Agent Outbound Messages
+
+Agent-originated durable messages carry:
+
+- `message_id`
+
+The agent MAY resend an unacknowledged message after reconnect.
+
+### 17.3 Resume Rules
+
+On reconnect:
+
+- the agent SHOULD send `last_applied_controller_sequence`
+- the controller SHOULD replay commands after that sequence
+
+This gives the protocol recoverable stream semantics instead of best-effort duplicate suppression only.
+
+## 18. Acknowledgement Semantics
+
+The controller acknowledges agent-originated durable messages with:
+
+```json
+{
+  "type": "controller.ack",
+  "message_id": "ack_1",
+  "acknowledged_message_id": "gevt_123"
+}
+```
+
+### 18.1 Ack Meaning
+
+`controller.ack` MUST mean that the controller has durably persisted the referenced message or committed it to an equivalent exactly-once processing state.
+
+It MUST NOT mean merely:
+
+- parsed
+- observed
+- buffered in memory only
+
+## 19. Commands
+
+The controller may request:
+
+- print jobs
+- device commands
+- job cancellation
+
+The protocol SHOULD define command payloads as protocol-native schemas even if they currently map closely to the agent’s local HTTP API.
+
+### 19.1 Submit Print Job
+
+Recommended shape:
 
 ```json
 {
   "type": "controller.command.submit_print_job",
   "message_id": "msg_100",
   "command_id": "cmd_100",
-  "issued_at": "2026-04-12T10:05:00Z",
+  "sequence": 105,
+  "issued_at": "2026-04-18T10:05:00Z",
   "payload": {
     "content": {
       "kind": "text",
@@ -467,6 +662,7 @@ All command messages must contain:
       "document_name": "Greeting"
     },
     "target": {
+      "device_id": "dev_123",
       "printer_name": "Kitchen Printer"
     },
     "options": {
@@ -480,22 +676,20 @@ All command messages must contain:
 }
 ```
 
-`payload` must exactly match the REST `POST /print-jobs` request body.
+### 19.2 Execute Device Command
 
-Required granted scope:
-
-- `jobs:submit`
-
-### Execute Device Command
+Recommended shape:
 
 ```json
 {
   "type": "controller.command.execute_device_command",
   "message_id": "msg_101",
   "command_id": "cmd_101",
-  "issued_at": "2026-04-12T10:06:00Z",
+  "sequence": 106,
+  "issued_at": "2026-04-18T10:06:00Z",
   "payload": {
     "target": {
+      "device_id": "dev_123",
       "printer_name": "Kitchen Printer"
     },
     "command": {
@@ -509,206 +703,126 @@ Required granted scope:
 }
 ```
 
-`payload` must exactly match the REST `POST /device-commands` request body.
+### 19.3 Cancel Job
 
-Required granted scope:
-
-- `commands:execute`
-
-### Cancel Job
+Recommended shape:
 
 ```json
 {
   "type": "controller.command.cancel_job",
   "message_id": "msg_102",
   "command_id": "cmd_102",
-  "issued_at": "2026-04-12T10:07:00Z",
+  "sequence": 107,
+  "issued_at": "2026-04-18T10:07:00Z",
   "job_id": "job_123"
 }
 ```
 
-Required granted scope:
+## 20. Stable Identifiers
 
-- `jobs:submit`
+The controller SHOULD prefer:
 
-## Agent Responses to Commands
+- `device_id`
 
-The agent does not execute controller commands inline on the WebSocket thread. It validates, persists, and then emits a durable response message through its outbound outbox.
+over:
 
-### Accepted
+- `printer_name`
 
-If a command is accepted and translated into runtime work:
+`printer_name` MAY remain as a convenience fallback for debugging or human-authored commands, but it SHOULD NOT be the primary identifier for durable automation.
 
-```json
-{
-  "type": "agent.command.accepted",
-  "message_id": "gack_...",
-  "command_id": "cmd_100",
-  "accepted_at": "2026-04-12T10:05:01Z",
-  "job": {
-    "...": "the same shape as JobResponse from the agent HTTP API"
-  },
-  "detail": "Accepted upstream command and queued job job_123."
-}
-```
+## 21. Permissions
 
-### Rejected
+The current scope model is too coarse. A cleaner permission model is:
 
-If a command is rejected:
-
-```json
-{
-  "type": "agent.command.rejected",
-  "message_id": "gerr_...",
-  "command_id": "cmd_100",
-  "rejected_at": "2026-04-12T10:05:01Z",
-  "code": "UPSTREAM_SCOPE_DENIED",
-  "detail": "The upstream controller is not authorized for scope 'jobs:submit'."
-}
-```
-
-## Runtime Event Forwarding
-
-The agent forwards runtime events to the controller as durable outbox messages:
-
-```json
-{
-  "type": "agent.runtime.event",
-  "message_id": "gevt_...",
-  "occurred_at": "2026-04-12T10:05:03Z",
-  "event": {
-    "sequence": 99,
-    "resource_kind": "job",
-    "resource_id": "job_123",
-    "event_type": "job.succeeded",
-    "occurred_at": "2026-04-12T10:05:03Z",
-    "payload": {
-      "job_id": "job_123"
-    }
-  },
-  "command_id": "cmd_100",
-  "job_id": "job_123"
-}
-```
-
-If the runtime event is related to a job created by a controller command, the agent includes the original `command_id`.
-
-## Acknowledgement Semantics
-
-The controller acknowledges agent-originated messages with:
-
-```json
-{
-  "type": "controller.ack",
-  "message_id": "ack_1",
-  "acknowledged_message_id": "gevt_..."
-}
-```
-
-The agent marks the referenced outbox record as acknowledged.
-
-### Important Delivery Rule
-
-The agent may resend a previously sent message after reconnect if it was not acknowledged.
-
-Controllers must therefore treat `message_id` as the deduplication key for agent-originated messages.
-
-## Replay and Deduplication Rules
-
-### Inbound Commands
-
-Inbound commands are deduplicated by `command_id`.
-
-If the controller resends a command with the same `command_id`:
-
-- the agent does not execute it again
-- the agent replays the previously stored acceptance or rejection message
-
-Controllers must never reuse `command_id` for semantically different commands.
-
-### Outbound Messages
-
-The agent persists outbound messages in an outbox.
-
-Controllers should deduplicate by `message_id` for:
-
-- `agent.command.accepted`
-- `agent.command.rejected`
-- `agent.runtime.event`
-- `agent.status.snapshot`
-
-## Scope Enforcement
-
-The controller may only invoke operations that the agent granted during enrollment.
-
-Current required scopes:
-
-- `jobs:submit`
-  Required for `controller.command.submit_print_job`
+- `system:read`
+- `devices:read`
+- `events:read`
+- `jobs:create`
+- `jobs:cancel`
 - `commands:execute`
-  Required for `controller.command.execute_device_command`
-- `jobs:submit`
-  Required for `controller.command.cancel_job`
 
-If a scope is missing, the agent rejects the command with `UPSTREAM_SCOPE_DENIED`.
+The protocol SHOULD describe these as controller permissions or controller actions, not as request-side granted state in the enrollment snapshot.
 
-## Certificate Lifecycle
+## 22. Large Payload Handling
 
-The controller may still return:
+Inline payloads are acceptable for:
 
-- `certificate_pem`
-- `ca_certificate_pem`
+- text
+- small receipts
+- small device commands
 
-If present, the agent installs them locally and may present the client certificate on later outbound TLS connections.
+For larger job content such as:
 
-For production `step_ca` mode, the preferred flow is controller-issued bootstrap material instead of a shared step-ca provisioner key on the agent. In that mode:
+- PDF
+- HTML
+- large images
 
-- the installer supplies an enrollment token or other controller-issued bootstrap credential to the agent
-- the controller validates the installation policy
-- the controller mints a short-lived step-ca OTT for that specific agent
-- the controller returns `certificate_bootstrap`
-- the agent bootstraps the step-ca root with the supplied fingerprint
-- the agent calls `/1.0/sign` with its CSR and the OTT
-- the agent renews later through `/1.0/renew`
+the protocol SHOULD support `content_ref` so the control stream stays responsive and replay remains manageable.
 
-This keeps CA-authorizing secrets off the edge host while still supporting seamless installation.
+## 23. Error Handling
 
-## Caddy Edge Compatibility
+The current implementation does not yet define a fully standardized controller-side error envelope.
+
+The protocol SHOULD eventually standardize:
+
+- enrollment error codes
+- refresh error codes
+- status sync rejection codes
+- control-stream close and rejection reasons
+
+## 24. Deployment Notes
+
+### 24.1 Caddy
 
 When the controller is fronted by Caddy:
 
-- enrollment and status sync should be exposed over `HTTPS`
-- the control stream should be exposed over `WSS`
-- optional client authentication may be enforced at the Caddy edge
+- enrollment and status sync SHOULD use `HTTPS`
+- the control stream SHOULD use `WSS`
+- mTLS MAY be optional or required
 
-If Caddy is configured with `require_and_verify` client auth, the agent must already have a usable client certificate before it attempts enrollment or control-stream connection. The recommended way to satisfy that requirement is step-ca certificate provisioning.
+If strict client certificate validation is enabled, the deployment SHOULD expose a bootstrap enrollment URL that is reachable before the first client certificate is issued.
 
-In practice, strict Caddy mTLS deployments should expose a bootstrap enrollment URL that is reachable before the first client certificate is issued. After initial certificate issuance, the normal controller status and events URLs can require client certificates.
+### 24.2 step-ca
 
-## Controller Implementation Checklist
+The preferred production pattern is:
 
-A controller implementation is production-compatible with the current agent if it:
+1. installer supplies `enrollment_token`
+2. controller validates policy
+3. controller returns `certificate.bootstrap`
+4. agent bootstraps trust and obtains the first client certificate
+5. agent later renews through step-ca
 
-1. Exposes the enrollment endpoint.
-2. Accepts and validates the enrollment token.
-3. Returns an enrollment response with at least `access_token`.
-4. Accepts status snapshots over HTTPS.
-5. Exposes a WSS control-stream endpoint.
-6. Sends `controller.hello` on stream startup.
-7. Sends `controller.ack` for each durable agent-originated message it has processed.
-8. Uses unique `command_id` values for controller commands.
-9. Treats agent `message_id` values as idempotency keys.
-10. If using `step_ca`, returns controller-issued `certificate_bootstrap` data rather than requiring the agent to hold a CA provisioner key.
-11. Optionally exposes `refresh_url` and signed client certificates.
+## 25. Controller Compatibility Checklist
 
-## Non-Goals of the Current Protocol
+A controller is compatible with this draft if it:
 
-The following are not yet standardized beyond the current implementation:
+1. exposes the enrollment endpoint
+2. validates the `enrollment_token` or clearly documents external enrollment auth
+3. explicitly selects a protocol version
+4. returns a clear `auth.mode`
+5. returns stable `links`
+6. accepts periodic status sync
+7. exposes a `WSS` control-stream endpoint
+8. sends `controller.hello`
+9. uses unique `command_id` values
+10. treats agent `message_id` values as idempotency keys
+11. sends `controller.ack` only after durable processing state
+12. if using `step_ca`, returns certificate bootstrap data rather than requiring the agent to hold a CA-authorizing provisioner secret
 
-- server-side error envelope shape for enrollment and status sync failures
-- batched controller commands
-- controller-driven pagination or replay cursors
-- explicit server-to-agent backpressure messages
-- multi-controller coordination for a single agent identity
+## 26. Implementation Notes
 
-Those can be added in future protocol versions, but they are not part of the current `2026-04-14` contract.
+The current codebase implements the core wire contract in this draft, including:
+
+- explicit `selected_protocol_version`
+- nested enrollment `auth`, `links`, `permissions`, and `certificate` structures
+- refresh-token-only controller refresh
+- controller command `sequence` handling with persisted resume state
+- protocol-native command payload models
+- explicit controller-action permissions
+- managed step-ca certificate lifecycle supervision
+
+Remaining future-facing areas include:
+
+- replacing periodic full snapshots with lighter long-lived status documents
+- adding a standardized `content_ref` flow for large print payloads
+- defining a richer standardized controller-side error envelope

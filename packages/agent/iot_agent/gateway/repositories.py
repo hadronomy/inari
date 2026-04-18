@@ -4,6 +4,7 @@ import uuid
 from typing import Any, Mapping
 
 from sqlalchemy import func, insert, select, update
+from sqlalchemy.exc import OperationalError
 
 from ..db.schema import gateway_inbound_commands_table, gateway_outbox_table
 from ..runtime.models import normalize_timestamp, timestamp_to_iso, utc_now
@@ -25,6 +26,7 @@ class GatewayRepository:
         *,
         command_id: str,
         message_id: str,
+        sequence: int | None,
         message_type: str,
         payload: Mapping[str, Any],
     ) -> tuple[GatewayInboundCommandRecord, bool]:
@@ -35,6 +37,7 @@ class GatewayRepository:
         stmt = insert(gateway_inbound_commands_table).values(
             command_id=command_id,
             message_id=message_id,
+            sequence=sequence,
             message_type=message_type,
             state=GatewayInboundCommandState.RECEIVED.value,
             payload_json=dump_json(payload),
@@ -50,6 +53,23 @@ class GatewayRepository:
         return self.get_inbound_command(command_id) or _missing_inbound(
             command_id
         ), True
+
+    def last_applied_controller_sequence(self) -> int | None:
+        stmt = select(func.max(gateway_inbound_commands_table.c.sequence)).where(
+            gateway_inbound_commands_table.c.state.in_(
+                (
+                    GatewayInboundCommandState.ACCEPTED.value,
+                    GatewayInboundCommandState.REJECTED.value,
+                )
+            ),
+            gateway_inbound_commands_table.c.sequence.is_not(None),
+        )
+        try:
+            with self.store.connection() as connection:
+                value = connection.execute(stmt).scalar_one_or_none()
+        except OperationalError:
+            return None
+        return int(value) if value is not None else None
 
     def get_inbound_command(
         self, command_id: str
@@ -262,6 +282,7 @@ def _row_to_inbound(row: Mapping[str, Any]) -> GatewayInboundCommandRecord:
         state=GatewayInboundCommandState(str(row["state"])),
         payload=load_json(str(row["payload_json"])),
         message_id=str(row["message_id"]),
+        sequence=int(row["sequence"]) if row["sequence"] is not None else None,
         received_at=normalize_timestamp(str(row["received_at"])) or utc_now(),
         updated_at=normalize_timestamp(str(row["updated_at"])) or utc_now(),
         job_id=str(row["job_id"]) if row["job_id"] is not None else None,
