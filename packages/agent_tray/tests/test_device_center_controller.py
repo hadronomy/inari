@@ -4,13 +4,14 @@ from datetime import UTC, datetime
 
 from PySide6.QtWidgets import QApplication
 
-from inari.models import DeviceEventCollectionResponse, RuntimeEventResponse
+from inari.models import DeviceEventCollectionResponse, DeviceResponse, RuntimeEventResponse
 from inari_tray.config import TraySettings
 from inari_tray.device_center.controller import (
     QtDeviceCenterController,
     _event_requires_directory_refresh,
 )
 from inari_tray.device_center.helpers import DEFAULT_EVENT_LIMIT
+from inari_tray.device_center.window import DeviceCenterWindow
 
 
 def test_event_requires_directory_refresh_only_for_device_directory_events() -> None:
@@ -55,6 +56,20 @@ def test_device_center_reuses_cached_device_events_until_marked_stale(
     assert client.device_event_requests == [("dev_printer", DEFAULT_EVENT_LIMIT)]
     assert "dev_printer" not in controller._stale_device_event_ids
     controller.close()
+
+
+def test_device_table_tab_moves_to_next_row() -> None:
+    _qt_app()
+    window = DeviceCenterWindow(title="Inari")
+    window.set_devices(
+        [_device_response("dev_1", "Alpha"), _device_response("dev_2", "Beta")],
+        selected_device_id="dev_1",
+        pinned_device_ids=set(),
+    )
+    assert window._device_table.focusNextPrevChild(True)
+
+    assert window._selected_device_id() == "dev_2"
+    window.close()
 
 
 class _ImmediateThread:
@@ -106,5 +121,36 @@ def _runtime_event(
             "event_type": event_type,
             "occurred_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
             "payload": {"name": "Kitchen Printer"},
+        }
+    )
+
+
+def _device_response(device_id: str, name: str) -> DeviceResponse:
+    return DeviceResponse.model_validate(
+        {
+            "id": device_id,
+            "kind": "printer",
+            "device_class": "physical",
+            "name": name,
+            "driver_key": "windows_spooler",
+            "driver": {
+                "key": "windows_spooler",
+                "display_name": "Windows Print Spooler",
+                "kind": "printer",
+                "platform": "windows",
+            },
+            "connection": {
+                "state": "online",
+                "first_seen_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+                "last_seen_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+                "observed_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+            },
+            "printer": {
+                "is_default": False,
+                "preferred_transport": "document",
+                "supported_transports": ["document"],
+                "capabilities": [],
+            },
+            "metadata": {},
         }
     )

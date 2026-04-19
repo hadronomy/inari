@@ -48,6 +48,30 @@ from .table_models import (
 )
 from .theme import resolve_device_center_theme
 
+SEARCH_DEBOUNCE_MS = 120
+
+
+class RowNavigationTableView(QTableView):
+    def focusNextPrevChild(self, next: bool) -> bool:
+        model = self.model()
+        if model is not None and model.rowCount() > 0:
+            current = self.currentIndex()
+            if current.isValid():
+                current_row = current.row()
+            elif next:
+                current_row = -1
+            else:
+                current_row = 0
+            step = 1 if next else -1
+            target_row = current_row + step
+            if 0 <= target_row < model.rowCount():
+                target = model.index(target_row, 0)
+                self.setCurrentIndex(target)
+                self.selectRow(target_row)
+                self.scrollTo(target, QAbstractItemView.ScrollHint.EnsureVisible)
+                return True
+        return super().focusNextPrevChild(next)
+
 
 class DeviceCenterWindow(QMainWindow):
     refresh_requested = Signal()
@@ -82,6 +106,11 @@ class DeviceCenterWindow(QMainWindow):
         self._status_note_timer = QTimer(self)
         self._status_note_timer.setSingleShot(True)
         self._status_note_timer.timeout.connect(self._clear_status_note)
+        self._search_debounce_timer = QTimer(self)
+        self._search_debounce_timer.setSingleShot(True)
+        self._search_debounce_timer.setInterval(SEARCH_DEBOUNCE_MS)
+        self._search_debounce_timer.timeout.connect(self._apply_debounced_search)
+        self._pending_search_text = ""
 
         self.setObjectName("deviceCenterWindow")
         self.setWindowTitle(f"{title} Device Center")
@@ -217,7 +246,7 @@ class DeviceCenterWindow(QMainWindow):
         directory_body_layout.setSpacing(0)
         directory_layout.addWidget(self._directory_body, stretch=1)
 
-        self._device_table = QTableView()
+        self._device_table = RowNavigationTableView()
         self._device_table.setModel(self._device_proxy)
         self._device_table.setSortingEnabled(True)
         self._device_table.setSelectionBehavior(
@@ -380,8 +409,12 @@ class DeviceCenterWindow(QMainWindow):
         self._refresh_activity_overlay()
 
     def _on_search_text_changed(self, value: str) -> None:
-        self._device_proxy.set_search_text(value)
+        self._pending_search_text = value
         self._clear_search_button.setVisible(bool(value.strip()))
+        self._search_debounce_timer.start()
+
+    def _apply_debounced_search(self) -> None:
+        self._device_proxy.set_search_text(self._pending_search_text)
 
     def set_devices(
         self,
@@ -785,7 +818,7 @@ class DeviceCenterWindow(QMainWindow):
         self._events_summary_label.setObjectName("eventsSummaryLabel")
         layout.addWidget(self._events_summary_label)
 
-        self._events_table = QTableView()
+        self._events_table = RowNavigationTableView()
         self._events_table.setModel(self._events_model)
         self._events_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -1092,6 +1125,7 @@ class DeviceCenterWindow(QMainWindow):
         table.setTextElideMode(Qt.TextElideMode.ElideRight)
         table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        table.setTabKeyNavigation(False)
         table.setFrameShape(QFrame.Shape.NoFrame)
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(row_height)
