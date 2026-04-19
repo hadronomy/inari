@@ -22,6 +22,11 @@ from .helpers import (
 )
 from .window import DeviceCenterWindow
 
+DEVICE_DIRECTORY_REFRESH_EVENT_TYPES = frozenset(
+    {"device.connected", "device.updated", "device.disconnected"}
+)
+MIN_FALLBACK_REFRESH_INTERVAL_MS = 60_000
+
 
 class _ControllerSignals(QObject):
     show_requested = Signal()
@@ -55,20 +60,27 @@ class QtDeviceCenterController(QObject):
         self._selected_device_id = self._load_selected_device_id()
         self._pinned_device_ids = self._load_pinned_device_ids()
         self._devices_loaded_once = False
+        self._connected = True
         self._refresh_generation = 0
         self._event_generation = 0
+        self._stale_device_event_ids: set[str] = set()
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(
-            max(1000, int(settings.device_center_refresh_interval_seconds * 1000))
+            max(
+                MIN_FALLBACK_REFRESH_INTERVAL_MS,
+                int(settings.device_center_refresh_interval_seconds * 1000),
+            )
         )
-        self._refresh_timer.timeout.connect(self._refresh_devices)
+        self._refresh_timer.timeout.connect(self._refresh_devices_if_needed)
         self._refresh_timer.start()
 
         self._coalesced_refresh_timer = QTimer(self)
         self._coalesced_refresh_timer.setInterval(400)
         self._coalesced_refresh_timer.setSingleShot(True)
-        self._coalesced_refresh_timer.timeout.connect(self._refresh_devices)
+        self._coalesced_refresh_timer.timeout.connect(
+            lambda: self._refresh_devices(reason="event")
+        )
 
         self._window.restore_geometry_state(
             self._qt_settings.value(self._settings_key("geometry"))
@@ -80,7 +92,7 @@ class QtDeviceCenterController(QObject):
         self._window.set_pinned_device_ids(self._pinned_device_ids)
 
         self._window.refresh_requested.connect(
-            lambda: self._refresh_devices(force=True)
+            lambda: self._refresh_devices(force=True, reason="manual")
         )
         self._window.selection_changed.connect(self._on_selection_changed)
         self._window.print_test_page_requested.connect(
@@ -124,7 +136,10 @@ class QtDeviceCenterController(QObject):
     def _show_window(self) -> None:
         self._window.show_window()
         if not self._devices_loaded_once:
-            self._refresh_devices(force=True)
+            self._refresh_devices(force=True, reason="initial")
+            return
+        if self._connected:
+            self._refresh_devices(force=True, reason="show")
 
     def _close_window(self) -> None:
         self._persist_geometry(self._window.saveGeometry())
@@ -134,40 +149,52 @@ class QtDeviceCenterController(QObject):
         self._window.close()
 
     def _apply_snapshot(self, snapshot: TraySnapshot) -> None:
+        was_connected = self._connected
+        self._connected = snapshot.connected
         self._window.set_connection_state(snapshot)
+        if (
+            snapshot.connected
+            and not was_connected
+            and self._window.isVisible()
+        ):
+            if self._selected_device_id is not None:
+                self._stale_device_event_ids.add(self._selected_device_id)
+            self._refresh_devices(force=True, reason="reconnect")
 
     def _apply_runtime_event(self, event: RuntimeEventResponse) -> None:
+        updated_events = self._append_device_event_to_cache(event)
         if (
             self._selected_device_id is not None
             and event.resource_kind == "device"
             and event.resource_id == self._selected_device_id
         ):
-            current_events = self._events_by_device_id.get(
-                self._selected_device_id,
-                (),
-            )
-            deduped = [
-                existing
-                for existing in current_events
-                if existing.sequence != event.sequence
-            ]
-            updated = tuple([event, *deduped][:DEFAULT_EVENT_LIMIT])
-            self._events_by_device_id[self._selected_device_id] = updated
             device = self._devices_by_id.get(self._selected_device_id)
             if device is not None:
                 self._window.set_device_details(
                     device,
-                    updated,
+                    updated_events,
                     pinned=device.id in self._pinned_device_ids,
                 )
-        self._coalesced_refresh_timer.start()
+        if _event_requires_directory_refresh(event):
+            self._coalesced_refresh_timer.start()
 
-    def _refresh_devices(self, *, force: bool = False) -> None:
+    def _refresh_devices_if_needed(self) -> None:
+        self._refresh_devices(reason="fallback")
+
+    def _refresh_devices(self, *, force: bool = False, reason: str) -> None:
+        if not force:
+            if not self._window.isVisible():
+                return
+            if not self._connected:
+                return
         self._refresh_generation += 1
         generation = self._refresh_generation
-        self._window.set_busy_message(
-            "Refreshing devices…" if force else "Updating device data…"
-        )
+        if force:
+            self._window.set_busy_message("Refreshing devices…")
+        elif reason == "fallback":
+            self._window.set_busy_message(None)
+        else:
+            self._window.set_busy_message("Updating device data…")
 
         def worker() -> None:
             try:
@@ -183,7 +210,13 @@ class QtDeviceCenterController(QObject):
             daemon=True,
         ).start()
 
-    def _load_device_events(self, device_id: str) -> None:
+    def _load_device_events(self, device_id: str, *, force: bool = False) -> None:
+        if (
+            not force
+            and device_id in self._events_by_device_id
+            and device_id not in self._stale_device_event_ids
+        ):
+            return
         self._event_generation += 1
         generation = self._event_generation
         self._window.set_busy_message("Loading recent device events…")
@@ -248,7 +281,9 @@ class QtDeviceCenterController(QObject):
             return
         events = tuple(response.events)
         self._events_by_device_id[device_id] = events
+        self._stale_device_event_ids.discard(device_id)
         if device_id != self._selected_device_id:
+            self._window.set_busy_message(None)
             return
         device = self._devices_by_id.get(device_id)
         self._window.set_device_details(
@@ -354,7 +389,7 @@ class QtDeviceCenterController(QObject):
         self._window.set_busy_message(None)
         self._window.show_status_note(title, timeout_ms=5000)
         self._maybe_notify(title, subtitle)
-        self._refresh_devices(force=True)
+        self._refresh_devices(force=True, reason="action")
 
     def _on_action_failed(self, title: str, subtitle: str) -> None:
         self._window.set_busy_message(None)
@@ -437,3 +472,20 @@ class QtDeviceCenterController(QObject):
     def _maybe_notify(self, title: str, subtitle: str | None) -> None:
         if self._notify is not None:
             self._notify(title, subtitle)
+
+    def _append_device_event_to_cache(
+        self, event: RuntimeEventResponse
+    ) -> tuple[RuntimeEventResponse, ...]:
+        if event.resource_kind != "device":
+            return self._events_by_device_id.get(event.resource_id, ())
+        current_events = self._events_by_device_id.get(event.resource_id, ())
+        deduped = [
+            existing for existing in current_events if existing.sequence != event.sequence
+        ]
+        updated = tuple([event, *deduped][:DEFAULT_EVENT_LIMIT])
+        self._events_by_device_id[event.resource_id] = updated
+        return updated
+
+
+def _event_requires_directory_refresh(event: RuntimeEventResponse) -> bool:
+    return event.event_type in DEVICE_DIRECTORY_REFRESH_EVENT_TYPES

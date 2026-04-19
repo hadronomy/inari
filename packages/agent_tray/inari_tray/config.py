@@ -35,7 +35,7 @@ class TraySettings(BaseSettings):
     event_timeout_seconds: float = 1.0
     startup_grace_period_seconds: float = 15.0
     shutdown_started_process_on_exit: bool = True
-    device_center_refresh_interval_seconds: float = 15.0
+    device_center_refresh_interval_seconds: float = 60.0
     log_dir: Path = Path("./logs")
 
     @field_validator("agent_api_base_url", mode="before")

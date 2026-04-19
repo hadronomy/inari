@@ -41,7 +41,7 @@ class DiscoveryCoordinator:
             if prior.connection_state is DeviceConnectionState.OFFLINE:
                 await self._publish_device_event("device.connected", saved)
                 continue
-            if prior != saved:
+            if _device_changed_materially(prior, saved):
                 await self._publish_device_event("device.updated", saved)
 
         for device_id, prior in previous.items():
@@ -122,3 +122,24 @@ def _device_event_payload(device: DeviceRecord) -> dict[str, object]:
             "capabilities": list(device.capability_keys),
         }
     return payload
+
+
+def _device_changed_materially(previous: DeviceRecord, current: DeviceRecord) -> bool:
+    return _device_material_state(previous) != _device_material_state(current)
+
+
+def _device_material_state(device: DeviceRecord) -> dict[str, object]:
+    return {
+        "kind": device.kind.value,
+        "driver_key": device.driver_key,
+        "name": device.name,
+        "connection_state": device.connection_state.value,
+        "is_default": device.is_default,
+        "preferred_transport": (
+            device.preferred_transport.value
+            if device.preferred_transport is not None
+            else None
+        ),
+        "capabilities": dict(device.capabilities),
+        "metadata": dict(device.metadata),
+    }

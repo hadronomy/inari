@@ -31,7 +31,6 @@ class DeviceTableModel(QAbstractTableModel):
         "Class",
         "Connected Via",
         "Last Seen",
-        "★",
     )
 
     def __init__(self) -> None:
@@ -59,8 +58,6 @@ class DeviceTableModel(QAbstractTableModel):
             return self._display_value(device, index.column())
         if role == Qt.ToolTipRole:
             return _device_tooltip(device, pinned=device.id in self._pinned_device_ids)
-        if role == Qt.TextAlignmentRole and index.column() == 5:
-            return int(Qt.AlignmentFlag.AlignCenter)
         return None
 
     def headerData(
@@ -138,8 +135,6 @@ class DeviceTableModel(QAbstractTableModel):
                 return _device_source_label(device)
             case 4:
                 return compact_timestamp(device.connection.last_seen_at)
-            case 5:
-                return "★" if device.printer is not None and device.printer.is_default else ""
             case _:
                 return ""
 
@@ -223,16 +218,6 @@ class DeviceFilterProxyModel(QSortFilterProxyModel):
                         left_device.connection.last_seen_at
                         < right_device.connection.last_seen_at
                     )
-                case 5:
-                    left_default = bool(
-                        left_device.printer is not None and left_device.printer.is_default
-                    )
-                    right_default = bool(
-                        right_device.printer is not None
-                        and right_device.printer.is_default
-                    )
-                    if left_default != right_default:
-                        return left_default
         return super().lessThan(left, right)
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:

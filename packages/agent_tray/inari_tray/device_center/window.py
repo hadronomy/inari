@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QMenu,
+    QScrollArea,
     QSplitter,
+    QSizePolicy,
     QTabWidget,
     QTableView,
     QVBoxLayout,
@@ -100,16 +102,47 @@ class DeviceCenterWindow(QMainWindow):
         self._connection_banner.setVisible(False)
         layout.addWidget(self._connection_banner)
 
-        toolbar_card = QFrame()
-        toolbar_card.setObjectName("toolbarCard")
-        toolbar_layout = QVBoxLayout(toolbar_card)
-        toolbar_layout.setContentsMargins(14, 12, 14, 12)
-        toolbar_layout.setSpacing(10)
-        layout.addWidget(toolbar_card)
+        self._directory_empty_label = QLabel()
+        self._directory_empty_label.setObjectName("emptyStateLabel")
+        self._directory_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._directory_empty_label.setWordWrap(True)
 
-        toolbar_header = QHBoxLayout()
-        toolbar_header.setSpacing(10)
-        toolbar_layout.addLayout(toolbar_header)
+        self._directory_empty_state_card = QFrame()
+        self._directory_empty_state_card.setObjectName("emptyStateCard")
+        directory_empty_layout = QVBoxLayout(self._directory_empty_state_card)
+        directory_empty_layout.setContentsMargins(0, 0, 0, 0)
+        directory_empty_layout.addWidget(self._directory_empty_label)
+
+        self._inspector_empty_label = QLabel("No device details are available.")
+        self._inspector_empty_label.setObjectName("emptyStateLabel")
+        self._inspector_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._inspector_empty_label.setWordWrap(True)
+
+        self._inspector_empty_state_card = QFrame()
+        self._inspector_empty_state_card.setObjectName("emptyStateCard")
+        inspector_empty_layout = QVBoxLayout(self._inspector_empty_state_card)
+        inspector_empty_layout.setContentsMargins(0, 0, 0, 0)
+        inspector_empty_layout.addWidget(self._inspector_empty_label)
+
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.setChildrenCollapsible(False)
+        content_splitter.setHandleWidth(12)
+        layout.addWidget(content_splitter, stretch=1)
+
+        directory_pane = QWidget()
+        directory_layout = QVBoxLayout(directory_pane)
+        directory_layout.setContentsMargins(0, 0, 0, 0)
+        directory_layout.setSpacing(10)
+
+        self._directory_header = QWidget()
+        directory_layout.addWidget(self._directory_header)
+        directory_header_layout = QVBoxLayout(self._directory_header)
+        directory_header_layout.setContentsMargins(0, 0, 0, 0)
+        directory_header_layout.setSpacing(8)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+        directory_header_layout.addLayout(header_row)
 
         title_stack = QVBoxLayout()
         title_stack.setSpacing(2)
@@ -119,64 +152,70 @@ class DeviceCenterWindow(QMainWindow):
         self._toolbar_meta_label = QLabel("Waiting for device data…")
         self._toolbar_meta_label.setObjectName("toolbarMeta")
         title_stack.addWidget(self._toolbar_meta_label)
-        toolbar_header.addLayout(title_stack, stretch=1)
-
-        self._toolbar_status_chip = QLabel("Starting")
-        self._toolbar_status_chip.setObjectName("toolbarStatusChip")
-        toolbar_header.addWidget(
-            self._toolbar_status_chip,
-            alignment=Qt.AlignmentFlag.AlignVCenter,
-        )
+        header_row.addLayout(title_stack, stretch=1)
 
         self._refresh_button = QPushButton("Refresh now")
         self._refresh_button.clicked.connect(self.refresh_requested)
-        toolbar_header.addWidget(self._refresh_button)
+        header_row.addWidget(self._refresh_button)
 
-        filter_row = QHBoxLayout()
-        filter_row.setSpacing(8)
-        toolbar_layout.addLayout(filter_row)
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(10)
+        directory_header_layout.addLayout(controls_row)
+
+        search_panel = QWidget()
+        search_panel.setObjectName("searchPanel")
+        search_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        search_layout = QHBoxLayout(search_panel)
+        search_layout.setContentsMargins(12, 0, 12, 0)
+        search_layout.setSpacing(8)
+        controls_row.addWidget(search_panel, stretch=1)
+
+        search_label = QLabel("Search")
+        search_label.setObjectName("searchPanelLabel")
+        search_layout.addWidget(search_label)
 
         self._search_input = QLineEdit()
         self._search_input.setObjectName("searchInput")
         self._search_input.setPlaceholderText(
-            "Search devices, drivers, sources, or endpoints"
+            "Search by device, driver, source, or endpoint"
         )
-        self._search_input.textChanged.connect(self._device_proxy.set_search_text)
-        filter_row.addWidget(self._search_input, stretch=1)
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        search_layout.addWidget(self._search_input, stretch=1)
+
+        self._clear_search_button = QPushButton("Clear")
+        self._clear_search_button.setObjectName("searchClearButton")
+        self._clear_search_button.clicked.connect(self._search_input.clear)
+        self._clear_search_button.setVisible(False)
+        search_layout.addWidget(self._clear_search_button)
+
+        filter_group = QWidget()
+        filter_group.setObjectName("searchFilterGroup")
+        filter_layout = QHBoxLayout(filter_group)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(6)
+        controls_row.addWidget(filter_group)
 
         self._online_only_button = QPushButton("Online")
         self._online_only_button.setCheckable(True)
         self._online_only_button.setProperty("buttonRole", "filter")
         self._online_only_button.toggled.connect(self._device_proxy.set_online_only)
         self._online_only_button.toggled.connect(self.online_only_changed)
-        filter_row.addWidget(self._online_only_button)
+        filter_layout.addWidget(self._online_only_button)
 
         self._pinned_only_button = QPushButton("Pinned")
         self._pinned_only_button.setCheckable(True)
         self._pinned_only_button.setProperty("buttonRole", "filter")
         self._pinned_only_button.toggled.connect(self._device_proxy.set_pinned_only)
         self._pinned_only_button.toggled.connect(self.pinned_only_changed)
-        filter_row.addWidget(self._pinned_only_button)
+        filter_layout.addWidget(self._pinned_only_button)
 
-        self._empty_label = QLabel()
-        self._empty_label.setObjectName("emptyStateLabel")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty_label.setWordWrap(True)
-
-        self._empty_state_card = QFrame()
-        self._empty_state_card.setObjectName("emptyStateCard")
-        empty_layout = QVBoxLayout(self._empty_state_card)
-        empty_layout.setContentsMargins(0, 0, 0, 0)
-        empty_layout.addWidget(self._empty_label)
-
-        content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        content_splitter.setChildrenCollapsible(False)
-        content_splitter.setHandleWidth(12)
-
-        directory_pane = QWidget()
-        directory_layout = QVBoxLayout(directory_pane)
-        directory_layout.setContentsMargins(0, 0, 0, 0)
-        directory_layout.setSpacing(0)
+        self._directory_body = QWidget()
+        directory_body_layout = QVBoxLayout(self._directory_body)
+        directory_body_layout.setContentsMargins(0, 0, 0, 0)
+        directory_body_layout.setSpacing(0)
+        directory_layout.addWidget(self._directory_body, stretch=1)
 
         self._device_table = QTableView()
         self._device_table.setModel(self._device_proxy)
@@ -204,14 +243,14 @@ class DeviceCenterWindow(QMainWindow):
             self._show_device_context_menu
         )
         self._device_table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-        directory_layout.addWidget(
-            self._wrap_shell("tableShell", self._device_table),
-            stretch=1,
-        )
+        self._table_frame = self._wrap_shell("tableShell", self._device_table)
+        directory_body_layout.addWidget(self._directory_empty_state_card, stretch=1)
+        directory_body_layout.addWidget(self._table_frame, stretch=1)
         content_splitter.addWidget(directory_pane)
 
         inspector = QFrame()
         inspector.setObjectName("inspectorCard")
+        self._inspector_frame = inspector
         inspector_layout = QVBoxLayout(inspector)
         inspector_layout.setContentsMargins(14, 14, 14, 14)
         inspector_layout.setSpacing(10)
@@ -248,21 +287,16 @@ class DeviceCenterWindow(QMainWindow):
 
         self._tabs = QTabWidget()
         inspector_layout.addWidget(self._tabs, stretch=1)
-        content_splitter.addWidget(inspector)
+
+        self._inspector_body = QWidget()
+        inspector_body_layout = QVBoxLayout(self._inspector_body)
+        inspector_body_layout.setContentsMargins(0, 0, 0, 0)
+        inspector_body_layout.setSpacing(0)
+        inspector_body_layout.addWidget(self._inspector_empty_state_card, stretch=1)
+        inspector_body_layout.addWidget(self._inspector_frame, stretch=1)
+        content_splitter.addWidget(self._inspector_body)
         content_splitter.setStretchFactor(0, 5)
         content_splitter.setStretchFactor(1, 4)
-
-        self._content_frame = QFrame()
-        content_layout = QVBoxLayout(self._content_frame)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.addWidget(content_splitter)
-        self._content_host = QWidget()
-        content_host_layout = QVBoxLayout(self._content_host)
-        content_host_layout.setContentsMargins(0, 0, 0, 0)
-        content_host_layout.setSpacing(0)
-        content_host_layout.addWidget(self._empty_state_card, stretch=1)
-        content_host_layout.addWidget(self._content_frame, stretch=1)
-        layout.addWidget(self._content_host, stretch=1)
 
         self._overview_fields, self._overview_metadata = self._build_overview_tab()
         self._driver_fields, self._driver_metadata = self._build_driver_tab()
@@ -345,6 +379,10 @@ class DeviceCenterWindow(QMainWindow):
             self._status_note_timer.start(timeout_ms)
         self._refresh_activity_overlay()
 
+    def _on_search_text_changed(self, value: str) -> None:
+        self._device_proxy.set_search_text(value)
+        self._clear_search_button.setVisible(bool(value.strip()))
+
     def set_devices(
         self,
         devices: list[DeviceResponse],
@@ -366,6 +404,10 @@ class DeviceCenterWindow(QMainWindow):
 
         self._suppress_selection_signal = True
         try:
+            if self._device_proxy.rowCount() == 0:
+                self._device_table.clearSelection()
+                actual_selection = None
+                return actual_selection
             target_device_id = selected_device_id or previous_selected_id
             actual_selection = self._selected_device_id()
             if actual_selection != target_device_id:
@@ -536,9 +578,7 @@ class DeviceCenterWindow(QMainWindow):
         event.ignore()
 
     def _build_overview_tab(self) -> tuple[dict[str, QLabel], QPlainTextEdit]:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(14)
+        layout = self._create_scroll_tab("Overview")
 
         metrics_layout = QGridLayout()
         metrics_layout.setContentsMargins(0, 0, 0, 0)
@@ -618,13 +658,10 @@ class DeviceCenterWindow(QMainWindow):
         )
         layout.addWidget(self._overview_metadata_shell)
         layout.addStretch(1)
-        self._tabs.addTab(tab, "Overview")
         return fields, metadata
 
     def _build_driver_tab(self) -> tuple[dict[str, QLabel], QPlainTextEdit]:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(14)
+        layout = self._create_scroll_tab("Driver")
 
         metrics_layout = QGridLayout()
         metrics_layout.setContentsMargins(0, 0, 0, 0)
@@ -690,13 +727,10 @@ class DeviceCenterWindow(QMainWindow):
         )
         layout.addWidget(self._driver_metadata_shell)
         layout.addStretch(1)
-        self._tabs.addTab(tab, "Driver")
         return fields, metadata
 
     def _build_capabilities_tab(self) -> dict[str, QLabel]:
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(14)
+        layout = self._create_scroll_tab("Capabilities")
 
         metrics_layout = QGridLayout()
         metrics_layout.setContentsMargins(0, 0, 0, 0)
@@ -741,7 +775,6 @@ class DeviceCenterWindow(QMainWindow):
         fields.update(transport_fields)
         fields.update(feature_fields)
         layout.addStretch(1)
-        self._tabs.addTab(tab, "Capabilities")
         return fields
 
     def _build_events_tab(self) -> None:
@@ -831,6 +864,21 @@ class DeviceCenterWindow(QMainWindow):
         layout.addWidget(value)
         return shell, value
 
+    def _create_scroll_tab(self, title: str) -> QVBoxLayout:
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 12, 0)
+        layout.setSpacing(14)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("inspectorScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        self._tabs.addTab(scroll, title)
+        return layout
+
     def _overview_section_title(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setObjectName("overviewSectionTitle")
@@ -864,23 +912,31 @@ class DeviceCenterWindow(QMainWindow):
 
     def _update_content_state(self) -> None:
         visible_rows = self._device_proxy.rowCount()
-        self._content_frame.setVisible(visible_rows > 0)
-        self._empty_state_card.setVisible(visible_rows == 0)
+        self._table_frame.setVisible(visible_rows > 0)
+        self._inspector_frame.setVisible(visible_rows > 0)
+        self._directory_empty_state_card.setVisible(visible_rows == 0)
+        self._inspector_empty_state_card.setVisible(visible_rows == 0)
         self._update_overlay_geometry()
         if visible_rows > 0:
             return
         if not self._devices:
             if self._connected:
-                self._empty_label.setText(
+                self._directory_empty_label.setText(
                     "No recognized devices yet.\nWhen Inari detects printers or other supported hardware, they will appear here."
                 )
             else:
-                self._empty_label.setText(
+                self._directory_empty_label.setText(
                     "The tray cannot currently reach the local Inari API.\nReconnect the agent to load device information."
                 )
+            self._inspector_empty_label.setText(
+                "No device details are available while the directory is empty."
+            )
             return
-        self._empty_label.setText(
+        self._directory_empty_label.setText(
             "No devices match the current filters.\nTry clearing the search field or disabling a filter."
+        )
+        self._inspector_empty_label.setText(
+            "No device details are available for the current filters."
         )
 
     def _update_summary_label(self) -> None:
@@ -925,12 +981,11 @@ class DeviceCenterWindow(QMainWindow):
 
     def _refresh_toolbar_state(self) -> None:
         if self._busy_message:
-            self._set_chip(self._toolbar_status_chip, "Updating", tone="busy")
+            self._refresh_button.setText("Refreshing…")
+            self._refresh_button.setEnabled(False)
             return
-        if not self._connected:
-            self._set_chip(self._toolbar_status_chip, "Offline", tone="offline")
-            return
-        self._set_chip(self._toolbar_status_chip, "Live", tone="online")
+        self._refresh_button.setEnabled(True)
+        self._refresh_button.setText("Retry now" if not self._connected else "Refresh now")
 
     def _resolved_activity_status(self) -> tuple[str, str]:
         if self._status_note:
@@ -1007,12 +1062,13 @@ class DeviceCenterWindow(QMainWindow):
     def _configure_device_table(self) -> None:
         self._configure_table(self._device_table, compact=False, row_height=38)
         header = self._device_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setMinimumSectionSize(64)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self._device_table.setColumnWidth(0, 260)
         self._device_table.setColumnWidth(3, 220)
 
     def _configure_events_table(self) -> None:
@@ -1048,6 +1104,9 @@ class DeviceCenterWindow(QMainWindow):
 
     def _emit_selection_changed(self, *_: object) -> None:
         if self._suppress_selection_signal:
+            return
+        if self._device_proxy.rowCount() == 0:
+            self.selection_changed.emit(None)
             return
         selection_model = self._device_table.selectionModel()
         if selection_model is None:
@@ -1191,6 +1250,8 @@ class DeviceCenterWindow(QMainWindow):
         return device.id
 
     def _selected_device_id(self) -> str | None:
+        if self._device_proxy.rowCount() == 0:
+            return None
         selection_model = self._device_table.selectionModel()
         if selection_model is None:
             return None

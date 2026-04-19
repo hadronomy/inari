@@ -28,7 +28,7 @@ from inari.runtime.execution import (
     PrinterOperationExecutor,
     RuntimeJobExecutor,
 )
-from inari.runtime.models import JobRecord, JobState
+from inari.runtime.models import JobRecord, JobState, build_device_id
 from inari.runtime.repositories import DeviceRepository, JobRepository
 from inari.runtime.services import DeviceCatalog, JobService
 from inari.runtime.store import RuntimeStore
@@ -107,6 +107,43 @@ class FakePrinterDriver(PrinterDriver):
         return PrintJobResult(
             printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4
         )
+
+
+@pytest.mark.anyio
+async def test_discovery_ignores_timestamp_only_device_changes(
+    tmp_path: Path,
+) -> None:
+    printer = PrinterDevice(
+        name="OneNote (Desktop)",
+        driver_key=FakePrinterDriver.metadata.key,
+        is_default=False,
+        preferred_transport=PrinterTransport.TEXT,
+        capabilities=PrinterCapabilities(
+            raw=False, text=True, documents=True, cash_drawer=False
+        ),
+        metadata={"source": "windows_spooler", "queue_name": "OneNote (Desktop)"},
+    )
+    driver = FakePrinterDriver(devices=(printer,))
+    registry = DriverRegistry(drivers=(driver,))
+    store = RuntimeStore(tmp_path / "runtime.sqlite3")
+    store.initialize()
+    repository = DeviceRepository(store)
+    discovery = DiscoveryCoordinator(
+        driver_registry=registry,
+        device_repository=repository,
+        event_hub=EventHub(),
+    )
+    device_id = build_device_id(
+        kind=DeviceKind.PRINTER,
+        driver_key=printer.driver_key,
+        name=printer.name,
+    )
+
+    await discovery.sync_once()
+    await discovery.sync_once()
+
+    events = repository.list_events(device_id, limit=10)
+    assert [event.event_type for event in events] == ["device.connected"]
 
 
 @pytest.mark.anyio
