@@ -324,64 +324,63 @@ Example config:
 
 config_version = 1
 
-[server]
+[agent]
+mode = "standalone"
+
+[api]
 host = "127.0.0.1"
 port = 7310
-trusted_hosts = ["127.0.0.1", "localhost"]
+allowed_hosts = ["127.0.0.1", "localhost"]
 
-[cors]
+[api.cors]
 allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
 
 [logging]
 level = "INFO"
 
-[paths]
+[storage]
 profile = "auto"
 
-[printing]
+[devices.printing]
 default_transport = "auto"
-html_enabled = true
+enable_html = true
 
-[[printing.network_printers]]
+[[devices.printing.printers]]
 name = "Kitchen Receipt Printer"
 host = "192.168.1.40"
 port = 9100
-preferred_transport = "raw"
+transport = "raw"
 cash_drawer = true
 text_enabled = true
 
-[security]
-gateway_mode = "standalone"
-gateway_exposure = "loopback"
+[auth.local]
 allow_loopback_bootstrap = true
-https_redirect_enabled = true
-secret_store_service_name = "inari"
-
-[security.local_tokens]
-ttl_seconds = 3600
+token_ttl = "1h"
 audience = "inari.local"
 
-[gateway]
-auth_mode = "controller"
-certificate_mode = "controller"
-edge_provider = "direct"
-mutual_tls_mode = "optional"
-trust_client_ca = true
+[controller]
+auth_provider = "controller"
+edge_profile = "direct"
+mtls_mode = "optional"
+trust_ca_bundle = true
 
-[gateway.zitadel]
+[auth.zitadel]
 assertion_algorithm = "RS256"
 requested_scopes = ["openid"]
 
-[gateway.step_ca]
+[certificates]
+provider = "controller"
+
+[certificates.step_ca]
 requested_sans = []
 ```
 
-For managed deployments, `mutual_tls_mode = "optional"` is the recommended starting posture.
+For managed deployments, `mtls_mode = "optional"` is the recommended starting posture.
 That keeps first enrollment workable before a client certificate exists, while allowing the
 agent and controller edge to tighten to required mTLS once a managed certificate has been
 issued.
 
-`[paths] profile` controls how unset storage paths are derived:
+`[storage] profile` controls how unset storage paths are derived:
 
 - `auto`: use development paths inside a source checkout, otherwise use production OS defaults
 - `development`: force repo-local paths like `./logs`, `./tmp`, and `./data`
@@ -399,7 +398,7 @@ You can still override any specific path explicitly with:
 [logging]
 directory = "/custom/logs"
 
-[paths]
+[storage]
 profile = "production"
 data_dir = "/srv/inari"
 temp_dir = "/srv/inari/tmp"

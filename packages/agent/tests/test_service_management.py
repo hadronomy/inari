@@ -150,7 +150,7 @@ def test_cli_config_write_default_omits_schema_header(tmp_path) -> None:
     assert result.exit_code == 0, result.output
     content = target_path.read_text(encoding="utf-8")
     assert not content.startswith("#:schema")
-    assert "[paths]" in content
+    assert "[storage]" in content
     assert 'profile = "production"' in content
     assert '# profile = "production"' not in content
 

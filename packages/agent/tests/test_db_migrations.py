@@ -127,7 +127,7 @@ def _create_legacy_database(database_path: Path) -> Path:
 def _write_config(tmp_path: Path) -> Path:
     config_path = tmp_path / "inari.toml"
     config_path.write_text(
-        '[paths]\ndata_dir = "."\nruntime_database = "./runtime.sqlite3"\n',
+        '[storage]\ndata_dir = "."\ndatabase_path = "./runtime.sqlite3"\n',
         encoding="utf-8",
     )
     return config_path

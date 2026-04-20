@@ -5,6 +5,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from inari.config import (
     AgentSettings,
@@ -17,37 +18,48 @@ from inari.config_paths import resolve_default_path_bundle
 from inari.security.models import GatewayExposure, GatewayMode
 
 
-def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
+def test_load_settings_reads_new_nested_toml_shape(tmp_path: Path) -> None:
     config_path = tmp_path / "inari.toml"
     config_path.write_text(
         textwrap.dedent(
             """
             config_version = 1
 
-            [server]
+            [agent]
+            mode = "managed"
+
+            [api]
             host = "0.0.0.0"
             port = 8410
-            trusted_hosts = ["agent.local", "localhost"]
+            allowed_hosts = ["agent.local", "localhost"]
+            exposure = "lan"
 
             [logging]
             level = "DEBUG"
             directory = "./runtime/logs"
 
-            [paths]
+            [storage]
             profile = "production"
             data_dir = "./runtime/data"
             temp_dir = "./runtime/tmp"
-            runtime_database = "./runtime/data/agent.sqlite3"
+            database_path = "./runtime/data/agent.sqlite3"
             security_state_dir = "./runtime/security"
 
-            [printing]
-            default_printer_name = "Kitchen Printer"
+            [devices.printing]
+            default_printer = "Kitchen Printer"
             default_transport = "raw"
-            html_enabled = false
+            enable_html = false
 
-            [gateway]
+            [controller]
             base_url = "https://controller.example.com"
-            auth_mode = "zitadel_service_account"
+            auth_provider = "zitadel_service_account"
+            mtls_mode = "required"
+
+            [controller.sync]
+            status_interval = "45s"
+
+            [controller.reconnect]
+            initial_delay = "2500ms"
             """
         ).strip(),
         encoding="utf-8",
@@ -58,6 +70,8 @@ def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
     assert settings.host == "0.0.0.0"
     assert settings.port == 8410
     assert settings.path_profile == "production"
+    assert settings.gateway_mode.value == "managed"
+    assert settings.gateway_exposure.value == "lan"
     assert settings.trusted_hosts == ["agent.local", "localhost"]
     assert settings.log_level == "DEBUG"
     assert settings.data_dir == (tmp_path / "runtime/data").resolve()
@@ -73,6 +87,28 @@ def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
     assert settings.html_print_enabled is False
     assert settings.upstream_base_url == "https://controller.example.com"
     assert settings.upstream_auth_mode.value == "zitadel_service_account"
+    assert settings.upstream_mutual_tls_mode.value == "required"
+    assert settings.gateway_sync_interval_seconds == 45.0
+    assert settings.gateway_reconnect_delay_seconds == 2.5
+
+
+def test_load_settings_rejects_legacy_gateway_shaped_toml(tmp_path: Path) -> None:
+    config_path = tmp_path / "inari.toml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            [server]
+            port = 8410
+
+            [gateway]
+            base_url = "https://controller.example.com"
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_settings(config_path=config_path, environ={})
 
 
 def test_load_settings_derives_runtime_paths_from_data_dir(tmp_path: Path) -> None:
@@ -80,7 +116,7 @@ def test_load_settings_derives_runtime_paths_from_data_dir(tmp_path: Path) -> No
     config_path.write_text(
         textwrap.dedent(
             """
-            [paths]
+            [storage]
             data_dir = "./state"
             """
         ).strip(),
@@ -102,23 +138,23 @@ def test_load_settings_reads_network_printers_from_toml(tmp_path: Path) -> None:
     config_path.write_text(
         textwrap.dedent(
             """
-            [printing]
+            [devices.printing]
             default_transport = "auto"
 
-            [[printing.network_printers]]
+            [[devices.printing.printers]]
             name = "Kitchen LAN Printer"
             host = "192.168.1.40"
             port = 9100
-            is_default = true
-            preferred_transport = "raw"
+            default = true
+            transport = "raw"
             cash_drawer = true
             text_enabled = true
 
-            [[printing.network_printers]]
+            [[devices.printing.printers]]
             name = "Office Label Printer"
             host = "192.168.1.41"
             port = 9200
-            preferred_transport = "document"
+            transport = "document"
             document_enabled = true
             """
         ).strip(),
@@ -174,8 +210,8 @@ def test_load_settings_merges_local_override_file(tmp_path: Path) -> None:
             [logging]
             level = "INFO"
 
-            [gateway.sync]
-            reconnect_delay_seconds = 5.0
+            [controller.reconnect]
+            initial_delay = "5s"
             """
         ).strip(),
         encoding="utf-8",
@@ -186,8 +222,8 @@ def test_load_settings_merges_local_override_file(tmp_path: Path) -> None:
             [logging]
             level = "DEBUG"
 
-            [gateway.sync]
-            reconnect_delay_seconds = 2.5
+            [controller.reconnect]
+            initial_delay = "2500ms"
             """
         ).strip(),
         encoding="utf-8",
@@ -207,8 +243,8 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
             [logging]
             level = "INFO"
 
-            [printing]
-            default_printer_name = "Kitchen Printer"
+            [devices.printing]
+            default_printer = "Kitchen Printer"
             """
         ).strip(),
         encoding="utf-8",
@@ -226,39 +262,6 @@ def test_load_settings_uses_env_as_final_override_layer(tmp_path: Path) -> None:
     assert settings.log_level == "DEBUG"
     assert settings.default_printer_name == "Bar Printer"
     assert settings.trusted_hosts == ["127.0.0.1", "localhost"]
-
-
-@pytest.mark.parametrize("legacy_field", ["bootstrap_token", "enrollment_code"])
-def test_load_settings_accepts_legacy_gateway_bootstrap_field_names(
-    tmp_path: Path, legacy_field: str
-) -> None:
-    config_path = tmp_path / "inari.toml"
-    config_path.write_text(
-        textwrap.dedent(
-            f"""
-            [gateway.bootstrap]
-            {legacy_field} = "legacy-bootstrap"
-            """
-        ).strip(),
-        encoding="utf-8",
-    )
-
-    settings = load_settings(config_path=config_path, environ={})
-
-    assert settings.upstream_enrollment_token == "legacy-bootstrap"
-
-
-@pytest.mark.parametrize(
-    "env_name",
-    [
-        "INARI_UPSTREAM_BOOTSTRAP_TOKEN",
-        "INARI_UPSTREAM_ENROLLMENT_CODE",
-    ],
-)
-def test_load_settings_maps_legacy_bootstrap_env_names(env_name: str) -> None:
-    settings = load_settings(environ={env_name: "legacy-env-bootstrap"})
-
-    assert settings.upstream_enrollment_token == "legacy-env-bootstrap"
 
 
 def test_load_settings_uses_development_defaults_inside_workspace(
@@ -306,7 +309,8 @@ def test_generate_taplo_schema_is_draft4_compatible() -> None:
 
     assert schema["$schema"] == "http://json-schema.org/draft-04/schema#"
     assert "properties" in schema
-    assert "server" in schema["properties"]
+    assert "agent" in schema["properties"]
+    assert "api" in schema["properties"]
     assert "$defs" not in json.dumps(schema)
 
 
@@ -314,17 +318,25 @@ def test_render_example_toml_includes_schema_header_and_sections() -> None:
     rendered = render_example_toml()
 
     assert "#:schema ./schemas/inari-config.schema.json" in rendered
-    assert "[server]" in rendered
-    assert "[paths]" in rendered
-    assert "[gateway.sync]" in rendered
+    assert "[agent]" in rendered
+    assert "[api]" in rendered
+    assert "[api.cors]" in rendered
+    assert "[storage]" in rendered
+    assert "[devices.printing]" in rendered
+    assert "[runtime.jobs.retry]" in rendered
+    assert "[auth.local]" in rendered
+    assert "[controller.queue]" in rendered
+    assert "[transport.zenoh]" in rendered
+    assert "[certificates.step_ca]" in rendered
+    assert "[server]" not in rendered
+    assert "[paths]" not in rendered
+    assert "[security]" not in rendered
+    assert "[gateway]" not in rendered
     assert "\nconfig_version = 1\n" in rendered
-    assert '# profile = "auto"' in rendered
-    assert "[security.tls]" in rendered
-    assert "[runtime]" not in rendered
+    assert '# profile = "production"' in rendered
     assert "network_printers = []" not in rendered
-    assert "# [[printing.network_printers]]" in rendered
+    assert "# [[devices.printing.printers]]" in rendered
     assert "Uncomment only the settings you want to override." in rendered
-    assert "# Default:" not in rendered
     assert "testserver" not in rendered
     assert '# enrollment_token = "enrollment-token"' in rendered
     assert "bootstrap_token" not in rendered

@@ -8,19 +8,38 @@
 # Schema version for this TOML format.
 config_version = 1
 
-# HTTP API binding and host filtering.
-[server]
+# Agent-wide deployment mode and identity-level behavior.
+[agent]
+# Run purely local (`standalone`) or connect to an upstream controller (`managed`).
+# mode = "standalone"
+
+# Local API listener and exposure settings.
+# This is the browser, tray, and local-operator boundary.
+[api]
 # Bind host for the local HTTP API.
 # host = "127.0.0.1"
 # Bind port for the local HTTP API.
 # port = 7310
 # Allowed Host headers for incoming requests.
-# trusted_hosts = ["127.0.0.1", "localhost"]
+# allowed_hosts = ["127.0.0.1", "localhost"]
+# Expose the API only on loopback or to the LAN.
+# exposure = "loopback"
+# Redirect HTTP to HTTPS when LAN TLS is enabled.
+# https_redirect = true
 
 # Browser access policy for local UI clients such as Odoo or the tray.
-[cors]
+[api.cors]
 # Browser origins allowed to call the local API.
 # allowed_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
+
+# Inbound TLS files for LAN exposure. Loopback-only deployments usually leave these unset.
+[api.tls]
+# PEM certificate file presented by the local API.
+# cert_path = "./certs/agent.crt"
+# Private key for the local API certificate.
+# key_path = "./certs/agent.key"
+# Optional custom CA bundle trusted by the agent.
+# ca_path = "./certs/ca.crt"
 
 # Logging verbosity and log file location.
 [logging]
@@ -29,35 +48,39 @@ config_version = 1
 # Directory for rotated agent logs.
 # directory = "./logs"
 
-# Filesystem locations for runtime state. Leave these commented to use OS-specific defaults.
-[paths]
-# Choose development or production path defaults. `auto` detects based on the working directory.
-# profile = "auto"
+# Filesystem locations and local state storage.
+# Leave these commented to use the platform defaults.
+[storage]
+# Choose development or production path defaults.
+# `production` is the recommended explicit operator setting.
+# profile = "production"
 # Base directory for runtime state files.
 # data_dir = "./data"
 # Directory for temporary files.
 # temp_dir = "./tmp"
 # SQLite database file path.
-# runtime_database = "./data/inari.sqlite3"
+# database_path = "./data/inari.sqlite3"
 # Directory for identities, enrollment state, and fallback local secrets.
 # security_state_dir = "./data/security"
+# OS credential store namespace used by the agent.
+# secret_store_service_name = "inari"
 
 # Default printer behavior and optional network printer definitions.
-[printing]
-# Preferred printer when jobs do not target a specific device.
-# default_printer_name = "Kitchen Printer"
+[devices.printing]
+# Preferred printer label when jobs do not target a specific device.
+# default_printer = "Kitchen Printer"
 # Default transport strategy when a driver supports more than one mode.
 # default_transport = "auto"
 # Allow HTML receipt/document rendering.
-# html_enabled = true
+# enable_html = true
 
 # Repeat this block for each raw TCP or receipt printer that should be managed directly by the agent.
-# [[printing.network_printers]]
+# [[devices.printing.printers]]
 # name = "Kitchen LAN Printer"
 # host = "192.168.1.40"
 # port = 9100
-# is_default = false
-# preferred_transport = "raw"
+# default = false
+# transport = "raw"
 # cash_drawer = true
 # text_enabled = false
 # document_enabled = false
@@ -66,121 +89,53 @@ config_version = 1
 # Device discovery cadence.
 [runtime.discovery]
 # How often the agent refreshes device discovery.
-# poll_interval_seconds = 3.0
+# interval = "3s"
 
 # Job scheduler tuning.
 [runtime.scheduler]
 # How often the scheduler looks for runnable jobs.
-# poll_interval_seconds = 0.5
+# interval = "500ms"
 # Maximum number of jobs leased per scheduling pass.
 # batch_size = 32
 
-# Job execution leases, retries, and timeouts.
-[runtime.jobs]
+# Job retry policy.
+[runtime.jobs.retry]
 # Maximum attempts before a job is marked failed.
 # max_attempts = 3
 # Initial retry delay after a failed job attempt.
-# retry_base_delay_seconds = 2
+# base_delay = "2s"
 # Upper bound for exponential retry delays.
-# retry_max_delay_seconds = 30
-# How long a dispatch lease is held before another worker may reclaim it.
-# dispatch_lease_seconds = 15
-# How long a worker execution lease remains valid without a heartbeat.
-# execution_lease_seconds = 30
-# How often active workers refresh their job lease.
-# heartbeat_interval_seconds = 5.0
-# Hard timeout for a single job execution.
-# execution_timeout_seconds = 60.0
-# How often the agent scans for expired leases.
-# lease_recovery_interval_seconds = 5.0
+# max_delay = "30s"
 
-# Local API exposure and local-auth defaults.
-[security]
-# Run purely local (`standalone`) or connect to an upstream controller (`managed`).
-# gateway_mode = "standalone"
-# Expose the API only on loopback or to the LAN.
-# gateway_exposure = "loopback"
+# Job lease, heartbeat, and recovery tuning.
+[runtime.jobs.lease]
+# How long a dispatch lease is held before another worker may reclaim it.
+# dispatch_ttl = "15s"
+# How long a worker execution lease remains valid without a heartbeat.
+# execution_ttl = "30s"
+# How often active workers refresh their job lease.
+# heartbeat_interval = "5s"
+# How often the agent scans for expired leases.
+# recovery_interval = "5s"
+
+# Job execution timeout policy.
+[runtime.jobs.execution]
+# Hard timeout for a single job execution.
+# timeout = "60s"
+
+# Local auth settings for trusted loopback clients such as the tray.
+[auth.local]
 # Allow local bootstrap token minting for trusted loopback clients.
 # allow_loopback_bootstrap = true
-# Redirect HTTP to HTTPS when LAN TLS is enabled.
-# https_redirect_enabled = true
-# OS credential store namespace used by the agent.
-# secret_store_service_name = "inari"
-
-# Short-lived tokens issued to local clients like the tray.
-[security.local_tokens]
-# Lifetime of locally issued bearer tokens in seconds.
-# ttl_seconds = 3600
+# Lifetime of locally issued bearer tokens.
+# token_ttl = "1h"
 # Audience claim for locally issued tokens.
 # audience = "inari.local"
 # Issuer claim for locally issued tokens.
 # issuer = "inari.local"
 
-# Inbound TLS files for LAN exposure. Loopback-only deployments usually leave these unset.
-[security.tls]
-# PEM certificate file presented by the local API.
-# cert_path = "./certs/agent.crt"
-# Private key for the local API certificate.
-# key_path = "./certs/agent.key"
-# Optional custom CA bundle trusted by the agent.
-# ca_path = "./certs/ca.crt"
-
-# Managed-mode controller connectivity.
-# Enrollment stays on HTTPS, while the steady-state managed data plane uses Zenoh.
-[gateway]
-# Base URL for the external controller.
-# base_url = "https://controller.example.com"
-# Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.
-# enrollment_url = "https://bootstrap.controller.example.com/api/inari/enroll"
-# How the agent authenticates to the controller.
-# auth_mode = "controller"
-# How the agent obtains and refreshes client certificates.
-# certificate_mode = "controller"
-# Controller edge layout. `caddy` enables stricter profile validation.
-# edge_provider = "direct"
-# Whether upstream client-certificate authentication is disabled, optional, or required.
-# Recommended production posture: keep this `optional` for bootstrap, then let the connection harden to required once a managed client certificate has been issued.
-# mutual_tls_mode = "optional"
-# Trust the managed CA bundle for outbound TLS validation.
-# trust_client_ca = true
-
-# Bootstrap material used only for first enrollment.
-# Use a single short-lived controller-issued enrollment token for the initial managed enrollment call.
-[gateway.bootstrap]
-# Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.
-# enrollment_token = "enrollment-token"
-
-# Managed-mode publication cadence, reconnect timing, and backoff tuning.
-[gateway.sync]
-# How often the latest gateway status is published onto the managed data plane.
-# interval_seconds = 30.0
-# Base reconnect delay after managed data-plane disconnects.
-# reconnect_delay_seconds = 5.0
-# Maximum queued outbound messages sent in one batch.
-# outbox_batch_size = 128
-# How often the agent flushes queued runtime events and command results onto Zenoh.
-# outbox_poll_interval_seconds = 0.5
-# Starting backoff value for repeated upstream failures.
-# backoff_base_seconds = 1.0
-# Maximum backoff value for repeated upstream failures.
-# backoff_max_seconds = 60.0
-
-# Zenoh data-plane overrides and local fallback settings.
-# The controller normally returns these details during enrollment.
-[gateway.zenoh]
-# Zenoh session mode for the agent.
-# session_mode = "client"
-# Explicit Zenoh router endpoints used when you want to override the controller-provided endpoints.
-# connect_endpoints = ["tls/router1.example.com:7447", "tls/router2.example.com:7447"]
-# Explicit Zenoh namespace override for this agent's managed keyspace.
-# namespace = "iot/v1/agents/agt_123"
-# Timeout used when querying controller-side command history during reconnect recovery.
-# query_timeout_seconds = 10.0
-# Close Zenoh links when the presented client certificate expires.
-# close_link_on_expiration = true
-
-# ZITADEL service-account settings for controller authentication.
-[gateway.zitadel]
+# ZITADEL service-account settings used when managed enrollment is authorized through ZITADEL.
+[auth.zitadel]
 # Base URL for your ZITADEL instance.
 # base_url = "https://zitadel.example.com"
 # Explicit token endpoint if it differs from the default instance URL.
@@ -200,12 +155,81 @@ config_version = 1
 # Scopes requested from ZITADEL.
 # requested_scopes = ["openid"]
 # How early to refresh ZITADEL access tokens.
-# token_refresh_skew_seconds = 120
+# token_refresh_skew = "120s"
+
+# Managed controller settings.
+# Enrollment stays on HTTPS, while the steady-state managed data plane uses Zenoh.
+[controller]
+# Base URL for the external controller.
+# base_url = "https://controller.example.com"
+# Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.
+# enrollment_url = "https://bootstrap.controller.example.com/api/inari/enroll"
+# How the agent authenticates to the controller during enrollment.
+# auth_provider = "controller"
+# Controller edge layout. `caddy` enables stricter profile validation.
+# edge_profile = "direct"
+# Whether upstream client-certificate authentication is disabled, optional, or required.
+# Recommended production posture: keep this `optional` for bootstrap, then let the connection harden to required once a managed client certificate has been issued.
+# mtls_mode = "optional"
+# Trust the managed CA bundle for outbound TLS validation.
+# trust_ca_bundle = true
+
+# Bootstrap material used only for first enrollment.
+# Use a single short-lived controller-issued enrollment token for the initial managed enrollment call.
+[controller.bootstrap]
+# Short-lived controller-issued bootstrap credential used as a Bearer token during enrollment.
+# enrollment_token = "enrollment-token"
+
+# Managed status publication cadence.
+[controller.sync]
+# How often the latest gateway status is published onto the managed data plane.
+# status_interval = "30s"
+
+# Managed outbox publication tuning.
+[controller.queue]
+# Maximum queued outbound messages sent in one batch.
+# batch_size = 128
+# How often the agent flushes queued runtime events and command results onto Zenoh.
+# poll_interval = "500ms"
+
+# Managed reconnect timing.
+[controller.reconnect]
+# Base reconnect delay after managed data-plane disconnects.
+# initial_delay = "5s"
+
+# Managed failure backoff tuning.
+[controller.backoff]
+# Starting backoff value for repeated upstream failures.
+# base = "1s"
+# Maximum backoff value for repeated upstream failures.
+# max = "60s"
+
+# Managed reconnect-recovery behavior.
+[controller.recovery]
+# Timeout used when querying controller-side command history during reconnect recovery.
+# query_timeout = "10s"
+
+# Zenoh data-plane overrides and local fallback settings.
+# The controller normally returns these details during enrollment.
+[transport.zenoh]
+# Zenoh session mode for the agent.
+# session_mode = "client"
+# Explicit Zenoh router endpoints used when you want to override the controller-provided endpoints.
+# connect_endpoints = ["tls/router1.example.com:7447", "tls/router2.example.com:7447"]
+# Explicit Zenoh namespace override for this agent's managed keyspace.
+# namespace = "iot/v1/agents/agt_123"
+# Close Zenoh links when the presented client certificate expires.
+# close_link_on_cert_expiration = true
+
+# Managed certificate provider selection.
+[certificates]
+# How the agent obtains and refreshes managed client certificates.
+# provider = "controller"
 
 # step-ca certificate bootstrap and renewal settings.
 # In the normal managed flow, the controller returns these values during enrollment.
 # Leave them commented unless you want explicit local overrides or fallback knowledge of the CA.
-[gateway.step_ca]
+[certificates.step_ca]
 # Base URL for the private step-ca instance when you want to override the controller-provided CA URL.
 # url = "https://ca.example.com"
 # Explicit sign endpoint override when it cannot be derived from `url` or the controller enrollment response.
@@ -217,6 +241,6 @@ config_version = 1
 # Additional SANs requested for the managed client certificate beyond the agent's default identity.
 # requested_sans = []
 # How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.
-# certificate_renewal_skew_seconds = 3600
+# renewal_skew = "1h"
 # How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.
-# lifecycle_poll_interval_seconds = 60.0
+# lifecycle_interval = "60s"

@@ -18,7 +18,7 @@ def test_package_entrypoint_invokes_main(mocker) -> None:
 def test_cli_serve_accepts_explicit_config_path(tmp_path, mocker) -> None:
     config_path = tmp_path / "inari.toml"
     config_path.write_text(
-        "[server]\nport = 8123\n",
+        "[api]\nport = 8123\n",
         encoding="utf-8",
     )
 
