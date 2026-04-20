@@ -415,7 +415,9 @@ async def test_submit_device_command_returns_queued_job_resource(mocker) -> None
     assert payload["job"]["kind"] == "device_command"
     assert payload["job"]["operation"] == "cut_paper"
     assert job_service.submitted_command_operation is not None
-    assert cast(Any, job_service.submitted_command_operation).command.kind == "cut_paper"
+    assert (
+        cast(Any, job_service.submitted_command_operation).command.kind == "cut_paper"
+    )
 
 
 @pytest.mark.anyio

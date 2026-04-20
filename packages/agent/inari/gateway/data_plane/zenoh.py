@@ -130,7 +130,8 @@ class ZenohGatewayTransport:
         last_applied_controller_sequence: int | None,
     ) -> tuple[ControllerCommandMessage, ...]:
         selector = self._history_selector(
-            enrollment, last_applied_controller_sequence=last_applied_controller_sequence
+            enrollment,
+            last_applied_controller_sequence=last_applied_controller_sequence,
         )
         replies = await asyncio.to_thread(self._collect_replies, selector)
         commands: list[ControllerCommandMessage] = []
@@ -147,9 +148,7 @@ class ZenohGatewayTransport:
         unique_by_command: dict[str, ControllerCommandMessage] = {}
         for command in commands:
             unique_by_command[command.command_id] = command
-        return tuple(
-            sorted(unique_by_command.values(), key=lambda item: item.sequence)
-        )
+        return tuple(sorted(unique_by_command.values(), key=lambda item: item.sequence))
 
     def _collect_replies(self, selector: str) -> list[Any]:
         session = self._session
@@ -160,9 +159,7 @@ class ZenohGatewayTransport:
         )
         return list(handler)
 
-    async def _ensure_session_locked(
-        self, enrollment: GatewayEnrollmentRecord
-    ) -> None:
+    async def _ensure_session_locked(self, enrollment: GatewayEnrollmentRecord) -> None:
         fingerprint = self._session_fingerprint(enrollment)
         if self._session is not None and self._fingerprint == fingerprint:
             return
@@ -227,7 +224,9 @@ class ZenohGatewayTransport:
 
     def _build_config(self, enrollment: GatewayEnrollmentRecord):
         config = self._config_factory()
-        config.insert_json5("mode", json.dumps(enrollment.data_plane.session_mode.value))
+        config.insert_json5(
+            "mode", json.dumps(enrollment.data_plane.session_mode.value)
+        )
         config.insert_json5(
             "connect/endpoints",
             dump_json_payload(list(enrollment.data_plane.connect_endpoints)),
@@ -281,7 +280,9 @@ class ZenohGatewayTransport:
             str(cert_path) if cert_path is not None else None,
             str(key_path) if key_path is not None else None,
             str(ca_path) if ca_path is not None else None,
-            str(self.settings.tls_ca_path) if self.settings.tls_ca_path is not None else None,
+            str(self.settings.tls_ca_path)
+            if self.settings.tls_ca_path is not None
+            else None,
         )
 
 

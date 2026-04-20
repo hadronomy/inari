@@ -258,7 +258,9 @@ def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-def _protocol_print_job_request(payload: ControllerSubmitPrintJobPayload) -> PrintJobRequest:
+def _protocol_print_job_request(
+    payload: ControllerSubmitPrintJobPayload,
+) -> PrintJobRequest:
     return PrintJobRequest.model_validate(
         {
             "content": payload.content.model_dump(mode="json"),

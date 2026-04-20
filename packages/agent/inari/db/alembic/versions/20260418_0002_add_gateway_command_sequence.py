@@ -31,8 +31,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "idx_gateway_inbound_sequence", table_name="gateway_inbound_commands"
-    )
+    op.drop_index("idx_gateway_inbound_sequence", table_name="gateway_inbound_commands")
     with op.batch_alter_table("gateway_inbound_commands") as batch_op:
         batch_op.drop_column("sequence")

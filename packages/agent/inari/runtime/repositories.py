@@ -611,9 +611,7 @@ def _row_to_job(row: RowMapping | Mapping[str, Any]) -> JobRecord:
     )
 
 
-def _row_to_job_attempt(
-    row: RowMapping | Mapping[str, Any]
-) -> JobAttemptRecord:
+def _row_to_job_attempt(row: RowMapping | Mapping[str, Any]) -> JobAttemptRecord:
     return JobAttemptRecord(
         id=int(row["id"]),
         job_id=str(row["job_id"]),
@@ -633,9 +631,7 @@ def _row_to_job_attempt(
     )
 
 
-def _row_to_device_event(
-    row: RowMapping | Mapping[str, Any]
-) -> DeviceEventRecord:
+def _row_to_device_event(row: RowMapping | Mapping[str, Any]) -> DeviceEventRecord:
     return DeviceEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["device_id"]),

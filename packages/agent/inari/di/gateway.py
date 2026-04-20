@@ -135,7 +135,9 @@ class GatewayProvider(Provider):
         return gateway_stack.snapshot_builder
 
     @provide
-    def enrollment_service(self, gateway_stack: GatewayStack) -> GatewayEnrollmentService:
+    def enrollment_service(
+        self, gateway_stack: GatewayStack
+    ) -> GatewayEnrollmentService:
         return gateway_stack.enrollment_service
 
     @provide

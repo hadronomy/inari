@@ -576,7 +576,9 @@ class DeviceCenterWindow(QMainWindow):
         self._set_field(
             self._capability_fields,
             "supported_transports",
-            "\n".join(supported_transport_labels) if supported_transport_labels else "—",
+            "\n".join(supported_transport_labels)
+            if supported_transport_labels
+            else "—",
         )
         self._set_field(
             self._capability_fields,
@@ -620,15 +622,9 @@ class DeviceCenterWindow(QMainWindow):
         metrics_layout.setColumnStretch(0, 1)
         metrics_layout.setColumnStretch(1, 1)
         state_card, state_value = self._build_metric_card("State")
-        default_card, default_value = self._build_metric_card(
-            "Default printer"
-        )
-        last_seen_card, last_seen_value = self._build_metric_card(
-            "Last detected"
-        )
-        observed_card, observed_value = self._build_metric_card(
-            "Last updated"
-        )
+        default_card, default_value = self._build_metric_card("Default printer")
+        last_seen_card, last_seen_value = self._build_metric_card("Last detected")
+        observed_card, observed_value = self._build_metric_card("Last updated")
         metrics_layout.addWidget(state_card, 0, 0)
         metrics_layout.addWidget(default_card, 0, 1)
         metrics_layout.addWidget(last_seen_card, 1, 0)
@@ -1018,7 +1014,9 @@ class DeviceCenterWindow(QMainWindow):
             self._refresh_button.setEnabled(False)
             return
         self._refresh_button.setEnabled(True)
-        self._refresh_button.setText("Retry now" if not self._connected else "Refresh now")
+        self._refresh_button.setText(
+            "Retry now" if not self._connected else "Refresh now"
+        )
 
     def _resolved_activity_status(self) -> tuple[str, str]:
         if self._status_note:

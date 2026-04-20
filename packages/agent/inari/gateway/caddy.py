@@ -62,9 +62,7 @@ def validate_caddy_profile(settings: AgentSettings) -> None:
         raise RuntimeError(
             "Caddy mTLS mode requires a managed client certificate flow."
         )
-    certificate_path = (
-        settings.resolved_security_state_dir / "upstream-client-cert.pem"
-    )
+    certificate_path = settings.resolved_security_state_dir / "upstream-client-cert.pem"
     if certificate_path.exists():
         return
     if settings.upstream_enrollment_url is None:

@@ -21,6 +21,7 @@ from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
 
 logger = logging.getLogger(__name__)
 
+
 class Win32PrintAPI(Protocol):
     PRINTER_ENUM_CONNECTIONS: int
     PRINTER_ENUM_LOCAL: int

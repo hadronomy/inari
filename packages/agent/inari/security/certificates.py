@@ -84,7 +84,9 @@ class CertificateLifecycleService:
         )
 
     def current_cert_chain(self) -> tuple[Path | None, Path | None, Path | None]:
-        certificate_path = self.certificate_path if self.certificate_path.exists() else None
+        certificate_path = (
+            self.certificate_path if self.certificate_path.exists() else None
+        )
         key_path = self.private_key_path if self.private_key_path.exists() else None
         ca_path = None
         if self.ca_path is not None and self.ca_path.exists():

@@ -25,6 +25,7 @@ from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
 
 logger = logging.getLogger(__name__)
 
+
 class CupsConnection(Protocol):
     def getPrinters(self) -> Mapping[str, Mapping[str, Any]]: ...
 

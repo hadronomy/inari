@@ -78,6 +78,8 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         gateway_supervisor=dependency_container.get(GatewaySupervisor),
         application_supervisor=dependency_container.get(ApplicationSupervisor),
     )
+
+
 @lru_cache(maxsize=1)
 def get_default_container() -> AgentContainer:
     return build_container(get_settings())

@@ -256,9 +256,7 @@ class GatewayRepository:
         return summary
 
 
-def _row_to_inbound(
-    row: RowMapping | Mapping[str, Any]
-) -> GatewayInboundCommandRecord:
+def _row_to_inbound(row: RowMapping | Mapping[str, Any]) -> GatewayInboundCommandRecord:
     return GatewayInboundCommandRecord(
         command_id=str(row["command_id"]),
         message_type=str(row["message_type"]),

@@ -85,9 +85,7 @@ class GatewayEnrollmentService:
             or ()
         )
         namespace = str(
-            data_plane_payload.get("namespace")
-            or self.settings.zenoh_namespace
-            or ""
+            data_plane_payload.get("namespace") or self.settings.zenoh_namespace or ""
         ).strip()
         if not connect_endpoints or not namespace:
             return None
@@ -206,8 +204,7 @@ class GatewayEnrollmentService:
                 status_code=502,
             )
         if (
-            self.settings.upstream_certificate_mode
-            is not UpstreamCertificateMode.NONE
+            self.settings.upstream_certificate_mode is not UpstreamCertificateMode.NONE
             and payload.certificate is None
         ):
             raise AgentError(
@@ -332,9 +329,7 @@ class GatewayEnrollmentService:
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
         )
 
-    def _resolve_connect_endpoints(
-        self, data_plane
-    ) -> tuple[str, ...]:
+    def _resolve_connect_endpoints(self, data_plane) -> tuple[str, ...]:
         if self.settings.zenoh_connect_endpoints:
             return tuple(self.settings.zenoh_connect_endpoints)
         endpoints = tuple(str(item) for item in data_plane.connect_endpoints)

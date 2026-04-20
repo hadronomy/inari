@@ -93,9 +93,7 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("controller", "queue"): ("Managed outbox publication tuning.",),
     ("controller", "reconnect"): ("Managed reconnect timing.",),
     ("controller", "backoff"): ("Managed failure backoff tuning.",),
-    ("controller", "recovery"): (
-        "Managed reconnect-recovery behavior.",
-    ),
+    ("controller", "recovery"): ("Managed reconnect-recovery behavior.",),
     ("transport", "zenoh"): (
         "Zenoh data-plane overrides and local fallback settings.",
         "The controller normally returns these details during enrollment.",
@@ -142,9 +140,7 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("devices", "printing", "default_transport"): (
         "Default transport strategy when a driver supports more than one mode.",
     ),
-    ("devices", "printing", "enable_html"): (
-        "Allow HTML receipt/document rendering.",
-    ),
+    ("devices", "printing", "enable_html"): ("Allow HTML receipt/document rendering.",),
     ("runtime", "discovery", "interval"): (
         "How often the agent refreshes device discovery.",
     ),
@@ -181,22 +177,12 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("auth", "local", "allow_loopback_bootstrap"): (
         "Allow local bootstrap token minting for trusted loopback clients.",
     ),
-    ("auth", "local", "token_ttl"): (
-        "Lifetime of locally issued bearer tokens.",
-    ),
-    ("auth", "local", "audience"): (
-        "Audience claim for locally issued tokens.",
-    ),
-    ("auth", "local", "issuer"): (
-        "Issuer claim for locally issued tokens.",
-    ),
-    ("api", "tls", "cert_path"): (
-        "PEM certificate file presented by the local API.",
-    ),
+    ("auth", "local", "token_ttl"): ("Lifetime of locally issued bearer tokens.",),
+    ("auth", "local", "audience"): ("Audience claim for locally issued tokens.",),
+    ("auth", "local", "issuer"): ("Issuer claim for locally issued tokens.",),
+    ("api", "tls", "cert_path"): ("PEM certificate file presented by the local API.",),
     ("api", "tls", "key_path"): ("Private key for the local API certificate.",),
-    ("api", "tls", "ca_path"): (
-        "Optional custom CA bundle trusted by the agent.",
-    ),
+    ("api", "tls", "ca_path"): ("Optional custom CA bundle trusted by the agent.",),
     ("controller", "base_url"): ("Base URL for the external controller.",),
     ("controller", "enrollment_url"): (
         "Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.",
@@ -400,7 +386,9 @@ ConfigDuration = Annotated[
 ]
 FloatDurationSeconds = Annotated[
     float,
-    BeforeValidator(lambda value: _parse_duration_seconds(value, field_name="duration")),
+    BeforeValidator(
+        lambda value: _parse_duration_seconds(value, field_name="duration")
+    ),
 ]
 IntegralDurationSeconds = Annotated[
     int,
@@ -654,9 +642,7 @@ class ControllerConfig(BaseModel):
         default_factory=ControllerReconnectConfig
     )
     backoff: ControllerBackoffConfig = Field(default_factory=ControllerBackoffConfig)
-    recovery: ControllerRecoveryConfig = Field(
-        default_factory=ControllerRecoveryConfig
-    )
+    recovery: ControllerRecoveryConfig = Field(default_factory=ControllerRecoveryConfig)
 
 
 class TransportZenohConfig(BaseModel):
@@ -690,9 +676,7 @@ class CertificatesConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     provider: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
-    step_ca: CertificatesStepCaConfig = Field(
-        default_factory=CertificatesStepCaConfig
-    )
+    step_ca: CertificatesStepCaConfig = Field(default_factory=CertificatesStepCaConfig)
 
 
 class AgentConfigFile(BaseModel):
@@ -1048,7 +1032,7 @@ class AgentSettings(BaseModel):
         "zitadel_requested_scopes",
         "step_ca_requested_sans",
         "zenoh_connect_endpoints",
-        mode="before"
+        mode="before",
     )
     @classmethod
     def normalize_list_values(cls, value: object) -> object:
@@ -1080,9 +1064,7 @@ class AgentSettings(BaseModel):
         self.runtime_database_path = self.runtime_database_path or (
             data_dir / "inari.sqlite3"
         )
-        self.security_state_dir = self.security_state_dir or (
-            data_dir / "security"
-        )
+        self.security_state_dir = self.security_state_dir or (data_dir / "security")
         return self
 
 
@@ -1177,9 +1159,7 @@ def generate_taplo_schema() -> dict[str, Any]:
     converted = _convert_schema_for_taplo(schema)
     converted["$schema"] = "http://json-schema.org/draft-04/schema#"
     converted.setdefault("title", "Inari Config")
-    converted.setdefault(
-        "description", "Schema for the Inari TOML configuration file."
-    )
+    converted.setdefault("description", "Schema for the Inari TOML configuration file.")
     return converted
 
 

@@ -297,42 +297,42 @@ def _database_path(temp_dir: Path) -> Path:
 def _snapshot_provider() -> GatewaySnapshotPayload:
     return GatewaySnapshotPayload.model_validate(
         {
-        "generated_at": utc_now().isoformat(),
-        "protocol": {
-            "version": GATEWAY_PROTOCOL_VERSION,
-            "supported_versions": [GATEWAY_PROTOCOL_VERSION],
-        },
-        "service": {"name": "Inari", "version": API_VERSION},
-        "security": {
-            "mode": "managed",
-            "exposure": "loopback",
-            "tls_required": False,
-            "edge_provider": "direct",
-            "certificate_mode": "controller",
-            "mutual_tls_mode": "disabled",
-            "mutual_tls_enabled": False,
-            "certificate_expires_at": None,
-        },
-        "runtime": {
-            "queue": {"total": 0},
-            "devices": {
-                "count": 0,
-                "online_count": 0,
-                "offline_count": 0,
-                "kind_counts": {},
-                "default_device_id": None,
-                "default_device_name": None,
+            "generated_at": utc_now().isoformat(),
+            "protocol": {
+                "version": GATEWAY_PROTOCOL_VERSION,
+                "supported_versions": [GATEWAY_PROTOCOL_VERSION],
             },
-        },
-        "capabilities": {
-            "supported_content_kinds": ["text"],
-            "supported_device_commands": ["cut_paper"],
-            "supported_controller_actions": ["jobs:create", "events:read"],
-            "features": ["status_publication", "zenoh_data_plane"],
-            "transport": "https+zenoh",
-            "client_certificate_present": False,
-        },
-        "observability": {},
+            "service": {"name": "Inari", "version": API_VERSION},
+            "security": {
+                "mode": "managed",
+                "exposure": "loopback",
+                "tls_required": False,
+                "edge_provider": "direct",
+                "certificate_mode": "controller",
+                "mutual_tls_mode": "disabled",
+                "mutual_tls_enabled": False,
+                "certificate_expires_at": None,
+            },
+            "runtime": {
+                "queue": {"total": 0},
+                "devices": {
+                    "count": 0,
+                    "online_count": 0,
+                    "offline_count": 0,
+                    "kind_counts": {},
+                    "default_device_id": None,
+                    "default_device_name": None,
+                },
+            },
+            "capabilities": {
+                "supported_content_kinds": ["text"],
+                "supported_device_commands": ["cut_paper"],
+                "supported_controller_actions": ["jobs:create", "events:read"],
+                "features": ["status_publication", "zenoh_data_plane"],
+                "transport": "https+zenoh",
+                "client_certificate_present": False,
+            },
+            "observability": {},
         }
     )
 

@@ -22,9 +22,7 @@ app = typer.Typer(
     help="Run the Inari service and manage its runtime database.",
 )
 db_app = typer.Typer(help="Inspect and upgrade the runtime database.")
-service_app = typer.Typer(
-    help="Install and manage the Inari as a platform service."
-)
+service_app = typer.Typer(help="Install and manage the Inari as a platform service.")
 config_app = typer.Typer(help="Generate and write agent configuration files.")
 app.add_typer(db_app, name="db")
 app.add_typer(service_app, name="service")

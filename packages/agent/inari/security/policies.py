@@ -45,8 +45,7 @@ class SecurityPolicyService:
             raise RuntimeError("Managed gateway mode requires an upstream base URL.")
         if (
             self.policy.mode is GatewayMode.MANAGED
-            and self.settings.upstream_certificate_mode
-            is UpstreamCertificateMode.NONE
+            and self.settings.upstream_certificate_mode is UpstreamCertificateMode.NONE
         ):
             raise RuntimeError(
                 "Managed gateway mode requires a certificate mode of 'controller' or 'step_ca' for the Zenoh data plane."

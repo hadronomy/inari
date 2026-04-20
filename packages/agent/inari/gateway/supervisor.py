@@ -48,9 +48,7 @@ class GatewaySupervisor:
             asyncio.create_task(
                 self._data_plane_loop(), name="inari-gateway-data-plane"
             ),
-            asyncio.create_task(
-                self._outbox_loop(), name="inari-gateway-outbox"
-            ),
+            asyncio.create_task(self._outbox_loop(), name="inari-gateway-outbox"),
             asyncio.create_task(
                 self.runtime_event_forwarder.run_forever(),
                 name="inari-gateway-runtime-forwarder",

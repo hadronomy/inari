@@ -242,18 +242,18 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
         snapshot_provider=_gateway_snapshot_payload,
         http_client_factory=_http_client_factory(
             FakeAsyncHttpClient(
-            response_payload=_enrollment_response_payload(
-                controller_actions=("jobs:create",),
-                certificate={
-                    "mode": "step_ca",
-                    "bootstrap": {
-                        "mode": "step_ca_ott",
-                        "ca_url": "https://step-ca.example.com",
-                        "root_fingerprint": "0123abcd",
-                        "ott": "ott_bootstrap_token",
+                response_payload=_enrollment_response_payload(
+                    controller_actions=("jobs:create",),
+                    certificate={
+                        "mode": "step_ca",
+                        "bootstrap": {
+                            "mode": "step_ca_ott",
+                            "ca_url": "https://step-ca.example.com",
+                            "root_fingerprint": "0123abcd",
+                            "ott": "ott_bootstrap_token",
+                        },
                     },
-                },
-            )
+                )
             )
         ),
     )
@@ -315,9 +315,9 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
         certificate_service=certificate_service,
         http_client_factory=_http_client_factory(
             StepCaHttpClient(
-            root_pem=ca_pem,
-            ca_key=ca_key,
-            certificate_service=certificate_service,
+                root_pem=ca_pem,
+                ca_key=ca_key,
+                certificate_service=certificate_service,
             )
         ),
     )
@@ -760,56 +760,56 @@ def _enrollment_record(
 def _gateway_snapshot_payload() -> GatewaySnapshotPayload:
     return GatewaySnapshotPayload.model_validate(
         {
-        "generated_at": "2026-04-13T00:00:00Z",
-        "protocol": {
-            "version": GATEWAY_PROTOCOL_VERSION,
-            "supported_versions": [GATEWAY_PROTOCOL_VERSION],
-        },
-        "service": {
-            "name": "Inari",
-            "version": API_VERSION,
-            "agent_id": "agt_test",
-            "key_id": "kid_test",
-        },
-        "security": {
-            "mode": "managed",
-            "exposure": "loopback",
-            "tls_required": False,
-            "edge_provider": "direct",
-            "certificate_mode": "controller",
-            "mutual_tls_mode": "disabled",
-            "mutual_tls_enabled": False,
-            "certificate_expires_at": None,
-        },
-        "runtime": {
-            "queue": {
-                "total": 0,
-                "queued": 0,
-                "dispatched": 0,
-                "running": 0,
-                "retry_scheduled": 0,
-                "succeeded": 0,
-                "failed": 0,
-                "cancelled": 0,
+            "generated_at": "2026-04-13T00:00:00Z",
+            "protocol": {
+                "version": GATEWAY_PROTOCOL_VERSION,
+                "supported_versions": [GATEWAY_PROTOCOL_VERSION],
             },
-            "devices": {
-                "count": 0,
-                "online_count": 0,
-                "offline_count": 0,
-                "kind_counts": {},
-                "default_device_id": None,
-                "default_device_name": None,
+            "service": {
+                "name": "Inari",
+                "version": API_VERSION,
+                "agent_id": "agt_test",
+                "key_id": "kid_test",
             },
-        },
-        "capabilities": {
-            "supported_content_kinds": ["text"],
-            "supported_device_commands": ["cut_paper"],
-            "supported_controller_actions": ["jobs:create", "events:read"],
-            "features": ["status_publication", "zenoh_data_plane"],
-            "transport": "https+zenoh",
-            "client_certificate_present": False,
-        },
-        "observability": {},
+            "security": {
+                "mode": "managed",
+                "exposure": "loopback",
+                "tls_required": False,
+                "edge_provider": "direct",
+                "certificate_mode": "controller",
+                "mutual_tls_mode": "disabled",
+                "mutual_tls_enabled": False,
+                "certificate_expires_at": None,
+            },
+            "runtime": {
+                "queue": {
+                    "total": 0,
+                    "queued": 0,
+                    "dispatched": 0,
+                    "running": 0,
+                    "retry_scheduled": 0,
+                    "succeeded": 0,
+                    "failed": 0,
+                    "cancelled": 0,
+                },
+                "devices": {
+                    "count": 0,
+                    "online_count": 0,
+                    "offline_count": 0,
+                    "kind_counts": {},
+                    "default_device_id": None,
+                    "default_device_name": None,
+                },
+            },
+            "capabilities": {
+                "supported_content_kinds": ["text"],
+                "supported_device_commands": ["cut_paper"],
+                "supported_controller_actions": ["jobs:create", "events:read"],
+                "features": ["status_publication", "zenoh_data_plane"],
+                "transport": "https+zenoh",
+                "client_certificate_present": False,
+            },
+            "observability": {},
         }
     )
 

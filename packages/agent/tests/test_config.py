@@ -127,8 +127,7 @@ def test_load_settings_derives_runtime_paths_from_data_dir(tmp_path: Path) -> No
 
     assert settings.data_dir == (tmp_path / "state").resolve()
     assert (
-        settings.runtime_database_path
-        == (tmp_path / "state/inari.sqlite3").resolve()
+        settings.runtime_database_path == (tmp_path / "state/inari.sqlite3").resolve()
     )
     assert settings.security_state_dir == (tmp_path / "state/security").resolve()
 
@@ -279,10 +278,7 @@ def test_load_settings_uses_development_defaults_inside_workspace(
     assert settings.data_dir == (tmp_path / "data").resolve()
     assert settings.log_dir == (tmp_path / "logs").resolve()
     assert settings.temp_dir == (tmp_path / "tmp").resolve()
-    assert (
-        settings.runtime_database_path
-        == (tmp_path / "data/inari.sqlite3").resolve()
-    )
+    assert settings.runtime_database_path == (tmp_path / "data/inari.sqlite3").resolve()
     assert settings.security_state_dir == (tmp_path / "data/security").resolve()
 
 

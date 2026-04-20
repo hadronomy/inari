@@ -51,7 +51,9 @@ def test_device_center_reuses_cached_device_events_until_marked_stale(
     controller._refresh_timer.stop()
     controller._coalesced_refresh_timer.stop()
 
-    controller._events_by_device_id["dev_printer"] = (_runtime_event("device.connected"),)
+    controller._events_by_device_id["dev_printer"] = (
+        _runtime_event("device.connected"),
+    )
 
     controller._load_device_events("dev_printer")
     assert client.device_event_requests == []

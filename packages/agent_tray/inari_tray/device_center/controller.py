@@ -157,11 +157,7 @@ class QtDeviceCenterController(QObject):
         was_connected = self._connected
         self._connected = snapshot.connected
         self._window.set_connection_state(snapshot)
-        if (
-            snapshot.connected
-            and not was_connected
-            and self._window.isVisible()
-        ):
+        if snapshot.connected and not was_connected and self._window.isVisible():
             if self._selected_device_id is not None:
                 self._stale_device_event_ids.add(self._selected_device_id)
             self._refresh_devices(force=True, reason="reconnect")
@@ -485,7 +481,9 @@ class QtDeviceCenterController(QObject):
             return self._events_by_device_id.get(event.resource_id, ())
         current_events = self._events_by_device_id.get(event.resource_id, ())
         deduped = [
-            existing for existing in current_events if existing.sequence != event.sequence
+            existing
+            for existing in current_events
+            if existing.sequence != event.sequence
         ]
         updated = tuple([event, *deduped][:DEFAULT_EVENT_LIMIT])
         self._events_by_device_id[event.resource_id] = updated
