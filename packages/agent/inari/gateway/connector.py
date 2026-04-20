@@ -4,7 +4,6 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
 
 from ..config import AgentSettings
 from ..runtime.models import utc_now
@@ -42,7 +41,7 @@ class GatewayConnector:
         settings: AgentSettings,
         enrollment_service: GatewayEnrollmentService,
         certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None,
-        snapshot_provider: Callable[[], dict[str, Any]],
+        snapshot_provider: Callable[[], GatewaySnapshotPayload],
         gateway_repository: GatewayRepository,
         command_dispatcher: GatewayCommandDispatcher,
         data_plane_transport: GatewayDataPlaneTransport | None = None,
@@ -96,7 +95,7 @@ class GatewayConnector:
         await self._ensure_certificate_current(enrollment, trigger="status_publish")
         snapshot_message = AgentStatusSnapshotMessage(
             message_id=_message_id("gstatus"),
-            snapshot=GatewaySnapshotPayload.model_validate(self.snapshot_provider()),
+            snapshot=self.snapshot_provider(),
         )
         client_certificate_present = self._client_certificate_present()
         certificate_bootstrap_pending = self._certificate_bootstrap_pending(

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, replace
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,7 +28,11 @@ from ..security.identity import AgentIdentityService
 from ..security.secrets import SecretStore
 from ..security.tls import TlsContextFactory
 from .auth_providers import UpstreamAuthProvider
-from .protocol import EnrollmentRequestPayload, EnrollmentResponsePayload
+from .protocol import (
+    EnrollmentRequestPayload,
+    EnrollmentResponsePayload,
+    GatewaySnapshotPayload,
+)
 
 UPSTREAM_ENROLLMENT_TOKEN_KEY = "upstream_enrollment_token"
 LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY = "upstream_bootstrap_token"
@@ -44,7 +50,7 @@ class GatewayEnrollmentService:
         certificate_service: CertificateLifecycleService,
         auth_provider: UpstreamAuthProvider,
         metadata_path: Path,
-        snapshot_provider: Callable[[], dict[str, Any]],
+        snapshot_provider: Callable[[], GatewaySnapshotPayload],
         http_client_factory: Callable[..., httpx.AsyncClient] | None = None,
     ) -> None:
         self.settings = settings
@@ -383,7 +389,7 @@ def _parse_datetime(value: Any):
 
 
 def _serialize_value(value: object) -> object:
-    if hasattr(value, "isoformat"):
+    if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, dict):
         return {str(key): _serialize_value(item) for key, item in value.items()}
@@ -391,8 +397,8 @@ def _serialize_value(value: object) -> object:
         return [_serialize_value(item) for item in value]
     if isinstance(value, tuple):
         return [_serialize_value(item) for item in value]
-    if hasattr(value, "value"):
-        return getattr(value, "value")
+    if isinstance(value, Enum):
+        return value.value
     return value
 
 

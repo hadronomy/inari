@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import socket
 import sys
@@ -112,12 +113,12 @@ def _import_pywin32_service_modules() -> tuple[Any, Any, Any, Any]:
     if sys.platform != "win32":
         raise RuntimeError("Windows service hosting is only available on Windows.")
 
-    import servicemanager  # type: ignore[import-not-found]
-    import win32event  # type: ignore[import-not-found]
-    import win32service  # type: ignore[import-not-found]
-    import win32serviceutil  # type: ignore[import-not-found]
-
-    return servicemanager, win32event, win32service, win32serviceutil
+    return (
+        importlib.import_module("servicemanager"),
+        importlib.import_module("win32event"),
+        importlib.import_module("win32service"),
+        importlib.import_module("win32serviceutil"),
+    )
 
 
 def windows_service_endpoint() -> str:

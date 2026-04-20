@@ -22,6 +22,7 @@ from .config_paths import (
     PathProfile,
     PlatformPathBundle,
     default_config_candidates,
+    parse_path_profile,
     resolve_default_path_bundle,
     resolve_effective_path_profile,
 )
@@ -757,6 +758,36 @@ class AgentSettings(BaseModel):
     gateway_backoff_base_seconds: float = 1.0
     gateway_backoff_max_seconds: float = 60.0
 
+    @property
+    def resolved_data_dir(self) -> Path:
+        if self.data_dir is None:
+            raise RuntimeError("Agent settings are missing data_dir.")
+        return self.data_dir
+
+    @property
+    def resolved_temp_dir(self) -> Path:
+        if self.temp_dir is None:
+            raise RuntimeError("Agent settings are missing temp_dir.")
+        return self.temp_dir
+
+    @property
+    def resolved_log_dir(self) -> Path:
+        if self.log_dir is None:
+            raise RuntimeError("Agent settings are missing log_dir.")
+        return self.log_dir
+
+    @property
+    def resolved_runtime_database_path(self) -> Path:
+        if self.runtime_database_path is None:
+            raise RuntimeError("Agent settings are missing runtime_database_path.")
+        return self.runtime_database_path
+
+    @property
+    def resolved_security_state_dir(self) -> Path:
+        if self.security_state_dir is None:
+            raise RuntimeError("Agent settings are missing security_state_dir.")
+        return self.security_state_dir
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def normalize_allowed_origins(cls, value: object) -> object:
@@ -834,14 +865,15 @@ class AgentSettings(BaseModel):
             profile=self.path_profile,
             working_directory=Path.cwd(),
         )
-        self.data_dir = self.data_dir or defaults.data_dir
+        data_dir = self.data_dir or defaults.data_dir
+        self.data_dir = data_dir
         self.log_dir = self.log_dir or defaults.log_dir
         self.temp_dir = self.temp_dir or defaults.temp_dir
         self.runtime_database_path = self.runtime_database_path or (
-            self.data_dir / "inari.sqlite3"
+            data_dir / "inari.sqlite3"
         )
         self.security_state_dir = self.security_state_dir or (
-            self.data_dir / "security"
+            data_dir / "security"
         )
         return self
 
@@ -871,7 +903,7 @@ def load_settings(
         environment=env,
         dotenv_values=_read_dotenv(dotenv_path),
     )
-    requested_path_profile = (
+    requested_path_profile = parse_path_profile(
         env_payload.get("path_profile") or file_config.paths.profile
     )
     resolved_path_defaults = resolve_default_path_bundle(

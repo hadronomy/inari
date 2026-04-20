@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 
 from PySide6.QtWidgets import QApplication
 
-from inari.models import DeviceEventCollectionResponse, DeviceResponse, RuntimeEventResponse
+from inari.models import (
+    DeviceDirectoryResponse,
+    DeviceEventCollectionResponse,
+    DeviceResponse,
+    JobResourceResponse,
+    RuntimeEventResponse,
+)
 from inari_tray.config import TraySettings
 from inari_tray.device_center.controller import (
     QtDeviceCenterController,
@@ -84,6 +90,20 @@ class _FakeClient:
     def __init__(self) -> None:
         self.device_event_requests: list[tuple[str, int]] = []
 
+    def list_devices(self) -> DeviceDirectoryResponse:
+        return DeviceDirectoryResponse.model_validate(
+            {
+                "devices": [],
+                "summary": {
+                    "count": 0,
+                    "online_count": 0,
+                    "offline_count": 0,
+                    "kind_counts": {},
+                    "default_device": None,
+                },
+            }
+        )
+
     def list_device_events(
         self, device_id: str, *, limit: int = DEFAULT_EVENT_LIMIT
     ) -> DeviceEventCollectionResponse:
@@ -99,10 +119,53 @@ class _FakeClient:
             }
         )
 
+    def submit_test_page(
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
+    ) -> JobResourceResponse:
+        del device_id, printer_name
+        return JobResourceResponse.model_validate(
+            {
+                "ok": True,
+                "job": {
+                    "id": "job_test_page",
+                    "kind": "device_command",
+                    "operation": "print_test_page",
+                    "state": "queued",
+                    "target": {
+                        "device_id": "dev_printer",
+                        "device_kind": "printer",
+                        "device_name": "Kitchen Printer",
+                    },
+                    "command_kind": "print_test_page",
+                    "attempt_count": 0,
+                    "max_attempts": 3,
+                    "created_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+                    "updated_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+                    "queued_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+                    "next_run_at": datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+                    "metadata": {},
+                },
+            }
+        )
+
+    def open_cash_drawer(
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
+    ) -> JobResourceResponse:
+        return self.submit_test_page(
+            device_id=device_id,
+            printer_name=printer_name,
+        )
+
 
 def _qt_app() -> QApplication:
     app = QApplication.instance()
-    if app is not None:
+    if isinstance(app, QApplication):
         return app
     return QApplication([])
 

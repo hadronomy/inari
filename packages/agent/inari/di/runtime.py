@@ -24,7 +24,7 @@ class RuntimeProvider(Provider):
 
     @provide
     def store(self, settings: AgentSettings) -> RuntimeStore:
-        return RuntimeStore(settings.runtime_database_path)
+        return RuntimeStore(settings.resolved_runtime_database_path)
 
     @provide
     def event_hub(self) -> EventHub:

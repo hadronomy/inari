@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
 import platform
@@ -420,8 +421,8 @@ class WindowsServiceAgentBridge(AgentControlBridge):
     def _import_service_modules(self):
         if sys.platform != "win32":
             raise RuntimeError("Windows service control is only available on Windows.")
-        import win32service  # type: ignore[import-not-found]
-        import win32serviceutil  # type: ignore[import-not-found]
+        win32service = importlib.import_module("win32service")
+        win32serviceutil = importlib.import_module("win32serviceutil")
 
         return win32service, win32serviceutil
 

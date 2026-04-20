@@ -5,9 +5,9 @@ from typing import Protocol
 
 from inari.models import RuntimeEventResponse
 
-from ..client import AgentApiClient
 from ..config import TraySettings
 from ..models import TraySnapshot
+from .contracts import DeviceCenterClient
 from .controller import QtDeviceCenterController
 
 
@@ -24,7 +24,7 @@ class DeviceCenterPresenter(Protocol):
 def create_device_center(
     settings: TraySettings,
     *,
-    client: AgentApiClient,
+    client: DeviceCenterClient,
     notify: Callable[[str, str | None], None] | None = None,
 ) -> DeviceCenterPresenter:
     return QtDeviceCenterController(settings=settings, client=client, notify=notify)

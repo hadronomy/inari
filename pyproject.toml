@@ -7,6 +7,9 @@ dependencies = []
 [tool.uv.workspace]
 members = ["packages/*"]
 
+[tool.ty.environment]
+root = ["./packages/agent", "./packages/agent_tray"]
+
 [tool.pytest.ini_options]
 minversion = "8.3"
 addopts = "--strict-markers --strict-config"

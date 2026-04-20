@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+from typing import Any, cast
 
 
-from inari.models import RuntimeEventResponse, SystemStatusResponse
+from inari.models import (
+    DeviceDirectoryResponse,
+    DeviceEventCollectionResponse,
+    JobResourceResponse,
+    RuntimeEventResponse,
+    SystemStatusResponse,
+)
 from inari.version import API_VERSION
 from inari_tray.app import AgentTrayApplication
 from inari_tray.bridge import (
@@ -39,6 +46,7 @@ def test_run_bootstraps_host_and_background_threads() -> None:
     application.run()
 
     assert host.run_called is True
+    assert host.initial_snapshot is not None
     assert host.initial_snapshot.title == "Inari"
     assert any(entry.label == "Open API Docs" for entry in host.initial_menu_entries)
     assert any(
@@ -302,9 +310,11 @@ def test_create_tray_host_uses_qt_backend() -> None:
 
 def test_apply_update_keeps_menu_live_while_visible(mocker) -> None:
     host = QtTrayHost(title="Inari")
-    host._tray_icon = FakeQtTrayIcon()
-    host._menu = FakeQtMenu(visible=True)
-    host._menu_actions = [object()]
+    tray_icon = FakeQtTrayIcon()
+    menu = FakeQtMenu(visible=True)
+    cast(Any, host)._tray_icon = tray_icon
+    cast(Any, host)._menu = menu
+    cast(Any, host)._menu_actions = [object()]
     snapshot = _tray_snapshot()
     menu_entries = [TrayMenuEntry("Refresh Now")]
 
@@ -314,17 +324,19 @@ def test_apply_update_keeps_menu_live_while_visible(mocker) -> None:
 
     host._apply_update(snapshot, menu_entries)
 
-    assert host._tray_icon.icon is not None
-    assert host._tray_icon.tooltip == snapshot.tooltip
+    assert tray_icon.icon is not None
+    assert tray_icon.tooltip == snapshot.tooltip
     update_menu_actions.assert_called_once_with(
-        host._menu, host._menu_actions, menu_entries
+        menu, cast(Any, host)._menu_actions, menu_entries
     )
 
 
 def test_apply_update_rebuilds_menu_when_layout_changes(mocker) -> None:
     host = QtTrayHost(title="Inari")
-    host._tray_icon = FakeQtTrayIcon()
-    host._menu = FakeQtMenu(visible=False)
+    tray_icon = FakeQtTrayIcon()
+    menu = FakeQtMenu(visible=False)
+    cast(Any, host)._tray_icon = tray_icon
+    cast(Any, host)._menu = menu
     menu_entries = [TrayMenuEntry("Open Logs")]
 
     mocker.patch("inari_tray.qt_host._image_to_qicon", return_value=object())
@@ -334,10 +346,10 @@ def test_apply_update_rebuilds_menu_when_layout_changes(mocker) -> None:
 
     host._apply_update(_tray_snapshot(), menu_entries)
 
-    assert host._menu_actions == ["action"]
-    assert host._tray_icon.icon is not None
-    assert host._tray_icon.tooltip == _tray_snapshot().tooltip
-    build_menu_actions.assert_called_once_with(host._menu, menu_entries)
+    assert cast(Any, host)._menu_actions == ["action"]
+    assert tray_icon.icon is not None
+    assert tray_icon.tooltip == _tray_snapshot().tooltip
+    build_menu_actions.assert_called_once_with(menu, menu_entries)
 
 
 def test_spawned_process_bridge_reports_stopped_before_first_launch() -> None:
@@ -645,10 +657,10 @@ class FakeTrayHost:
     def __init__(self) -> None:
         self.run_called = False
         self.stopped = False
-        self.initial_snapshot = None
+        self.initial_snapshot: TraySnapshot | None = None
         self.initial_menu_entries: list[TrayMenuEntry] = []
-        self.updated_snapshot = None
-        self.activate_callback = None
+        self.updated_snapshot: TraySnapshot | None = None
+        self.activate_callback: Any | None = None
 
     def run(self, *, snapshot, menu_entries, on_ready, on_activate=None) -> None:
         self.run_called = True
@@ -711,6 +723,12 @@ class FakeControlBridge:
         self.start_calls += 1
         return "Started the local agent process."
 
+    def stop(self) -> str:
+        return "Stopped the local agent process."
+
+    def restart(self) -> str:
+        return "Restarted the local agent process."
+
     def mark_ready(self) -> None:
         return None
 
@@ -742,6 +760,18 @@ class FakeServiceControlBridge:
         )
 
     def mark_ready(self) -> None:
+        return None
+
+    def start(self) -> str:
+        return "Started the service."
+
+    def stop(self) -> str:
+        return "Stopped the service."
+
+    def restart(self) -> str:
+        return "Restarted the service."
+
+    def shutdown(self) -> None:
         return None
 
 
@@ -776,6 +806,69 @@ class FakeTrayClient:
 
     def iter_live_updates(self, stop_event):
         return iter(())
+
+    def list_devices(self) -> DeviceDirectoryResponse:
+        return DeviceDirectoryResponse.model_validate(
+            {
+                "devices": [],
+                "summary": {
+                    "count": 0,
+                    "online_count": 0,
+                    "offline_count": 0,
+                    "kind_counts": {},
+                    "default_device": None,
+                },
+            }
+        )
+
+    def list_device_events(
+        self, device_id: str, *, limit: int = 50
+    ) -> DeviceEventCollectionResponse:
+        del device_id, limit
+        return DeviceEventCollectionResponse.model_validate({"events": []})
+
+    def submit_test_page(
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
+    ) -> JobResourceResponse:
+        del device_id, printer_name
+        return JobResourceResponse.model_validate(
+            {
+                "ok": True,
+                "job": {
+                    "id": "job_test_page",
+                    "kind": "device_command",
+                    "operation": "print_test_page",
+                    "state": "queued",
+                    "target": {
+                        "device_id": "dev_printer",
+                        "device_kind": "printer",
+                        "device_name": "Kitchen Printer",
+                    },
+                    "command_kind": "print_test_page",
+                    "attempt_count": 0,
+                    "max_attempts": 3,
+                    "created_at": "2026-04-18T10:00:00Z",
+                    "updated_at": "2026-04-18T10:00:00Z",
+                    "queued_at": "2026-04-18T10:00:00Z",
+                    "next_run_at": "2026-04-18T10:00:00Z",
+                    "metadata": {},
+                },
+            }
+        )
+
+    def open_cash_drawer(
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
+    ) -> JobResourceResponse:
+        return self.submit_test_page(
+            device_id=device_id,
+            printer_name=printer_name,
+        )
 
 
 class FakeFailingTrayClient(FakeTrayClient):

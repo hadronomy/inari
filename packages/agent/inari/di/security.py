@@ -25,8 +25,9 @@ class SecurityProvider(Provider):
 
     @provide
     def identity_service(self, settings: AgentSettings) -> AgentIdentityService:
-        identity_path = settings.security_state_dir / "agent-identity.pem"
-        certificate_path = settings.security_state_dir / "upstream-client-cert.pem"
+        security_state_dir = settings.resolved_security_state_dir
+        identity_path = security_state_dir / "agent-identity.pem"
+        certificate_path = security_state_dir / "upstream-client-cert.pem"
         return AgentIdentityService(
             identity_path=identity_path,
             certificate_path=certificate_path,
@@ -37,9 +38,10 @@ class SecurityProvider(Provider):
         self,
         settings: AgentSettings,
     ) -> CertificateLifecycleService:
-        identity_path = settings.security_state_dir / "agent-identity.pem"
-        certificate_path = settings.security_state_dir / "upstream-client-cert.pem"
-        ca_path = settings.security_state_dir / "upstream-ca.pem"
+        security_state_dir = settings.resolved_security_state_dir
+        identity_path = security_state_dir / "agent-identity.pem"
+        certificate_path = security_state_dir / "upstream-client-cert.pem"
+        ca_path = security_state_dir / "upstream-ca.pem"
         return CertificateLifecycleService(
             certificate_path=certificate_path,
             private_key_path=identity_path,
@@ -48,7 +50,7 @@ class SecurityProvider(Provider):
 
     @provide
     def secret_store(self, settings: AgentSettings) -> ResilientSecretStore:
-        security_state_dir = settings.security_state_dir
+        security_state_dir = settings.resolved_security_state_dir
         return ResilientSecretStore(
             primary=KeyringSecretStore(
                 service_name=settings.secret_store_service_name,

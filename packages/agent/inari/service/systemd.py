@@ -132,10 +132,10 @@ class SystemdServiceManager:
         if self.scope == "system":
             read_write_paths = sorted(
                 {
-                    str(self.context.settings.data_dir),
-                    str(self.context.settings.log_dir),
-                    str(self.context.settings.temp_dir),
-                    str(self.context.settings.security_state_dir),
+                    str(self.context.settings.resolved_data_dir),
+                    str(self.context.settings.resolved_log_dir),
+                    str(self.context.settings.resolved_temp_dir),
+                    str(self.context.settings.resolved_security_state_dir),
                     str(self.context.config_path.parent),
                 }
             )
@@ -192,16 +192,13 @@ class SystemdServiceManager:
     def _ensure_parent_directories(self) -> None:
         for path in (
             self.context.config_path.parent,
-            self.context.settings.data_dir,
-            self.context.settings.log_dir,
-            self.context.settings.temp_dir,
-            self.context.settings.security_state_dir,
-            self.context.settings.runtime_database_path.parent
-            if self.context.settings.runtime_database_path is not None
-            else None,
+            self.context.settings.resolved_data_dir,
+            self.context.settings.resolved_log_dir,
+            self.context.settings.resolved_temp_dir,
+            self.context.settings.resolved_security_state_dir,
+            self.context.settings.resolved_runtime_database_path.parent,
         ):
-            if path is not None:
-                Path(path).mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=True, exist_ok=True)
 
     def _run(self, command: Sequence[str]) -> subprocess.CompletedProcess[str]:
         runner = self.runner or _run_command

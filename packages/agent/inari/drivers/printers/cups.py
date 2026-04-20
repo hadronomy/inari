@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import re
 import shutil
@@ -7,7 +8,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Mapping, Protocol
+from typing import Any, ClassVar, Mapping, NoReturn, Protocol, cast
 
 from ...exceptions import PrinterServiceError
 from ...printers import EscPosCommands
@@ -23,12 +24,6 @@ from .base import PrinterDriver
 from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
 
 logger = logging.getLogger(__name__)
-
-try:  # pragma: no cover - import-time platform boundary
-    import cups as _cups
-except Exception:  # pragma: no cover
-    _cups = None
-
 
 class CupsConnection(Protocol):
     def getPrinters(self) -> Mapping[str, Mapping[str, Any]]: ...
@@ -57,7 +52,7 @@ class CupsPrinterDriver(PrinterDriver):
 
     def __post_init__(self) -> None:
         if self.cups_api is None:
-            self.cups_api = _cups
+            self.cups_api = _load_cups_api()
 
     def is_available(self) -> bool:
         if self._lp_command() is not None and self._lpstat_command() is not None:
@@ -213,13 +208,19 @@ class CupsPrinterDriver(PrinterDriver):
             ) from exc
 
     def _list_printer_names_from_cli(self) -> tuple[str, ...]:
-        result = self._run_cli(self._lpstat_command(), "-e")
+        lpstat = self._lpstat_command()
+        if lpstat is None:
+            self._raise_cups_unavailable()
+        result = self._run_cli(lpstat, "-e")
         names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
         return tuple(sorted(names, key=str.casefold))
 
     def _default_printer_from_cli(self, *, optional: bool) -> str | None:
         try:
-            result = self._run_cli(self._lpstat_command(), "-d")
+            lpstat = self._lpstat_command()
+            if lpstat is None:
+                self._raise_cups_unavailable()
+            result = self._run_cli(lpstat, "-d")
         except PrinterServiceError:
             if optional:
                 return None
@@ -298,7 +299,7 @@ class CupsPrinterDriver(PrinterDriver):
             ) from exc
 
     @staticmethod
-    def _raise_cups_unavailable() -> None:
+    def _raise_cups_unavailable() -> NoReturn:
         raise PrinterServiceError(
             "NO_PRINTER_DRIVER", "CUPS support is not available on this machine."
         )
@@ -333,3 +334,10 @@ def _parse_cups_job_id(output: str) -> int | None:
     if match is None:
         return None
     return int(match.group(1))
+
+
+def _load_cups_api() -> CupsAPI | None:
+    try:
+        return cast(CupsAPI, importlib.import_module("cups"))
+    except Exception:  # pragma: no cover - import-time platform boundary
+        return None

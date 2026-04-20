@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import mkdtemp
+from typing import Any, cast
 
 import pytest
 from asgi_lifespan import LifespanManager
@@ -273,10 +274,11 @@ async def test_system_status_reports_device_and_queue_summary(mocker) -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    device_catalog = cast(StubDeviceCatalog, container.device_catalog)
     assert payload["service"]["version"] == API_VERSION
     assert payload["devices"]["count"] == 1
     assert payload["devices"]["default_device"] == {
-        "id": next(iter(container.device_catalog.devices)).id,
+        "id": next(iter(device_catalog.devices)).id,
         "name": "Kitchen Printer",
     }
     assert payload["queue"]["queued"] == 1
@@ -293,9 +295,10 @@ async def test_list_devices_uses_semantically_refined_shape(mocker) -> None:
 
     assert response.status_code == 200
     payload = response.json()
+    device_catalog = cast(StubDeviceCatalog, container.device_catalog)
     assert "ok" not in payload
     assert payload["summary"]["default_device"] == {
-        "id": next(iter(container.device_catalog.devices)).id,
+        "id": next(iter(device_catalog.devices)).id,
         "name": "Kitchen Printer",
     }
     device = payload["devices"][0]
@@ -375,12 +378,14 @@ async def test_submit_print_job_returns_queued_job_resource(mocker) -> None:
 
     assert response.status_code == 202
     payload = response.json()
+    job_service = cast(StubJobService, container.job_service)
     assert payload["ok"] is True
     assert payload["job"]["kind"] == "print_job"
     assert payload["job"]["state"] == "queued"
     assert payload["job"]["target"]["device_name"] == "Kitchen Printer"
+    assert job_service.submitted_print_operation is not None
     assert (
-        container.job_service.submitted_print_operation.target.printer_name
+        cast(Any, job_service.submitted_print_operation).target.printer_name
         == "Kitchen Printer"
     )
 
@@ -406,15 +411,18 @@ async def test_submit_device_command_returns_queued_job_resource(mocker) -> None
 
     assert response.status_code == 202
     payload = response.json()
+    job_service = cast(StubJobService, container.job_service)
     assert payload["job"]["kind"] == "device_command"
     assert payload["job"]["operation"] == "cut_paper"
-    assert container.job_service.submitted_command_operation.command.kind == "cut_paper"
+    assert job_service.submitted_command_operation is not None
+    assert cast(Any, job_service.submitted_command_operation).command.kind == "cut_paper"
 
 
 @pytest.mark.anyio
 async def test_job_history_response_includes_attempts_and_events(mocker) -> None:
     container = make_test_container(mocker=mocker)
-    job_id = next(iter(container.job_service.jobs))
+    job_service = cast(StubJobService, container.job_service)
+    job_id = next(iter(job_service.jobs))
 
     async with async_client_for(container) as client:
         response = await client.get(
@@ -431,9 +439,10 @@ async def test_job_history_response_includes_attempts_and_events(mocker) -> None
 @pytest.mark.anyio
 async def test_list_jobs_serializes_job_execution_results(mocker) -> None:
     container = make_test_container(mocker=mocker)
-    job_id = next(iter(container.job_service.jobs))
+    job_service = cast(StubJobService, container.job_service)
+    job_id = next(iter(job_service.jobs))
     completed = replace(
-        container.job_service.jobs[job_id],
+        job_service.jobs[job_id],
         state=JobState.SUCCEEDED,
         result_payload={
             "printer": {
@@ -447,7 +456,7 @@ async def test_list_jobs_serializes_job_execution_results(mocker) -> None:
             "device_job_id": 42,
         },
     )
-    container.job_service.jobs[job_id] = completed
+    job_service.jobs[job_id] = completed
 
     async with async_client_for(container) as client:
         response = await client.get("/jobs", headers=await auth_headers(client))
@@ -511,7 +520,7 @@ async def test_validation_errors_use_unified_problem_details_shape(mocker) -> No
 @pytest.mark.anyio
 async def test_agent_errors_use_unified_problem_details_shape(mocker) -> None:
     container = make_test_container(mocker=mocker)
-    container.job_service.enqueue_print_error = AgentError(
+    cast(StubJobService, container.job_service).enqueue_print_error = AgentError(
         "DEVICE_NOT_FOUND",
         "Device 'dev_missing' was not found.",
         status_code=404,
@@ -627,7 +636,7 @@ def make_test_container(
     mocker,
 ) -> AgentContainer:
     settings = AgentSettings(
-        security_state_dir=mkdtemp(prefix="inari-security-"),
+        security_state_dir=Path(mkdtemp(prefix="inari-security-")),
         runtime_database_path=Path(mkdtemp(prefix="inari-runtime-"))
         / "runtime.sqlite3",
     )
@@ -680,31 +689,33 @@ def make_test_container(
         occurred_at=now,
         payload={"job_id": job.id},
     )
+    device_catalog = StubDeviceCatalog(
+        devices=devices,
+        driver_metadata={
+            "tests.fake-printers": DriverMetadata(
+                key="tests.fake-printers",
+                display_name="Test Printer Driver",
+                kind=DeviceKind.PRINTER,
+                platform="test",
+            )
+        },
+    )
+    job_service = StubJobService(
+        jobs={job.id: job},
+        queue_counts_payload={"queued": 1},
+        job_attempts=(attempt,),
+        job_events=(event,),
+    )
     return AgentContainer(
         settings=settings,
-        database_migrator=StubDatabaseMigrator(),
+        database_migrator=cast(Any, StubDatabaseMigrator()),
         driver_registry=DriverRegistry(drivers=()),
-        printer_service=mocker.Mock(spec=StubPrinterService),
+        printer_service=cast(Any, mocker.Mock(spec=StubPrinterService)),
         event_hub=EventHub(),
-        device_catalog=StubDeviceCatalog(
-            devices=devices,
-            driver_metadata={
-                "tests.fake-printers": DriverMetadata(
-                    key="tests.fake-printers",
-                    display_name="Test Printer Driver",
-                    kind=DeviceKind.PRINTER,
-                    platform="test",
-                )
-            },
-        ),
-        job_service=StubJobService(
-            jobs={job.id: job},
-            queue_counts_payload={"queued": 1},
-            job_attempts=(attempt,),
-            job_events=(event,),
-        ),
-        runtime_supervisor=StubRuntimeSupervisor(),
-        authorization_service=StubAuthorizationService(),
-        gateway_service=StubGatewayService(settings=settings),
-        application_supervisor=StubApplicationSupervisor(),
+        device_catalog=cast(Any, device_catalog),
+        job_service=cast(Any, job_service),
+        runtime_supervisor=cast(Any, StubRuntimeSupervisor()),
+        authorization_service=cast(Any, StubAuthorizationService()),
+        gateway_service=cast(Any, StubGatewayService(settings=settings)),
+        application_supervisor=cast(Any, StubApplicationSupervisor()),
     )

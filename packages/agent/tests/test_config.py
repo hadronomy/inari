@@ -14,6 +14,7 @@ from inari.config import (
     write_generated_config_artifacts,
 )
 from inari.config_paths import resolve_default_path_bundle
+from inari.security.models import GatewayExposure, GatewayMode
 
 
 def test_load_settings_reads_nested_toml_shape(tmp_path: Path) -> None:
@@ -356,10 +357,10 @@ def test_agent_settings_still_accept_flat_instantiation() -> None:
     settings = AgentSettings(
         log_level="DEBUG",
         default_printer_name="Kitchen Printer",
-        gateway_mode="managed",
-        gateway_exposure="loopback",
+        gateway_mode=GatewayMode.MANAGED,
+        gateway_exposure=GatewayExposure.LOOPBACK,
         path_profile="development",
-        trusted_hosts='["127.0.0.1", "localhost"]',
+        trusted_hosts=["127.0.0.1", "localhost"],
     )
 
     assert settings.log_level == "DEBUG"

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import importlib
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Iterator, Protocol, Sequence
+from typing import Any, ClassVar, Iterator, NoReturn, Protocol, Sequence, cast
 
 from ...exceptions import PrinterServiceError
 from ...printers import EscPosCommands
@@ -19,12 +20,6 @@ from .base import PrinterDriver
 from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
 
 logger = logging.getLogger(__name__)
-
-try:  # pragma: no cover - import-time platform boundary
-    import win32print as _win32print
-except Exception:  # pragma: no cover
-    _win32print = None
-
 
 class Win32PrintAPI(Protocol):
     PRINTER_ENUM_CONNECTIONS: int
@@ -59,7 +54,7 @@ class SpoolWriteResult:
 
 class WindowsSpooler:
     def __init__(self, api: Win32PrintAPI | None = None) -> None:
-        self._api = api or _win32print
+        self._api = api or _load_win32print_api()
 
     def is_available(self) -> bool:
         return self._api is not None
@@ -74,8 +69,11 @@ class WindowsSpooler:
         return tuple(sorted(names, key=str.casefold))
 
     def get_default_printer_name(self, *, optional: bool = False) -> str | None:
-        api = self._require_api(optional=optional)
+        api = self._optional_api()
         if api is None:
+            if optional:
+                return None
+            self._raise_unavailable()
             return None
 
         try:
@@ -180,14 +178,26 @@ class WindowsSpooler:
             "PRINTER_ENUM_FAILED", f"Unsupported printer enumeration entry: {entry!r}"
         )
 
-    def _require_api(self, *, optional: bool = False) -> Win32PrintAPI | None:
+    def _require_api(self) -> Win32PrintAPI:
         if self._api is not None:
             return self._api
-        if optional:
-            return None
+        self._raise_unavailable()
+
+    def _optional_api(self) -> Win32PrintAPI | None:
+        return self._api
+
+    @staticmethod
+    def _raise_unavailable() -> NoReturn:
         raise PrinterServiceError(
             "WIN32_UNAVAILABLE", "pywin32 is not available on this machine."
         )
+
+
+def _load_win32print_api() -> Win32PrintAPI | None:
+    try:
+        return cast(Win32PrintAPI, importlib.import_module("win32print"))
+    except Exception:  # pragma: no cover - import-time platform boundary
+        return None
 
 
 @dataclass(slots=True)

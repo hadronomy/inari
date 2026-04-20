@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+import httpx
 
 import pytest
 from cryptography import x509
@@ -12,7 +15,10 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
 
 from inari.config import AgentSettings
-from inari.gateway.auth_providers import ZitadelServiceAccountAuthProvider
+from inari.gateway.auth_providers import (
+    UpstreamAuthProvider,
+    ZitadelServiceAccountAuthProvider,
+)
 from inari.gateway.caddy import CaddyControllerProfile
 from inari.gateway.enrollment import (
     GatewayEnrollmentService,
@@ -23,20 +29,24 @@ from inari.gateway.models import (
     GatewayEnrollmentRecord,
     MutualTlsMode,
     StepCaOttBootstrap,
+    UpstreamAuthMode,
     UpstreamCertificateMode,
     UpstreamDataPlaneKind,
+    UpstreamEdgeProvider,
     ZenohDataPlaneAuthKind,
     ZenohDataPlaneConfig,
     ZenohSerialization,
     ZenohSessionMode,
     resolve_mutual_tls_policy,
 )
+from inari.gateway.protocol import GatewaySnapshotPayload
 from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from inari.security.certificate_provisioners import StepCaOttCertificateProvisioner
 from inari.security.certificates import CertificateLifecycleService
 from inari.security.identity import AgentIdentityService
 from inari.security.policies import SecurityPolicyService
 from inari.security.secrets import MemorySecretStore
+from inari.security.models import GatewayMode
 from inari.security.tls import TlsContextFactory
 from inari.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
@@ -68,12 +78,12 @@ async def test_zitadel_auth_provider_exchanges_and_caches_token(tmp_path: Path) 
     )
     provider = ZitadelServiceAccountAuthProvider(
         settings=AgentSettings(
-            upstream_auth_mode="zitadel_service_account",
+            upstream_auth_mode=UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT,
             zitadel_base_url="https://zitadel.example.com",
             zitadel_service_account_key_path=key_path,
             zitadel_requested_scopes=["openid", "events:read"],
         ),
-        http_client_factory=lambda **kwargs: fake_client,
+        http_client_factory=_http_client_factory(fake_client),
     )
 
     first = await provider.headers_for_enrollment()
@@ -112,19 +122,22 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
     )
     service = GatewayEnrollmentService(
         settings=AgentSettings(
-            gateway_mode="managed",
+            gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
-            upstream_auth_mode="zitadel_service_account",
-            upstream_certificate_mode="step_ca",
+            upstream_auth_mode=UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
         ),
         identity_service=identity_service,
         secret_store=MemorySecretStore(),
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
-        auth_provider=StaticAuthProvider({"Authorization": "Bearer zitadel-token"}),
+        auth_provider=cast(
+            UpstreamAuthProvider,
+            StaticAuthProvider({"Authorization": "Bearer zitadel-token"}),
+        ),
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
-        http_client_factory=lambda **kwargs: http_client,
+        http_client_factory=_http_client_factory(http_client),
     )
 
     record = await service.ensure_enrolled()
@@ -167,19 +180,19 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     )
     service = GatewayEnrollmentService(
         settings=AgentSettings(
-            gateway_mode="managed",
+            gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             upstream_enrollment_token="bootstrap-token",
         ),
         identity_service=identity_service,
         secret_store=secret_store,
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
-        auth_provider=StaticAuthProvider({}),
+        auth_provider=cast(UpstreamAuthProvider, StaticAuthProvider({})),
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
-        http_client_factory=lambda **kwargs: http_client,
+        http_client_factory=_http_client_factory(http_client),
     )
 
     record = await service.ensure_enrolled()
@@ -215,19 +228,20 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
     )
     service = GatewayEnrollmentService(
         settings=AgentSettings(
-            gateway_mode="managed",
+            gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             upstream_enrollment_token="bootstrap-token",
         ),
         identity_service=identity_service,
         secret_store=MemorySecretStore(),
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
-        auth_provider=StaticAuthProvider({}),
+        auth_provider=cast(UpstreamAuthProvider, StaticAuthProvider({})),
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
-        http_client_factory=lambda **kwargs: FakeAsyncHttpClient(
+        http_client_factory=_http_client_factory(
+            FakeAsyncHttpClient(
             response_payload=_enrollment_response_payload(
                 controller_actions=("jobs:create",),
                 certificate={
@@ -239,6 +253,7 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
                         "ott": "ott_bootstrap_token",
                     },
                 },
+            )
             )
         ),
     )
@@ -289,42 +304,44 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
     )
     provisioner = StepCaOttCertificateProvisioner(
         settings=AgentSettings(
-            gateway_mode="managed",
+            gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             upstream_enrollment_token="bootstrap-token",
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
         identity_service=identity_service,
         certificate_service=certificate_service,
-        http_client_factory=lambda **kwargs: StepCaHttpClient(
+        http_client_factory=_http_client_factory(
+            StepCaHttpClient(
             root_pem=ca_pem,
             ca_key=ca_key,
             certificate_service=certificate_service,
+            )
         ),
     )
     enrollment_service = GatewayEnrollmentService(
         settings=AgentSettings(
-            gateway_mode="managed",
+            gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             upstream_enrollment_token="bootstrap-token",
         ),
         identity_service=identity_service,
         secret_store=secret_store,
         tls_context_factory=TlsContextFactory(AgentSettings()),
         certificate_service=certificate_service,
-        auth_provider=StaticAuthProvider({}),
+        auth_provider=cast(UpstreamAuthProvider, StaticAuthProvider({})),
         metadata_path=tmp_path / "upstream-enrollment.json",
         snapshot_provider=_gateway_snapshot_payload,
-        http_client_factory=lambda **kwargs: http_client,
+        http_client_factory=_http_client_factory(http_client),
     )
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
-            gateway_mode="managed",
+            gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
@@ -372,13 +389,13 @@ async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(
     )
     provisioner = StepCaOttCertificateProvisioner(
         settings=AgentSettings(
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
         identity_service=identity_service,
         certificate_service=certificate_service,
-        http_client_factory=lambda **kwargs: sign_client,
+        http_client_factory=_http_client_factory(sign_client),
     )
     enrollment = _enrollment_record(
         certificate_bootstrap=StepCaOttBootstrap(
@@ -435,18 +452,20 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(
     )
     provisioner = StepCaOttCertificateProvisioner(
         settings=AgentSettings(
-            upstream_certificate_mode="step_ca",
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(new_ca_cert),
         ),
         identity_service=AgentIdentityService(identity_path=identity_path),
         certificate_service=certificate_service,
-        http_client_factory=lambda **kwargs: StepCaHttpClient(
-            root_pem=new_ca_cert.public_bytes(serialization.Encoding.PEM).decode(
-                "utf-8"
-            ),
-            ca_key=new_ca_key,
-            certificate_service=certificate_service,
+        http_client_factory=_http_client_factory(
+            StepCaHttpClient(
+                root_pem=new_ca_cert.public_bytes(serialization.Encoding.PEM).decode(
+                    "utf-8"
+                ),
+                ca_key=new_ca_key,
+                certificate_service=certificate_service,
+            )
         ),
     )
 
@@ -464,6 +483,7 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(
     )
 
     assert certificate is not None
+    assert certificate_service.ca_path is not None
     installed_ca_pem = certificate_service.ca_path.read_text(encoding="utf-8")
     assert _fingerprint(
         x509.load_pem_x509_certificate(installed_ca_pem.encode("utf-8"))
@@ -474,9 +494,9 @@ def test_caddy_required_mtls_requires_enrollment_route_or_existing_certificate(
     tmp_path: Path,
 ) -> None:
     settings = AgentSettings(
-        gateway_mode="managed",
+        gateway_mode=GatewayMode.MANAGED,
         upstream_base_url="https://controller.example.com",
-        upstream_edge_provider="caddy",
+        upstream_edge_provider=UpstreamEdgeProvider.CADDY,
         upstream_mutual_tls_mode=MutualTlsMode.REQUIRED,
         security_state_dir=tmp_path,
     )
@@ -487,9 +507,9 @@ def test_caddy_required_mtls_requires_enrollment_route_or_existing_certificate(
 
 def test_zitadel_requires_key_material() -> None:
     settings = AgentSettings(
-        gateway_mode="managed",
+        gateway_mode=GatewayMode.MANAGED,
         upstream_base_url="https://controller.example.com",
-        upstream_auth_mode="zitadel_service_account",
+        upstream_auth_mode=UpstreamAuthMode.ZITADEL_SERVICE_ACCOUNT,
         zitadel_base_url="https://zitadel.example.com",
     )
 
@@ -499,9 +519,9 @@ def test_zitadel_requires_key_material() -> None:
 
 def test_managed_gateway_requires_certificate_mode_for_zenoh() -> None:
     settings = AgentSettings(
-        gateway_mode="managed",
+        gateway_mode=GatewayMode.MANAGED,
         upstream_base_url="https://controller.example.com",
-        upstream_certificate_mode="none",
+        upstream_certificate_mode=UpstreamCertificateMode.NONE,
     )
 
     with pytest.raises(RuntimeError):
@@ -511,8 +531,8 @@ def test_managed_gateway_requires_certificate_mode_for_zenoh() -> None:
 def test_caddy_profile_renders_required_client_auth_snippet() -> None:
     profile = CaddyControllerProfile.from_settings(
         AgentSettings(
-            upstream_edge_provider="caddy",
-            upstream_mutual_tls_mode="required",
+            upstream_edge_provider=UpstreamEdgeProvider.CADDY,
+            upstream_mutual_tls_mode=MutualTlsMode.REQUIRED,
         )
     )
 
@@ -737,8 +757,9 @@ def _enrollment_record(
     )
 
 
-def _gateway_snapshot_payload() -> dict[str, object]:
-    return {
+def _gateway_snapshot_payload() -> GatewaySnapshotPayload:
+    return GatewaySnapshotPayload.model_validate(
+        {
         "generated_at": "2026-04-13T00:00:00Z",
         "protocol": {
             "version": GATEWAY_PROTOCOL_VERSION,
@@ -789,7 +810,12 @@ def _gateway_snapshot_payload() -> dict[str, object]:
             "client_certificate_present": False,
         },
         "observability": {},
-    }
+        }
+    )
+
+
+def _http_client_factory(client: object) -> Callable[..., httpx.AsyncClient]:
+    return cast(Callable[..., httpx.AsyncClient], lambda **kwargs: client)
 
 
 def _enrollment_response_payload(

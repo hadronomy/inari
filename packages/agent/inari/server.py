@@ -30,17 +30,19 @@ class AgentServerController:
         container: AgentContainer | None = None,
     ) -> AgentServerController:
         resolved_container = container or build_container(settings)
+        tls_options = (
+            resolved_container.tls_context_factory.server_options()
+            if resolved_container.tls_context_factory is not None
+            else {}
+        )
         config = uvicorn.Config(
             create_app(settings=settings, container=resolved_container),
             host=settings.host,
             port=settings.port,
             log_level=settings.log_level.lower(),
             reload=False,
-            **(
-                resolved_container.tls_context_factory.server_options()
-                if resolved_container.tls_context_factory is not None
-                else {}
-            ),
+            ssl_certfile=tls_options.get("ssl_certfile"),
+            ssl_keyfile=tls_options.get("ssl_keyfile"),
         )
         return cls(
             settings=settings,

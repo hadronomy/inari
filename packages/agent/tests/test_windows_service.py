@@ -4,6 +4,7 @@ import runpy
 import sys
 from types import SimpleNamespace
 from types import ModuleType
+from typing import Any, cast
 
 from inari.config import AgentSettings
 
@@ -287,26 +288,28 @@ def test_module_entrypoint_invokes_main_when_run_as_script(
     mocker, monkeypatch, tmp_path
 ) -> None:
     fake_servicemanager = ModuleType("servicemanager")
-    fake_servicemanager.Initialize = mocker.Mock()
-    fake_servicemanager.PrepareToHostSingle = mocker.Mock()
-    fake_servicemanager.StartServiceCtrlDispatcher = mocker.Mock()
-    fake_servicemanager.LogInfoMsg = mocker.Mock()
-    fake_servicemanager.LogErrorMsg = mocker.Mock()
+    cast(Any, fake_servicemanager).Initialize = mocker.Mock()
+    cast(Any, fake_servicemanager).PrepareToHostSingle = mocker.Mock()
+    cast(Any, fake_servicemanager).StartServiceCtrlDispatcher = mocker.Mock()
+    cast(Any, fake_servicemanager).LogInfoMsg = mocker.Mock()
+    cast(Any, fake_servicemanager).LogErrorMsg = mocker.Mock()
 
     fake_win32event = ModuleType("win32event")
-    fake_win32event.CreateEvent = mocker.Mock(return_value="event")
-    fake_win32event.SetEvent = mocker.Mock()
+    cast(Any, fake_win32event).CreateEvent = mocker.Mock(return_value="event")
+    cast(Any, fake_win32event).SetEvent = mocker.Mock()
 
     fake_win32service = ModuleType("win32service")
-    fake_win32service.SERVICE_STOP_PENDING = 3
+    cast(Any, fake_win32service).SERVICE_STOP_PENDING = 3
 
     fake_win32serviceutil = ModuleType("win32serviceutil")
-    fake_win32serviceutil.ServiceFramework = type(
+    cast(Any, fake_win32serviceutil).ServiceFramework = type(
         "FakeServiceFramework", (), {"__init__": lambda self, args: None}
     )
-    fake_win32serviceutil.HandleCommandLine = mocker.Mock()
-    fake_win32serviceutil.SetServiceCustomOption = mocker.Mock()
-    fake_win32serviceutil.GetServiceCustomOption = mocker.Mock(return_value=None)
+    cast(Any, fake_win32serviceutil).HandleCommandLine = mocker.Mock()
+    cast(Any, fake_win32serviceutil).SetServiceCustomOption = mocker.Mock()
+    cast(Any, fake_win32serviceutil).GetServiceCustomOption = mocker.Mock(
+        return_value=None
+    )
 
     monkeypatch.setitem(sys.modules, "servicemanager", fake_servicemanager)
     monkeypatch.setitem(sys.modules, "win32event", fake_win32event)
@@ -327,4 +330,4 @@ def test_module_entrypoint_invokes_main_when_run_as_script(
 
     runpy.run_module("inari.windows_service", run_name="__main__")
 
-    fake_win32serviceutil.HandleCommandLine.assert_called_once()
+    cast(Any, fake_win32serviceutil).HandleCommandLine.assert_called_once()

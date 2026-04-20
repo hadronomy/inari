@@ -110,13 +110,15 @@ class ZenohGatewayTransport:
                 return
             self._loop = asyncio.get_running_loop()
             keyspace = self._keyspace(enrollment)
+            session = self._session
+            assert session is not None
             self._subscriber = await asyncio.to_thread(
-                self._session.declare_subscriber,
+                session.declare_subscriber,
                 keyspace.live_commands(),
                 zenoh.handlers.Callback(self._handle_live_command_sample),
             )
             self._presence_token = await asyncio.to_thread(
-                self._session.liveliness().declare_token,
+                session.liveliness().declare_token,
                 keyspace.presence(),
             )
             self._runtime_resources_ready = True
@@ -150,7 +152,9 @@ class ZenohGatewayTransport:
         )
 
     def _collect_replies(self, selector: str) -> list[Any]:
-        handler = self._session.get(
+        session = self._session
+        assert session is not None
+        handler = session.get(
             selector,
             timeout=self.settings.zenoh_query_timeout_seconds,
         )
@@ -184,10 +188,11 @@ class ZenohGatewayTransport:
             await asyncio.to_thread(session.close)
 
     async def _put_json(self, key_expr: str, payload: dict[str, Any]) -> None:
-        if self._session is None:
+        session = self._session
+        if session is None:
             raise RuntimeError("Zenoh session is not connected.")
         await asyncio.to_thread(
-            self._session.put,
+            session.put,
             key_expr,
             dump_json_payload(payload),
             encoding=zenoh.Encoding.APPLICATION_JSON,

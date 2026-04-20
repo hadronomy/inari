@@ -253,7 +253,7 @@ class StepCaOttCertificateProvisioner:
         try:
             async with self._http_client_factory(
                 verify=self._verify_context(),
-                cert=(certificate_path, key_path),
+                cert=(str(certificate_path), str(key_path)),
                 timeout=self.settings.gateway_reconnect_delay_seconds,
             ) as client:
                 response = await client.post(renew_url)

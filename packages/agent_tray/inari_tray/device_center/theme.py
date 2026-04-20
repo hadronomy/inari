@@ -470,7 +470,7 @@ class DeviceCenterTheme:
 
 def resolve_device_center_theme() -> DeviceCenterTheme:
     app = QGuiApplication.instance()
-    palette = app.palette() if app is not None else QPalette()
+    palette = app.palette() if isinstance(app, QGuiApplication) else QPalette()
     return _dark_theme() if _is_dark_palette(palette) else _light_theme()
 
 

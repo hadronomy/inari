@@ -88,10 +88,9 @@ class GatewayProvider(Provider):
             tls_context_factory=tls_context_factory,
             certificate_service=certificate_lifecycle_service,
             auth_provider=upstream_auth_provider,
-            metadata_path=settings.security_state_dir / "upstream-enrollment.json",
-            snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(
-                mode="json"
-            ),
+            metadata_path=settings.resolved_security_state_dir
+            / "upstream-enrollment.json",
+            snapshot_provider=snapshot_builder.build_snapshot,
         )
         certificate_lifecycle_manager = ManagedCertificateLifecycleManager(
             settings=settings,
@@ -104,9 +103,7 @@ class GatewayProvider(Provider):
             settings=settings,
             enrollment_service=enrollment_service,
             certificate_lifecycle_manager=certificate_lifecycle_manager,
-            snapshot_provider=lambda: snapshot_builder.build_snapshot().model_dump(
-                mode="json"
-            ),
+            snapshot_provider=snapshot_builder.build_snapshot,
             gateway_repository=gateway_repository,
             command_dispatcher=gateway_command_dispatcher,
             data_plane_transport=zenoh_gateway_transport,

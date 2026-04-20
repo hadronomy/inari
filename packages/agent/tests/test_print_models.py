@@ -5,6 +5,7 @@ import base64
 import pytest
 from pydantic import ValidationError
 
+from inari.device_commands import CutPaper
 from inari.binary_payloads import coerce_image_payload, coerce_pdf_payload
 from inari.exceptions import PrinterServiceError
 from inari.models import DeviceCommandRequest, PrintJobRequest
@@ -141,5 +142,6 @@ def test_device_command_request_accepts_typed_command() -> None:
 
     assert operation.target.device_id == "dev_test"
     assert operation.target.printer_name == "Kitchen Printer"
+    assert isinstance(operation.command, CutPaper)
     assert operation.command.kind == "cut_paper"
     assert operation.command.mode == "full"

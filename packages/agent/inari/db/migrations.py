@@ -129,6 +129,7 @@ class DatabaseMigrator:
                 raise DatabaseMigrationError(
                     f"Database migration completed unexpectedly at revision {current_revision!r}; expected {target_revision!r}."
                 )
+            assert current_revision is not None
             return DatabaseMigrationResult(
                 previous_revision=previous_revision,
                 current_revision=current_revision,

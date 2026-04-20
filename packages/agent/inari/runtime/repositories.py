@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from sqlalchemy import collate, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import CursorResult, RowMapping
 
 from ..db.schema import (
     device_events_table,
@@ -110,7 +111,7 @@ class DeviceRepository:
         )
         with self.store.connection() as connection:
             result = connection.execute(stmt)
-            sequence = int(result.inserted_primary_key[0] or result.lastrowid)
+            sequence = _inserted_row_id(result)
         return DeviceEventRecord(
             sequence=sequence,
             resource_id=device_id,
@@ -266,7 +267,7 @@ class JobRepository:
                     started_at=timestamp_to_iso(now),
                 )
             )
-            attempt_id = int(result.inserted_primary_key[0] or result.lastrowid)
+            attempt_id = _inserted_row_id(result)
         updated = self.get(job_id) or _missing_job(job_id)
         return updated, JobAttemptRecord(
             id=attempt_id,
@@ -454,7 +455,7 @@ class JobRepository:
         )
         with self.store.connection() as connection:
             result = connection.execute(stmt)
-            sequence = int(result.inserted_primary_key[0] or result.lastrowid)
+            sequence = _inserted_row_id(result)
         return JobEventRecord(
             sequence=sequence,
             resource_id=job_id,
@@ -547,7 +548,7 @@ class JobRepository:
         return self.get(job_id) if result.rowcount and result.rowcount > 0 else None
 
 
-def _row_to_device(row: Mapping[str, Any]) -> DeviceRecord:
+def _row_to_device(row: RowMapping | Mapping[str, Any]) -> DeviceRecord:
     return DeviceRecord(
         id=str(row["id"]),
         kind=DeviceKind(str(row["kind"])),
@@ -566,7 +567,7 @@ def _row_to_device(row: Mapping[str, Any]) -> DeviceRecord:
     )
 
 
-def _row_to_job(row: Mapping[str, Any]) -> JobRecord:
+def _row_to_job(row: RowMapping | Mapping[str, Any]) -> JobRecord:
     return JobRecord(
         id=str(row["id"]),
         kind=JobKind(str(row["kind"])),
@@ -610,7 +611,9 @@ def _row_to_job(row: Mapping[str, Any]) -> JobRecord:
     )
 
 
-def _row_to_job_attempt(row: Mapping[str, Any]) -> JobAttemptRecord:
+def _row_to_job_attempt(
+    row: RowMapping | Mapping[str, Any]
+) -> JobAttemptRecord:
     return JobAttemptRecord(
         id=int(row["id"]),
         job_id=str(row["job_id"]),
@@ -630,7 +633,9 @@ def _row_to_job_attempt(row: Mapping[str, Any]) -> JobAttemptRecord:
     )
 
 
-def _row_to_device_event(row: Mapping[str, Any]) -> DeviceEventRecord:
+def _row_to_device_event(
+    row: RowMapping | Mapping[str, Any]
+) -> DeviceEventRecord:
     return DeviceEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["device_id"]),
@@ -640,7 +645,7 @@ def _row_to_device_event(row: Mapping[str, Any]) -> DeviceEventRecord:
     )
 
 
-def _row_to_job_event(row: Mapping[str, Any]) -> JobEventRecord:
+def _row_to_job_event(row: RowMapping | Mapping[str, Any]) -> JobEventRecord:
     return JobEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["job_id"]),
@@ -652,3 +657,13 @@ def _row_to_job_event(row: Mapping[str, Any]) -> JobEventRecord:
 
 def _missing_job(job_id: str) -> JobRecord:
     raise LookupError(f"Job {job_id!r} is missing from the runtime store.")
+
+
+def _inserted_row_id(result: CursorResult[Any]) -> int:
+    if result.inserted_primary_key:
+        inserted_key = result.inserted_primary_key[0]
+        if inserted_key is not None:
+            return int(inserted_key)
+    if result.lastrowid is not None:
+        return int(result.lastrowid)
+    raise RuntimeError("SQLite insert did not return a row id.")

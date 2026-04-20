@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from io import BytesIO
 import logging
 from typing import Callable, Sequence
@@ -40,7 +39,7 @@ class QtTrayHost(TrayHost):
         on_activate: Callable[[], None] | None = None,
     ) -> None:
         application = QApplication.instance()
-        if application is None:
+        if not isinstance(application, QApplication):
             application = QApplication([self._title])
         application.setQuitOnLastWindowClosed(False)
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -96,7 +95,12 @@ class QtTrayHost(TrayHost):
     def _show_message(self, title: str, message: str) -> None:
         if self._tray_icon is None or not self._tray_icon.supportsMessages():
             return
-        self._tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 5000)
+        self._tray_icon.showMessage(
+            title,
+            message,
+            QSystemTrayIcon.MessageIcon.Information,
+            5000,
+        )
 
     def _run_ready_callback(self, callback: Callable[[], None]) -> None:
         try:
@@ -194,6 +198,6 @@ def _menu_layout_matches(
 def _image_to_qicon(image: Image) -> QIcon:
     buffer = BytesIO()
     image.save(buffer, format="PNG")
-    qimage = QImage.fromData(buffer.getvalue(), "PNG")
+    qimage = QImage.fromData(buffer.getvalue())
     pixmap = QPixmap.fromImage(qimage)
     return QIcon(pixmap)

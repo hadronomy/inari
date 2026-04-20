@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from inari_tray.icons import ICON_SIZE, build_tray_icon
 from inari_tray.models import (
@@ -33,17 +34,23 @@ def _snapshot(*, level: TrayStatusLevel) -> TraySnapshot:
 
 
 def test_build_tray_icon_keeps_canvas_edges_transparent() -> None:
-    image = build_tray_icon(_snapshot(level=TrayStatusLevel.ONLINE))
+    image = build_tray_icon(_snapshot(level=TrayStatusLevel.ONLINE)).convert("RGBA")
 
     assert image.size == (ICON_SIZE, ICON_SIZE)
-    assert image.getpixel((0, 0))[3] == 0
-    assert image.getpixel((ICON_SIZE - 1, 0))[3] == 0
-    assert image.getpixel((0, ICON_SIZE - 1))[3] == 0
+    top_left = cast(tuple[int, int, int, int], image.getpixel((0, 0)))
+    top_right = cast(tuple[int, int, int, int], image.getpixel((ICON_SIZE - 1, 0)))
+    bottom_left = cast(tuple[int, int, int, int], image.getpixel((0, ICON_SIZE - 1)))
+    assert top_left[3] == 0
+    assert top_right[3] == 0
+    assert bottom_left[3] == 0
 
 
 def test_build_tray_icon_places_colored_status_dot() -> None:
-    image = build_tray_icon(_snapshot(level=TrayStatusLevel.OFFLINE))
+    image = build_tray_icon(_snapshot(level=TrayStatusLevel.OFFLINE)).convert("RGBA")
 
-    dot_pixel = image.getpixel((ICON_SIZE - 8, ICON_SIZE - 8))
+    dot_pixel = cast(
+        tuple[int, int, int, int],
+        image.getpixel((ICON_SIZE - 8, ICON_SIZE - 8)),
+    )
     assert dot_pixel[:3] == (240, 87, 113)
     assert dot_pixel[3] == 255

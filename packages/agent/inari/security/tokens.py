@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from typing import Any, Iterable
@@ -72,7 +73,7 @@ class TokenService:
                 "The supplied access token is invalid.",
                 status_code=401,
             ) from exc
-        claims = dict(getattr(claims_set, "claims", claims_set))
+        claims = _claims_mapping(claims_set)
         self._validate_claims(claims)
         scopes = frozenset(AccessScope(value) for value in claims.get("scope", []))
         principal_kind = PrincipalKind(
@@ -133,13 +134,30 @@ class TokenService:
             )
 
 
-def _as_datetime(value: object) -> datetime | None:
+def _claims_mapping(value: object) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    claims = getattr(value, "claims", None)
+    if isinstance(claims, Mapping):
+        return {str(key): item for key, item in claims.items()}
+    raise AgentError(
+        "INVALID_ACCESS_TOKEN",
+        "The supplied access token claims could not be decoded.",
+        status_code=401,
+    )
+
+
+def _as_datetime(value: datetime | int | float | str | None) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
     return datetime.fromtimestamp(int(value), tz=UTC)
 
 

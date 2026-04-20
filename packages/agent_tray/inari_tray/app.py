@@ -7,20 +7,24 @@ import subprocess
 import threading
 import time
 import webbrowser
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from inari.models import (
+    JobResourceResponse,
     LiveEventUpdateResponse,
     LiveSnapshotResponse,
+    LiveUpdateMessage,
     RuntimeEventResponse,
     SystemStatusResponse,
 )
 
-from .bridge import AgentControlBridge, build_control_bridge
+from .bridge import build_control_bridge
 from .client import AgentApiClient
 from .config import TraySettings
 from .device_center import DeviceCenterPresenter, create_device_center
+from .device_center.api import DeviceCenterClient
 from .models import (
     ControlMode,
     ControlSnapshot,
@@ -33,13 +37,44 @@ from .tray_host import TrayHost, TrayMenuEntry, create_tray_host
 logger = logging.getLogger(__name__)
 
 
+class TrayApiClient(DeviceCenterClient, Protocol):
+    def get_status(self) -> SystemStatusResponse: ...
+
+    def iter_live_updates(
+        self, stop_event: threading.Event
+    ) -> Iterator[LiveUpdateMessage]: ...
+
+    def submit_test_page(
+        self,
+        *,
+        device_id: str | None = None,
+        printer_name: str | None = None,
+    ) -> JobResourceResponse: ...
+
+
+class TrayControlBridge(Protocol):
+    mode: ControlMode
+
+    def query_state(self) -> ControlSnapshot: ...
+
+    def mark_ready(self) -> None: ...
+
+    def start(self) -> str: ...
+
+    def stop(self) -> str: ...
+
+    def restart(self) -> str: ...
+
+    def shutdown(self) -> None: ...
+
+
 class AgentTrayApplication:
     def __init__(
         self,
         settings: TraySettings,
         *,
-        client: AgentApiClient | None = None,
-        bridge: AgentControlBridge | None = None,
+        client: TrayApiClient | None = None,
+        bridge: TrayControlBridge | None = None,
         host: TrayHost | None = None,
         device_center: DeviceCenterPresenter | None = None,
         device_center_factory: Callable[..., DeviceCenterPresenter] | None = None,
@@ -439,7 +474,7 @@ class AgentTrayApplication:
     def _default_device_center_factory(
         settings: TraySettings,
         *,
-        client: AgentApiClient,
+        client: TrayApiClient,
         notify: Callable[[str, str | None], None] | None = None,
     ) -> DeviceCenterPresenter:
         return create_device_center(settings, client=client, notify=notify)

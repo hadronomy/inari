@@ -90,6 +90,11 @@ class EscPosImageReceiptRenderer:
             width = padded_width
 
         pixels = image.load()
+        if pixels is None:
+            raise PrinterServiceError(
+                "INVALID_RECEIPT_IMAGE",
+                "Receipt image pixels could not be loaded.",
+            )
         bytes_per_row = width // 8
         raster_bytes = bytearray()
 

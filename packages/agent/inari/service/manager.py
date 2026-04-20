@@ -73,7 +73,9 @@ def build_service_context(
     resolved_config_path = resolve_service_config_path(
         config_path, platform_system=platform_system
     )
-    working_directory = (settings.data_dir or resolved_config_path.parent).resolve()
+    working_directory = (
+        settings.data_dir or resolved_config_path.parent
+    ).resolve()
     return ServiceContext(
         settings=settings,
         identity=identity,

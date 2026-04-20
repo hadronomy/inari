@@ -4,6 +4,7 @@ import uuid
 from typing import Any, Mapping
 
 from sqlalchemy import func, insert, select, update
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import OperationalError
 
 from ..db.schema import gateway_inbound_commands_table, gateway_outbox_table
@@ -255,7 +256,9 @@ class GatewayRepository:
         return summary
 
 
-def _row_to_inbound(row: Mapping[str, Any]) -> GatewayInboundCommandRecord:
+def _row_to_inbound(
+    row: RowMapping | Mapping[str, Any]
+) -> GatewayInboundCommandRecord:
     return GatewayInboundCommandRecord(
         command_id=str(row["command_id"]),
         message_type=str(row["message_type"]),
@@ -276,7 +279,7 @@ def _row_to_inbound(row: Mapping[str, Any]) -> GatewayInboundCommandRecord:
     )
 
 
-def _row_to_outbox(row: Mapping[str, Any]) -> GatewayOutboxRecord:
+def _row_to_outbox(row: RowMapping | Mapping[str, Any]) -> GatewayOutboxRecord:
     return GatewayOutboxRecord(
         message_id=str(row["message_id"]),
         message_type=str(row["message_type"]),

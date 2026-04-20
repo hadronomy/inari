@@ -25,6 +25,18 @@ class PlatformPathBundle:
     runtime_database_path: Path
 
 
+def parse_path_profile(value: object) -> PathProfile:
+    match value:
+        case "auto":
+            return "auto"
+        case "development":
+            return "development"
+        case "production":
+            return "production"
+        case _:
+            raise ValueError(f"Unsupported path profile: {value!r}")
+
+
 def resolve_default_path_bundle(
     *,
     profile: PathProfile = "auto",
@@ -50,10 +62,11 @@ def resolve_effective_path_profile(
     working_directory: Path,
     config_path: Path | None = None,
 ) -> ResolvedPathProfile:
-    if profile not in {"auto", "development", "production"}:
-        raise ValueError(f"Unsupported path profile: {profile!r}")
-    if profile in {"development", "production"}:
-        return profile
+    profile = parse_path_profile(profile)
+    if profile == "development":
+        return "development"
+    if profile == "production":
+        return "production"
     anchor = config_path.parent if config_path is not None else working_directory
     return (
         "development"

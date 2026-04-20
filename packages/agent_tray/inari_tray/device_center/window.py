@@ -1248,8 +1248,10 @@ class DeviceCenterWindow(QMainWindow):
         button.setText(hide_text if checked else show_text)
         shell.updateGeometry()
         parent = shell.parentWidget()
-        if parent is not None and parent.layout() is not None:
-            parent.layout().activate()
+        if parent is not None:
+            layout = parent.layout()
+            if layout is not None:
+                layout.activate()
 
     def _select_device_by_id(self, device_id: str | None) -> str | None:
         if not device_id:

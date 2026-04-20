@@ -14,7 +14,7 @@ class AppProvider(Provider):
 
     @provide
     def database_migrator(self, settings: AgentSettings) -> DatabaseMigrator:
-        return DatabaseMigrator(settings.runtime_database_path)
+        return DatabaseMigrator(settings.resolved_runtime_database_path)
 
     @provide
     def application_supervisor(

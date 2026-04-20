@@ -8,11 +8,16 @@ from typing import Any
 from PySide6.QtCore import QObject, QSettings, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
-from inari.models import DeviceDirectoryResponse, DeviceResponse, RuntimeEventResponse
+from inari.models import (
+    DeviceDirectoryResponse,
+    DeviceEventCollectionResponse,
+    DeviceResponse,
+    RuntimeEventResponse,
+)
 
-from ..client import AgentApiClient
 from ..config import TraySettings
 from ..models import TraySnapshot
+from .contracts import DeviceCenterClient
 from .helpers import (
     DEFAULT_EVENT_LIMIT,
     SETTINGS_APPLICATION,
@@ -45,7 +50,7 @@ class QtDeviceCenterController(QObject):
         self,
         *,
         settings: TraySettings,
-        client: AgentApiClient,
+        client: DeviceCenterClient,
         notify: Callable[[str, str | None], None] | None = None,
     ) -> None:
         super().__init__()
@@ -275,9 +280,9 @@ class QtDeviceCenterController(QObject):
         self,
         generation: int,
         device_id: str,
-        response: object,
+        response: DeviceEventCollectionResponse,
     ) -> None:
-        if generation != self._event_generation or not hasattr(response, "events"):
+        if generation != self._event_generation:
             return
         events = tuple(response.events)
         self._events_by_device_id[device_id] = events

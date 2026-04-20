@@ -16,7 +16,11 @@ format:
 lint:
     uv run --no-sync --group dev ruff check packages/agent packages/agent_tray
 
+# Type check the Python packages with ty. TODO: Install ty and add it to the dev group in pyproject.toml.
+typecheck:
+    uvx ty check
+
 # Run the repository verification suite.
-check: lint
+check: lint typecheck
     uv run --directory packages/agent --group dev pytest tests -q
     uv run --directory packages/agent_tray --group dev pytest tests -q

@@ -66,8 +66,12 @@ def test_device_table_model_uses_row_changes_for_directory_updates() -> None:
     assert reset_calls == []
     assert removed == [(0, 0)]
     assert inserted == [(1, 1)]
-    assert model.device_at(0).id == "dev_kitchen"
-    assert model.device_at(1).id == "dev_bar"
+    device_zero = model.device_at(0)
+    assert device_zero is not None
+    assert device_zero.id == "dev_kitchen"
+    device_one = model.device_at(1)
+    assert device_one is not None
+    assert device_one.id == "dev_bar"
 
 
 def _qt_app() -> QCoreApplication:

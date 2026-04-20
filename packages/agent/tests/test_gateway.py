@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from inari.config import AgentSettings
 from inari.gateway.connector import GatewayConnector
+from inari.gateway.data_plane.base import GatewayDataPlaneTransport
+from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
     ControllerAction,
     GatewayEnrollmentRecord,
@@ -18,7 +21,7 @@ from inari.gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
-from inari.gateway.protocol import AgentStatusSnapshotMessage
+from inari.gateway.protocol import AgentStatusSnapshotMessage, GatewaySnapshotPayload
 from inari.gateway.repositories import GatewayRepository
 from inari.gateway.runtime_bridge import (
     GatewayCommandDispatcher,
@@ -35,7 +38,9 @@ from inari.runtime.models import (
     JobState,
     utc_now,
 )
+from inari.runtime.services import JobService
 from inari.runtime.store import RuntimeStore
+from inari.security.models import GatewayMode
 from inari.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
@@ -45,14 +50,24 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
     store.initialize()
     connector = GatewayConnector(
         settings=AgentSettings(
-            gateway_mode="managed", upstream_base_url="https://controller.example"
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_base_url="https://controller.example",
         ),
-        enrollment_service=FakeEnrollmentService(None),
+        enrollment_service=cast(
+            GatewayEnrollmentService,
+            FakeEnrollmentService(None),
+        ),
         certificate_lifecycle_manager=None,
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
-        command_dispatcher=FakeCommandDispatcher(),
-        data_plane_transport=FakeDataPlaneTransport(),
+        command_dispatcher=cast(
+            GatewayCommandDispatcher,
+            FakeCommandDispatcher(),
+        ),
+        data_plane_transport=cast(
+            GatewayDataPlaneTransport,
+            FakeDataPlaneTransport(),
+        ),
     )
 
     await connector.sync_once()
@@ -73,14 +88,21 @@ async def test_connector_marks_online_after_successful_status_sync(
     transport = FakeDataPlaneTransport()
     connector = GatewayConnector(
         settings=AgentSettings(
-            gateway_mode="managed", upstream_base_url="https://controller.example"
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_base_url="https://controller.example",
         ),
-        enrollment_service=FakeEnrollmentService(enrollment),
+        enrollment_service=cast(
+            GatewayEnrollmentService,
+            FakeEnrollmentService(enrollment),
+        ),
         certificate_lifecycle_manager=None,
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
-        command_dispatcher=FakeCommandDispatcher(),
-        data_plane_transport=transport,
+        command_dispatcher=cast(
+            GatewayCommandDispatcher,
+            FakeCommandDispatcher(),
+        ),
+        data_plane_transport=cast(GatewayDataPlaneTransport, transport),
     )
 
     await connector.sync_once()
@@ -99,7 +121,7 @@ async def test_dispatcher_accepts_remote_print_job_and_persists_response(
     store.initialize()
     repository = GatewayRepository(store)
     dispatcher = GatewayCommandDispatcher(
-        job_service=StubJobService(),
+        job_service=cast(JobService, StubJobService()),
         gateway_repository=repository,
     )
     enrollment = _enrollment_record(
@@ -219,7 +241,7 @@ class FakeDataPlaneTransport:
 
 
 class _NullCertificateService:
-    def current_certificate(self):
+    def current_certificate(self) -> None:
         return None
 
 
@@ -272,8 +294,9 @@ def _database_path(temp_dir: Path) -> Path:
     return temp_dir / "runtime.sqlite3"
 
 
-def _snapshot_provider() -> dict[str, object]:
-    return {
+def _snapshot_provider() -> GatewaySnapshotPayload:
+    return GatewaySnapshotPayload.model_validate(
+        {
         "generated_at": utc_now().isoformat(),
         "protocol": {
             "version": GATEWAY_PROTOCOL_VERSION,
@@ -310,7 +333,8 @@ def _snapshot_provider() -> dict[str, object]:
             "client_certificate_present": False,
         },
         "observability": {},
-    }
+        }
+    )
 
 
 def _enrollment_record(

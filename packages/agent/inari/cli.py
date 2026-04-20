@@ -72,7 +72,7 @@ def _database_migrator(
     config_path: Path | None,
 ) -> tuple[AgentSettings, DatabaseMigrator]:
     settings = _load_cli_settings(config_path)
-    return settings, DatabaseMigrator(settings.runtime_database_path)
+    return settings, DatabaseMigrator(settings.resolved_runtime_database_path)
 
 
 def _service_manager(config_path: Path | None, scope: ServiceScope):

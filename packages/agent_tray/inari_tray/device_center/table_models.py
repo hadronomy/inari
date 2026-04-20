@@ -3,7 +3,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from datetime import UTC
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    QSize,
+    Qt,
+)
 from PySide6.QtCore import QSortFilterProxyModel
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
@@ -20,8 +26,10 @@ from inari.runtime.models import DeviceConnectionState
 from .helpers import compact_timestamp, device_endpoint
 from .theme import DeviceCenterTheme
 
-DEVICE_ROLE = Qt.UserRole + 1
-EVENT_ROLE = Qt.UserRole + 2
+DISPLAY_ROLE = int(Qt.ItemDataRole.DisplayRole)
+TOOLTIP_ROLE = int(Qt.ItemDataRole.ToolTipRole)
+DEVICE_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+EVENT_ROLE = int(Qt.ItemDataRole.UserRole) + 2
 
 
 class DeviceTableModel(QAbstractTableModel):
@@ -38,25 +46,33 @@ class DeviceTableModel(QAbstractTableModel):
         self._devices: list[DeviceResponse] = []
         self._pinned_device_ids: set[str] = set()
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(
+        self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self._devices)
 
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def columnCount(
+        self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self.HEADERS)
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = DISPLAY_ROLE,
+    ):
         if not index.isValid():
             return None
         device = self._devices[index.row()]
         if role == DEVICE_ROLE:
             return device
-        if role == Qt.DisplayRole:
+        if role == DISPLAY_ROLE:
             return self._display_value(device, index.column())
-        if role == Qt.ToolTipRole:
+        if role == TOOLTIP_ROLE:
             return _device_tooltip(device, pinned=device.id in self._pinned_device_ids)
         return None
 
@@ -64,11 +80,11 @@ class DeviceTableModel(QAbstractTableModel):
         self,
         section: int,
         orientation: Qt.Orientation,
-        role: int = Qt.DisplayRole,
+        role: int = DISPLAY_ROLE,
     ):
         if (
             orientation is Qt.Orientation.Horizontal
-            and role == Qt.DisplayRole
+            and role == DISPLAY_ROLE
             and 0 <= section < len(self.HEADERS)
         ):
             return self.HEADERS[section]
@@ -193,7 +209,11 @@ class DeviceFilterProxyModel(QSortFilterProxyModel):
         self._pinned_device_ids = set(pinned_device_ids)
         self.invalidate()
 
-    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+    def lessThan(
+        self,
+        left: QModelIndex | QPersistentModelIndex,
+        right: QModelIndex | QPersistentModelIndex,
+    ) -> bool:
         left_device = left.data(DEVICE_ROLE)
         right_device = right.data(DEVICE_ROLE)
         if isinstance(left_device, DeviceResponse) and isinstance(
@@ -220,7 +240,11 @@ class DeviceFilterProxyModel(QSortFilterProxyModel):
                     )
         return super().lessThan(left, right)
 
-    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
+    def filterAcceptsRow(
+        self,
+        source_row: int,
+        source_parent: QModelIndex | QPersistentModelIndex,
+    ) -> bool:
         model = self.sourceModel()
         if not isinstance(model, DeviceTableModel):
             return True
@@ -261,23 +285,31 @@ class DeviceEventsTableModel(QAbstractTableModel):
         super().__init__()
         self._events: list[RuntimeEventResponse] = []
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(
+        self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self._events)
 
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def columnCount(
+        self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self.HEADERS)
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+    def data(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = DISPLAY_ROLE,
+    ):
         if not index.isValid():
             return None
         event = self._events[index.row()]
         if role == EVENT_ROLE:
             return event
-        if role == Qt.DisplayRole:
+        if role == DISPLAY_ROLE:
             match index.column():
                 case 0:
                     return event.occurred_at.astimezone(UTC).strftime(
@@ -287,7 +319,7 @@ class DeviceEventsTableModel(QAbstractTableModel):
                     return event.event_type
                 case 2:
                     return _event_detail(event)
-        if role == Qt.ToolTipRole:
+        if role == TOOLTIP_ROLE:
             return _event_tooltip(event)
         return None
 
@@ -295,11 +327,11 @@ class DeviceEventsTableModel(QAbstractTableModel):
         self,
         section: int,
         orientation: Qt.Orientation,
-        role: int = Qt.DisplayRole,
+        role: int = DISPLAY_ROLE,
     ):
         if (
             orientation is Qt.Orientation.Horizontal
-            and role == Qt.DisplayRole
+            and role == DISPLAY_ROLE
             and 0 <= section < len(self.HEADERS)
         ):
             return self.HEADERS[section]
@@ -324,7 +356,7 @@ class DeviceStateBadgeDelegate(QStyledItemDelegate):
         self,
         painter: QPainter,
         option: QStyleOptionViewItem,
-        index: QModelIndex,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> None:
         device = index.data(DEVICE_ROLE)
         if not isinstance(device, DeviceResponse):
@@ -384,7 +416,11 @@ class DeviceStateBadgeDelegate(QStyledItemDelegate):
         )
         painter.restore()
 
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
+    def sizeHint(
+        self,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
+    ) -> QSize:
         base = super().sizeHint(option, index)
         return QSize(base.width(), max(base.height(), 24))
 
@@ -402,7 +438,7 @@ class DeviceNameDelegate(QStyledItemDelegate):
         self,
         painter: QPainter,
         option: QStyleOptionViewItem,
-        index: QModelIndex,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> None:
         super().paint(painter, option, index)
         if not bool(option.state & QStyle.StateFlag.State_Selected):

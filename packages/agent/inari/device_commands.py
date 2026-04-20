@@ -27,7 +27,7 @@ class DeviceCommand:
 
     def to_payload(self) -> dict[str, Any]:
         payload = {"kind": self.kind.value}
-        for field in fields(self):
+        for field in fields(type(self)):
             payload[field.name] = _encode_value(getattr(self, field.name))
         return payload
 

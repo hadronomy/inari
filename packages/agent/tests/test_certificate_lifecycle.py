@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
+import httpx
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -12,12 +15,14 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from inari.config import AgentSettings
+from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
     CertificateBootstrapMode,
     GatewayEnrollmentRecord,
     ManagedCertificateFailureReason,
     ManagedCertificateState,
     StepCaOttBootstrap,
+    UpstreamCertificateMode,
     UpstreamDataPlaneKind,
     ZenohDataPlaneAuthKind,
     ZenohDataPlaneConfig,
@@ -25,12 +30,16 @@ from inari.gateway.models import (
     ZenohSessionMode,
 )
 from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from inari.security.certificate_provisioners import StepCaOttCertificateProvisioner
+from inari.security.certificate_provisioners import (
+    ClientCertificateProvisioner,
+    StepCaOttCertificateProvisioner,
+)
 from inari.security.certificates import (
     CertificateLifecycleService,
     ManagedCertificate,
 )
 from inari.security.identity import AgentIdentityService
+from inari.security.models import GatewayMode
 
 
 @pytest.mark.anyio
@@ -44,12 +53,18 @@ async def test_lifecycle_waits_for_bootstrap_when_certificate_is_missing(
     )
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
-            gateway_mode="managed",
-            upstream_certificate_mode="step_ca",
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
         ),
-        enrollment_service=StubEnrollmentService(_enrollment_record()),
+        enrollment_service=cast(
+            GatewayEnrollmentService,
+            StubEnrollmentService(_enrollment_record()),
+        ),
         certificate_service=certificate_service,
-        certificate_provisioner=NoopProvisioner(),
+        certificate_provisioner=cast(
+            ClientCertificateProvisioner,
+            NoopProvisioner(),
+        ),
     )
 
     certificate = await lifecycle.ensure_current(trigger="test")
@@ -97,27 +112,29 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
     )
     provisioner = StepCaOttCertificateProvisioner(
         settings=AgentSettings(
-            gateway_mode="managed",
-            upstream_certificate_mode="step_ca",
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
         identity_service=identity_service,
         certificate_service=certificate_service,
-        http_client_factory=lambda **kwargs: StepCaHttpClient(
-            root_pem=ca_pem,
-            ca_key=ca_key,
-            certificate_service=certificate_service,
+        http_client_factory=_http_client_factory(
+            StepCaHttpClient(
+                root_pem=ca_pem,
+                ca_key=ca_key,
+                certificate_service=certificate_service,
+            )
         ),
     )
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
-            gateway_mode="managed",
-            upstream_certificate_mode="step_ca",
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
-        enrollment_service=enrollment_service,
+        enrollment_service=cast(GatewayEnrollmentService, enrollment_service),
         certificate_service=certificate_service,
         certificate_provisioner=provisioner,
     )
@@ -129,6 +146,7 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
     assert "BEGIN CERTIFICATE" in certificate_service.certificate_path.read_text(
         encoding="utf-8"
     )
+    assert enrollment_service.record is not None
     assert enrollment_service.record.certificate_bootstrap is not None
     assert enrollment_service.record.certificate_bootstrap.ott is None
 
@@ -178,23 +196,23 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(
     )
     provisioner = StepCaOttCertificateProvisioner(
         settings=AgentSettings(
-            gateway_mode="managed",
-            upstream_certificate_mode="step_ca",
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
             step_ca_certificate_renewal_skew_seconds=3600,
         ),
         identity_service=identity_service,
         certificate_service=certificate_service,
-        http_client_factory=lambda **kwargs: RejectingRenewHttpClient(),
+        http_client_factory=_http_client_factory(RejectingRenewHttpClient()),
     )
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
-            gateway_mode="managed",
-            upstream_certificate_mode="step_ca",
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_certificate_renewal_skew_seconds=3600,
         ),
-        enrollment_service=enrollment_service,
+        enrollment_service=cast(GatewayEnrollmentService, enrollment_service),
         certificate_service=certificate_service,
         certificate_provisioner=provisioner,
     )
@@ -229,12 +247,15 @@ async def test_lifecycle_serializes_concurrent_issuance_attempts(
     provisioner = SlowProvisioner(certificate_service)
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
-            gateway_mode="managed",
-            upstream_certificate_mode="step_ca",
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
         ),
-        enrollment_service=enrollment_service,
+        enrollment_service=cast(GatewayEnrollmentService, enrollment_service),
         certificate_service=certificate_service,
-        certificate_provisioner=provisioner,
+        certificate_provisioner=cast(
+            ClientCertificateProvisioner,
+            provisioner,
+        ),
     )
 
     results = await asyncio.gather(
@@ -321,6 +342,7 @@ class StepCaHttpClient:
 
     async def post(self, url: str, *, json=None, headers=None):
         if url.endswith("/sign"):
+            assert json is not None
             csr = x509.load_pem_x509_csr(json["csr"].encode("utf-8"))
             certificate = _issue_certificate_from_csr(csr, self.ca_key)
             return FakeAsyncResponse(
@@ -470,3 +492,7 @@ def _enrollment_record(
         ),
         certificate_bootstrap=certificate_bootstrap,
     )
+
+
+def _http_client_factory(client: object) -> Callable[..., httpx.AsyncClient]:
+    return cast(Callable[..., httpx.AsyncClient], lambda **kwargs: client)

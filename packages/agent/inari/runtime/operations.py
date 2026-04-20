@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from base64 import b64decode, b64encode
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, TypeGuard
 
 from ..binary_payloads import BinaryPayload, DetectedMediaType
 from ..device_commands import DeviceCommand
@@ -18,6 +18,8 @@ from ..print_jobs import (
     TextDocumentContent,
 )
 from ..printers import PrinterTransport
+
+BinaryPayloadSource = Literal["base64", "data_url"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -259,7 +261,7 @@ def deserialize_binary_payload(payload: Mapping[str, Any]) -> BinaryPayload:
         declared_mime_types = ()
     return BinaryPayload(
         content=b64decode(str(payload.get("content_base64", ""))),
-        source=str(payload.get("source", "base64")),  # type: ignore[arg-type]
+        source=normalize_binary_payload_source(payload.get("source")),
         declared_mime_types=declared_mime_types,
         detected_type=detected_type,
     )
@@ -267,7 +269,7 @@ def deserialize_binary_payload(payload: Mapping[str, Any]) -> BinaryPayload:
 
 def _mapping(value: object) -> dict[str, Any]:
     if isinstance(value, Mapping):
-        return dict(value)
+        return {str(key): item for key, item in value.items()}
     return {}
 
 
@@ -276,3 +278,13 @@ def _optional_text(value: object) -> str | None:
         text = value.strip()
         return text or None
     return None
+
+
+def is_binary_payload_source(value: object) -> TypeGuard[BinaryPayloadSource]:
+    return value in ("base64", "data_url")
+
+
+def normalize_binary_payload_source(value: object) -> BinaryPayloadSource:
+    if is_binary_payload_source(value):
+        return value
+    return "base64"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from threading import Event
+from typing import cast
 
 import httpx
 import respx
@@ -106,7 +107,10 @@ def test_client_reuses_cached_token_for_websocket_stream() -> None:
 
         next(client.iter_live_updates(Event()))
 
-    assert captured["additional_headers"]["Authorization"] == "Bearer local-token"
+    additional_headers = captured["additional_headers"]
+    assert isinstance(additional_headers, dict)
+    typed_headers = cast(dict[str, str], additional_headers)
+    assert typed_headers["Authorization"] == "Bearer local-token"
 
 
 def test_client_lists_devices_with_enriched_driver_metadata() -> None:

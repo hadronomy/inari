@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Protocol
 
 import keyring
-from keyring.errors import KeyringError, NoKeyringError
+from keyring.errors import KeyringError, NoKeyringError, PasswordDeleteError
 
 
 class SecretStore(Protocol):
@@ -73,7 +73,7 @@ class KeyringSecretStore:
     def delete_secret(self, key: str) -> None:
         try:
             keyring.delete_password(self.service_name, key)
-        except keyring.errors.PasswordDeleteError:
+        except PasswordDeleteError:
             return
 
 

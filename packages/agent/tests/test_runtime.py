@@ -175,7 +175,7 @@ async def test_supervisor_executes_queued_print_jobs_asynchronously(
         job_lease_recovery_interval_seconds=0.05,
     )
     printer_service = PrinterService(settings=settings, driver_registry=registry)
-    store = RuntimeStore(settings.runtime_database_path)
+    store = RuntimeStore(settings.resolved_runtime_database_path)
     event_hub = EventHub()
     device_repository = DeviceRepository(store)
     job_repository = JobRepository(store)
