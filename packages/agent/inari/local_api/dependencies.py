@@ -10,6 +10,7 @@ from ..runtime.events import EventHub
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
 from ..security.auth import AuthorizationService
+from ..security.local_trust import StandaloneTrustService
 from ..security.policies import SecurityPolicyService
 
 
@@ -45,6 +46,14 @@ def get_authorization_service(
     if container.authorization_service is None:
         raise RuntimeError("AuthorizationService is not configured.")
     return container.authorization_service
+
+
+def get_standalone_trust_service(
+    container: AgentContainer = Depends(get_container),
+) -> StandaloneTrustService:
+    if container.standalone_trust_service is None:
+        raise RuntimeError("StandaloneTrustService is not configured.")
+    return container.standalone_trust_service
 
 
 def get_security_policy_service(

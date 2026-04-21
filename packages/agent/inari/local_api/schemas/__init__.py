@@ -1,7 +1,16 @@
 from .auth import (
     AuthenticatedPrincipalResponse,
+    LocalChallengeRequest,
+    LocalChallengeResponse,
+    LocalClientAttestationInput,
+    LocalPairingCompleteRequest,
+    LocalPairingCompleteResponse,
+    LocalPairingRevokeRequest,
+    LocalPairingStartResponse,
+    LocalTrustStatusResponse,
     LocalTokenRequest,
     PrincipalResponse,
+    TrustedLocalClientResponse,
     TokenResponse,
 )
 from .base import APIModel
@@ -98,6 +107,14 @@ __all__ = [
     "LiveSnapshotResponse",
     "LiveUpdateMessage",
     "LocalTokenRequest",
+    "LocalChallengeRequest",
+    "LocalChallengeResponse",
+    "LocalClientAttestationInput",
+    "LocalPairingCompleteRequest",
+    "LocalPairingCompleteResponse",
+    "LocalPairingRevokeRequest",
+    "LocalPairingStartResponse",
+    "LocalTrustStatusResponse",
     "ManagedCertificateStatusResponse",
     "OpenCashDrawerCommandInput",
     "PdfDocumentContentInput",
@@ -117,4 +134,5 @@ __all__ = [
     "SystemStatusResponse",
     "TextDocumentContentInput",
     "TokenResponse",
+    "TrustedLocalClientResponse",
 ]

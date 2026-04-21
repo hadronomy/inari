@@ -123,10 +123,20 @@ config_version = 1
 # Hard timeout for a single job execution.
 # timeout = "60s"
 
-# Local auth settings for trusted loopback clients such as the tray.
+# Local auth and standalone pairing settings for trusted loopback clients such as the tray.
 [auth.local]
-# Allow local bootstrap token minting for trusted loopback clients.
+# Allow unauthenticated loopback clients to start first-run local pairing.
 # allow_loopback_bootstrap = true
+# Require local clients to pair before standalone token issuance.
+# pairing_required = true
+# How long first-run or rotated local pairing secrets remain valid.
+# pairing_secret_ttl = "5m"
+# Browser origins allowed to bind paired local-client tokens.
+# trusted_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
+# Bind browser-origin token issuance to trusted and paired origins.
+# origin_bound_tokens = true
+# Whether the tray should use stronger local signed-challenge trust when available.
+# tray_mutual_trust = "optional"
 # Lifetime of locally issued bearer tokens.
 # token_ttl = "1h"
 # Audience claim for locally issued tokens.

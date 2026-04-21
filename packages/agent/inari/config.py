@@ -76,7 +76,7 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("runtime", "jobs", "lease"): ("Job lease, heartbeat, and recovery tuning.",),
     ("runtime", "jobs", "execution"): ("Job execution timeout policy.",),
     ("auth", "local"): (
-        "Local auth settings for trusted loopback clients such as the tray.",
+        "Local auth and standalone pairing settings for trusted loopback clients such as the tray.",
     ),
     ("auth", "zitadel"): (
         "ZITADEL service-account settings used when managed enrollment is authorized through ZITADEL.",
@@ -175,7 +175,22 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
         "Hard timeout for a single job execution.",
     ),
     ("auth", "local", "allow_loopback_bootstrap"): (
-        "Allow local bootstrap token minting for trusted loopback clients.",
+        "Allow unauthenticated loopback clients to start first-run local pairing.",
+    ),
+    ("auth", "local", "pairing_required"): (
+        "Require local clients to pair before standalone token issuance.",
+    ),
+    ("auth", "local", "pairing_secret_ttl"): (
+        "How long first-run or rotated local pairing secrets remain valid.",
+    ),
+    ("auth", "local", "trusted_origins"): (
+        "Browser origins allowed to bind paired local-client tokens.",
+    ),
+    ("auth", "local", "origin_bound_tokens"): (
+        "Bind browser-origin token issuance to trusted and paired origins.",
+    ),
+    ("auth", "local", "tray_mutual_trust"): (
+        "Whether the tray should use stronger local signed-challenge trust when available.",
     ),
     ("auth", "local", "token_ttl"): ("Lifetime of locally issued bearer tokens.",),
     ("auth", "local", "audience"): ("Audience claim for locally issued tokens.",),
@@ -337,6 +352,7 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     ("runtime", "jobs", "lease", "recovery_interval"): "5s",
     ("runtime", "jobs", "execution", "timeout"): "60s",
     ("auth", "local", "token_ttl"): "1h",
+    ("auth", "local", "pairing_secret_ttl"): "5m",
     ("auth", "zitadel", "token_refresh_skew"): "120s",
     ("controller", "sync", "status_interval"): "30s",
     ("controller", "queue", "poll_interval"): "500ms",
@@ -372,6 +388,7 @@ _ARRAY_TABLE_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 PrinterMode = Literal["auto", "raw", "text", "document"]
+TrayMutualTrustMode = Literal["disabled", "optional", "required"]
 
 
 def _parse_duration_timedelta(value: object) -> timedelta:
@@ -559,6 +576,16 @@ class AuthLocalConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     allow_loopback_bootstrap: bool = True
+    pairing_required: bool = True
+    pairing_secret_ttl: ConfigDuration = timedelta(minutes=5)
+    trusted_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://127.0.0.1:8069",
+            "http://localhost:8069",
+        ]
+    )
+    origin_bound_tokens: bool = True
+    tray_mutual_trust: TrayMutualTrustMode = "optional"
     token_ttl: ConfigDuration = timedelta(hours=1)
     audience: str = "inari.local"
     issuer: str | None = None
@@ -779,6 +806,14 @@ class AgentConfigFile(BaseModel):
             "gateway_mode": self.agent.mode,
             "gateway_exposure": self.api.exposure,
             "allow_loopback_bootstrap": self.auth.local.allow_loopback_bootstrap,
+            "local_pairing_required": self.auth.local.pairing_required,
+            "local_pairing_secret_ttl_seconds": _parse_duration_int_seconds(
+                self.auth.local.pairing_secret_ttl,
+                field_name="auth.local.pairing_secret_ttl",
+            ),
+            "local_trusted_origins": list(self.auth.local.trusted_origins),
+            "local_origin_bound_tokens": self.auth.local.origin_bound_tokens,
+            "local_tray_mutual_trust": self.auth.local.tray_mutual_trust,
             "https_redirect_enabled": self.api.https_redirect,
             "secret_store_service_name": self.storage.secret_store_service_name,
             "local_token_ttl_seconds": _parse_duration_int_seconds(
@@ -908,6 +943,17 @@ class AgentSettings(BaseModel):
     token_issuer: str | None = None
     secret_store_service_name: str = "inari"
     allow_loopback_bootstrap: bool = True
+    local_pairing_required: bool = True
+    local_pairing_secret_ttl_seconds: IntegralDurationSeconds = 300
+    local_trusted_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://127.0.0.1:8069",
+            "http://localhost:8069",
+        ]
+    )
+    local_origin_bound_tokens: bool = True
+    local_tray_mutual_trust: TrayMutualTrustMode = "optional"
+    standalone_pairing_secret: str | None = None
     discovery_poll_interval_seconds: FloatDurationSeconds = 3.0
     scheduler_poll_interval_seconds: FloatDurationSeconds = 0.5
     scheduler_batch_size: int = 32
@@ -982,7 +1028,7 @@ class AgentSettings(BaseModel):
             raise RuntimeError("Agent settings are missing security_state_dir.")
         return self.security_state_dir
 
-    @field_validator("allowed_origins", mode="before")
+    @field_validator("allowed_origins", "local_trusted_origins", mode="before")
     @classmethod
     def normalize_allowed_origins(cls, value: object) -> object:
         return _normalize_list_like(value)

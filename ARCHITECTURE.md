@@ -103,6 +103,9 @@ The security layer handles:
 
 - loopback-first exposure rules
 - scoped local bearer tokens
+- standalone local pairing with signed client challenges
+- origin-bound token issuance for paired browser-style clients
+- tray-held local identity material for first-party desktop trust
 - optional TLS requirements for non-loopback exposure
 - persistent agent identity material
 - resilient local secret storage
@@ -111,7 +114,7 @@ Key code lives under:
 
 - [security/](./packages/agent/inari/security)
 
-Local desktop clients such as the tray obtain short-lived loopback tokens from `POST /auth/local-token` and then use those tokens for protected local API access.
+Local desktop clients such as the tray pair with the standalone agent, sign local trust challenges from `POST /auth/local-challenge`, obtain short-lived local client tokens from `POST /auth/local-token`, and then use those tokens for protected local API access.
 
 ### 5. Managed Gateway Layer
 

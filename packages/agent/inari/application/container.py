@@ -25,6 +25,7 @@ from ..runtime.supervisor import RuntimeSupervisor
 from ..security.auth import AuthorizationService
 from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
 from ..security.identity import AgentIdentityService
+from ..security.local_trust import StandaloneTrustService
 from ..security.policies import SecurityPolicyService
 from ..security.tls import TlsContextFactory
 from .supervision import ApplicationSupervisor
@@ -42,6 +43,7 @@ class AgentContainer:
     runtime_supervisor: RuntimeSupervisor
     identity_service: AgentIdentityService | None = None
     authorization_service: AuthorizationService | None = None
+    standalone_trust_service: StandaloneTrustService | None = None
     security_policy_service: SecurityPolicyService | None = None
     tls_context_factory: TlsContextFactory | None = None
     certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None = None
@@ -70,6 +72,7 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         runtime_supervisor=dependency_container.get(RuntimeSupervisor),
         identity_service=dependency_container.get(AgentIdentityService),
         authorization_service=dependency_container.get(AuthorizationService),
+        standalone_trust_service=dependency_container.get(StandaloneTrustService),
         security_policy_service=dependency_container.get(SecurityPolicyService),
         tls_context_factory=dependency_container.get(TlsContextFactory),
         certificate_lifecycle_manager=dependency_container.get(

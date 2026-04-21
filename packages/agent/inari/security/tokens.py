@@ -38,6 +38,7 @@ class TokenService:
         client_name: str,
         scopes: Iterable[AccessScope],
         principal_kind: PrincipalKind = PrincipalKind.LOCAL_CLIENT,
+        metadata: Mapping[str, str] | None = None,
     ) -> IssuedToken:
         issued_at = utc_now()
         expires_at = issued_at + timedelta(seconds=self.token_ttl_seconds)
@@ -53,6 +54,8 @@ class TokenService:
             "exp": int(expires_at.timestamp()),
             "jti": token_urlsafe(12),
         }
+        if metadata:
+            claims.update(metadata)
         token = jwt.encode({"alg": "HS256", "typ": "JWT"}, claims, self._signing_key())
         if isinstance(token, bytes):
             token = token.decode("utf-8")

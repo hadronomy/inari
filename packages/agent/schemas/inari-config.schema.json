@@ -150,10 +150,42 @@
           "default": null,
           "title": "Issuer"
         },
+        "origin_bound_tokens": {
+          "default": true,
+          "title": "Origin Bound Tokens",
+          "type": "boolean"
+        },
+        "pairing_required": {
+          "default": true,
+          "title": "Pairing Required",
+          "type": "boolean"
+        },
+        "pairing_secret_ttl": {
+          "default": "5m",
+          "title": "Pairing Secret Ttl",
+          "type": "string"
+        },
         "token_ttl": {
           "default": "1h",
           "title": "Token Ttl",
           "type": "string"
+        },
+        "tray_mutual_trust": {
+          "default": "optional",
+          "enum": [
+            "disabled",
+            "optional",
+            "required"
+          ],
+          "title": "Tray Mutual Trust",
+          "type": "string"
+        },
+        "trusted_origins": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trusted Origins",
+          "type": "array"
         }
       },
       "title": "AuthLocalConfig",

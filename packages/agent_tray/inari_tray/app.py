@@ -25,6 +25,7 @@ from .client import AgentApiClient
 from .config import TraySettings
 from .device_center import DeviceCenterPresenter, create_device_center
 from .device_center.api import DeviceCenterClient
+from .local_trust import TrayPairingContext
 from .models import (
     ControlMode,
     ControlSnapshot,
@@ -80,8 +81,15 @@ class AgentTrayApplication:
         device_center_factory: Callable[..., DeviceCenterPresenter] | None = None,
     ) -> None:
         self.settings = settings
-        self.client = client or AgentApiClient(settings)
-        self.bridge = bridge or build_control_bridge(settings)
+        self._pairing_context = TrayPairingContext()
+        self.client = client or AgentApiClient(
+            settings,
+            pairing_context=self._pairing_context,
+        )
+        self.bridge = bridge or build_control_bridge(
+            settings,
+            pairing_context=self._pairing_context,
+        )
         self.host = host
         self._device_center = device_center
         self._device_center_factory = (
@@ -236,7 +244,10 @@ class AgentTrayApplication:
         ):
             return
         service_settings = self.settings.model_copy(update={"control_mode": "service"})
-        candidate = build_control_bridge(service_settings)
+        candidate = build_control_bridge(
+            service_settings,
+            pairing_context=self._pairing_context,
+        )
         control = candidate.query_state()
         if control.mode is not ControlMode.SERVICE:
             return

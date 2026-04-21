@@ -8,25 +8,17 @@ import httpx
 import respx
 
 from inari.core.version import API_VERSION
+from inari.security.local_trust.crypto import generate_local_client_key_pair
 from inari_tray.client import AgentApiClient
 from inari_tray.config import TraySettings
+from inari_tray.local_trust import TrayLocalIdentity, TrayPairingContext
 
 
 def test_client_fetches_local_token_before_calling_protected_status() -> None:
     settings = TraySettings(agent_api_base_url="http://agent.test")
     with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
-        token_route = respx_mock.post("/auth/local-token").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "local-token",
-                    "token_type": "Bearer",
-                    "expires_at": "2099-01-01T00:00:00Z",
-                    "scopes": ["system:read", "devices:read"],
-                    "subject": "local:inari-tray",
-                    "principal_kind": "local_client",
-                },
-            )
+        token_route = _mock_attested_token(
+            respx_mock, scopes=["system:read", "devices:read"]
         )
         status_route = respx_mock.get("/system/status").mock(
             return_value=httpx.Response(
@@ -63,6 +55,7 @@ def test_client_fetches_local_token_before_calling_protected_status() -> None:
                 base_url=settings.agent_api_base_url
             ),
             websocket_connect=lambda *args, **kwargs: FakeWebSocketConnection(kwargs),
+            identity_store=FakeIdentityStore(),
         )
 
         status = client.get_status()
@@ -84,18 +77,8 @@ def test_client_reuses_cached_token_for_websocket_stream() -> None:
         return FakeWebSocketConnection(kwargs)
 
     with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
-        respx_mock.post("/auth/local-token").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "local-token",
-                    "token_type": "Bearer",
-                    "expires_at": "2099-01-01T00:00:00Z",
-                    "scopes": ["system:read", "devices:read", "events:read"],
-                    "subject": "local:inari-tray",
-                    "principal_kind": "local_client",
-                },
-            )
+        _mock_attested_token(
+            respx_mock, scopes=["system:read", "devices:read", "events:read"]
         )
         client = AgentApiClient(
             settings,
@@ -103,6 +86,7 @@ def test_client_reuses_cached_token_for_websocket_stream() -> None:
                 base_url=settings.agent_api_base_url
             ),
             websocket_connect=websocket_connect,
+            identity_store=FakeIdentityStore(),
         )
 
         next(client.iter_live_updates(Event()))
@@ -113,22 +97,200 @@ def test_client_reuses_cached_token_for_websocket_stream() -> None:
     assert typed_headers["Authorization"] == "Bearer local-token"
 
 
-def test_client_lists_devices_with_enriched_driver_metadata() -> None:
+def test_client_pairs_local_identity_when_agent_requires_pairing() -> None:
     settings = TraySettings(agent_api_base_url="http://agent.test")
+    identity_store = FakeIdentityStore()
+    identity = identity_store.get_or_create()
     with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
+        respx_mock.post("/auth/local-challenge").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "challenge_id": "token_challenge_1",
+                        "challenge": "token-challenge-1",
+                        "purpose": "token",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "challenge_id": "pairing_challenge_1",
+                        "challenge": "pairing-challenge-1",
+                        "purpose": "pairing",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "challenge_id": "token_challenge_2",
+                        "challenge": "token-challenge-2",
+                        "purpose": "token",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                    },
+                ),
+            ]
+        )
         respx_mock.post("/auth/local-token").mock(
+            side_effect=[
+                httpx.Response(
+                    403,
+                    json={
+                        "ok": False,
+                        "code": "LOCAL_CLIENT_NOT_PAIRED",
+                        "detail": "Pair first.",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "access_token": "paired-token",
+                        "token_type": "Bearer",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                        "scopes": ["system:read"],
+                        "subject": "local:inari-tray",
+                        "principal_kind": "local_client",
+                    },
+                ),
+            ]
+        )
+        respx_mock.post("/auth/pairing/start").mock(
             return_value=httpx.Response(
                 200,
                 json={
-                    "access_token": "local-token",
-                    "token_type": "Bearer",
+                    "pairing_secret": "pairing-secret",
                     "expires_at": "2099-01-01T00:00:00Z",
-                    "scopes": ["devices:read"],
-                    "subject": "local:inari-tray",
-                    "principal_kind": "local_client",
                 },
             )
         )
+        pairing_route = respx_mock.post("/auth/pairing/complete").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "client": {
+                        "client_id": identity.client_id,
+                        "client_name": identity.client_name,
+                        "trust_level": "paired_native",
+                        "origins": [],
+                        "paired_at": "2026-04-21T00:00:00Z",
+                        "last_seen_at": "2026-04-21T00:00:00Z",
+                    }
+                },
+            )
+        )
+        client = AgentApiClient(
+            settings,
+            http_client_factory=lambda: httpx.Client(
+                base_url=settings.agent_api_base_url
+            ),
+            identity_store=identity_store,
+        )
+
+        token = client._ensure_token()
+
+    assert token.access_token == "paired-token"
+    assert pairing_route.called
+
+
+def test_client_uses_runtime_bootstrap_secret_before_pairing_start() -> None:
+    settings = TraySettings(agent_api_base_url="http://agent.test")
+    identity_store = FakeIdentityStore()
+    identity = identity_store.get_or_create()
+    pairing_context = TrayPairingContext()
+    bootstrap_secret = pairing_context.ensure_bootstrap_secret()
+    with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
+        respx_mock.post("/auth/local-challenge").mock(
+            side_effect=[
+                httpx.Response(
+                    200,
+                    json={
+                        "challenge_id": "token_challenge_1",
+                        "challenge": "token-challenge-1",
+                        "purpose": "token",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "challenge_id": "pairing_challenge_1",
+                        "challenge": "pairing-challenge-1",
+                        "purpose": "pairing",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "challenge_id": "token_challenge_2",
+                        "challenge": "token-challenge-2",
+                        "purpose": "token",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                    },
+                ),
+            ]
+        )
+        respx_mock.post("/auth/local-token").mock(
+            side_effect=[
+                httpx.Response(
+                    403,
+                    json={
+                        "ok": False,
+                        "code": "LOCAL_CLIENT_NOT_PAIRED",
+                        "detail": "Pair first.",
+                    },
+                ),
+                httpx.Response(
+                    200,
+                    json={
+                        "access_token": "paired-token",
+                        "token_type": "Bearer",
+                        "expires_at": "2099-01-01T00:00:00Z",
+                        "scopes": ["system:read"],
+                        "subject": "local:inari-tray",
+                        "principal_kind": "local_client",
+                    },
+                ),
+            ]
+        )
+        pairing_route = respx_mock.post("/auth/pairing/complete").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "client": {
+                        "client_id": identity.client_id,
+                        "client_name": identity.client_name,
+                        "trust_level": "paired_native",
+                        "origins": [],
+                        "paired_at": "2026-04-21T00:00:00Z",
+                        "last_seen_at": "2026-04-21T00:00:00Z",
+                    }
+                },
+            )
+        )
+        client = AgentApiClient(
+            settings,
+            http_client_factory=lambda: httpx.Client(
+                base_url=settings.agent_api_base_url
+            ),
+            identity_store=identity_store,
+            pairing_context=pairing_context,
+        )
+
+        token = client._ensure_token()
+
+    payload = json.loads(pairing_route.calls.last.request.content.decode("utf-8"))
+    assert token.access_token == "paired-token"
+    assert payload["pairing_secret"] == bootstrap_secret
+    assert pairing_context.bootstrap_secret() is None
+
+
+def test_client_lists_devices_with_enriched_driver_metadata() -> None:
+    settings = TraySettings(agent_api_base_url="http://agent.test")
+    with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
+        _mock_attested_token(respx_mock, scopes=["devices:read"])
         respx_mock.get("/devices").mock(
             return_value=httpx.Response(
                 200,
@@ -179,6 +341,7 @@ def test_client_lists_devices_with_enriched_driver_metadata() -> None:
             http_client_factory=lambda: httpx.Client(
                 base_url=settings.agent_api_base_url
             ),
+            identity_store=FakeIdentityStore(),
         )
 
         directory = client.list_devices()
@@ -192,19 +355,7 @@ def test_client_lists_devices_with_enriched_driver_metadata() -> None:
 def test_client_lists_device_events() -> None:
     settings = TraySettings(agent_api_base_url="http://agent.test")
     with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
-        respx_mock.post("/auth/local-token").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "local-token",
-                    "token_type": "Bearer",
-                    "expires_at": "2099-01-01T00:00:00Z",
-                    "scopes": ["devices:read"],
-                    "subject": "local:inari-tray",
-                    "principal_kind": "local_client",
-                },
-            )
-        )
+        _mock_attested_token(respx_mock, scopes=["devices:read"])
         route = respx_mock.get("/devices/dev_printer/events").mock(
             return_value=httpx.Response(
                 200,
@@ -228,6 +379,7 @@ def test_client_lists_device_events() -> None:
             http_client_factory=lambda: httpx.Client(
                 base_url=settings.agent_api_base_url
             ),
+            identity_store=FakeIdentityStore(),
         )
 
         events = client.list_device_events("dev_printer", limit=25)
@@ -240,19 +392,7 @@ def test_client_lists_device_events() -> None:
 def test_client_device_commands_target_device_id() -> None:
     settings = TraySettings(agent_api_base_url="http://agent.test")
     with respx.mock(assert_all_called=True, base_url="http://agent.test") as respx_mock:
-        respx_mock.post("/auth/local-token").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "local-token",
-                    "token_type": "Bearer",
-                    "expires_at": "2099-01-01T00:00:00Z",
-                    "scopes": ["commands:execute"],
-                    "subject": "local:inari-tray",
-                    "principal_kind": "local_client",
-                },
-            )
-        )
+        _mock_attested_token(respx_mock, scopes=["commands:execute"])
         command_route = respx_mock.post("/device-commands").mock(
             return_value=httpx.Response(
                 200,
@@ -285,6 +425,7 @@ def test_client_device_commands_target_device_id() -> None:
             http_client_factory=lambda: httpx.Client(
                 base_url=settings.agent_api_base_url
             ),
+            identity_store=FakeIdentityStore(),
         )
 
         client.submit_test_page(device_id="dev_printer")
@@ -297,6 +438,47 @@ def test_client_device_commands_target_device_id() -> None:
     assert posted_payloads[0]["command"]["kind"] == "print_test_page"
     assert posted_payloads[1]["target"] == {"device_id": "dev_printer"}
     assert posted_payloads[1]["command"]["kind"] == "open_cash_drawer"
+
+
+def _mock_attested_token(respx_mock, *, scopes: list[str]):
+    respx_mock.post("/auth/local-challenge").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "challenge_id": "challenge_1",
+                "challenge": "local-challenge",
+                "purpose": "token",
+                "expires_at": "2099-01-01T00:00:00Z",
+            },
+        )
+    )
+    return respx_mock.post("/auth/local-token").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "access_token": "local-token",
+                "token_type": "Bearer",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "scopes": scopes,
+                "subject": "local:inari-tray",
+                "principal_kind": "local_client",
+            },
+        )
+    )
+
+
+class FakeIdentityStore:
+    def __init__(self) -> None:
+        key_pair = generate_local_client_key_pair(prefix="tray")
+        self.identity = TrayLocalIdentity(
+            client_id=key_pair.client_id,
+            client_name="inari-tray",
+            private_key_pem=key_pair.private_key_pem,
+            public_key_pem=key_pair.public_key_pem,
+        )
+
+    def get_or_create(self) -> TrayLocalIdentity:
+        return self.identity
 
 
 class FakeWebSocketConnection:

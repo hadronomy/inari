@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol, Sequence
 
 from .config import TraySettings
+from .local_trust import TrayPairingContext
 from .models import ControlMode, ControlSnapshot, LifecycleState
 
 
@@ -81,6 +82,7 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         launch_command: Sequence[str] | None = None,
         working_directory: Path | None = None,
         clock: Callable[[], float] | None = None,
+        pairing_context: TrayPairingContext | None = None,
     ) -> None:
         self.settings = settings
         self._process_factory = process_factory or subprocess.Popen
@@ -89,6 +91,7 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
         )
         self._working_directory = working_directory or _default_working_directory()
         self._clock = clock or time.monotonic
+        self._pairing_context = pairing_context or TrayPairingContext()
         self._launch_log_path = settings.log_dir / "agent-launch.log"
         self._lock = threading.Lock()
         self._process: Any | None = None
@@ -168,6 +171,10 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
                 creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 creation_flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             command = self._resolve_launch_command()
+            environment = os.environ.copy()
+            environment["INARI_STANDALONE_PAIRING_SECRET"] = (
+                self._pairing_context.ensure_bootstrap_secret()
+            )
             output_handle = self._launch_log_path.open("a", encoding="utf-8")
             output_handle.write(
                 f"\n=== Starting Inari at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
@@ -178,7 +185,7 @@ class SpawnedProcessAgentBridge(AgentControlBridge):
             self._process = self._process_factory(
                 list(command),
                 cwd=str(self._working_directory),
-                env=os.environ.copy(),
+                env=environment,
                 stdin=subprocess.DEVNULL,
                 stdout=output_handle,
                 stderr=subprocess.STDOUT,
@@ -511,11 +518,14 @@ class LaunchdAgentBridge(SubprocessServiceAgentBridge):
 
 
 def build_control_bridge(
-    settings: TraySettings, *, platform_name: str | None = None
+    settings: TraySettings,
+    *,
+    platform_name: str | None = None,
+    pairing_context: TrayPairingContext | None = None,
 ) -> AgentControlBridge:
     current_platform = platform_name or platform.system()
     if settings.control_mode == "spawn":
-        return SpawnedProcessAgentBridge(settings)
+        return SpawnedProcessAgentBridge(settings, pairing_context=pairing_context)
     if settings.control_mode == "service":
         if current_platform == "Windows":
             return WindowsServiceAgentBridge(settings)

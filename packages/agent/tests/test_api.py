@@ -149,9 +149,10 @@ class StubJobService:
 class StubAuthorizationService:
     issued_tokens: dict[str, AuthenticatedPrincipal] = field(default_factory=dict)
 
-    def issue_loopback_token(
-        self, connection, *, client_name: str, requested_scopes=None
+    def issue_local_token(
+        self, connection, *, client_name: str, requested_scopes=None, attestation=None
     ):
+        del attestation
         scopes = tuple(requested_scopes or tuple(AccessScope))
         expires_at = datetime.now(tz=UTC) + timedelta(hours=1)
         token_value = f"token::{client_name}::{len(self.issued_tokens) + 1}"

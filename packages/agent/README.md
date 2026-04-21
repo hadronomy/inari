@@ -22,7 +22,7 @@ For the managed controller protocol draft, see [docs/gateway_protocol.md](../../
 - coherent HTTP API split into `system`, `devices`, `jobs`, and live `events`
 - built-in gateway mode so the agent can operate as its own secure local edge node
 - scoped bearer-token auth for local HTTP and WebSocket endpoints
-- local loopback token bootstrap for desktop companions such as the tray app
+- local client pairing and short-lived tokens for desktop companions such as the tray app
 - managed upstream enrollment over HTTPS plus a Zenoh-based managed data plane
 - controller protocol version negotiation plus durable upstream inbox/outbox persistence
 - replay-safe controller command deduplication, history recovery, and runtime event forwarding
@@ -68,6 +68,12 @@ inari/
 Primary endpoints:
 
 - `POST /auth/local-token`
+- `POST /auth/local-challenge`
+- `GET /auth/local-trust`
+- `POST /auth/pairing/start`
+- `POST /auth/pairing/complete`
+- `POST /auth/pairing/rotate`
+- `POST /auth/pairing/revoke`
 - `GET /auth/me`
 - `GET /gateway/identity`
 - `GET /gateway/upstream/status`
@@ -85,7 +91,7 @@ Primary endpoints:
 
 Interactive API docs are served with Scalar at `GET /docs`.
 
-The operational API is now authenticated. Local desktop clients obtain a short-lived bearer token from `POST /auth/local-token` over loopback, then use that token for protected HTTP and local WebSocket calls. By default the agent runs in standalone, loopback-only gateway mode, so it does not need any external gateway to broker local device connections.
+The operational API is authenticated. In standalone mode, local desktop clients pair first, then prove their paired identity with `POST /auth/local-challenge` and obtain short-lived bearer tokens from `POST /auth/local-token`. The tray performs this automatically when it launches or reconnects to the local agent. By default the agent runs in standalone, loopback-only gateway mode, so it does not need any external gateway to broker local device connections.
 
 When managed mode uses `step_ca`, `GET /gateway/upstream/status` also reports a nested `certificate_lifecycle` object that explains whether the managed client certificate is healthy, renewing, waiting for bootstrap, expired, or needs rebootstrap after a failed renewal.
 
@@ -355,6 +361,11 @@ text_enabled = true
 
 [auth.local]
 allow_loopback_bootstrap = true
+pairing_required = true
+pairing_secret_ttl = "5m"
+trusted_origins = ["http://127.0.0.1:8069", "http://localhost:8069"]
+origin_bound_tokens = true
+tray_mutual_trust = "optional"
 token_ttl = "1h"
 audience = "inari.local"
 

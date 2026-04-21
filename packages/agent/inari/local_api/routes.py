@@ -10,6 +10,7 @@ from .dependencies import (
     get_event_hub,
     get_gateway_service,
     get_job_service,
+    get_standalone_trust_service,
 )
 from ..core.exceptions import AgentError
 from ..gateway.service import GatewayService
@@ -19,7 +20,8 @@ from ..runtime.events import EventHub
 from ..runtime.models import JobState
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
-from ..security.auth import AuthorizationService
+from ..security.auth import AuthorizationService, connection_origin
+from ..security.local_trust import StandaloneTrustService
 from ..security.models import AccessScope, AuthenticatedPrincipal
 from ..core.version import API_VERSION, SERVICE_NAME
 from .schemas import (
@@ -36,8 +38,15 @@ from .schemas import (
     JobCollectionResponse,
     JobHistoryResponse,
     LiveEventUpdateResponse,
+    LocalChallengeRequest,
+    LocalChallengeResponse,
+    LocalPairingCompleteRequest,
+    LocalPairingCompleteResponse,
+    LocalPairingRevokeRequest,
+    LocalPairingStartResponse,
     LiveSnapshotResponse,
     LocalTokenRequest,
+    LocalTrustStatusResponse,
     JobResourceResponse,
     JobResponse,
     PrincipalResponse,
@@ -47,6 +56,7 @@ from .schemas import (
     ServiceDescriptorResponse,
     SystemStatusResponse,
     TokenResponse,
+    TrustedLocalClientResponse,
 )
 
 router = APIRouter()
@@ -64,6 +74,9 @@ AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
 ]
 GatewayServiceDependency = Annotated[GatewayService, Depends(get_gateway_service)]
+StandaloneTrustServiceDependency = Annotated[
+    StandaloneTrustService, Depends(get_standalone_trust_service)
+]
 
 
 def build_system_status_response(
@@ -100,12 +113,110 @@ async def issue_local_token(
     authorization_service: AuthorizationServiceDependency,
     connection: Request,
 ) -> TokenResponse:
-    token = authorization_service.issue_loopback_token(
+    token = authorization_service.issue_local_token(
         connection,
         client_name=request.client_name,
         requested_scopes=request.requested_scopes,
+        attestation=(
+            request.attestation.to_domain() if request.attestation is not None else None
+        ),
     )
     return TokenResponse.from_issued_token(token)
+
+
+@auth_router.post("/local-challenge", response_model=LocalChallengeResponse)
+async def issue_local_challenge(
+    request: LocalChallengeRequest,
+    authorization_service: AuthorizationServiceDependency,
+    local_trust_service: StandaloneTrustServiceDependency,
+    connection: Request,
+) -> LocalChallengeResponse:
+    authorization_service.policy_service.assert_loopback_client(connection)
+    challenge = local_trust_service.issue_challenge(
+        purpose=request.purpose,
+        client_id=request.client_id,
+    )
+    return LocalChallengeResponse.from_challenge(challenge)
+
+
+@auth_router.get("/local-trust", response_model=LocalTrustStatusResponse)
+async def local_trust_status(
+    authorization_service: AuthorizationServiceDependency,
+    local_trust_service: StandaloneTrustServiceDependency,
+    connection: Request,
+) -> LocalTrustStatusResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_READ)
+    return LocalTrustStatusResponse.from_state(
+        local_trust_service.current_state(),
+        pairing_required=local_trust_service.pairing_required,
+    )
+
+
+@auth_router.post("/pairing/start", response_model=LocalPairingStartResponse)
+async def start_local_pairing(
+    authorization_service: AuthorizationServiceDependency,
+    local_trust_service: StandaloneTrustServiceDependency,
+    connection: Request,
+) -> LocalPairingStartResponse:
+    authorization_service.policy_service.assert_loopback_client(connection)
+    result = local_trust_service.start_pairing()
+    return LocalPairingStartResponse(
+        pairing_secret=result.secret,
+        expires_at=result.expires_at,
+    )
+
+
+@auth_router.post("/pairing/complete", response_model=LocalPairingCompleteResponse)
+async def complete_local_pairing(
+    request: LocalPairingCompleteRequest,
+    authorization_service: AuthorizationServiceDependency,
+    local_trust_service: StandaloneTrustServiceDependency,
+    connection: Request,
+) -> LocalPairingCompleteResponse:
+    authorization_service.policy_service.assert_loopback_client(connection)
+    client = local_trust_service.complete_pairing(
+        client_id=request.client_id,
+        client_name=request.client_name,
+        public_key_pem=request.public_key_pem,
+        pairing_secret=request.pairing_secret,
+        attestation=request.attestation.to_domain(),
+        origin=request.origin or connection_origin(connection),
+    )
+    return LocalPairingCompleteResponse(
+        client=TrustedLocalClientResponse.from_domain(client)
+    )
+
+
+@auth_router.post("/pairing/rotate", response_model=LocalPairingStartResponse)
+async def rotate_local_pairing_secret(
+    authorization_service: AuthorizationServiceDependency,
+    local_trust_service: StandaloneTrustServiceDependency,
+    connection: Request,
+) -> LocalPairingStartResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_WRITE)
+    result = local_trust_service.start_pairing(allow_when_paired=True)
+    return LocalPairingStartResponse(
+        pairing_secret=result.secret,
+        expires_at=result.expires_at,
+    )
+
+
+@auth_router.post("/pairing/revoke", response_model=LocalTrustStatusResponse)
+async def revoke_local_pairing(
+    request: LocalPairingRevokeRequest,
+    authorization_service: AuthorizationServiceDependency,
+    local_trust_service: StandaloneTrustServiceDependency,
+    connection: Request,
+) -> LocalTrustStatusResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_WRITE)
+    state = local_trust_service.revoke_client(request.client_id)
+    return LocalTrustStatusResponse.from_state(
+        state,
+        pairing_required=local_trust_service.pairing_required,
+    )
 
 
 @auth_router.get("/me", response_model=AuthenticatedPrincipalResponse)

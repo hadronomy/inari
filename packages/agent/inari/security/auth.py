@@ -11,6 +11,7 @@ from .models import (
     IssuedToken,
     LOCAL_OPERATOR_SCOPES,
 )
+from .local_trust import LocalClientAttestation, StandaloneTrustService
 from .policies import SecurityPolicyService
 from .tokens import TokenService
 
@@ -21,18 +22,26 @@ class AuthorizationService:
         *,
         token_service: TokenService,
         policy_service: SecurityPolicyService,
+        standalone_trust_service: StandaloneTrustService,
     ) -> None:
         self.token_service = token_service
         self.policy_service = policy_service
+        self.standalone_trust_service = standalone_trust_service
 
-    def issue_loopback_token(
+    def issue_local_token(
         self,
         connection: HTTPConnection,
         *,
         client_name: str,
         requested_scopes: Iterable[AccessScope] | None = None,
+        attestation: LocalClientAttestation | None = None,
     ) -> IssuedToken:
         self.policy_service.assert_loopback_client(connection)
+        grant = self.standalone_trust_service.authorize_token_request(
+            client_name=client_name,
+            attestation=attestation,
+            origin=connection_origin(connection),
+        )
         allowed = set(LOCAL_OPERATOR_SCOPES)
         requested = set(requested_scopes or LOCAL_OPERATOR_SCOPES)
         scopes = tuple(sorted(allowed & requested, key=lambda scope: scope.value))
@@ -43,7 +52,9 @@ class AuthorizationService:
                 status_code=400,
             )
         return self.token_service.issue_local_token(
-            client_name=client_name, scopes=scopes
+            client_name=grant.client_name,
+            scopes=scopes,
+            metadata=grant.token_claims(),
         )
 
     def authenticate_connection(
@@ -93,3 +104,11 @@ def extract_bearer_token(connection: HTTPConnection) -> str | None:
     if query_token:
         return query_token.strip()
     return None
+
+
+def connection_origin(connection: HTTPConnection) -> str | None:
+    origin = connection.headers.get("origin")
+    if origin is None:
+        return None
+    normalized = origin.strip()
+    return normalized or None

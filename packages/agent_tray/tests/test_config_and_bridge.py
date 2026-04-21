@@ -23,6 +23,7 @@ from inari_tray.bridge import (
     build_control_bridge,
 )
 from inari_tray.config import TraySettings
+from inari_tray.local_trust import TrayPairingContext
 from inari_tray.models import (
     ControlMode,
     ControlSnapshot,
@@ -393,6 +394,32 @@ def test_spawned_process_bridge_manages_process_lifecycle() -> None:
     assert stopped.lifecycle is LifecycleState.STOPPED
     assert len(created) == 1
     assert created[0].terminated is True
+
+
+def test_spawned_process_bridge_passes_runtime_pairing_secret_to_agent() -> None:
+    captured: dict[str, Any] = {}
+    pairing_context = TrayPairingContext()
+
+    def process_factory(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeProcess()
+
+    bridge = SpawnedProcessAgentBridge(
+        TraySettings(control_mode="spawn"),
+        process_factory=process_factory,
+        launch_command=("inari",),
+        pairing_context=pairing_context,
+    )
+
+    bridge.start()
+
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert (
+        environment["INARI_STANDALONE_PAIRING_SECRET"]
+        == pairing_context.bootstrap_secret()
+    )
+    assert environment["INARI_STANDALONE_PAIRING_SECRET"]
 
 
 def test_spawned_process_bridge_leaves_starting_state_after_grace_period() -> None:

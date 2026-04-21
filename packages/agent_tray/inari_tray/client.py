@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from threading import Event
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import httpx
 from pydantic import TypeAdapter
@@ -19,8 +19,17 @@ from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
 from .config import TraySettings
+from .local_trust import (
+    LocalIdentityStore,
+    TrayLocalTrustClient,
+    TrayPairingContext,
+)
 
 LIVE_UPDATE_MESSAGE_ADAPTER = TypeAdapter(LiveUpdateMessage)
+
+
+class LocalTokenProvider(Protocol):
+    def request_token(self, client: httpx.Client) -> TokenResponse: ...
 
 
 class AgentApiClient:
@@ -30,10 +39,18 @@ class AgentApiClient:
         *,
         http_client_factory: Callable[[], httpx.Client] | None = None,
         websocket_connect: Callable[..., Any] | None = None,
+        identity_store: LocalIdentityStore | None = None,
+        pairing_context: TrayPairingContext | None = None,
+        local_trust_client: LocalTokenProvider | None = None,
     ) -> None:
         self.settings = settings
         self._http_client_factory = http_client_factory or self._default_http_client
         self._websocket_connect = websocket_connect or connect
+        self._local_trust_client = local_trust_client or TrayLocalTrustClient(
+            settings,
+            identity_store=identity_store,
+            pairing_context=pairing_context,
+        )
         self._cached_token: TokenResponse | None = None
 
     def get_status(self) -> SystemStatusResponse:
@@ -150,12 +167,7 @@ class AgentApiClient:
         owns_client = client is None
         active_client = client or self._http_client_factory()
         try:
-            response = active_client.post(
-                "/auth/local-token",
-                json={"client_name": self.settings.auth_client_name},
-            )
-            response.raise_for_status()
-            self._cached_token = TokenResponse.model_validate(response.json())
+            self._cached_token = self._local_trust_client.request_token(active_client)
             return self._cached_token
         finally:
             if owns_client:

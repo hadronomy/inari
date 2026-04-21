@@ -29,6 +29,8 @@ class TraySettings(BaseSettings):
     log_level: LogLevel = "INFO"
     auto_start_agent: bool = True
     auth_client_name: str = "inari-tray"
+    trust_store_service_name: str = "inari-tray"
+    trust_store_path: Path | None = None
     status_reconcile_interval_seconds: float = 30.0
     event_reconnect_delay_seconds: float = 3.0
     connect_timeout_seconds: float = 2.0
@@ -45,9 +47,9 @@ class TraySettings(BaseSettings):
             return value.rstrip("/")
         return value
 
-    @field_validator("log_dir", mode="before")
+    @field_validator("log_dir", "trust_store_path", mode="before")
     @classmethod
-    def normalize_log_dir(cls, value: object) -> object:
+    def normalize_paths(cls, value: object) -> object:
         if isinstance(value, str):
             return Path(value)
         return value
