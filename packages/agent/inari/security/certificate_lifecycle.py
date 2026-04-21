@@ -13,12 +13,17 @@ from ..gateway.models import (
     ManagedCertificateOperation,
     ManagedCertificateState,
     ManagedCertificateStatus,
-    UpstreamCertificateMode,
 )
 from ..runtime.models import utc_now
+from .certificate_crypto import ManagedCertificateCryptoService
 from .certificate_provisioners import (
-    ClientCertificateProvisioner,
+    CertificateEnrollmentRequest,
+    CertificateRenewalRequest,
+    ClientCertificateProvider,
     ManagedCertificateProvisioningError,
+    ProvisionedCertificateMaterial,
+    RetryableProvisioningError,
+    TrustBootstrapRequest,
 )
 from .certificates import (
     CertificateLifecycleService,
@@ -36,12 +41,14 @@ class ManagedCertificateLifecycleManager:
         settings: AgentSettings,
         enrollment_service: GatewayEnrollmentService,
         certificate_service: CertificateLifecycleService,
-        certificate_provisioner: ClientCertificateProvisioner,
+        certificate_provider: ClientCertificateProvider,
+        certificate_crypto_service: ManagedCertificateCryptoService,
     ) -> None:
         self.settings = settings
         self.enrollment_service = enrollment_service
         self.certificate_service = certificate_service
-        self.certificate_provisioner = certificate_provisioner
+        self.certificate_provider = certificate_provider
+        self.certificate_crypto_service = certificate_crypto_service
         self._lock = asyncio.Lock()
         self._backoff = _LifecycleBackoff(
             base_delay=settings.gateway_backoff_base_seconds,
@@ -50,12 +57,12 @@ class ManagedCertificateLifecycleManager:
         self._status = ManagedCertificateStatus(
             state=(
                 ManagedCertificateState.WAITING_FOR_ENROLLMENT
-                if settings.upstream_certificate_mode is UpstreamCertificateMode.STEP_CA
+                if self.certificate_provider.manages_client_certificate
                 else ManagedCertificateState.DISABLED
             ),
             detail=(
                 "Awaiting managed enrollment before certificate lifecycle can begin."
-                if settings.upstream_certificate_mode is UpstreamCertificateMode.STEP_CA
+                if self.certificate_provider.manages_client_certificate
                 else "Managed certificate lifecycle is disabled."
             ),
         )
@@ -69,18 +76,14 @@ class ManagedCertificateLifecycleManager:
         enrollment: GatewayEnrollmentRecord | None = None,
         trigger: str = "manual",
     ) -> ManagedCertificate | None:
-        if (
-            self.settings.upstream_certificate_mode
-            is not UpstreamCertificateMode.STEP_CA
-        ):
+        if not self.certificate_provider.manages_client_certificate:
             inspection = self.certificate_service.inspect_current_certificate()
-            status = self._status_from_observation(
+            self._status = self._status_from_observation(
                 inspection,
                 state=ManagedCertificateState.DISABLED,
                 detail="Managed certificate lifecycle is disabled.",
                 last_checked_at=utc_now(),
             )
-            self._status = status
             return inspection.certificate
 
         async with self._lock:
@@ -147,7 +150,7 @@ class ManagedCertificateLifecycleManager:
                 inspection,
                 state=ManagedCertificateState.WAITING_FOR_BOOTSTRAP,
                 failure_reason=ManagedCertificateFailureReason.BOOTSTRAP_REQUIRED,
-                detail="The agent has no managed client certificate and is waiting for fresh bootstrap material.",
+                detail="The agent has no managed client certificate and is waiting for fresh bootstrap credentials.",
                 bootstrap_pending=False,
                 last_checked_at=now,
                 next_action_at=now,
@@ -183,9 +186,9 @@ class ManagedCertificateLifecycleManager:
             else ManagedCertificateState.RENEWING
         )
         detail = (
-            "Bootstrapping a managed client certificate from step-ca."
+            "Bootstrapping the managed client certificate."
             if current is None
-            else "Renewing the managed client certificate with step-ca."
+            else "Renewing the managed client certificate."
         )
         self._status = self._status_from_observation(
             inspection,
@@ -198,7 +201,10 @@ class ManagedCertificateLifecycleManager:
         )
 
         try:
-            certificate = await self.certificate_provisioner.ensure_certificate(record)
+            material = await self._execute_lifecycle_operation(
+                record=record,
+                current=current,
+            )
         except ManagedCertificateProvisioningError as exc:
             self._status = self._status_for_failure(
                 inspection=self.certificate_service.inspect_current_certificate(),
@@ -208,12 +214,11 @@ class ManagedCertificateLifecycleManager:
             )
             return current if current is not None and not _is_expired(current) else None
         except Exception as exc:
-            unknown = ManagedCertificateProvisioningError(
-                "STEP_CA_LIFECYCLE_FAILED",
+            unknown = RetryableProvisioningError(
+                "CERTIFICATE_LIFECYCLE_FAILED",
                 f"Managed certificate lifecycle failed unexpectedly: {exc}",
                 operation=operation,
                 failure_reason=ManagedCertificateFailureReason.UNKNOWN,
-                retryable=True,
             )
             self._status = self._status_for_failure(
                 inspection=self.certificate_service.inspect_current_certificate(),
@@ -223,13 +228,13 @@ class ManagedCertificateLifecycleManager:
             )
             return current if current is not None and not _is_expired(current) else None
 
-        if certificate is None:
+        if material is None:
             self._status = self._status_from_observation(
                 self.certificate_service.inspect_current_certificate(),
                 state=ManagedCertificateState.WAITING_FOR_BOOTSTRAP,
                 operation=operation,
                 failure_reason=ManagedCertificateFailureReason.BOOTSTRAP_REQUIRED,
-                detail="step-ca could not issue a certificate because bootstrap material is missing.",
+                detail="The provider could not issue a managed client certificate because bootstrap credentials are missing.",
                 bootstrap_pending=False,
                 last_checked_at=now,
                 last_operation_at=now,
@@ -237,11 +242,32 @@ class ManagedCertificateLifecycleManager:
             )
             return current
 
+        certificate = self.certificate_service.install(
+            certificate_pem=material.leaf_certificate_pem,
+            ca_certificate_pem=material.ca_bundle_pem,
+        )
+        if certificate is None:
+            failure = ManagedCertificateProvisioningError(
+                "CERTIFICATE_INSTALLATION_FAILED",
+                "The provider returned certificate material that could not be installed locally.",
+                operation=operation,
+                failure_reason=ManagedCertificateFailureReason.LOCAL_CERTIFICATE_INVALID,
+                retryable=False,
+                rebootstrap_required=True,
+            )
+            self._status = self._status_for_failure(
+                inspection=self.certificate_service.inspect_current_certificate(),
+                now=now,
+                bootstrap_pending=self._bootstrap_pending(record),
+                error=failure,
+            )
+            return current if current is not None and not _is_expired(current) else None
+
         persisted_record = self.enrollment_service.load_enrollment() or record
         self.enrollment_service.persist_certificate_state(
             persisted_record,
             certificate=certificate,
-            clear_bootstrap_ott=True,
+            clear_bootstrap_auth=True,
         )
         self._backoff.reset()
         updated_inspection = self.certificate_service.inspect_current_certificate()
@@ -268,6 +294,30 @@ class ManagedCertificateLifecycleManager:
             + (1 if operation is ManagedCertificateOperation.RENEW else 0),
         )
         return certificate
+
+    async def _execute_lifecycle_operation(
+        self,
+        *,
+        record: GatewayEnrollmentRecord,
+        current: ManagedCertificate | None,
+    ) -> ProvisionedCertificateMaterial | None:
+        enrollment_spec = record.certificate_enrollment
+        if current is None:
+            if enrollment_spec is None:
+                return None
+            await self.certificate_provider.bootstrap_trust(
+                TrustBootstrapRequest(enrollment=enrollment_spec)
+            )
+            request = self.certificate_crypto_service.build_request(enrollment_spec)
+            return await self.certificate_provider.enroll(
+                CertificateEnrollmentRequest(
+                    enrollment=enrollment_spec,
+                    csr_pem=request.csr_pem,
+                )
+            )
+        return await self.certificate_provider.renew(
+            CertificateRenewalRequest(enrollment=enrollment_spec)
+        )
 
     def _status_for_failure(
         self,
@@ -382,12 +432,12 @@ class ManagedCertificateLifecycleManager:
         )
 
     def _bootstrap_pending(self, record: GatewayEnrollmentRecord | None) -> bool:
-        return bool(
-            record and record.certificate_bootstrap and record.certificate_bootstrap.ott
-        )
+        return bool(record and record.bootstrap_pending)
 
     def _sleep_seconds(self) -> float:
-        base_delay = max(5.0, self.settings.step_ca_lifecycle_poll_interval_seconds)
+        base_delay = max(
+            5.0, self.settings.managed_certificate_lifecycle_poll_interval_seconds
+        )
         next_action_at = self._status.next_action_at
         if next_action_at is None:
             return base_delay

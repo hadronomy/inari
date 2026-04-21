@@ -25,9 +25,9 @@ The recommended production shape is:
 Inari  ---- HTTPS enrollment ----> Controller API ----------------------> ZITADEL
   |                                  |
   |                                  | issues enrollment decision and, when configured,
-  |                                  | returns step-ca bootstrap + Zenoh contract
+  |                                  | returns certificate enrollment + Zenoh contract
   |
-  |---- step-ca OTT bootstrap ------------------------------> step-ca
+  |---- provider-specific certificate enrollment -----------> step-ca
   |---- client cert issue / renew --------------------------> step-ca
   |
   |==== Zenoh TLS + mTLS data plane ========================> Controller / Zenoh Router
@@ -49,7 +49,7 @@ That gives us:
 - a clean first-contact path before a managed client certificate exists
 - a natural place for controller-issued enrollment tokens
 - a natural place for ZITADEL-backed enrollment authorization
-- a natural place for step-ca bootstrap delivery
+- a natural place for certificate enrollment delivery
 
 ### Managed Data Plane
 
@@ -92,7 +92,7 @@ In this mode:
 
 - enrollment is authorized by the controller-issued `enrollment_token`
 - the controller returns the Zenoh data-plane contract
-- the controller returns `step-ca` bootstrap material when managed certificates are enabled
+- the controller returns `step-ca` enrollment material when managed certificates are enabled
 - the agent issues its first client certificate from `/1.0/sign`
 - the agent later renews through `/1.0/renew`
 

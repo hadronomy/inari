@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
@@ -68,8 +68,8 @@ class MutualTlsMode(StrEnum):
     REQUIRED = "required"
 
 
-class CertificateBootstrapMode(StrEnum):
-    STEP_CA_OTT = "step_ca_ott"
+class CertificateBootstrapAuthType(StrEnum):
+    OTT = "ott"
 
 
 class ControllerAction(StrEnum):
@@ -125,18 +125,68 @@ class ManagedCertificateFailureReason(StrEnum):
     UNKNOWN = "unknown"
 
 
-@dataclass(slots=True, frozen=True)
-class StepCaOttBootstrap:
-    mode: CertificateBootstrapMode
-    ca_url: str
-    root_fingerprint: str
-    ott: str | None = None
-    sign_url: str | None = None
-    renew_url: str | None = None
+@dataclass(slots=True, frozen=True, kw_only=True)
+class CertificateTrustSpec:
+    root_fingerprint: str | None = None
+
+    def to_persisted_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        if self.root_fingerprint is not None:
+            payload["root_fingerprint"] = self.root_fingerprint
+        return payload
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class CertificateBootstrapAuth:
+    type: CertificateBootstrapAuthType
+    token: str | None = None
     expires_at: datetime | None = None
+
+    def clear_token(self) -> CertificateBootstrapAuth:
+        if self.token is None:
+            return self
+        return replace(self, token=None)
+
+    def to_persisted_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {"type": self.type}
+        if self.expires_at is not None:
+            payload["expires_at"] = self.expires_at
+        return payload
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class CertificateEnrollmentSpec:
+    base_url: str
+    trust: CertificateTrustSpec | None = None
+    bootstrap_auth: CertificateBootstrapAuth | None = None
     subject: str | None = None
     authorized_sans: tuple[str, ...] = ()
     requires_mutual_tls_after_issuance: bool = True
+
+    @property
+    def bootstrap_pending(self) -> bool:
+        return bool(self.bootstrap_auth is not None and self.bootstrap_auth.token)
+
+    def clear_bootstrap_token(self) -> CertificateEnrollmentSpec:
+        if self.bootstrap_auth is None or self.bootstrap_auth.token is None:
+            return self
+        return replace(self, bootstrap_auth=self.bootstrap_auth.clear_token())
+
+    def to_persisted_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "base_url": self.base_url,
+            "authorized_sans": list(self.authorized_sans),
+            "requires_mutual_tls_after_issuance": (
+                self.requires_mutual_tls_after_issuance
+            ),
+        }
+        if self.trust is not None:
+            payload["trust"] = self.trust.to_persisted_dict()
+        if self.bootstrap_auth is not None:
+            payload["bootstrap_auth"] = self.bootstrap_auth.to_persisted_dict()
+        if self.subject is not None:
+            payload["subject"] = self.subject
+        return payload
 
 
 @dataclass(slots=True, frozen=True)
@@ -163,6 +213,17 @@ class ZenohDataPlaneConfig:
     auth_kind: ZenohDataPlaneAuthKind = ZenohDataPlaneAuthKind.MTLS
     close_link_on_expiration: bool = True
 
+    def to_persisted_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "session_mode": self.session_mode,
+            "connect_endpoints": list(self.connect_endpoints),
+            "namespace": self.namespace,
+            "serialization": self.serialization,
+            "auth": {"kind": self.auth_kind},
+            "tls": {"close_link_on_expiration": self.close_link_on_expiration},
+        }
+
 
 @dataclass(slots=True, frozen=True)
 class GatewayEnrollmentRecord:
@@ -176,7 +237,41 @@ class GatewayEnrollmentRecord:
     certificate_mode: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
     edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
     mutual_tls_mode: MutualTlsMode = MutualTlsMode.OPTIONAL
-    certificate_bootstrap: StepCaOttBootstrap | None = None
+    certificate_enrollment: CertificateEnrollmentSpec | None = None
+
+    @property
+    def bootstrap_pending(self) -> bool:
+        return bool(
+            self.certificate_enrollment is not None
+            and self.certificate_enrollment.bootstrap_pending
+        )
+
+    def clear_bootstrap_token(self) -> GatewayEnrollmentRecord:
+        if self.certificate_enrollment is None:
+            return self
+        return replace(
+            self,
+            certificate_enrollment=self.certificate_enrollment.clear_bootstrap_token(),
+        )
+
+    def to_persisted_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "enrolled_at": self.enrolled_at,
+            "data_plane": self.data_plane.to_persisted_dict(),
+            "controller_actions": list(self.controller_actions),
+            "protocol_version": self.protocol_version,
+            "controller_name": self.controller_name,
+            "controller_instance_id": self.controller_instance_id,
+            "certificate_expires_at": self.certificate_expires_at,
+            "certificate_mode": self.certificate_mode,
+            "edge_provider": self.edge_provider,
+            "mutual_tls_mode": self.mutual_tls_mode,
+        }
+        if self.certificate_enrollment is not None:
+            payload["certificate_enrollment"] = (
+                self.certificate_enrollment.to_persisted_dict()
+            )
+        return payload
 
 
 @dataclass(slots=True, frozen=True)
@@ -281,7 +376,7 @@ def resolve_mutual_tls_policy(
     *,
     certificate_mode: UpstreamCertificateMode,
     client_certificate_present: bool,
-    certificate_bootstrap: StepCaOttBootstrap | None = None,
+    certificate_enrollment: CertificateEnrollmentSpec | None = None,
 ) -> MutualTlsPolicy:
     if configured_mode is MutualTlsMode.DISABLED:
         return MutualTlsPolicy(
@@ -304,8 +399,8 @@ def resolve_mutual_tls_policy(
             effective_mode=MutualTlsMode.OPTIONAL,
         )
     if (
-        certificate_bootstrap is not None
-        and not certificate_bootstrap.requires_mutual_tls_after_issuance
+        certificate_enrollment is not None
+        and not certificate_enrollment.requires_mutual_tls_after_issuance
     ):
         return MutualTlsPolicy(
             configured_mode=configured_mode,

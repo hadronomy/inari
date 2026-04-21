@@ -121,7 +121,7 @@ The managed gateway stack is responsible for:
 
 - HTTPS enrollment into the controller
 - optional enrollment auth through controller-issued tokens or ZITADEL
-- managed client-certificate bootstrap and renewal through step-ca
+- managed client-certificate enrollment and renewal through step-ca
 - Zenoh-based steady-state status, command, and runtime-event transport
 - replay-safe command persistence and reconnect recovery
 

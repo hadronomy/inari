@@ -151,7 +151,7 @@
           "title": "Issuer"
         },
         "token_ttl": {
-          "default": "PT1H",
+          "default": "1h",
           "title": "Token Ttl",
           "type": "string"
         }
@@ -249,7 +249,7 @@
           "title": "Service User Id"
         },
         "token_refresh_skew": {
-          "default": "PT2M",
+          "default": "2m",
           "title": "Token Refresh Skew",
           "type": "string"
         },
@@ -272,6 +272,11 @@
     "CertificatesConfig": {
       "additionalProperties": false,
       "properties": {
+        "lifecycle_interval": {
+          "default": "1m",
+          "title": "Lifecycle Interval",
+          "type": "string"
+        },
         "provider": {
           "$ref": "#/definitions/UpstreamCertificateMode",
           "default": "controller"
@@ -286,11 +291,6 @@
     "CertificatesStepCaConfig": {
       "additionalProperties": false,
       "properties": {
-        "lifecycle_interval": {
-          "default": "PT1M",
-          "title": "Lifecycle Interval",
-          "type": "string"
-        },
         "renew_url": {
           "anyOf": [
             {
@@ -304,7 +304,7 @@
           "title": "Renew Url"
         },
         "renewal_skew": {
-          "default": "PT1H",
+          "default": "1h",
           "title": "Renewal Skew",
           "type": "string"
         },
@@ -359,12 +359,12 @@
       "additionalProperties": false,
       "properties": {
         "base": {
-          "default": "PT1S",
+          "default": "1s",
           "title": "Base",
           "type": "string"
         },
         "max": {
-          "default": "PT1M",
+          "default": "1m",
           "title": "Max",
           "type": "string"
         }
@@ -466,7 +466,7 @@
           "type": "integer"
         },
         "poll_interval": {
-          "default": "PT0.5S",
+          "default": "500ms",
           "title": "Poll Interval",
           "type": "string"
         }
@@ -478,7 +478,7 @@
       "additionalProperties": false,
       "properties": {
         "initial_delay": {
-          "default": "PT5S",
+          "default": "5s",
           "title": "Initial Delay",
           "type": "string"
         }
@@ -490,7 +490,7 @@
       "additionalProperties": false,
       "properties": {
         "query_timeout": {
-          "default": "PT10S",
+          "default": "10s",
           "title": "Query Timeout",
           "type": "string"
         }
@@ -502,7 +502,7 @@
       "additionalProperties": false,
       "properties": {
         "status_interval": {
-          "default": "PT30S",
+          "default": "30s",
           "title": "Status Interval",
           "type": "string"
         }
@@ -699,7 +699,7 @@
       "additionalProperties": false,
       "properties": {
         "interval": {
-          "default": "PT3S",
+          "default": "3s",
           "title": "Interval",
           "type": "string"
         }
@@ -727,7 +727,7 @@
       "additionalProperties": false,
       "properties": {
         "timeout": {
-          "default": "PT1M",
+          "default": "1m",
           "title": "Timeout",
           "type": "string"
         }
@@ -739,22 +739,22 @@
       "additionalProperties": false,
       "properties": {
         "dispatch_ttl": {
-          "default": "PT15S",
+          "default": "15s",
           "title": "Dispatch Ttl",
           "type": "string"
         },
         "execution_ttl": {
-          "default": "PT30S",
+          "default": "30s",
           "title": "Execution Ttl",
           "type": "string"
         },
         "heartbeat_interval": {
-          "default": "PT5S",
+          "default": "5s",
           "title": "Heartbeat Interval",
           "type": "string"
         },
         "recovery_interval": {
-          "default": "PT5S",
+          "default": "5s",
           "title": "Recovery Interval",
           "type": "string"
         }
@@ -766,7 +766,7 @@
       "additionalProperties": false,
       "properties": {
         "base_delay": {
-          "default": "PT2S",
+          "default": "2s",
           "title": "Base Delay",
           "type": "string"
         },
@@ -776,7 +776,7 @@
           "type": "integer"
         },
         "max_delay": {
-          "default": "PT30S",
+          "default": "30s",
           "title": "Max Delay",
           "type": "string"
         }
@@ -793,7 +793,7 @@
           "type": "integer"
         },
         "interval": {
-          "default": "PT0.5S",
+          "default": "500ms",
           "title": "Interval",
           "type": "string"
         }

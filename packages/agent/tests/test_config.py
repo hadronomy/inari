@@ -60,6 +60,9 @@ def test_load_settings_reads_new_nested_toml_shape(tmp_path: Path) -> None:
 
             [controller.reconnect]
             initial_delay = "2500ms"
+
+            [certificates]
+            lifecycle_interval = "75s"
             """
         ).strip(),
         encoding="utf-8",
@@ -90,6 +93,25 @@ def test_load_settings_reads_new_nested_toml_shape(tmp_path: Path) -> None:
     assert settings.upstream_mutual_tls_mode.value == "required"
     assert settings.gateway_sync_interval_seconds == 45.0
     assert settings.gateway_reconnect_delay_seconds == 2.5
+    assert settings.managed_certificate_lifecycle_poll_interval_seconds == 75.0
+
+
+def test_load_settings_rejects_step_ca_scoped_lifecycle_interval(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "inari.toml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            [certificates.step_ca]
+            lifecycle_interval = "60s"
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_settings(config_path=config_path, environ={})
 
 
 def test_load_settings_rejects_legacy_gateway_shaped_toml(tmp_path: Path) -> None:
@@ -324,6 +346,7 @@ def test_render_example_toml_includes_schema_header_and_sections() -> None:
     assert "[controller.queue]" in rendered
     assert "[transport.zenoh]" in rendered
     assert "[certificates.step_ca]" in rendered
+    assert '# lifecycle_interval = "60s"' in rendered
     assert "[server]" not in rendered
     assert "[paths]" not in rendered
     assert "[security]" not in rendered

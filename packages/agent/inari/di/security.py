@@ -8,9 +8,10 @@ from ..gateway.auth_providers import (
     build_upstream_auth_provider,
 )
 from ..security.auth import AuthorizationService
+from ..security.certificate_crypto import ManagedCertificateCryptoService
 from ..security.certificate_provisioners import (
-    ClientCertificateProvisioner,
-    build_certificate_provisioner,
+    ClientCertificateProvider,
+    build_certificate_provider,
 )
 from ..security.certificates import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
@@ -79,17 +80,22 @@ class SecurityProvider(Provider):
         return build_upstream_auth_provider(settings)
 
     @provide
-    def certificate_provisioner(
+    def certificate_provider(
         self,
         settings: AgentSettings,
-        identity_service: AgentIdentityService,
         certificate_lifecycle_service: CertificateLifecycleService,
-    ) -> ClientCertificateProvisioner:
-        return build_certificate_provisioner(
+    ) -> ClientCertificateProvider:
+        return build_certificate_provider(
             settings,
-            identity_service=identity_service,
             certificate_service=certificate_lifecycle_service,
         )
+
+    @provide
+    def certificate_crypto_service(
+        self,
+        identity_service: AgentIdentityService,
+    ) -> ManagedCertificateCryptoService:
+        return ManagedCertificateCryptoService(identity_service=identity_service)
 
     @provide
     def token_service(

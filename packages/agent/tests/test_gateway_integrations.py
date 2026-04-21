@@ -22,13 +22,15 @@ from inari.gateway.auth_providers import (
 from inari.gateway.caddy import CaddyControllerProfile
 from inari.gateway.enrollment import (
     GatewayEnrollmentService,
-    UPSTREAM_STEP_CA_OTT_KEY,
+    UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY,
 )
 from inari.gateway.models import (
-    CertificateBootstrapMode,
+    CertificateBootstrapAuth,
+    CertificateBootstrapAuthType,
+    CertificateEnrollmentSpec,
+    CertificateTrustSpec,
     GatewayEnrollmentRecord,
     MutualTlsMode,
-    StepCaOttBootstrap,
     UpstreamAuthMode,
     UpstreamCertificateMode,
     UpstreamDataPlaneKind,
@@ -40,8 +42,13 @@ from inari.gateway.models import (
     resolve_mutual_tls_policy,
 )
 from inari.gateway.protocol import GatewaySnapshotPayload
+from inari.security.certificate_crypto import ManagedCertificateCryptoService
 from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from inari.security.certificate_provisioners import StepCaOttCertificateProvisioner
+from inari.security.certificate_provisioners import (
+    CertificateEnrollmentRequest,
+    StepCaCertificateProvider,
+    TrustBootstrapRequest,
+)
 from inari.security.certificates import CertificateLifecycleService
 from inari.security.identity import AgentIdentityService
 from inari.security.policies import SecurityPolicyService
@@ -111,11 +118,13 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
             controller_actions=("jobs:create",),
             certificate={
                 "mode": "step_ca",
-                "bootstrap": {
-                    "mode": "step_ca_ott",
-                    "ca_url": "https://step-ca.example.com",
-                    "root_fingerprint": "0123abcd",
-                    "ott": "ott_bootstrap_token",
+                "enrollment": {
+                    "base_url": "https://step-ca.example.com",
+                    "trust": {"root_fingerprint": "0123abcd"},
+                    "bootstrap_auth": {
+                        "type": "ott",
+                        "token": "ott_bootstrap_token",
+                    },
                 },
             },
         )
@@ -164,13 +173,13 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
             controller_actions=("jobs:create",),
             certificate={
                 "mode": "step_ca",
-                "bootstrap": {
-                    "mode": "step_ca_ott",
-                    "ca_url": "https://step-ca.example.com",
-                    "root_fingerprint": "0123abcd",
-                    "ott": "ott_bootstrap_token",
-                    "sign_url": "https://step-ca.example.com/1.0/sign",
-                    "renew_url": "https://step-ca.example.com/1.0/renew",
+                "enrollment": {
+                    "base_url": "https://step-ca.example.com",
+                    "trust": {"root_fingerprint": "0123abcd"},
+                    "bootstrap_auth": {
+                        "type": "ott",
+                        "token": "ott_bootstrap_token",
+                    },
                     "subject": "agt_test",
                     "authorized_sans": ["urn:inari:agt_test"],
                     "requires_mutual_tls_after_issuance": True,
@@ -200,20 +209,28 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     assert record is not None
     assert http_client.last_post_headers["Authorization"] == "Bearer bootstrap-token"
     assert "enrollment_code" not in http_client.last_post_json
-    assert record.certificate_bootstrap is not None
-    assert record.certificate_bootstrap.mode is CertificateBootstrapMode.STEP_CA_OTT
-    assert record.certificate_bootstrap.ott == "ott_bootstrap_token"
-    assert secret_store.get_secret(UPSTREAM_STEP_CA_OTT_KEY) == "ott_bootstrap_token"
+    assert record.certificate_enrollment is not None
+    assert record.certificate_enrollment.bootstrap_auth is not None
+    assert (
+        record.certificate_enrollment.bootstrap_auth.type
+        is CertificateBootstrapAuthType.OTT
+    )
+    assert record.certificate_enrollment.bootstrap_auth.token == "ott_bootstrap_token"
+    assert (
+        secret_store.get_secret(UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY)
+        == "ott_bootstrap_token"
+    )
     metadata = json.loads(
         (tmp_path / "upstream-enrollment.json").read_text(encoding="utf-8")
     )
-    assert "certificate_bootstrap" in metadata
-    assert "ott" not in metadata["certificate_bootstrap"]
+    assert "certificate_enrollment" in metadata
+    assert "token" not in metadata["certificate_enrollment"]["bootstrap_auth"]
 
     reloaded = service.load_enrollment()
     assert reloaded is not None
-    assert reloaded.certificate_bootstrap is not None
-    assert reloaded.certificate_bootstrap.ott == "ott_bootstrap_token"
+    assert reloaded.certificate_enrollment is not None
+    assert reloaded.certificate_enrollment.bootstrap_auth is not None
+    assert reloaded.certificate_enrollment.bootstrap_auth.token == "ott_bootstrap_token"
 
 
 @pytest.mark.anyio
@@ -246,11 +263,13 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
                     controller_actions=("jobs:create",),
                     certificate={
                         "mode": "step_ca",
-                        "bootstrap": {
-                            "mode": "step_ca_ott",
-                            "ca_url": "https://step-ca.example.com",
-                            "root_fingerprint": "0123abcd",
-                            "ott": "ott_bootstrap_token",
+                        "enrollment": {
+                            "base_url": "https://step-ca.example.com",
+                            "trust": {"root_fingerprint": "0123abcd"},
+                            "bootstrap_auth": {
+                                "type": "ott",
+                                "token": "ott_bootstrap_token",
+                            },
                         },
                     },
                 )
@@ -261,8 +280,8 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
     record = await service.ensure_enrolled()
 
     assert record is not None
-    assert record.certificate_bootstrap is not None
-    assert record.certificate_bootstrap.requires_mutual_tls_after_issuance is True
+    assert record.certificate_enrollment is not None
+    assert record.certificate_enrollment.requires_mutual_tls_after_issuance is True
 
 
 @pytest.mark.anyio
@@ -291,18 +310,18 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
             controller_actions=("jobs:create",),
             certificate={
                 "mode": "step_ca",
-                "bootstrap": {
-                    "mode": "step_ca_ott",
-                    "ca_url": "https://step-ca.example.com",
-                    "root_fingerprint": _fingerprint(ca_cert),
-                    "ott": "ott_bootstrap_token",
-                    "sign_url": "https://step-ca.example.com/1.0/sign",
-                    "renew_url": "https://step-ca.example.com/1.0/renew",
+                "enrollment": {
+                    "base_url": "https://step-ca.example.com",
+                    "trust": {"root_fingerprint": _fingerprint(ca_cert)},
+                    "bootstrap_auth": {
+                        "type": "ott",
+                        "token": "ott_bootstrap_token",
+                    },
                 },
             },
         )
     )
-    provisioner = StepCaOttCertificateProvisioner(
+    provider = StepCaCertificateProvider(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
             upstream_base_url="https://controller.example.com",
@@ -311,7 +330,6 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
-        identity_service=identity_service,
         certificate_service=certificate_service,
         http_client_factory=_http_client_factory(
             StepCaHttpClient(
@@ -347,7 +365,10 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
         ),
         enrollment_service=enrollment_service,
         certificate_service=certificate_service,
-        certificate_provisioner=provisioner,
+        certificate_provider=provider,
+        certificate_crypto_service=ManagedCertificateCryptoService(
+            identity_service=identity_service
+        ),
     )
 
     await enrollment_service.ensure_enrolled()
@@ -357,12 +378,13 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
     assert lifecycle.current_status().state.value == "valid"
     reloaded = enrollment_service.load_enrollment()
     assert reloaded is not None
-    assert reloaded.certificate_bootstrap is not None
-    assert reloaded.certificate_bootstrap.ott is None
+    assert reloaded.certificate_enrollment is not None
+    assert reloaded.certificate_enrollment.bootstrap_auth is not None
+    assert reloaded.certificate_enrollment.bootstrap_auth.token is None
 
 
 @pytest.mark.anyio
-async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(
+async def test_step_ca_provider_bootstraps_root_and_issues_certificate(
     tmp_path: Path,
 ) -> None:
     ca_key = ec.generate_private_key(ec.SECP256R1())
@@ -387,40 +409,51 @@ async def test_step_ca_ott_provisioner_bootstraps_root_and_issues_certificate(
         ca_key=ca_key,
         certificate_service=certificate_service,
     )
-    provisioner = StepCaOttCertificateProvisioner(
+    provider = StepCaCertificateProvider(
         settings=AgentSettings(
             upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
-        identity_service=identity_service,
         certificate_service=certificate_service,
         http_client_factory=_http_client_factory(sign_client),
     )
     enrollment = _enrollment_record(
-        certificate_bootstrap=StepCaOttBootstrap(
-            mode=CertificateBootstrapMode.STEP_CA_OTT,
-            ca_url="https://step-ca.example.com",
+        certificate_enrollment=_certificate_enrollment(
             root_fingerprint=_fingerprint(ca_cert),
-            ott="ott_bootstrap_token",
-            sign_url="https://step-ca.example.com/1.0/sign",
-            renew_url="https://step-ca.example.com/1.0/renew",
+            token="ott_bootstrap_token",
             subject="agt_test",
             authorized_sans=("urn:inari:agt_test",),
-            requires_mutual_tls_after_issuance=True,
         )
     )
 
-    certificate = await provisioner.ensure_certificate(enrollment)
+    assert enrollment.certificate_enrollment is not None
+    await provider.bootstrap_trust(
+        TrustBootstrapRequest(enrollment=enrollment.certificate_enrollment)
+    )
+    request = ManagedCertificateCryptoService(
+        identity_service=identity_service
+    ).build_request(enrollment.certificate_enrollment)
+    material = await provider.enroll(
+        CertificateEnrollmentRequest(
+            enrollment=enrollment.certificate_enrollment,
+            csr_pem=request.csr_pem,
+        )
+    )
 
-    assert certificate is not None
+    assert material is not None
+    installed = certificate_service.install(
+        certificate_pem=material.leaf_certificate_pem,
+        ca_certificate_pem=material.ca_bundle_pem,
+    )
+    assert installed is not None
     assert (tmp_path / "upstream-ca.pem").exists()
     assert (tmp_path / "upstream-client-cert.pem").exists()
     assert sign_client.sign_calls == 1
 
 
 @pytest.mark.anyio
-async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(
+async def test_step_ca_provider_replaces_rotated_root_certificate(
     tmp_path: Path,
 ) -> None:
     old_ca_key = ec.generate_private_key(ec.SECP256R1())
@@ -450,13 +483,12 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(
     certificate_service.install_certificate_authority(
         old_ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
     )
-    provisioner = StepCaOttCertificateProvisioner(
+    provider = StepCaCertificateProvider(
         settings=AgentSettings(
             upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(new_ca_cert),
         ),
-        identity_service=AgentIdentityService(identity_path=identity_path),
         certificate_service=certificate_service,
         http_client_factory=_http_client_factory(
             StepCaHttpClient(
@@ -468,21 +500,33 @@ async def test_step_ca_ott_provisioner_replaces_rotated_root_certificate(
             )
         ),
     )
-
-    certificate = await provisioner.ensure_certificate(
-        _enrollment_record(
-            certificate_bootstrap=StepCaOttBootstrap(
-                mode=CertificateBootstrapMode.STEP_CA_OTT,
-                ca_url="https://step-ca.example.com",
-                root_fingerprint=_fingerprint(new_ca_cert),
-                ott="ott_bootstrap_token",
-                sign_url="https://step-ca.example.com/1.0/sign",
-                renew_url="https://step-ca.example.com/1.0/renew",
-            )
+    enrollment = _enrollment_record(
+        certificate_enrollment=_certificate_enrollment(
+            root_fingerprint=_fingerprint(new_ca_cert),
+            token="ott_bootstrap_token",
         )
     )
 
-    assert certificate is not None
+    assert enrollment.certificate_enrollment is not None
+    await provider.bootstrap_trust(
+        TrustBootstrapRequest(enrollment=enrollment.certificate_enrollment)
+    )
+    request = ManagedCertificateCryptoService(
+        identity_service=AgentIdentityService(identity_path=identity_path)
+    ).build_request(enrollment.certificate_enrollment)
+    material = await provider.enroll(
+        CertificateEnrollmentRequest(
+            enrollment=enrollment.certificate_enrollment,
+            csr_pem=request.csr_pem,
+        )
+    )
+
+    assert material is not None
+    installed = certificate_service.install(
+        certificate_pem=material.leaf_certificate_pem,
+        ca_certificate_pem=material.ca_bundle_pem,
+    )
+    assert installed is not None
     assert certificate_service.ca_path is not None
     installed_ca_pem = certificate_service.ca_path.read_text(encoding="utf-8")
     assert _fingerprint(
@@ -547,9 +591,8 @@ def test_optional_mutual_tls_promotes_to_required_after_certificate_issuance() -
         MutualTlsMode.OPTIONAL,
         certificate_mode=UpstreamCertificateMode.STEP_CA,
         client_certificate_present=True,
-        certificate_bootstrap=StepCaOttBootstrap(
-            mode=CertificateBootstrapMode.STEP_CA_OTT,
-            ca_url="https://ca.example.com",
+        certificate_enrollment=_certificate_enrollment(
+            base_url="https://ca.example.com",
             root_fingerprint="0123abcd",
         ),
     )
@@ -563,9 +606,8 @@ def test_optional_mutual_tls_respects_explicit_post_issuance_opt_out() -> None:
         MutualTlsMode.OPTIONAL,
         certificate_mode=UpstreamCertificateMode.STEP_CA,
         client_certificate_present=True,
-        certificate_bootstrap=StepCaOttBootstrap(
-            mode=CertificateBootstrapMode.STEP_CA_OTT,
-            ca_url="https://ca.example.com",
+        certificate_enrollment=_certificate_enrollment(
+            base_url="https://ca.example.com",
             root_fingerprint="0123abcd",
             requires_mutual_tls_after_issuance=False,
         ),
@@ -739,7 +781,7 @@ def _fingerprint(certificate: x509.Certificate) -> str:
 
 def _enrollment_record(
     *,
-    certificate_bootstrap: StepCaOttBootstrap | None = None,
+    certificate_enrollment: CertificateEnrollmentSpec | None = None,
 ) -> GatewayEnrollmentRecord:
     return GatewayEnrollmentRecord(
         enrolled_at=datetime.now(tz=UTC),
@@ -753,7 +795,33 @@ def _enrollment_record(
             close_link_on_expiration=True,
         ),
         protocol_version=GATEWAY_PROTOCOL_VERSION,
-        certificate_bootstrap=certificate_bootstrap,
+        certificate_enrollment=certificate_enrollment,
+    )
+
+
+def _certificate_enrollment(
+    *,
+    base_url: str = "https://step-ca.example.com",
+    root_fingerprint: str = "0123abcd",
+    token: str | None = None,
+    subject: str | None = None,
+    authorized_sans: tuple[str, ...] = (),
+    requires_mutual_tls_after_issuance: bool = True,
+) -> CertificateEnrollmentSpec:
+    return CertificateEnrollmentSpec(
+        base_url=base_url,
+        trust=CertificateTrustSpec(root_fingerprint=root_fingerprint),
+        bootstrap_auth=(
+            CertificateBootstrapAuth(
+                type=CertificateBootstrapAuthType.OTT,
+                token=token,
+            )
+            if token is not None
+            else None
+        ),
+        subject=subject,
+        authorized_sans=authorized_sans,
+        requires_mutual_tls_after_issuance=requires_mutual_tls_after_issuance,
     )
 
 

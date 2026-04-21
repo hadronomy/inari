@@ -261,6 +261,9 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("certificates", "provider"): (
         "How the agent obtains and refreshes managed client certificates.",
     ),
+    ("certificates", "lifecycle_interval"): (
+        "How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.",
+    ),
     ("certificates", "step_ca", "url"): (
         "Base URL for the private step-ca instance when you want to override the controller-provided CA URL.",
     ),
@@ -278,9 +281,6 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("certificates", "step_ca", "renewal_skew"): (
         "How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.",
-    ),
-    ("certificates", "step_ca", "lifecycle_interval"): (
-        "How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.",
     ),
 }
 
@@ -344,8 +344,8 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     ("controller", "backoff", "base"): "1s",
     ("controller", "backoff", "max"): "60s",
     ("controller", "recovery", "query_timeout"): "10s",
+    ("certificates", "lifecycle_interval"): "60s",
     ("certificates", "step_ca", "renewal_skew"): "1h",
-    ("certificates", "step_ca", "lifecycle_interval"): "60s",
 }
 
 _ARRAY_TABLE_EXAMPLES: dict[tuple[str, ...], tuple[dict[str, Any], ...]] = {
@@ -669,13 +669,13 @@ class CertificatesStepCaConfig(BaseModel):
     root_fingerprint: str | None = None
     requested_sans: list[str] = Field(default_factory=list)
     renewal_skew: ConfigDuration = timedelta(hours=1)
-    lifecycle_interval: ConfigDuration = timedelta(seconds=60)
 
 
 class CertificatesConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     provider: UpstreamCertificateMode = UpstreamCertificateMode.CONTROLLER
+    lifecycle_interval: ConfigDuration = timedelta(seconds=60)
     step_ca: CertificatesStepCaConfig = Field(default_factory=CertificatesStepCaConfig)
 
 
@@ -857,9 +857,11 @@ class AgentConfigFile(BaseModel):
                 self.certificates.step_ca.renewal_skew,
                 field_name="certificates.step_ca.renewal_skew",
             ),
-            "step_ca_lifecycle_poll_interval_seconds": _parse_duration_seconds(
-                self.certificates.step_ca.lifecycle_interval,
-                field_name="certificates.step_ca.lifecycle_interval",
+            "managed_certificate_lifecycle_poll_interval_seconds": (
+                _parse_duration_seconds(
+                    self.certificates.lifecycle_interval,
+                    field_name="certificates.lifecycle_interval",
+                )
             ),
         }
 
@@ -942,7 +944,7 @@ class AgentSettings(BaseModel):
     step_ca_root_fingerprint: str | None = None
     step_ca_requested_sans: list[str] = Field(default_factory=list)
     step_ca_certificate_renewal_skew_seconds: IntegralDurationSeconds = 3600
-    step_ca_lifecycle_poll_interval_seconds: FloatDurationSeconds = 60.0
+    managed_certificate_lifecycle_poll_interval_seconds: FloatDurationSeconds = 60.0
     gateway_sync_interval_seconds: FloatDurationSeconds = 30.0
     gateway_reconnect_delay_seconds: FloatDurationSeconds = 5.0
     gateway_outbox_batch_size: int = 128

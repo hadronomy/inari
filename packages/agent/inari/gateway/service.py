@@ -141,9 +141,10 @@ class GatewaySnapshotBuilder:
                     ),
                     *(
                         (
-                            "step_ca_client_certificates",
-                            "step_ca_ott_bootstrap",
+                            "managed_client_certificates",
+                            "certificate_bootstrap_auth",
                             "certificate_lifecycle_supervision",
+                            "step_ca_provider",
                         )
                         if self.settings.upstream_certificate_mode.value == "step_ca"
                         else ()

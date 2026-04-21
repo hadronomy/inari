@@ -326,7 +326,7 @@ class GatewayConnector:
             return False
         if client_certificate_present:
             return False
-        return enrollment is not None
+        return bool(enrollment is not None and enrollment.bootstrap_pending)
 
     def _mutual_tls_policy(
         self,
@@ -344,8 +344,8 @@ class GatewayConnector:
                 else self.settings.upstream_certificate_mode
             ),
             client_certificate_present=client_certificate_present,
-            certificate_bootstrap=(
-                enrollment.certificate_bootstrap if enrollment is not None else None
+            certificate_enrollment=(
+                enrollment.certificate_enrollment if enrollment is not None else None
             ),
         )
 

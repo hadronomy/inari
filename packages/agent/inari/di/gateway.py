@@ -17,8 +17,9 @@ from ..gateway.runtime_bridge import (
 from ..gateway.service import GatewayService, GatewaySnapshotBuilder
 from ..gateway.supervisor import GatewaySupervisor
 from ..runtime.services import DeviceCatalog, JobService
+from ..security.certificate_crypto import ManagedCertificateCryptoService
 from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from ..security.certificate_provisioners import ClientCertificateProvisioner
+from ..security.certificate_provisioners import ClientCertificateProvider
 from ..security.certificates import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
 from ..security.policies import SecurityPolicyService
@@ -66,7 +67,8 @@ class GatewayProvider(Provider):
         secret_store: ResilientSecretStore,
         tls_context_factory: TlsContextFactory,
         upstream_auth_provider: UpstreamAuthProvider,
-        certificate_provisioner: ClientCertificateProvisioner,
+        certificate_provider: ClientCertificateProvider,
+        certificate_crypto_service: ManagedCertificateCryptoService,
         gateway_command_dispatcher: GatewayCommandDispatcher,
         gateway_runtime_event_forwarder: GatewayRuntimeEventForwarder,
         zenoh_gateway_transport: ZenohGatewayTransport,
@@ -96,7 +98,8 @@ class GatewayProvider(Provider):
             settings=settings,
             enrollment_service=enrollment_service,
             certificate_service=certificate_lifecycle_service,
-            certificate_provisioner=certificate_provisioner,
+            certificate_provider=certificate_provider,
+            certificate_crypto_service=certificate_crypto_service,
         )
         snapshot_builder.certificate_lifecycle_manager = certificate_lifecycle_manager
         connector = GatewayConnector(

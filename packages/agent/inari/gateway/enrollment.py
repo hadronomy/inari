@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
 import httpx
+from pydantic import ValidationError
 
 from ..config import AgentSettings
 from ..exceptions import AgentError
 from ..gateway.models import (
-    CertificateBootstrapMode,
+    CertificateBootstrapAuth,
+    CertificateBootstrapAuthType,
+    CertificateEnrollmentSpec,
+    CertificateTrustSpec,
     GatewayEnrollmentRecord,
-    StepCaOttBootstrap,
     UpstreamCertificateMode,
     UpstreamDataPlaneKind,
     ZenohDataPlaneAuthKind,
@@ -29,14 +32,17 @@ from ..security.secrets import SecretStore
 from ..security.tls import TlsContextFactory
 from .auth_providers import UpstreamAuthProvider
 from .protocol import (
+    ControllerCertificatePayload,
     EnrollmentRequestPayload,
     EnrollmentResponsePayload,
     GatewaySnapshotPayload,
+    StepCaCertificateEnrollmentPayload,
+    StepCaCertificatePayload,
 )
 
 UPSTREAM_ENROLLMENT_TOKEN_KEY = "upstream_enrollment_token"
 LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY = "upstream_bootstrap_token"
-UPSTREAM_STEP_CA_OTT_KEY = "upstream_step_ca_ott"
+UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY = "upstream_certificate_bootstrap_token"
 
 
 class GatewayEnrollmentService:
@@ -89,9 +95,11 @@ class GatewayEnrollmentService:
         ).strip()
         if not connect_endpoints or not namespace:
             return None
-        bootstrap = _parse_certificate_bootstrap(
-            payload.get("certificate_bootstrap"),
-            ott=self.secret_store.get_secret(UPSTREAM_STEP_CA_OTT_KEY),
+        certificate_enrollment = _parse_certificate_enrollment(
+            payload.get("certificate_enrollment"),
+            bootstrap_token=self.secret_store.get_secret(
+                UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY
+            ),
         )
         certificate_mode = UpstreamCertificateMode(
             str(
@@ -150,11 +158,11 @@ class GatewayEnrollmentService:
             certificate_mode=certificate_mode,
             edge_provider=self.settings.upstream_edge_provider,
             mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
-            certificate_bootstrap=bootstrap,
+            certificate_enrollment=certificate_enrollment,
         )
 
     def clear_enrollment(self) -> None:
-        self.secret_store.delete_secret(UPSTREAM_STEP_CA_OTT_KEY)
+        self.secret_store.delete_secret(UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY)
         if self.metadata_path.exists():
             self.metadata_path.unlink()
 
@@ -212,39 +220,27 @@ class GatewayEnrollmentService:
                 "The controller did not return managed certificate details for the Zenoh data plane.",
                 status_code=502,
             )
-        if payload.certificate is not None:
-            if payload.certificate.mode is not self.settings.upstream_certificate_mode:
+        certificate_enrollment = None
+        certificate_payload = payload.certificate
+        if certificate_payload is not None:
+            if certificate_payload.mode is not self.settings.upstream_certificate_mode:
                 raise AgentError(
                     "UPSTREAM_CERTIFICATE_MODE_MISMATCH",
-                    f"The controller selected certificate mode {payload.certificate.mode.value!r}, but the agent is configured for {self.settings.upstream_certificate_mode.value!r}.",
+                    f"The controller selected certificate mode {certificate_payload.mode.value!r}, but the agent is configured for {self.settings.upstream_certificate_mode.value!r}.",
                     status_code=502,
                 )
-            if payload.certificate.mode is UpstreamCertificateMode.CONTROLLER:
-                self.certificate_service.install(
-                    certificate_pem=payload.certificate.client_certificate_pem,
-                    ca_certificate_pem=payload.certificate.ca_certificate_pem,
-                )
-            if (
-                payload.certificate.mode is UpstreamCertificateMode.STEP_CA
-                and payload.certificate.bootstrap is None
-            ):
-                raise AgentError(
-                    "STEP_CA_BOOTSTRAP_REQUIRED",
-                    "The controller selected step-ca certificate mode but did not return bootstrap material.",
-                    status_code=502,
-                )
+            match certificate_payload:
+                case ControllerCertificatePayload():
+                    self.certificate_service.install(
+                        certificate_pem=certificate_payload.client_certificate_pem,
+                        ca_certificate_pem=certificate_payload.ca_certificate_pem,
+                    )
+                case StepCaCertificatePayload():
+                    certificate_enrollment = _to_certificate_enrollment_spec(
+                        certificate_payload.enrollment
+                    )
 
         certificate = self.certificate_service.current_certificate()
-        bootstrap = (
-            _to_step_ca_bootstrap(
-                payload.certificate.bootstrap
-                if payload.certificate is not None
-                else None
-            )
-            if self.settings.upstream_certificate_mode
-            is UpstreamCertificateMode.STEP_CA
-            else None
-        )
         record = GatewayEnrollmentRecord(
             enrolled_at=payload.enrolled_at,
             data_plane=ZenohDataPlaneConfig(
@@ -276,7 +272,7 @@ class GatewayEnrollmentService:
             certificate_mode=self.settings.upstream_certificate_mode,
             edge_provider=self.settings.upstream_edge_provider,
             mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
-            certificate_bootstrap=bootstrap,
+            certificate_enrollment=certificate_enrollment,
         )
         self._store_enrollment(record)
         return record
@@ -286,44 +282,37 @@ class GatewayEnrollmentService:
         record: GatewayEnrollmentRecord,
         *,
         certificate: ManagedCertificate | None,
-        clear_bootstrap_ott: bool,
+        clear_bootstrap_auth: bool,
     ) -> GatewayEnrollmentRecord:
-        bootstrap = record.certificate_bootstrap
-        if (
-            clear_bootstrap_ott
-            and certificate is not None
-            and bootstrap is not None
-            and bootstrap.ott is not None
-        ):
-            bootstrap = replace(bootstrap, ott=None)
         updated = replace(
             record,
             certificate_expires_at=(
                 certificate.not_valid_after if certificate is not None else None
             ),
-            certificate_bootstrap=bootstrap,
         )
+        if clear_bootstrap_auth and certificate is not None:
+            updated = updated.clear_bootstrap_token()
         self._store_enrollment(updated)
         return updated
 
     def _store_enrollment(self, record: GatewayEnrollmentRecord) -> None:
-        if (
-            record.certificate_bootstrap is not None
-            and record.certificate_bootstrap.ott
-        ):
+        bootstrap_auth = (
+            record.certificate_enrollment.bootstrap_auth
+            if record.certificate_enrollment is not None
+            else None
+        )
+        if bootstrap_auth is not None and bootstrap_auth.token:
             self.secret_store.set_secret(
-                UPSTREAM_STEP_CA_OTT_KEY, record.certificate_bootstrap.ott
+                UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY,
+                bootstrap_auth.token,
             )
         else:
-            self.secret_store.delete_secret(UPSTREAM_STEP_CA_OTT_KEY)
+            self.secret_store.delete_secret(UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY)
         self._save_enrollment(record)
 
     def _save_enrollment(self, record: GatewayEnrollmentRecord) -> None:
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        raw_payload = asdict(record)
-        bootstrap_payload = raw_payload.get("certificate_bootstrap")
-        if isinstance(bootstrap_payload, dict):
-            bootstrap_payload.pop("ott", None)
+        raw_payload = record.to_persisted_dict()
         payload = {key: _serialize_value(value) for key, value in raw_payload.items()}
         self.metadata_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
@@ -397,49 +386,47 @@ def _serialize_value(value: object) -> object:
     return value
 
 
-def _parse_certificate_bootstrap(
+def _parse_certificate_enrollment(
     value: Any,
     *,
-    ott: str | None,
-) -> StepCaOttBootstrap | None:
-    if not isinstance(value, dict):
-        return None
-    mode = CertificateBootstrapMode(
-        str(value.get("mode") or CertificateBootstrapMode.STEP_CA_OTT.value)
-    )
-    if mode is not CertificateBootstrapMode.STEP_CA_OTT:
-        raise AgentError(
-            "UNSUPPORTED_CERTIFICATE_BOOTSTRAP",
-            f"Unsupported managed certificate bootstrap mode {mode.value!r}.",
-            status_code=502,
-        )
-    return StepCaOttBootstrap(
-        mode=mode,
-        ca_url=str(value["ca_url"]),
-        root_fingerprint=str(value["root_fingerprint"]),
-        ott=ott,
-        sign_url=str(value["sign_url"]) if value.get("sign_url") else None,
-        renew_url=str(value["renew_url"]) if value.get("renew_url") else None,
-        expires_at=_parse_datetime(value.get("expires_at")),
-        subject=str(value["subject"]) if value.get("subject") else None,
-        authorized_sans=tuple(str(item) for item in value.get("authorized_sans") or ()),
-        requires_mutual_tls_after_issuance=bool(
-            value.get("requires_mutual_tls_after_issuance", True)
-        ),
-    )
-
-
-def _to_step_ca_bootstrap(value: Any) -> StepCaOttBootstrap | None:
+    bootstrap_token: str | None,
+) -> CertificateEnrollmentSpec | None:
     if value is None:
         return None
-    return StepCaOttBootstrap(
-        mode=CertificateBootstrapMode.STEP_CA_OTT,
-        ca_url=value.ca_url,
-        root_fingerprint=value.root_fingerprint,
-        ott=value.ott,
-        sign_url=value.sign_url,
-        renew_url=value.renew_url,
-        expires_at=value.expires_at,
+    try:
+        payload = StepCaCertificateEnrollmentPayload.model_validate(value)
+    except ValidationError as exc:
+        raise AgentError(
+            "CERTIFICATE_ENROLLMENT_METADATA_INVALID",
+            "Persisted managed certificate enrollment metadata is invalid.",
+            status_code=500,
+        ) from exc
+    return _to_certificate_enrollment_spec(payload, bootstrap_token=bootstrap_token)
+
+
+def _to_certificate_enrollment_spec(
+    value: StepCaCertificateEnrollmentPayload | None,
+    *,
+    bootstrap_token: str | None = None,
+) -> CertificateEnrollmentSpec | None:
+    if value is None:
+        return None
+    trust = None
+    if value.trust is not None:
+        trust = CertificateTrustSpec(root_fingerprint=value.trust.root_fingerprint)
+    bootstrap_auth = None
+    if value.bootstrap_auth is not None:
+        bootstrap_auth = CertificateBootstrapAuth(
+            type=CertificateBootstrapAuthType(value.bootstrap_auth.type),
+            token=bootstrap_token
+            if bootstrap_token is not None
+            else value.bootstrap_auth.token,
+            expires_at=value.bootstrap_auth.expires_at,
+        )
+    return CertificateEnrollmentSpec(
+        base_url=value.base_url,
+        trust=trust,
+        bootstrap_auth=bootstrap_auth,
         subject=value.subject,
         authorized_sans=tuple(value.authorized_sans),
         requires_mutual_tls_after_issuance=value.requires_mutual_tls_after_issuance,

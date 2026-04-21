@@ -110,24 +110,40 @@ class GatewaySnapshotPayload(GatewayProtocolModel):
     observability: dict[str, Any] = Field(default_factory=dict)
 
 
-class CertificateBootstrapPayload(GatewayProtocolModel):
-    mode: Literal["step_ca_ott"] = "step_ca_ott"
-    ca_url: str
-    root_fingerprint: str
-    ott: str | None = None
-    sign_url: str | None = None
-    renew_url: str | None = None
+class CertificateTrustPayload(GatewayProtocolModel):
+    root_fingerprint: str | None = None
+
+
+class CertificateBootstrapAuthPayload(GatewayProtocolModel):
+    type: Literal["ott"] = "ott"
+    token: str | None = None
     expires_at: datetime | None = None
+
+
+class StepCaCertificateEnrollmentPayload(GatewayProtocolModel):
+    base_url: str
+    trust: CertificateTrustPayload | None = None
+    bootstrap_auth: CertificateBootstrapAuthPayload | None = None
     subject: str | None = None
     authorized_sans: tuple[str, ...] = ()
     requires_mutual_tls_after_issuance: bool = True
 
 
-class EnrollmentCertificatePayload(GatewayProtocolModel):
-    mode: UpstreamCertificateMode
-    client_certificate_pem: str | None = None
+class ControllerCertificatePayload(GatewayProtocolModel):
+    mode: Literal[UpstreamCertificateMode.CONTROLLER]
+    client_certificate_pem: str
     ca_certificate_pem: str | None = None
-    bootstrap: CertificateBootstrapPayload | None = None
+
+
+class StepCaCertificatePayload(GatewayProtocolModel):
+    mode: Literal[UpstreamCertificateMode.STEP_CA]
+    enrollment: StepCaCertificateEnrollmentPayload
+
+
+EnrollmentCertificatePayload = Annotated[
+    ControllerCertificatePayload | StepCaCertificatePayload,
+    Field(discriminator="mode"),
+]
 
 
 class EnrollmentPermissionsPayload(GatewayProtocolModel):

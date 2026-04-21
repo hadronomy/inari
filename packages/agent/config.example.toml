@@ -225,6 +225,8 @@ config_version = 1
 [certificates]
 # How the agent obtains and refreshes managed client certificates.
 # provider = "controller"
+# How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.
+# lifecycle_interval = "60s"
 
 # step-ca certificate bootstrap and renewal settings.
 # In the normal managed flow, the controller returns these values during enrollment.
@@ -242,5 +244,3 @@ config_version = 1
 # requested_sans = []
 # How early to renew managed certificates before expiry after the initial controller-mediated bootstrap.
 # renewal_skew = "1h"
-# How often the dedicated managed-certificate lifecycle loop inspects, renews, and repairs certificate state.
-# lifecycle_interval = "60s"

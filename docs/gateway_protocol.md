@@ -54,7 +54,7 @@ This protocol covers:
 - managed enrollment
 - short-lived controller-issued `enrollment_token` bootstrap
 - controller-authorized command execution
-- controller-issued step-ca OTT bootstrap for client certificates
+- controller-issued certificate enrollment material for managed client certificates
 - Zenoh-based status publication, command delivery, and runtime event publication
 - reconnect and command-history recovery
 - protocol version selection
@@ -103,7 +103,7 @@ Managed mode uses an outbound trust model:
 
 1. The agent validates the controller TLS certificate during enrollment.
 2. The controller validates the agent’s enrollment credential during enrollment.
-3. The controller may bootstrap a managed client certificate through step-ca.
+3. The controller may return provider-specific enrollment material for a managed client certificate.
 4. The steady-state Zenoh data plane uses TLS with client-certificate authentication.
 
 The agent has a persistent logical identity consisting of:
@@ -224,15 +224,15 @@ The recommended enrollment response shape is:
   },
   "certificate": {
     "mode": "step_ca",
-    "client_certificate_pem": null,
-    "ca_certificate_pem": null,
-    "bootstrap": {
-      "mode": "step_ca_ott",
-      "ca_url": "https://ca.example.com",
-      "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "ott": "step-ca-one-time-token",
-      "sign_url": "https://ca.example.com/1.0/sign",
-      "renew_url": "https://ca.example.com/1.0/renew",
+    "enrollment": {
+      "base_url": "https://ca.example.com",
+      "trust": {
+        "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "bootstrap_auth": {
+        "type": "ott",
+        "token": "step-ca-one-time-token"
+      },
       "subject": "agt_123",
       "authorized_sans": ["urn:inari:agt_123"],
       "requires_mutual_tls_after_issuance": true
@@ -249,7 +249,10 @@ The recommended enrollment response shape is:
 - `data_plane.kind` MUST be `zenoh`
 - `data_plane.connect_endpoints` and `data_plane.namespace` are required unless a local override is explicitly configured
 - `certificate` is optional
-- `certificate.bootstrap` is optional
+- `certificate` is a discriminated object by `mode`
+- for `mode = "controller"`, `client_certificate_pem` is required and `ca_certificate_pem` is optional
+- for `mode = "step_ca"`, `enrollment` is required
+- `certificate.enrollment.bootstrap_auth.token` is bootstrap-only secret material; the agent stores it in the local secret store and MUST NOT persist it in enrollment metadata
 
 ### 8.5 Enrollment Sequence With step-ca Enabled
 
@@ -268,7 +271,7 @@ sequenceDiagram
     Agent->>Controller: POST /api/inari/enroll<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
     Controller->>Controller: Validate enrollment policy<br/>Select protocol version<br/>Grant controller actions
     Controller->>Controller: Mint short-lived step-ca OTT
-    Controller-->>Agent: Enrollment response<br/>data_plane + certificate.bootstrap(step_ca_ott)
+    Controller-->>Agent: Enrollment response<br/>data_plane + certificate.enrollment
 
     Agent->>StepCA: Fetch root CA
     StepCA-->>Agent: Root certificate
@@ -477,6 +480,8 @@ On reconnect:
 
 Certificate-related data lives under the `certificate` object in the enrollment response.
 
+The object is intentionally discriminated by `mode`. The agent must receive either controller-installed certificate material or provider-specific enrollment material. Mixed optional payloads are invalid.
+
 ### 12.1 Modes
 
 `certificate.mode` SHOULD be one of:
@@ -485,9 +490,36 @@ Certificate-related data lives under the `certificate` object in the enrollment 
 - `controller`
 - `step_ca`
 
-`certificate.bootstrap.mode` currently supports:
+`controller` mode shape:
 
-- `step_ca_ott`
+```json
+{
+  "mode": "controller",
+  "client_certificate_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
+  "ca_certificate_pem": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n"
+}
+```
+
+`step_ca` mode shape:
+
+```json
+{
+  "mode": "step_ca",
+  "enrollment": {
+    "base_url": "https://ca.example.com",
+    "trust": {
+      "root_fingerprint": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "bootstrap_auth": {
+      "type": "ott",
+      "token": "short-lived-agent-scoped-token"
+    },
+    "subject": "agt_123",
+    "authorized_sans": ["urn:inari:agt_123"],
+    "requires_mutual_tls_after_issuance": true
+  }
+}
+```
 
 ### 12.2 step-ca Rules
 
@@ -497,7 +529,9 @@ For `step_ca` mode:
 - the agent MUST verify the fetched root against that fingerprint
 - the agent MUST use its CSR when requesting the first certificate
 - the resulting certificate MUST match the CSR public key
-- the agent SHOULD renew through `/1.0/renew`
+- the provider derives step-ca endpoints from `enrollment.base_url`
+- controllers SHOULD NOT send step-ca wire endpoints in the protocol payload
+- the agent SHOULD renew through the provider's renewal flow
 - the OTT SHOULD be short-lived, single-use, and agent-scoped
 
 ### 12.3 Recommended Production Posture
@@ -559,7 +593,7 @@ A controller is compatible with this draft if it:
 3. explicitly selects a protocol version
 4. returns a Zenoh `data_plane` block with stable endpoints and namespace
 5. returns controller permissions
-6. if using `step_ca`, returns certificate bootstrap data rather than requiring a shared CA-authorizing secret on the agent
+6. if using `step_ca`, returns provider-specific certificate enrollment data rather than requiring a shared CA-authorizing secret on the agent
 7. publishes live commands with unique `command_id` and monotonically increasing `sequence`
 8. answers command-history queries for reconnect recovery
 9. consumes agent status, results, runtime events, and errors from the documented keyspace

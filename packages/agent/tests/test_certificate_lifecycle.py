@@ -17,11 +17,13 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from inari.config import AgentSettings
 from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
-    CertificateBootstrapMode,
+    CertificateBootstrapAuth,
+    CertificateBootstrapAuthType,
+    CertificateEnrollmentSpec,
+    CertificateTrustSpec,
     GatewayEnrollmentRecord,
     ManagedCertificateFailureReason,
     ManagedCertificateState,
-    StepCaOttBootstrap,
     UpstreamCertificateMode,
     UpstreamDataPlaneKind,
     ZenohDataPlaneAuthKind,
@@ -29,15 +31,15 @@ from inari.gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
+from inari.security.certificate_crypto import ManagedCertificateCryptoService
 from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
 from inari.security.certificate_provisioners import (
-    ClientCertificateProvisioner,
-    StepCaOttCertificateProvisioner,
+    CertificateEnrollmentRequest,
+    ClientCertificateProvider,
+    ProvisionedCertificateMaterial,
+    StepCaCertificateProvider,
 )
-from inari.security.certificates import (
-    CertificateLifecycleService,
-    ManagedCertificate,
-)
+from inari.security.certificates import CertificateLifecycleService, ManagedCertificate
 from inari.security.identity import AgentIdentityService
 from inari.security.models import GatewayMode
 
@@ -51,6 +53,7 @@ async def test_lifecycle_waits_for_bootstrap_when_certificate_is_missing(
         private_key_path=tmp_path / "identity.pem",
         ca_path=tmp_path / "upstream-ca.pem",
     )
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
@@ -58,12 +61,17 @@ async def test_lifecycle_waits_for_bootstrap_when_certificate_is_missing(
         ),
         enrollment_service=cast(
             GatewayEnrollmentService,
-            StubEnrollmentService(_enrollment_record()),
+            StubEnrollmentService(
+                _enrollment_record(certificate_enrollment=_certificate_enrollment())
+            ),
         ),
         certificate_service=certificate_service,
-        certificate_provisioner=cast(
-            ClientCertificateProvisioner,
-            NoopProvisioner(),
+        certificate_provider=cast(
+            ClientCertificateProvider,
+            PendingProvider(),
+        ),
+        certificate_crypto_service=ManagedCertificateCryptoService(
+            identity_service=identity_service
         ),
     )
 
@@ -100,24 +108,21 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
     )
     enrollment_service = StubEnrollmentService(
         _enrollment_record(
-            certificate_bootstrap=StepCaOttBootstrap(
-                mode=CertificateBootstrapMode.STEP_CA_OTT,
-                ca_url="https://step-ca.example.com",
+            certificate_enrollment=_certificate_enrollment(
                 root_fingerprint=_fingerprint(ca_cert),
-                ott="ott_bootstrap_token",
-                sign_url="https://step-ca.example.com/1.0/sign",
-                renew_url="https://step-ca.example.com/1.0/renew",
+                token="ott_bootstrap_token",
+                subject="agt_test",
+                authorized_sans=("urn:inari:agt_test",),
             )
         )
     )
-    provisioner = StepCaOttCertificateProvisioner(
+    provider = StepCaCertificateProvider(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
             upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
             step_ca_url="https://step-ca.example.com",
             step_ca_root_fingerprint=_fingerprint(ca_cert),
         ),
-        identity_service=identity_service,
         certificate_service=certificate_service,
         http_client_factory=_http_client_factory(
             StepCaHttpClient(
@@ -136,7 +141,10 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
         ),
         enrollment_service=cast(GatewayEnrollmentService, enrollment_service),
         certificate_service=certificate_service,
-        certificate_provisioner=provisioner,
+        certificate_provider=provider,
+        certificate_crypto_service=ManagedCertificateCryptoService(
+            identity_service=identity_service
+        ),
     )
 
     certificate = await lifecycle.ensure_current(trigger="test")
@@ -147,8 +155,9 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
         encoding="utf-8"
     )
     assert enrollment_service.record is not None
-    assert enrollment_service.record.certificate_bootstrap is not None
-    assert enrollment_service.record.certificate_bootstrap.ott is None
+    assert enrollment_service.record.certificate_enrollment is not None
+    assert enrollment_service.record.certificate_enrollment.bootstrap_auth is not None
+    assert enrollment_service.record.certificate_enrollment.bootstrap_auth.token is None
 
 
 @pytest.mark.anyio
@@ -185,16 +194,12 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(
     )
     enrollment_service = StubEnrollmentService(
         _enrollment_record(
-            certificate_bootstrap=StepCaOttBootstrap(
-                mode=CertificateBootstrapMode.STEP_CA_OTT,
-                ca_url="https://step-ca.example.com",
-                root_fingerprint=_fingerprint(ca_cert),
-                ott=None,
-                renew_url="https://step-ca.example.com/1.0/renew",
+            certificate_enrollment=_certificate_enrollment(
+                root_fingerprint=_fingerprint(ca_cert)
             )
         )
     )
-    provisioner = StepCaOttCertificateProvisioner(
+    provider = StepCaCertificateProvider(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
             upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
@@ -202,7 +207,6 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(
             step_ca_root_fingerprint=_fingerprint(ca_cert),
             step_ca_certificate_renewal_skew_seconds=3600,
         ),
-        identity_service=identity_service,
         certificate_service=certificate_service,
         http_client_factory=_http_client_factory(RejectingRenewHttpClient()),
     )
@@ -214,7 +218,10 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(
         ),
         enrollment_service=cast(GatewayEnrollmentService, enrollment_service),
         certificate_service=certificate_service,
-        certificate_provisioner=provisioner,
+        certificate_provider=provider,
+        certificate_crypto_service=ManagedCertificateCryptoService(
+            identity_service=identity_service
+        ),
     )
 
     certificate = await lifecycle.ensure_current(trigger="test")
@@ -234,17 +241,13 @@ async def test_lifecycle_serializes_concurrent_issuance_attempts(
         private_key_path=tmp_path / "identity.pem",
         ca_path=tmp_path / "upstream-ca.pem",
     )
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
     enrollment_service = StubEnrollmentService(
         _enrollment_record(
-            certificate_bootstrap=StepCaOttBootstrap(
-                mode=CertificateBootstrapMode.STEP_CA_OTT,
-                ca_url="https://step-ca.example.com",
-                root_fingerprint="fingerprint",
-                ott="ott_bootstrap_token",
-            )
+            certificate_enrollment=_certificate_enrollment(token="ott_bootstrap_token")
         )
     )
-    provisioner = SlowProvisioner(certificate_service)
+    provider = SlowProvider()
     lifecycle = ManagedCertificateLifecycleManager(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
@@ -252,9 +255,12 @@ async def test_lifecycle_serializes_concurrent_issuance_attempts(
         ),
         enrollment_service=cast(GatewayEnrollmentService, enrollment_service),
         certificate_service=certificate_service,
-        certificate_provisioner=cast(
-            ClientCertificateProvisioner,
-            provisioner,
+        certificate_provider=cast(
+            ClientCertificateProvider,
+            provider,
+        ),
+        certificate_crypto_service=ManagedCertificateCryptoService(
+            identity_service=identity_service
         ),
     )
 
@@ -264,7 +270,7 @@ async def test_lifecycle_serializes_concurrent_issuance_attempts(
         lifecycle.ensure_current(trigger="test"),
     )
 
-    assert provisioner.calls == 1
+    assert provider.calls == 1
     assert all(result is not None for result in results)
     assert lifecycle.current_status().successful_issue_count == 1
 
@@ -281,42 +287,49 @@ class StubEnrollmentService:
         record: GatewayEnrollmentRecord,
         *,
         certificate: ManagedCertificate | None,
-        clear_bootstrap_ott: bool,
+        clear_bootstrap_auth: bool,
     ) -> GatewayEnrollmentRecord:
-        bootstrap = record.certificate_bootstrap
-        if clear_bootstrap_ott and bootstrap is not None and bootstrap.ott is not None:
-            bootstrap = replace(bootstrap, ott=None)
         self.record = replace(
             record,
             certificate_expires_at=certificate.not_valid_after
             if certificate is not None
             else None,
-            certificate_bootstrap=bootstrap,
         )
+        if clear_bootstrap_auth and certificate is not None:
+            self.record = self.record.clear_bootstrap_token()
         return self.record
 
 
-class NoopProvisioner:
-    mode = "step_ca"
+class PendingProvider:
+    manages_client_certificate = True
 
-    async def ensure_certificate(self, enrollment=None):
+    async def bootstrap_trust(self, request) -> None:
+        del request
+        return None
+
+    async def enroll(
+        self, request: CertificateEnrollmentRequest
+    ) -> ProvisionedCertificateMaterial | None:
+        del request
+        return None
+
+    async def renew(self, request) -> ProvisionedCertificateMaterial | None:
+        del request
         return None
 
 
-class SlowProvisioner:
-    mode = "step_ca"
-
-    def __init__(self, certificate_service: CertificateLifecycleService) -> None:
-        self.certificate_service = certificate_service
+class SlowProvider(PendingProvider):
+    def __init__(self) -> None:
         self.calls = 0
 
-    async def ensure_certificate(self, enrollment=None):
+    async def enroll(
+        self, request: CertificateEnrollmentRequest
+    ) -> ProvisionedCertificateMaterial | None:
+        del request
         self.calls += 1
         await asyncio.sleep(0.05)
         certificate = _issue_ephemeral_certificate("agt_test")
-        return self.certificate_service.install(
-            certificate_pem=certificate, ca_certificate_pem=None
-        )
+        return ProvisionedCertificateMaterial(leaf_certificate_pem=certificate)
 
 
 class StepCaHttpClient:
@@ -382,8 +395,6 @@ class FakeAsyncResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            import httpx
-
             request = httpx.Request("POST", "https://step-ca.example.com")
             response = httpx.Response(self.status_code, request=request)
             raise httpx.HTTPStatusError("boom", request=request, response=response)
@@ -475,9 +486,35 @@ def _fingerprint(certificate: x509.Certificate) -> str:
     return certificate.fingerprint(hashes.SHA256()).hex()
 
 
+def _certificate_enrollment(
+    *,
+    base_url: str = "https://step-ca.example.com",
+    root_fingerprint: str = "fingerprint",
+    token: str | None = None,
+    subject: str | None = None,
+    authorized_sans: tuple[str, ...] = (),
+    requires_mutual_tls_after_issuance: bool = True,
+) -> CertificateEnrollmentSpec:
+    return CertificateEnrollmentSpec(
+        base_url=base_url,
+        trust=CertificateTrustSpec(root_fingerprint=root_fingerprint),
+        bootstrap_auth=(
+            CertificateBootstrapAuth(
+                type=CertificateBootstrapAuthType.OTT,
+                token=token,
+            )
+            if token is not None
+            else None
+        ),
+        subject=subject,
+        authorized_sans=authorized_sans,
+        requires_mutual_tls_after_issuance=requires_mutual_tls_after_issuance,
+    )
+
+
 def _enrollment_record(
     *,
-    certificate_bootstrap: StepCaOttBootstrap | None = None,
+    certificate_enrollment: CertificateEnrollmentSpec | None = None,
 ) -> GatewayEnrollmentRecord:
     return GatewayEnrollmentRecord(
         enrolled_at=datetime.now(tz=UTC),
@@ -490,7 +527,7 @@ def _enrollment_record(
             auth_kind=ZenohDataPlaneAuthKind.MTLS,
             close_link_on_expiration=True,
         ),
-        certificate_bootstrap=certificate_bootstrap,
+        certificate_enrollment=certificate_enrollment,
     )
 
 
