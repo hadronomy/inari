@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .cli import main
+from inari.cli import main
 
 
 main()

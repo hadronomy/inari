@@ -18,7 +18,7 @@ def test_cli_service_install_uses_service_manager(tmp_path, mocker) -> None:
     fake_manager = mocker.Mock()
     fake_manager.install.return_value = "Installed the service."
     mocker.patch(
-        "inari.cli._service_manager",
+        "inari.commands.service._service_manager",
         return_value=(
             AgentSettings.model_validate({"path_profile": "production"}),
             tmp_path / "agent.toml",
@@ -96,7 +96,7 @@ def test_cli_service_status_prints_current_state(tmp_path, mocker) -> None:
         detail="Managing a test service.",
     )
     mocker.patch(
-        "inari.cli._service_manager",
+        "inari.commands.service._service_manager",
         return_value=(
             AgentSettings.model_validate({"path_profile": "production"}),
             tmp_path / "agent.toml",
@@ -121,7 +121,7 @@ def test_cli_print_definition_streams_definition_content(tmp_path, mocker) -> No
         content="[Unit]\nDescription=Inari\n",
     )
     mocker.patch(
-        "inari.cli._service_manager",
+        "inari.commands.service._service_manager",
         return_value=(
             AgentSettings.model_validate({"path_profile": "production"}),
             tmp_path / "agent.toml",
