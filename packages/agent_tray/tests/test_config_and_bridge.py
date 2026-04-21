@@ -5,14 +5,14 @@ import subprocess
 from typing import Any, cast
 
 
-from inari.models import (
+from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     JobResourceResponse,
     RuntimeEventResponse,
     SystemStatusResponse,
 )
-from inari.version import API_VERSION
+from inari.core.version import API_VERSION
 from inari_tray.app import AgentTrayApplication
 from inari_tray.bridge import (
     LaunchdAgentBridge,
@@ -294,7 +294,7 @@ def test_settings_derive_related_agent_urls() -> None:
 
 
 def test_settings_default_service_name_tracks_platform_defaults(monkeypatch) -> None:
-    monkeypatch.setattr("inari.service.models.platform.system", lambda: "Linux")
+    monkeypatch.setattr("inari.host_service.models.platform.system", lambda: "Linux")
 
     settings = TraySettings()
 

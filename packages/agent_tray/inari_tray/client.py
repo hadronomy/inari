@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import httpx
 from pydantic import TypeAdapter
-from inari.models import (
+from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     JobResourceResponse,

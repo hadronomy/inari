@@ -14,26 +14,21 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from tests.factories import (
+    certificate_enrollment as _certificate_enrollment,
+    enrollment_record as _enrollment_record,
+)
 from inari.config import AgentSettings
 from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
-    CertificateBootstrapAuth,
-    CertificateBootstrapAuthType,
-    CertificateEnrollmentSpec,
-    CertificateTrustSpec,
     GatewayEnrollmentRecord,
     ManagedCertificateFailureReason,
     ManagedCertificateState,
     UpstreamCertificateMode,
-    UpstreamDataPlaneKind,
-    ZenohDataPlaneAuthKind,
-    ZenohDataPlaneConfig,
-    ZenohSerialization,
-    ZenohSessionMode,
 )
-from inari.security.certificate_crypto import ManagedCertificateCryptoService
-from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from inari.security.certificate_provisioners import (
+from inari.security.certificates.crypto import ManagedCertificateCryptoService
+from inari.security.certificates.lifecycle import ManagedCertificateLifecycleManager
+from inari.security.certificates.providers import (
     CertificateEnrollmentRequest,
     ClientCertificateProvider,
     ProvisionedCertificateMaterial,
@@ -484,51 +479,6 @@ def _issue_ephemeral_certificate(subject_name: str) -> str:
 
 def _fingerprint(certificate: x509.Certificate) -> str:
     return certificate.fingerprint(hashes.SHA256()).hex()
-
-
-def _certificate_enrollment(
-    *,
-    base_url: str = "https://step-ca.example.com",
-    root_fingerprint: str = "fingerprint",
-    token: str | None = None,
-    subject: str | None = None,
-    authorized_sans: tuple[str, ...] = (),
-    requires_mutual_tls_after_issuance: bool = True,
-) -> CertificateEnrollmentSpec:
-    return CertificateEnrollmentSpec(
-        base_url=base_url,
-        trust=CertificateTrustSpec(root_fingerprint=root_fingerprint),
-        bootstrap_auth=(
-            CertificateBootstrapAuth(
-                type=CertificateBootstrapAuthType.OTT,
-                token=token,
-            )
-            if token is not None
-            else None
-        ),
-        subject=subject,
-        authorized_sans=authorized_sans,
-        requires_mutual_tls_after_issuance=requires_mutual_tls_after_issuance,
-    )
-
-
-def _enrollment_record(
-    *,
-    certificate_enrollment: CertificateEnrollmentSpec | None = None,
-) -> GatewayEnrollmentRecord:
-    return GatewayEnrollmentRecord(
-        enrolled_at=datetime.now(tz=UTC),
-        data_plane=ZenohDataPlaneConfig(
-            kind=UpstreamDataPlaneKind.ZENOH,
-            session_mode=ZenohSessionMode.CLIENT,
-            connect_endpoints=("tls/router.example.com:7447",),
-            namespace="iot/v1/agents/agt_test",
-            serialization=ZenohSerialization.JSON,
-            auth_kind=ZenohDataPlaneAuthKind.MTLS,
-            close_link_on_expiration=True,
-        ),
-        certificate_enrollment=certificate_enrollment,
-    )
 
 
 def _http_client_factory(client: object) -> Callable[..., httpx.AsyncClient]:

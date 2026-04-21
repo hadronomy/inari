@@ -8,11 +8,15 @@ from inari.config import AgentSettings
 
 
 def test_package_entrypoint_invokes_main(mocker) -> None:
-    mocked_main = mocker.patch("inari.cli.main")
+    mocked_main = mocker.patch("inari.cli.app")
 
     runpy.run_module("inari", run_name="__main__")
 
-    mocked_main.assert_called_once_with()
+    mocked_main.assert_called_once_with(
+        args=None,
+        prog_name="inari",
+        standalone_mode=False,
+    )
 
 
 def test_cli_serve_accepts_explicit_config_path(tmp_path, mocker) -> None:

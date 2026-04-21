@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import DefaultDict, Iterable, cast
 
 from .base import DeviceDriver, DeviceKind
-from .printers.base import PrinterDriver
+from ..printing.drivers.base import PrinterDriver
 
 
 class DriverRegistry:

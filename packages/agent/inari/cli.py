@@ -5,16 +5,16 @@ from typing import Annotated
 
 import typer
 
-from .container import build_container
+from .application.container import build_container
 from .db import DatabaseMigrationError, DatabaseMigrator
 from .config import AgentSettings, PathProfile, load_settings, write_default_config_file
-from .server import serve as serve_agent
-from .service.manager import (
+from .local_api.server import serve as serve_agent
+from .host_service.manager import (
     build_service_manager,
     load_service_settings,
     resolve_service_config_path,
 )
-from .service.models import DEFAULT_SERVICE_SCOPE, ServiceScope
+from .host_service.models import DEFAULT_SERVICE_SCOPE, ServiceScope
 
 app = typer.Typer(
     add_completion=False,

@@ -10,8 +10,8 @@ from typing import Any
 import zenoh
 
 from ...config import AgentSettings
-from ...exceptions import AgentError
-from ...security.certificates import CertificateLifecycleService
+from ...core.exceptions import AgentError
+from ...security.certificates.store import CertificateLifecycleService
 from ..models import GatewayEnrollmentRecord, ZenohDataPlaneAuthKind
 from ..protocol import (
     AGENT_PUBLICATION_ADAPTER,

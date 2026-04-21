@@ -14,12 +14,16 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from inari.config import AgentSettings
-from inari.container import AgentContainer
+from inari.application.container import AgentContainer
 from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
-from inari.exceptions import AgentError
+from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
-from inari.main import create_app
-from inari.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from inari.local_api.app import create_app
+from inari.printing.protocols import (
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+)
 from inari.runtime.events import EventHub
 from inari.runtime.models import (
     DeviceConnectionState,
@@ -40,7 +44,7 @@ from inari.security.models import (
     IssuedToken,
     PrincipalKind,
 )
-from inari.version import API_VERSION
+from inari.core.version import API_VERSION
 
 
 @dataclass(slots=True)

@@ -1,61 +1,55 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
 import httpx
-
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import NameOID
-
+from tests.factories import (
+    certificate_enrollment as _certificate_enrollment,
+    enrollment_record as _enrollment_record,
+)
 from inari.config import AgentSettings
-from inari.gateway.auth_providers import (
+from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
+from inari.gateway.edge.caddy import CaddyControllerProfile
+from inari.gateway.enrollment.auth import (
     UpstreamAuthProvider,
     ZitadelServiceAccountAuthProvider,
 )
-from inari.gateway.caddy import CaddyControllerProfile
-from inari.gateway.enrollment import (
-    GatewayEnrollmentService,
+from inari.gateway.enrollment.service import (
     UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY,
+    GatewayEnrollmentService,
 )
 from inari.gateway.models import (
-    CertificateBootstrapAuth,
     CertificateBootstrapAuthType,
-    CertificateEnrollmentSpec,
-    CertificateTrustSpec,
-    GatewayEnrollmentRecord,
     MutualTlsMode,
     UpstreamAuthMode,
     UpstreamCertificateMode,
     UpstreamDataPlaneKind,
     UpstreamEdgeProvider,
-    ZenohDataPlaneAuthKind,
-    ZenohDataPlaneConfig,
-    ZenohSerialization,
-    ZenohSessionMode,
     resolve_mutual_tls_policy,
 )
 from inari.gateway.protocol import GatewaySnapshotPayload
-from inari.security.certificate_crypto import ManagedCertificateCryptoService
-from inari.security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from inari.security.certificate_provisioners import (
+from inari.security.certificates import CertificateLifecycleService
+from inari.security.certificates.crypto import ManagedCertificateCryptoService
+from inari.security.certificates.lifecycle import ManagedCertificateLifecycleManager
+from inari.security.certificates.providers import (
     CertificateEnrollmentRequest,
     StepCaCertificateProvider,
     TrustBootstrapRequest,
 )
-from inari.security.certificates import CertificateLifecycleService
 from inari.security.identity import AgentIdentityService
+from inari.security.models import GatewayMode
 from inari.security.policies import SecurityPolicyService
 from inari.security.secrets import MemorySecretStore
-from inari.security.models import GatewayMode
 from inari.security.tls import TlsContextFactory
-from inari.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
 @pytest.mark.anyio
@@ -777,52 +771,6 @@ def _issue_certificate_from_csr(csr: x509.CertificateSigningRequest, issuer_key)
 
 def _fingerprint(certificate: x509.Certificate) -> str:
     return certificate.fingerprint(hashes.SHA256()).hex()
-
-
-def _enrollment_record(
-    *,
-    certificate_enrollment: CertificateEnrollmentSpec | None = None,
-) -> GatewayEnrollmentRecord:
-    return GatewayEnrollmentRecord(
-        enrolled_at=datetime.now(tz=UTC),
-        data_plane=ZenohDataPlaneConfig(
-            kind=UpstreamDataPlaneKind.ZENOH,
-            session_mode=ZenohSessionMode.CLIENT,
-            connect_endpoints=("tls/router.example.com:7447",),
-            namespace="iot/v1/agents/agt_test",
-            serialization=ZenohSerialization.JSON,
-            auth_kind=ZenohDataPlaneAuthKind.MTLS,
-            close_link_on_expiration=True,
-        ),
-        protocol_version=GATEWAY_PROTOCOL_VERSION,
-        certificate_enrollment=certificate_enrollment,
-    )
-
-
-def _certificate_enrollment(
-    *,
-    base_url: str = "https://step-ca.example.com",
-    root_fingerprint: str = "0123abcd",
-    token: str | None = None,
-    subject: str | None = None,
-    authorized_sans: tuple[str, ...] = (),
-    requires_mutual_tls_after_issuance: bool = True,
-) -> CertificateEnrollmentSpec:
-    return CertificateEnrollmentSpec(
-        base_url=base_url,
-        trust=CertificateTrustSpec(root_fingerprint=root_fingerprint),
-        bootstrap_auth=(
-            CertificateBootstrapAuth(
-                type=CertificateBootstrapAuthType.OTT,
-                token=token,
-            )
-            if token is not None
-            else None
-        ),
-        subject=subject,
-        authorized_sans=authorized_sans,
-        requires_mutual_tls_after_issuance=requires_mutual_tls_after_issuance,
-    )
 
 
 def _gateway_snapshot_payload() -> GatewaySnapshotPayload:

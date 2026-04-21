@@ -6,10 +6,10 @@ import logging
 import random
 
 from ..config import AgentSettings
-from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
+from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
 from ..security.models import GatewayMode
 from .connector import GatewayConnector
-from .runtime_bridge import GatewayRuntimeEventForwarder
+from .bridges.runtime import GatewayRuntimeEventForwarder
 
 logger = logging.getLogger(__name__)
 

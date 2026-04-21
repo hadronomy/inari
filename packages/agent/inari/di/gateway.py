@@ -5,22 +5,23 @@ from dataclasses import dataclass
 from dishka import Provider, Scope, provide
 
 from ..config import AgentSettings
-from ..gateway.auth_providers import UpstreamAuthProvider
+from ..gateway.enrollment.auth import UpstreamAuthProvider
 from ..gateway.connector import GatewayConnector
 from ..gateway.data_plane import ZenohGatewayTransport
 from ..gateway.enrollment import GatewayEnrollmentService
 from ..gateway.repositories import GatewayRepository
-from ..gateway.runtime_bridge import (
+from ..gateway.bridges.runtime import (
     GatewayCommandDispatcher,
     GatewayRuntimeEventForwarder,
 )
 from ..gateway.service import GatewayService, GatewaySnapshotBuilder
 from ..gateway.supervisor import GatewaySupervisor
-from ..runtime.services import DeviceCatalog, JobService
-from ..security.certificate_crypto import ManagedCertificateCryptoService
-from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from ..security.certificate_provisioners import ClientCertificateProvider
-from ..security.certificates import CertificateLifecycleService
+from ..runtime.devices.service import DeviceCatalog
+from ..runtime.jobs.service import JobService
+from ..security.certificates.crypto import ManagedCertificateCryptoService
+from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
+from ..security.certificates.providers import ClientCertificateProvider
+from ..security.certificates.store import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
 from ..security.policies import SecurityPolicyService
 from ..security.secrets import ResilientSecretStore

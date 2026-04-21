@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
+from inari.host_service.models import DEFAULT_SERVICE_SCOPE, default_service_name
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from inari.service.models import DEFAULT_SERVICE_SCOPE, default_service_name
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 TrayControlMode = Literal["monitor", "spawn", "service"]

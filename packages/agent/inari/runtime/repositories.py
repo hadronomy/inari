@@ -17,7 +17,7 @@ from ..db.schema import (
     jobs_table,
 )
 from ..drivers import DeviceKind
-from ..printers import PrinterTransport
+from ..printing.protocols import PrinterTransport
 from .models import (
     DeviceConnectionState,
     DeviceEventRecord,

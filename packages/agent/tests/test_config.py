@@ -14,7 +14,7 @@ from inari.config import (
     render_example_toml,
     write_generated_config_artifacts,
 )
-from inari.config_paths import resolve_default_path_bundle
+from inari.core.config_paths import resolve_default_path_bundle
 from inari.security.models import GatewayExposure, GatewayMode
 
 

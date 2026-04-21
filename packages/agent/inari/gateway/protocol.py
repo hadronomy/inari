@@ -16,9 +16,9 @@ from ..gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
-from ..printers import CutMode, PrinterTransport
+from ..printing.protocols import CutMode, PrinterTransport
 from ..security.models import GatewayExposure, GatewayMode
-from ..version import GATEWAY_PROTOCOL_VERSION, SUPPORTED_GATEWAY_PROTOCOL_VERSIONS
+from ..core.version import GATEWAY_PROTOCOL_VERSION, SUPPORTED_GATEWAY_PROTOCOL_VERSIONS
 
 
 class GatewayProtocolModel(BaseModel):

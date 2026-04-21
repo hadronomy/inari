@@ -5,8 +5,9 @@ import contextlib
 import logging
 
 from ..config import AgentSettings
-from .execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator
-from .services import DeviceCatalog, JobService
+from .devices.service import DeviceCatalog
+from .jobs.execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator
+from .jobs.service import JobService
 from .store import RuntimeStore
 
 logger = logging.getLogger(__name__)

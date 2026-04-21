@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from inari.models import (
+from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     JobResourceResponse,

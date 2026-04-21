@@ -4,7 +4,7 @@ import ssl
 from pathlib import Path
 
 from ..config import AgentSettings
-from .certificates import CertificateLifecycleService
+from .certificates.store import CertificateLifecycleService
 
 
 class TlsContextFactory:

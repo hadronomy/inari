@@ -4,7 +4,7 @@ from collections.abc import Iterable
 
 from starlette.requests import HTTPConnection
 
-from ..exceptions import AgentError, ErrorSourcePayload
+from ..core.exceptions import AgentError, ErrorSourcePayload
 from .models import (
     AccessScope,
     AuthenticatedPrincipal,

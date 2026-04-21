@@ -5,11 +5,11 @@ import base64
 import pytest
 from pydantic import ValidationError
 
-from inari.device_commands import CutPaper
-from inari.binary_payloads import coerce_image_payload, coerce_pdf_payload
-from inari.exceptions import PrinterServiceError
-from inari.models import DeviceCommandRequest, PrintJobRequest
-from inari.print_jobs import ReceiptImageContent, TextDocumentContent
+from inari.printing.commands import CutPaper
+from inari.printing.payloads import coerce_image_payload, coerce_pdf_payload
+from inari.core.exceptions import PrinterServiceError
+from inari.local_api.schemas import DeviceCommandRequest, PrintJobRequest
+from inari.printing.jobs import ReceiptImageContent, TextDocumentContent
 
 
 def test_image_payload_accepts_data_url_and_detects_mime() -> None:

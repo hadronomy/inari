@@ -7,7 +7,7 @@ from hashlib import sha1
 from typing import Any, Mapping
 
 from ..drivers import DeviceKind
-from ..printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from ..printing.protocols import PrinterCapabilities, PrinterDevice, PrinterTransport
 
 
 def utc_now() -> datetime:

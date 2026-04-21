@@ -5,14 +5,14 @@ from typing import Any, ClassVar, Mapping
 
 import pytest
 
-from inari.binary_payloads import BinaryPayload
+from inari.printing.payloads import BinaryPayload
 from inari.config import AgentSettings
 from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
-from inari.drivers.printers.base import PrinterDriver
-from inari.exceptions import PrinterServiceError
-from inari.print_jobs import PrintJob, ReceiptImageContent
-from inari.printer_service import PrinterService
-from inari.printers import (
+from inari.printing.drivers.base import PrinterDriver
+from inari.core.exceptions import PrinterServiceError
+from inari.printing.jobs import PrintJob, ReceiptImageContent
+from inari.printing.service import PrinterService
+from inari.printing.protocols import (
     PrintJobResult,
     PrinterCapabilities,
     PrinterDevice,

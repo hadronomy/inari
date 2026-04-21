@@ -4,15 +4,15 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from inari.device_commands import (
+from inari.printing.commands import (
     CutPaper,
     DeviceCommand,
     FeedDots,
     FeedLines,
     PrintTestPage,
 )
-from inari.printers import CutMode, PrinterTransport
-from inari.runtime.operations import (
+from inari.printing.protocols import CutMode, PrinterTransport
+from inari.runtime.jobs.operations import (
     DeviceTargetRef,
     QueuedDeviceCommandOperation,
     deserialize_device_command_operation,

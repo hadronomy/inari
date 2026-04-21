@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from inari.models import RuntimeEventResponse, SystemStatusResponse
-from inari.version import API_VERSION
+from inari.local_api.schemas import RuntimeEventResponse, SystemStatusResponse
+from inari.core.version import API_VERSION
 
 from inari_tray.models import (
     ControlMode,

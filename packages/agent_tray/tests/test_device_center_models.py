@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from PySide6.QtCore import QCoreApplication, Qt
 
-from inari.models import DeviceResponse
+from inari.local_api.schemas import DeviceResponse
 from inari_tray.device_center.table_models import DeviceTableModel
 
 

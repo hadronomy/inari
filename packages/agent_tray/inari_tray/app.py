@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Callable, Protocol
 
-from inari.models import (
+from inari.local_api.schemas import (
     JobResourceResponse,
     LiveEventUpdateResponse,
     LiveSnapshotResponse,

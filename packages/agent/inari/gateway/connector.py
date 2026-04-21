@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from ..config import AgentSettings
 from ..runtime.models import utc_now
-from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
+from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
 from ..security.models import GatewayMode
 from .data_plane import ZenohGatewayTransport
 from .data_plane.base import GatewayDataPlaneTransport
@@ -29,7 +29,7 @@ from .protocol import (
     GatewaySnapshotPayload,
 )
 from .repositories import GatewayRepository
-from .runtime_bridge import GatewayCommandDispatcher
+from .bridges.runtime import GatewayCommandDispatcher
 
 logger = logging.getLogger(__name__)
 

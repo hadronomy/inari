@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from PySide6.QtWidgets import QApplication
 
-from inari.models import (
+from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     DeviceResponse,

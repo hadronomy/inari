@@ -8,7 +8,7 @@ from typing import Any, Iterable
 from joserfc import jwt
 from joserfc.jwk import OctKey
 
-from ..exceptions import AgentError
+from ..core.exceptions import AgentError
 from .identity import AgentIdentityService
 from .models import AccessScope, AuthenticatedPrincipal, IssuedToken, PrincipalKind
 from .secrets import SecretStore

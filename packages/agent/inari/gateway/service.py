@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from ..config import AgentSettings
-from ..device_commands import DeviceCommandKind
-from ..print_jobs import PrintContentKind
-from ..runtime.services import DeviceCatalog, JobService
-from ..security.certificate_lifecycle import ManagedCertificateLifecycleManager
-from ..security.certificates import CertificateLifecycleService
+from ..printing.commands import DeviceCommandKind
+from ..printing.jobs import PrintContentKind
+from ..runtime.devices.service import DeviceCatalog
+from ..runtime.jobs.service import JobService
+from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
+from ..security.certificates.store import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
 from ..security.policies import SecurityPolicyService
-from ..version import API_VERSION, SERVICE_NAME
-from .caddy import CaddyControllerProfile
+from ..core.version import API_VERSION, SERVICE_NAME
+from .edge.caddy import CaddyControllerProfile
 from .connector import GatewayConnector
 from .models import SUPPORTED_CONTROLLER_ACTIONS, resolve_mutual_tls_policy
 from .protocol import (
@@ -47,7 +48,10 @@ class GatewaySnapshotBuilder:
         self.certificate_lifecycle_manager = certificate_lifecycle_manager
 
     def build_snapshot(self) -> GatewaySnapshotPayload:
-        from ..models import DeviceDirectorySummaryResponse, QueueSummaryResponse
+        from ..local_api.schemas import (
+            DeviceDirectorySummaryResponse,
+            QueueSummaryResponse,
+        )
         from ..runtime.models import utc_now
 
         identity = self.identity_service.get_or_create_identity()

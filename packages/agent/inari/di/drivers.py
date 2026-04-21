@@ -6,15 +6,15 @@ from dishka import Provider, Scope, provide
 
 from ..config import AgentSettings
 from ..drivers import DriverRegistry
-from ..drivers.printers import (
+from ..printing.drivers import (
     CupsPrinterDriver,
     RawSocketPrinterDriver,
     WindowsPrinterDriver,
     WindowsSpooler,
 )
-from ..printer_service import PrinterService
-from ..printers import PrinterTransport
-from ..receipt_renderers import EscPosImageReceiptRenderer, EscPosRenderer
+from ..printing.service import PrinterService
+from ..printing.protocols import PrinterTransport
+from ..printing.renderers import EscPosImageReceiptRenderer, EscPosRenderer
 
 
 def build_printer_drivers(

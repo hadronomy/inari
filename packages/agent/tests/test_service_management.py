@@ -8,10 +8,10 @@ import pytest
 from typer.testing import CliRunner
 
 from inari.config import AgentSettings
-from inari.service.launchd import LaunchdServiceManager
-from inari.service.manager import build_service_context, build_service_manager
-from inari.service.models import ServiceDefinition, ServiceState, ServiceStatus
-from inari.service.systemd import SystemdServiceManager
+from inari.host_service.launchd import LaunchdServiceManager
+from inari.host_service.manager import build_service_context, build_service_manager
+from inari.host_service.models import ServiceDefinition, ServiceState, ServiceStatus
+from inari.host_service.systemd import SystemdServiceManager
 
 
 def test_cli_service_install_uses_service_manager(tmp_path, mocker) -> None:
@@ -50,19 +50,19 @@ def test_windows_service_manager_install_persists_config_path(tmp_path, mocker) 
     )
     fake_win32serviceutil = mocker.Mock()
     mocker.patch(
-        "inari.service.windows.WindowsServiceManager._serviceutil",
+        "inari.host_service.windows.WindowsServiceManager._serviceutil",
         return_value=fake_win32serviceutil,
     )
     fake_service_class = object()
     mocker.patch(
-        "inari.windows_service.create_windows_service_class",
+        "inari.host_service.windows_entrypoint.create_windows_service_class",
         return_value=fake_service_class,
     )
     persist_config = mocker.patch(
-        "inari.windows_service.set_windows_service_config_path"
+        "inari.host_service.windows_entrypoint.set_windows_service_config_path"
     )
 
-    from inari.service.windows import WindowsServiceManager
+    from inari.host_service.windows import WindowsServiceManager
 
     manager = WindowsServiceManager(
         build_service_context(

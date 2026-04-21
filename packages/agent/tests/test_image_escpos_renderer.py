@@ -4,7 +4,7 @@ from io import BytesIO
 
 from PIL import Image
 
-from inari.receipt_renderers import (
+from inari.printing.renderers import (
     EscPosImageReceiptRenderer,
     EscPosImageReceiptRendererConfig,
 )

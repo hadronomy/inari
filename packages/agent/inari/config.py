@@ -22,7 +22,7 @@ from pydantic import (
     model_validator,
 )
 
-from .config_paths import (
+from .core.config_paths import (
     PathProfile,
     PlatformPathBundle,
     default_config_candidates,

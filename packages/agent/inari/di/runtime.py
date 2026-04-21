@@ -4,9 +4,9 @@ from dishka import Provider, Scope, provide
 
 from ..config import AgentSettings
 from ..gateway.repositories import GatewayRepository
-from ..runtime.discovery import DiscoveryCoordinator
+from ..runtime.devices.discovery import DiscoveryCoordinator
 from ..runtime.events import EventHub
-from ..runtime.execution import (
+from ..runtime.jobs.execution import (
     DeviceWorkerPool,
     JobScheduler,
     LeaseRecoveryCoordinator,
@@ -14,7 +14,8 @@ from ..runtime.execution import (
     RuntimeJobExecutor,
 )
 from ..runtime.repositories import DeviceRepository, JobRepository
-from ..runtime.services import DeviceCatalog, JobService
+from ..runtime.devices.service import DeviceCatalog
+from ..runtime.jobs.service import JobService
 from ..runtime.store import RuntimeStore
 from ..runtime.supervisor import RuntimeSupervisor
 

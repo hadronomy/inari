@@ -23,11 +23,15 @@ from inari.gateway.models import (
 )
 from inari.gateway.protocol import AgentStatusSnapshotMessage, GatewaySnapshotPayload
 from inari.gateway.repositories import GatewayRepository
-from inari.gateway.runtime_bridge import (
+from inari.gateway.bridges.runtime import (
     GatewayCommandDispatcher,
     GatewayRuntimeEventForwarder,
 )
-from inari.printers import PrinterCapabilities, PrinterDevice, PrinterTransport
+from inari.printing.protocols import (
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+)
 from inari.runtime.events import EventHub
 from inari.runtime.models import (
     DeviceConnectionState,
@@ -38,10 +42,10 @@ from inari.runtime.models import (
     JobState,
     utc_now,
 )
-from inari.runtime.services import JobService
+from inari.runtime.jobs.service import JobService
 from inari.runtime.store import RuntimeStore
 from inari.security.models import GatewayMode
-from inari.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
+from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
 @pytest.mark.anyio

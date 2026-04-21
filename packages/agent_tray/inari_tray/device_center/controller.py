@@ -8,7 +8,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QSettings, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
-from inari.models import (
+from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     DeviceResponse,

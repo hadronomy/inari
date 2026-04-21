@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 from inari.cli import app
 from inari.db.migrations import DatabaseMigrator
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+DATA_DIR = Path(__file__).parent / "data"
 
 
 def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ def test_db_cli_upgrade_and_current_commands(tmp_path: Path) -> None:
 
 def _create_legacy_database(database_path: Path) -> Path:
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    schema = (FIXTURES_DIR / "legacy_runtime_schema.sql").read_text(encoding="utf-8")
+    schema = (DATA_DIR / "legacy_runtime_schema.sql").read_text(encoding="utf-8")
     with sqlite3.connect(database_path) as connection:
         connection.executescript(schema)
         connection.execute(

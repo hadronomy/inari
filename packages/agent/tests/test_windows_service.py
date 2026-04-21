@@ -28,16 +28,16 @@ def test_service_cli_uses_handle_command_line_for_management_commands(
         fake_win32serviceutil,
     )
     mocker.patch(
-        "inari.windows_service._import_pywin32_service_modules",
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=fake_modules,
     )
     mocked_service_class = object()
     mocker.patch(
-        "inari.windows_service.create_windows_service_class",
+        "inari.host_service.windows_entrypoint.create_windows_service_class",
         return_value=mocked_service_class,
     )
 
-    from inari.windows_service import _run_service_cli
+    from inari.host_service.windows_entrypoint import _run_service_cli
 
     _run_service_cli(
         [
@@ -79,7 +79,7 @@ def test_service_custom_option_round_trip_uses_pywin32_storage(
         ),
     )
     mocker.patch(
-        "inari.windows_service._import_pywin32_service_modules",
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=(
             fake_servicemanager,
             fake_win32event,
@@ -88,7 +88,7 @@ def test_service_custom_option_round_trip_uses_pywin32_storage(
         ),
     )
 
-    from inari.windows_service import (
+    from inari.host_service.windows_entrypoint import (
         get_windows_service_config_path,
         set_windows_service_config_path,
     )
@@ -125,7 +125,7 @@ def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
         GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
-        "inari.windows_service._import_pywin32_service_modules",
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=(
             fake_servicemanager,
             fake_win32event,
@@ -135,11 +135,11 @@ def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
     )
     fake_controller = SimpleNamespace(run=mocker.Mock(), request_shutdown=mocker.Mock())
     mocker.patch(
-        "inari.windows_service.AgentServerController.from_settings",
+        "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
         return_value=fake_controller,
     )
 
-    from inari.windows_service import create_windows_service_class
+    from inari.host_service.windows_entrypoint import create_windows_service_class
 
     service_class = create_windows_service_class(settings=AgentSettings())
     service = service_class(["inari-windows-service"])
@@ -166,7 +166,7 @@ def test_service_class_uses_python_module_host(mocker) -> None:
         GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
-        "inari.windows_service._import_pywin32_service_modules",
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=(
             fake_servicemanager,
             fake_win32event,
@@ -175,12 +175,12 @@ def test_service_class_uses_python_module_host(mocker) -> None:
         ),
     )
 
-    from inari.windows_service import create_windows_service_class
+    from inari.host_service.windows_entrypoint import create_windows_service_class
 
     service_class = create_windows_service_class(settings=AgentSettings())
 
     assert service_class._exe_name_.endswith("python.exe")
-    assert service_class._exe_args_ == "-m inari.windows_service"
+    assert service_class._exe_args_ == "-m inari.host_service.windows_entrypoint"
 
 
 def test_service_class_builds_controller_during_run(mocker) -> None:
@@ -214,7 +214,7 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
         GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
-        "inari.windows_service._import_pywin32_service_modules",
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=(
             fake_servicemanager,
             fake_win32event,
@@ -222,14 +222,14 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
             fake_win32serviceutil,
         ),
     )
-    mocker.patch("inari.windows_service._write_bootstrap_log")
+    mocker.patch("inari.host_service.windows_entrypoint._write_bootstrap_log")
     fake_controller = SimpleNamespace(run=mocker.Mock(), request_shutdown=mocker.Mock())
     controller_factory = mocker.patch(
-        "inari.windows_service.AgentServerController.from_settings",
+        "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
         return_value=fake_controller,
     )
 
-    from inari.windows_service import create_windows_service_class
+    from inari.host_service.windows_entrypoint import create_windows_service_class
 
     service_class = create_windows_service_class(settings=AgentSettings())
     service = service_class(["inari-windows-service"])
@@ -245,7 +245,7 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
 
 
 def test_windows_service_entrypoint_requires_windows(monkeypatch) -> None:
-    from inari.windows_service import _import_pywin32_service_modules
+    from inari.host_service.windows_entrypoint import _import_pywin32_service_modules
 
     monkeypatch.setattr("sys.platform", "linux")
     import pytest
@@ -268,7 +268,7 @@ def test_load_service_settings_falls_back_to_production_defaults_when_config_mis
         GetServiceCustomOption=mocker.Mock(return_value=str(tmp_path / "missing.toml")),
     )
     mocker.patch(
-        "inari.windows_service._import_pywin32_service_modules",
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=(
             fake_servicemanager,
             fake_win32event,
@@ -277,7 +277,7 @@ def test_load_service_settings_falls_back_to_production_defaults_when_config_mis
         ),
     )
 
-    from inari.windows_service import _load_service_settings
+    from inari.host_service.windows_entrypoint import _load_service_settings
 
     settings = _load_service_settings()
 
@@ -315,19 +315,21 @@ def test_module_entrypoint_invokes_main_when_run_as_script(
     monkeypatch.setitem(sys.modules, "win32event", fake_win32event)
     monkeypatch.setitem(sys.modules, "win32service", fake_win32service)
     monkeypatch.setitem(sys.modules, "win32serviceutil", fake_win32serviceutil)
-    monkeypatch.delitem(sys.modules, "inari.windows_service", raising=False)
+    monkeypatch.delitem(
+        sys.modules, "inari.host_service.windows_entrypoint", raising=False
+    )
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(
         sys,
         "argv",
         [
-            "inari.windows_service",
+            "inari.host_service.windows_entrypoint",
             "--config",
             str(tmp_path / "agent.toml"),
             "install",
         ],
     )
 
-    runpy.run_module("inari.windows_service", run_name="__main__")
+    runpy.run_module("inari.host_service.windows_entrypoint", run_name="__main__")
 
     cast(Any, fake_win32serviceutil).HandleCommandLine.assert_called_once()

@@ -6,7 +6,7 @@ from ..config import AgentSettings
 from ..db import DatabaseMigrator
 from ..gateway.supervisor import GatewaySupervisor
 from ..runtime.supervisor import RuntimeSupervisor
-from ..supervision import ApplicationSupervisor
+from ..application.supervision import ApplicationSupervisor
 
 
 class AppProvider(Provider):

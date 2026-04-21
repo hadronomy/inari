@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from inari.models import RuntimeEventResponse
+from inari.local_api.schemas import RuntimeEventResponse
 
 from ..config import TraySettings
 from ..models import TraySnapshot

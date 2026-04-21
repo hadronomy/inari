@@ -5,8 +5,8 @@ import ipaddress
 from starlette.requests import HTTPConnection
 
 from ..config import AgentSettings
-from ..exceptions import AgentError
-from ..gateway.caddy import validate_caddy_profile
+from ..core.exceptions import AgentError
+from ..gateway.edge.caddy import validate_caddy_profile
 from ..gateway.models import UpstreamAuthMode, UpstreamCertificateMode
 from .models import GatewayExposure, GatewaySecurityPolicy, GatewayMode
 

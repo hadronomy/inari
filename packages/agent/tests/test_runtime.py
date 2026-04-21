@@ -9,19 +9,19 @@ import pytest
 
 from inari.config import AgentSettings
 from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
-from inari.drivers.printers.base import PrinterDriver
-from inari.models import PrintJobRequest
-from inari.printer_service import PrinterService
-from inari.printers import (
+from inari.printing.drivers.base import PrinterDriver
+from inari.local_api.schemas import PrintJobRequest
+from inari.printing.service import PrinterService
+from inari.printing.protocols import (
     PrintJobResult,
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
     RenderedDocument,
 )
-from inari.runtime.discovery import DiscoveryCoordinator
+from inari.runtime.devices.discovery import DiscoveryCoordinator
 from inari.runtime.events import EventHub
-from inari.runtime.execution import (
+from inari.runtime.jobs.execution import (
     DeviceWorkerPool,
     JobScheduler,
     LeaseRecoveryCoordinator,
@@ -30,7 +30,8 @@ from inari.runtime.execution import (
 )
 from inari.runtime.models import JobRecord, JobState, build_device_id
 from inari.runtime.repositories import DeviceRepository, JobRepository
-from inari.runtime.services import DeviceCatalog, JobService
+from inari.runtime.devices.service import DeviceCatalog
+from inari.runtime.jobs.service import JobService
 from inari.runtime.store import RuntimeStore
 from inari.runtime.supervisor import RuntimeSupervisor
 

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
-from inari.models import RuntimeEventResponse, SystemStatusResponse
+from inari.local_api.schemas import RuntimeEventResponse, SystemStatusResponse
 
 
 class ControlMode(StrEnum):

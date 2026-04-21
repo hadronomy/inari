@@ -42,7 +42,7 @@ dev = [
 
 [project.scripts]
 inari = "inari.cli:main"
-inari-windows-service = "inari.windows_service:main"
+inari-windows-service = "inari.host_service.windows_entrypoint:main"
 inari-generate-config = "inari.config:generate_schema_main"
 
 [build-system]

@@ -7,7 +7,7 @@ from typing import cast
 import httpx
 import respx
 
-from inari.version import API_VERSION
+from inari.core.version import API_VERSION
 from inari_tray.client import AgentApiClient
 from inari_tray.config import TraySettings
 

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from inari.models import DeviceResponse, RuntimeEventResponse
+from inari.local_api.schemas import DeviceResponse, RuntimeEventResponse
 from inari.runtime.models import DeviceConnectionState
 
 from .helpers import compact_timestamp, device_endpoint

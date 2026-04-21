@@ -7,7 +7,7 @@ from typing import Any
 from PySide6.QtCore import QByteArray
 from PySide6.QtWidgets import QLabel
 
-from inari.models import DeviceResponse
+from inari.local_api.schemas import DeviceResponse
 
 SETTINGS_ORGANIZATION = "Inari"
 SETTINGS_APPLICATION = "Inari Tray"

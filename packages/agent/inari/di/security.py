@@ -3,17 +3,17 @@ from __future__ import annotations
 from dishka import Provider, Scope, provide
 
 from ..config import AgentSettings
-from ..gateway.auth_providers import (
+from ..gateway.enrollment.auth import (
     UpstreamAuthProvider,
     build_upstream_auth_provider,
 )
 from ..security.auth import AuthorizationService
-from ..security.certificate_crypto import ManagedCertificateCryptoService
-from ..security.certificate_provisioners import (
+from ..security.certificates.crypto import ManagedCertificateCryptoService
+from ..security.certificates.providers import (
     ClientCertificateProvider,
     build_certificate_provider,
 )
-from ..security.certificates import CertificateLifecycleService
+from ..security.certificates.store import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
 from ..security.policies import SecurityPolicyService
 from ..security.secrets import FileSecretStore, KeyringSecretStore, ResilientSecretStore
