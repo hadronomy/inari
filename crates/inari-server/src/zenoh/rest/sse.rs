@@ -1,9 +1,8 @@
-use std::{convert::Infallible, time::Duration};
+use std::convert::Infallible;
+use std::time::Duration;
 
-use axum::{
-    response::sse::{Event, KeepAlive, Sse},
-    response::{IntoResponse, Response},
-};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 

@@ -1,26 +1,16 @@
-use std::{
-    mem,
-    time::{Duration, Instant},
-};
+use std::mem;
+use std::time::{Duration, Instant};
 
-use tokio::{
-    select,
-    sync::{broadcast, mpsc, watch},
-    time,
-};
+use tokio::sync::{broadcast, mpsc, watch};
+use tokio::{select, time};
 
-use crate::{
-    config::ZenohConfig,
-    error::{AppError, AppResult},
-    shutdown::ShutdownCoordinator,
-};
-
-use super::{
-    ZenohEvent, ZenohStatus,
-    access::{SessionLease, SupervisorSignal},
-    handle::{Command, ZenohHandle},
-    session::{close_session, delete, open_session, publish},
-};
+use super::access::{SessionLease, SupervisorSignal};
+use super::handle::{Command, ZenohHandle};
+use super::session::{close_session, delete, open_session, publish};
+use super::{ZenohEvent, ZenohStatus};
+use crate::config::ZenohConfig;
+use crate::error::{AppError, AppResult};
+use crate::shutdown::ShutdownCoordinator;
 
 #[derive(Debug)]
 pub struct ZenohSupervisor {
@@ -69,7 +59,10 @@ impl ZenohSupervisor {
             return Ok(());
         }
 
-        let retry_interval = self.config.retry_interval.max(Duration::from_secs(1));
+        let retry_interval = self
+            .config
+            .retry_interval
+            .max(Duration::from_secs(1));
         let mut attempt = 0_u64;
         let mut generation = 0_u64;
         let mut state = SessionState::disconnected_now();
@@ -106,7 +99,9 @@ impl ZenohSupervisor {
             }
 
             let sleep = time::sleep_until(
-                state.next_attempt_at().expect("disconnected states carry a retry deadline"),
+                state
+                    .next_attempt_at()
+                    .expect("disconnected states carry a retry deadline"),
             );
             tokio::pin!(sleep);
 
@@ -192,7 +187,11 @@ impl ZenohSupervisor {
                 };
 
                 let should_reconnect = session.is_some() && response.is_err();
-                if let Some(error) = response.as_ref().err().filter(|_| should_reconnect) {
+                if let Some(error) = response
+                    .as_ref()
+                    .err()
+                    .filter(|_| should_reconnect)
+                {
                     let message = error.to_string();
                     self.set_session(None);
                     self.set_status(ZenohStatus::reconnecting(attempt, message.clone()));
@@ -202,7 +201,7 @@ impl ZenohSupervisor {
 
                 let _ = respond_to.send(response);
                 Ok(if should_reconnect { Control::Reconnect } else { Control::Continue })
-            }
+            },
             Command::Delete { key, respond_to } => {
                 self.emit_event(ZenohEvent::DeleteRequested { key: key.clone() });
 
@@ -212,7 +211,11 @@ impl ZenohSupervisor {
                 };
 
                 let should_reconnect = session.is_some() && response.is_err();
-                if let Some(error) = response.as_ref().err().filter(|_| should_reconnect) {
+                if let Some(error) = response
+                    .as_ref()
+                    .err()
+                    .filter(|_| should_reconnect)
+                {
                     let message = error.to_string();
                     self.set_session(None);
                     self.set_status(ZenohStatus::reconnecting(attempt, message.clone()));
@@ -222,7 +225,7 @@ impl ZenohSupervisor {
 
                 let _ = respond_to.send(response);
                 Ok(if should_reconnect { Control::Reconnect } else { Control::Continue })
-            }
+            },
         }
     }
 
@@ -242,7 +245,7 @@ impl ZenohSupervisor {
                 self.emit_event(ZenohEvent::Reconnecting { attempt, message: message.clone() });
                 self.log_session_lost(attempt, &message);
                 Ok(Control::Reconnect)
-            }
+            },
         }
     }
 
@@ -355,7 +358,10 @@ impl ZenohSupervisor {
     fn take_state_elapsed_ms(&mut self) -> u64 {
         let elapsed = self.state_changed_at.elapsed();
         self.state_changed_at = Instant::now();
-        elapsed.as_millis().try_into().unwrap_or(u64::MAX)
+        elapsed
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
     }
 }
 

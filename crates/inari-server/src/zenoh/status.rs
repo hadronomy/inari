@@ -87,14 +87,14 @@ impl fmt::Display for ZenohEvent {
             Self::Connected { attempt } => write!(f, "connected(attempt={attempt})"),
             Self::Reconnecting { attempt, message } => {
                 write!(f, "reconnecting(attempt={attempt}, message={message})")
-            }
+            },
             Self::Failed { attempt, message } => {
                 write!(f, "failed(attempt={attempt}, message={message})")
-            }
+            },
             Self::ShuttingDown => f.write_str("shutting_down"),
             Self::PublishRequested { key, bytes } => {
                 write!(f, "publish_requested(key={key}, bytes={bytes})")
-            }
+            },
             Self::DeleteRequested { key } => write!(f, "delete_requested(key={key})"),
         }
     }

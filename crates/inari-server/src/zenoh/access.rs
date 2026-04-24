@@ -1,17 +1,15 @@
-use std::{fmt, time::Duration};
+use std::fmt;
+use std::time::Duration;
 
-use ::zenoh::{
-    bytes::Encoding,
-    handlers::{FifoChannel, FifoChannelHandler},
-    pubsub::Subscriber,
-    query::{QueryConsolidation, Reply, Selector},
-    sample::Sample,
-};
+use ::zenoh::bytes::Encoding;
+use ::zenoh::handlers::{FifoChannel, FifoChannelHandler};
+use ::zenoh::pubsub::Subscriber;
+use ::zenoh::query::{QueryConsolidation, Reply, Selector};
+use ::zenoh::sample::Sample;
 use bytes::Bytes;
 
-use crate::error::{AppError, AppResult};
-
 use super::KeyExpression;
+use crate::error::{AppError, AppResult};
 
 #[derive(Clone)]
 pub(crate) struct SessionLease {
@@ -82,10 +80,13 @@ impl ZenohSubscription {
     }
 
     pub(crate) async fn recv_async(&self) -> AppResult<Sample> {
-        self.subscriber.recv_async().await.map_err(|source| {
-            tracing::debug!(error = %source, "Zenoh subscription stream closed");
-            AppError::service_unavailable("Zenoh subscription stream is no longer available.")
-        })
+        self.subscriber
+            .recv_async()
+            .await
+            .map_err(|source| {
+                tracing::debug!(error = %source, "Zenoh subscription stream closed");
+                AppError::service_unavailable("Zenoh subscription stream is no longer available.")
+            })
     }
 }
 
@@ -136,7 +137,9 @@ async fn issue_query(
         .timeout(request.timeout);
 
     if let Some((payload, encoding)) = request.payload {
-        query = query.payload(::zenoh::bytes::ZBytes::from(payload)).encoding(encoding);
+        query = query
+            .payload(::zenoh::bytes::ZBytes::from(payload))
+            .encoding(encoding);
     }
 
     query.await.map_err(|source| {
@@ -150,10 +153,16 @@ async fn issue_liveliness_get(
     key: &KeyExpression,
     timeout: Duration,
 ) -> AppResult<FifoChannelHandler<Reply>> {
-    session.session().liveliness().get(key.clone()).timeout(timeout).await.map_err(|source| {
-        tracing::debug!(error = %source, "Zenoh liveliness query failed");
-        AppError::service_unavailable("Zenoh liveliness query failed.")
-    })
+    session
+        .session()
+        .liveliness()
+        .get(key.clone())
+        .timeout(timeout)
+        .await
+        .map_err(|source| {
+            tracing::debug!(error = %source, "Zenoh liveliness query failed");
+            AppError::service_unavailable("Zenoh liveliness query failed.")
+        })
 }
 
 pub(crate) async fn declare_subscription(

@@ -1,12 +1,8 @@
-use axum::{
-    Json,
-    body::Bytes,
-    http::{
-        HeaderMap, HeaderValue, StatusCode,
-        header::{self, CONTENT_ENCODING, CONTENT_TYPE},
-    },
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::body::Bytes;
+use axum::http::header::{self, CONTENT_ENCODING, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 
 use super::super::ZenohJsonSample;
 
@@ -18,7 +14,11 @@ pub(crate) enum ResponseKind {
 }
 
 pub(crate) fn preferred_response_kind(headers: &HeaderMap) -> ResponseKind {
-    let Some(value) = headers.get(header::ACCEPT).and_then(|value| value.to_str().ok()) else {
+    let accept = headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok());
+
+    let Some(value) = accept else {
         return ResponseKind::Json;
     };
 
@@ -29,12 +29,16 @@ pub(crate) fn preferred_response_kind(headers: &HeaderMap) -> ResponseKind {
             continue;
         };
 
-        if best.as_ref().is_none_or(|current| candidate.is_preferred_to(current)) {
+        if best
+            .as_ref()
+            .is_none_or(|current| candidate.is_preferred_to(current))
+        {
             best = Some(candidate);
         }
     }
 
-    best.map(|accepted| accepted.kind).unwrap_or(ResponseKind::Json)
+    best.map(|accepted| accepted.kind)
+        .unwrap_or(ResponseKind::Json)
 }
 
 pub(crate) fn json_response(samples: Vec<ZenohJsonSample>) -> Response {
@@ -133,7 +137,9 @@ fn parse_quality(value: &str) -> Option<u16> {
     let decimals = value.strip_prefix("0.")?;
     if decimals.is_empty()
         || decimals.len() > 3
-        || !decimals.bytes().all(|byte| byte.is_ascii_digit())
+        || !decimals
+            .bytes()
+            .all(|byte| byte.is_ascii_digit())
     {
         return None;
     }
@@ -150,13 +156,23 @@ fn html_entry(reply: &::zenoh::query::Reply) -> String {
     match reply.result() {
         Ok(sample) => {
             let key = escape_html(sample.key_expr().as_str());
-            let value = escape_html(&sample.payload().try_to_string().unwrap_or_default());
+            let value = escape_html(
+                &sample
+                    .payload()
+                    .try_to_string()
+                    .unwrap_or_default(),
+            );
             format!("<dt>{key}</dt>\n<dd>{value}</dd>\n")
-        }
+        },
         Err(error) => {
-            let value = escape_html(&error.payload().try_to_string().unwrap_or_default());
+            let value = escape_html(
+                &error
+                    .payload()
+                    .try_to_string()
+                    .unwrap_or_default(),
+            );
             format!("<dt>ERROR</dt>\n<dd>{value}</dd>\n")
-        }
+        },
     }
 }
 
@@ -179,12 +195,22 @@ fn escape_html(value: &str) -> String {
 
 fn raw_reply(reply: ::zenoh::query::Reply) -> RawReply {
     match reply.result() {
-        Ok(sample) => {
-            RawReply::from_parts(sample.encoding(), sample.payload().to_bytes().into_owned().into())
-        }
-        Err(error) => {
-            RawReply::from_parts(error.encoding(), error.payload().to_bytes().into_owned().into())
-        }
+        Ok(sample) => RawReply::from_parts(
+            sample.encoding(),
+            sample
+                .payload()
+                .to_bytes()
+                .into_owned()
+                .into(),
+        ),
+        Err(error) => RawReply::from_parts(
+            error.encoding(),
+            error
+                .payload()
+                .to_bytes()
+                .into_owned()
+                .into(),
+        ),
     }
 }
 
@@ -232,7 +258,6 @@ fn parse_header_value(value: &str, label: &'static str) -> Option<HeaderValue> {
 #[cfg(test)]
 mod tests {
     use axum::http::{HeaderMap, header};
-
     use bytes::Bytes;
 
     use super::{RawReply, ResponseKind, parse_quality, preferred_response_kind};
@@ -242,7 +267,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::ACCEPT,
-            "text/html;q=0.1, application/json;q=0.9".parse().expect("header should parse"),
+            "text/html;q=0.1, application/json;q=0.9"
+                .parse()
+                .expect("header should parse"),
         );
 
         assert_eq!(preferred_response_kind(&headers), ResponseKind::Json);
@@ -253,7 +280,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::ACCEPT,
-            "text/html, application/json".parse().expect("header should parse"),
+            "text/html, application/json"
+                .parse()
+                .expect("header should parse"),
         );
 
         assert_eq!(preferred_response_kind(&headers), ResponseKind::Html);
@@ -275,9 +304,16 @@ mod tests {
         );
 
         assert_eq!(
-            raw.content_type.as_ref().expect("content type should exist"),
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
             "application/json",
         );
-        assert_eq!(raw.content_encoding.as_ref().expect("content encoding should exist"), "gzip",);
+        assert_eq!(
+            raw.content_encoding
+                .as_ref()
+                .expect("content encoding should exist"),
+            "gzip",
+        );
     }
 }

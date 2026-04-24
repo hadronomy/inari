@@ -4,16 +4,13 @@ use ::zenoh::bytes::Encoding;
 use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
-use crate::error::{AppError, AppResult};
-
-use super::{
-    KeyExpression, ZenohEvent, ZenohStatus,
-    access::{
-        SessionLease, SupervisorSignal, ZenohQueryRequest, ZenohSubscription,
-        declare_liveliness_subscription, declare_subscription, execute_liveliness_get_collect,
-        execute_liveliness_get_first, execute_query_collect, execute_query_first,
-    },
+use super::access::{
+    SessionLease, SupervisorSignal, ZenohQueryRequest, ZenohSubscription,
+    declare_liveliness_subscription, declare_subscription, execute_liveliness_get_collect,
+    execute_liveliness_get_first, execute_query_collect, execute_query_first,
 };
+use super::{KeyExpression, ZenohEvent, ZenohStatus};
+use crate::error::{AppError, AppResult};
 
 #[derive(Clone)]
 pub struct ZenohHandle {
@@ -52,7 +49,8 @@ impl ZenohHandle {
     }
 
     pub async fn publish_bytes(&self, key: KeyExpression, payload: Bytes) -> AppResult<()> {
-        self.put_bytes(key, payload, Encoding::default()).await
+        self.put_bytes(key, payload, Encoding::default())
+            .await
     }
 
     pub async fn put_bytes(
@@ -62,9 +60,12 @@ impl ZenohHandle {
         encoding: Encoding,
     ) -> AppResult<()> {
         let (respond_to, response) = oneshot::channel();
-        self.commands.send(Command::Publish { key, payload, encoding, respond_to }).await.map_err(
-            |_| AppError::service_unavailable("Zenoh supervisor is not accepting requests."),
-        )?;
+        self.commands
+            .send(Command::Publish { key, payload, encoding, respond_to })
+            .await
+            .map_err(|_| {
+                AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
+            })?;
 
         response.await.map_err(|_| {
             AppError::service_unavailable("Zenoh supervisor stopped before completing the request.")
@@ -73,9 +74,12 @@ impl ZenohHandle {
 
     pub async fn delete(&self, key: KeyExpression) -> AppResult<()> {
         let (respond_to, response) = oneshot::channel();
-        self.commands.send(Command::Delete { key, respond_to }).await.map_err(|_| {
-            AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
-        })?;
+        self.commands
+            .send(Command::Delete { key, respond_to })
+            .await
+            .map_err(|_| {
+                AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
+            })?;
 
         response.await.map_err(|_| {
             AppError::service_unavailable("Zenoh supervisor stopped before completing the request.")
@@ -148,8 +152,9 @@ impl ZenohHandle {
     }
 
     fn report_session_fault(&self, error: &AppError) {
-        if let Err(send_error) =
-            self.signals.try_send(SupervisorSignal::SessionFault { message: error.to_string() })
+        if let Err(send_error) = self
+            .signals
+            .try_send(SupervisorSignal::SessionFault { message: error.to_string() })
         {
             tracing::trace!(error = %send_error, "failed to report Zenoh session fault");
         }

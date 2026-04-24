@@ -1,9 +1,9 @@
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::{
-    config::{LogFormat, ObservabilityConfig},
-    error::AppError,
-};
+use crate::config::{LogFormat, ObservabilityConfig};
+use crate::error::AppError;
 
 pub fn init(config: &ObservabilityConfig) -> Result<(), AppError> {
     let env_filter = EnvFilter::try_from_default_env()

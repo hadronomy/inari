@@ -98,7 +98,7 @@ impl std::fmt::Display for ConfigOrigin {
                 } else {
                     f.write_str(&files)
                 }
-            }
+            },
         }
     }
 }
@@ -166,7 +166,11 @@ impl RuntimeConfig {
     pub fn worker_threads(&self) -> usize {
         self.worker_threads
             .map(NonZeroUsize::get)
-            .or_else(|| std::thread::available_parallelism().ok().map(NonZeroUsize::get))
+            .or_else(|| {
+                std::thread::available_parallelism()
+                    .ok()
+                    .map(NonZeroUsize::get)
+            })
             .unwrap_or(4)
     }
 }
@@ -228,11 +232,15 @@ impl Default for CorsConfig {
         Self {
             enabled: false,
             allow_origins: Vec::new(),
-            allow_methods: ["GET", "HEAD", "POST", "OPTIONS"].map(String::from).to_vec(),
+            allow_methods: ["GET", "HEAD", "POST", "OPTIONS"]
+                .map(String::from)
+                .to_vec(),
             allow_headers: ["authorization", "content-type", "x-request-id"]
                 .map(String::from)
                 .to_vec(),
-            expose_headers: ["x-request-id"].map(String::from).to_vec(),
+            expose_headers: ["x-request-id"]
+                .map(String::from)
+                .to_vec(),
             allow_credentials: false,
             max_age: DEFAULT_CORS_MAX_AGE,
         }
@@ -335,10 +343,14 @@ fn build_settings(files: &[PathBuf], environment: Environment) -> Result<AppConf
         builder = builder.add_source(File::from(path.clone()));
     }
 
-    let config =
-        builder.add_source(environment).build().map_err(|source| ConfigError::Build { source })?;
+    let config = builder
+        .add_source(environment)
+        .build()
+        .map_err(|source| ConfigError::Build { source })?;
 
-    config.try_deserialize().map_err(|source| ConfigError::Deserialize { source })
+    config
+        .try_deserialize()
+        .map_err(|source| ConfigError::Deserialize { source })
 }
 
 fn config_files(explicit_path: Option<PathBuf>) -> Result<Vec<PathBuf>, ConfigError> {
@@ -349,7 +361,7 @@ fn config_files(explicit_path: Option<PathBuf>) -> Result<Vec<PathBuf>, ConfigEr
             }
 
             Ok(vec![path])
-        }
+        },
         None => Ok(DEFAULT_CONFIG_CANDIDATES
             .iter()
             .map(PathBuf::from)

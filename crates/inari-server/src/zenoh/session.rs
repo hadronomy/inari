@@ -1,27 +1,24 @@
 use std::str::FromStr;
 
-use ::zenoh::{
-    bytes::{Encoding, ZBytes},
-    config::EndPoint,
-};
+use ::zenoh::bytes::{Encoding, ZBytes};
+use ::zenoh::config::EndPoint;
 use bytes::Bytes;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{
-    config::ZenohConfig,
-    error::{AppError, AppResult},
-};
-
 use super::KeyExpression;
+use crate::config::ZenohConfig;
+use crate::error::{AppError, AppResult};
 
 pub(super) async fn open_session(config: &ZenohConfig) -> AppResult<::zenoh::Session> {
     let mut zenoh_config = ::zenoh::Config::default();
     configure_zenoh(&mut zenoh_config, config)?;
 
-    ::zenoh::open(zenoh_config).await.map_err(|source| {
-        AppError::service_unavailable(format!("Failed to open the Zenoh session: {source}"))
-    })
+    ::zenoh::open(zenoh_config)
+        .await
+        .map_err(|source| {
+            AppError::service_unavailable(format!("Failed to open the Zenoh session: {source}"))
+        })
 }
 
 pub(super) async fn close_session(session: ::zenoh::Session) {
@@ -47,7 +44,10 @@ pub(super) async fn publish(
 }
 
 pub(super) async fn delete(session: &::zenoh::Session, key: &KeyExpression) -> AppResult<()> {
-    session.delete(key).await.map_err(|_| AppError::service_unavailable("Zenoh delete failed."))?;
+    session
+        .delete(key)
+        .await
+        .map_err(|_| AppError::service_unavailable("Zenoh delete failed."))?;
 
     Ok(())
 }
@@ -108,10 +108,15 @@ fn insert_json5_value(
     key: &'static str,
     value: Value,
 ) -> AppResult<()> {
-    config.insert_json5(key, &value.to_string()).map_err(|source| {
-        AppError::internal("zenoh_configuration", "Failed to apply Zenoh session configuration.")
+    config
+        .insert_json5(key, &value.to_string())
+        .map_err(|source| {
+            AppError::internal(
+                "zenoh_configuration",
+                "Failed to apply Zenoh session configuration.",
+            )
             .with_boxed_source(source)
-    })?;
+        })?;
 
     Ok(())
 }

@@ -1,15 +1,13 @@
-use axum::{
-    Router,
-    body::Bytes,
-    extract::{Path, RawQuery, State},
-    http::{HeaderMap, StatusCode},
-    response::Response,
-    routing::get,
-};
-
-use crate::{error::AppResult, state::AppState};
+use axum::Router;
+use axum::body::Bytes;
+use axum::extract::{Path, RawQuery, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use axum::routing::get;
 
 use super::{ZenohRestService, index_response};
+use crate::error::AppResult;
+use crate::state::AppState;
 
 pub(crate) fn router(_state: &AppState) -> Router<AppState> {
     Router::new()
@@ -21,7 +19,14 @@ pub(crate) fn router(_state: &AppState) -> Router<AppState> {
                 .patch(empty_selector_write)
                 .delete(empty_selector_write),
         )
-        .route("/{*selector}", get(query).post(query).put(write).patch(write).delete(remove))
+        .route(
+            "/{*selector}",
+            get(query)
+                .post(query)
+                .put(write)
+                .patch(write)
+                .delete(remove),
+        )
 }
 
 async fn index(State(state): State<AppState>) -> Response {
@@ -35,7 +40,9 @@ async fn query(
     headers: HeaderMap,
     body: Bytes,
 ) -> AppResult<Response> {
-    ZenohRestService::new(state).query(&selector, query, headers, body).await
+    ZenohRestService::new(state)
+        .query(&selector, query, headers, body)
+        .await
 }
 
 async fn write(
@@ -44,14 +51,18 @@ async fn write(
     headers: HeaderMap,
     body: Bytes,
 ) -> AppResult<StatusCode> {
-    ZenohRestService::new(state).write(&selector, &headers, body).await
+    ZenohRestService::new(state)
+        .write(&selector, &headers, body)
+        .await
 }
 
 async fn remove(
     State(state): State<AppState>,
     Path(selector): Path<String>,
 ) -> AppResult<StatusCode> {
-    ZenohRestService::new(state).delete(&selector).await
+    ZenohRestService::new(state)
+        .delete(&selector)
+        .await
 }
 
 async fn empty_selector_query(State(state): State<AppState>) -> AppResult<Response> {

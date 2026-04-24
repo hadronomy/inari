@@ -1,21 +1,19 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
+use std::time::Duration;
 
-use axum::{
-    body::{Body, BodyDataStream, to_bytes},
-    http::{Request, StatusCode},
-};
-use tokio::{sync::Mutex, task::JoinHandle};
+use axum::body::{Body, BodyDataStream, to_bytes};
+use axum::http::{Request, StatusCode};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use tower::ServiceExt;
 
-use crate::{
-    config::{LoadedConfig, ZenohAdminSpaceConfig, ZenohConfig},
-    http,
-    protocol::NoopProtocolModule,
-    shutdown::{ShutdownCoordinator, ShutdownReason},
-    state::AppState,
-    zenoh::ZenohSupervisor,
-};
+use crate::config::{LoadedConfig, ZenohAdminSpaceConfig, ZenohConfig};
+use crate::http;
+use crate::protocol::NoopProtocolModule;
+use crate::shutdown::{ShutdownCoordinator, ShutdownReason};
+use crate::state::AppState;
+use crate::zenoh::ZenohSupervisor;
 
 fn enabled_config() -> LoadedConfig {
     let mut loaded = LoadedConfig::default();
@@ -27,7 +25,11 @@ fn enabled_config() -> LoadedConfig {
 
 fn admin_enabled_config() -> LoadedConfig {
     let mut loaded = enabled_config();
-    loaded.settings.http.zenoh_rest.allow_admin_space = true;
+    loaded
+        .settings
+        .http
+        .zenoh_rest
+        .allow_admin_space = true;
     loaded.settings.zenoh.admin_space =
         ZenohAdminSpaceConfig { enabled: true, read: true, write: false };
     loaded
@@ -43,14 +45,20 @@ async fn spawn_live_app()
 
     wait_for_connection(&state).await;
 
-    let app = http::router(&state).expect("router should build").with_state(state.clone());
+    let app = http::router(&state)
+        .expect("router should build")
+        .with_state(state.clone());
 
     (app, state, shutdown, task)
 }
 
 async fn wait_for_connection(state: &AppState) {
     for _ in 0..100 {
-        if state.zenoh().session_snapshot().is_some() {
+        if state
+            .zenoh()
+            .session_snapshot()
+            .is_some()
+        {
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -85,12 +93,22 @@ async fn declare_liveliness_token(
 }
 
 async fn install_materialized_queryable(state: &AppState, key: &'static str) -> TestTasks {
-    let session =
-        state.zenoh().session_snapshot().expect("session should be connected").session().clone();
+    let session = state
+        .zenoh()
+        .session_snapshot()
+        .expect("session should be connected")
+        .session()
+        .clone();
     let value = Arc::new(Mutex::new(None::<(Vec<u8>, ::zenoh::bytes::Encoding)>));
 
-    let subscriber = session.declare_subscriber(key).await.expect("subscriber should declare");
-    let queryable = session.declare_queryable(key).await.expect("queryable should declare");
+    let subscriber = session
+        .declare_subscriber(key)
+        .await
+        .expect("subscriber should declare");
+    let queryable = session
+        .declare_queryable(key)
+        .await
+        .expect("queryable should declare");
 
     let subscriber_value = Arc::clone(&value);
     let subscriber_task = tokio::spawn(async move {
@@ -100,10 +118,10 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
                 ::zenoh::sample::SampleKind::Put => {
                     *guard =
                         Some((sample.payload().to_bytes().into_owned(), sample.encoding().clone()));
-                }
+                },
                 ::zenoh::sample::SampleKind::Delete => {
                     *guard = None;
-                }
+                },
             }
         }
     });
@@ -112,7 +130,10 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
         while let Ok(query) = queryable.recv_async().await {
             let reply = value.lock().await.clone();
             if let Some((payload, encoding)) = reply {
-                let result = query.reply(key, payload).encoding(encoding).await;
+                let result = query
+                    .reply(key, payload)
+                    .encoding(encoding)
+                    .await;
                 assert!(result.is_ok(), "query reply should succeed");
             }
         }
@@ -122,16 +143,31 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
 }
 
 async fn install_echo_queryable(state: &AppState, key: &'static str) -> TestTasks {
-    let session =
-        state.zenoh().session_snapshot().expect("session should be connected").session().clone();
-    let queryable = session.declare_queryable(key).await.expect("queryable should declare");
+    let session = state
+        .zenoh()
+        .session_snapshot()
+        .expect("session should be connected")
+        .session()
+        .clone();
+    let queryable = session
+        .declare_queryable(key)
+        .await
+        .expect("queryable should declare");
 
     let query_task = tokio::spawn(async move {
         while let Ok(query) = queryable.recv_async().await {
-            let payload =
-                query.payload().map(|payload| payload.to_bytes().into_owned()).unwrap_or_default();
-            let encoding = query.encoding().cloned().unwrap_or_default();
-            let result = query.reply(key, payload).encoding(encoding).await;
+            let payload = query
+                .payload()
+                .map(|payload| payload.to_bytes().into_owned())
+                .unwrap_or_default();
+            let encoding = query
+                .encoding()
+                .cloned()
+                .unwrap_or_default();
+            let result = query
+                .reply(key, payload)
+                .encoding(encoding)
+                .await;
             assert!(result.is_ok(), "query reply should succeed");
         }
     });
@@ -162,7 +198,9 @@ async fn route_is_not_mounted_when_disabled() {
     let loaded = LoadedConfig::default();
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
     let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
-    let app = http::router(&state).expect("router should build").with_state(state);
+    let app = http::router(&state)
+        .expect("router should build")
+        .with_state(state);
 
     let response = app
         .oneshot(
@@ -194,7 +232,9 @@ async fn zenoh_root_reports_connection_state() {
     assert_eq!(response.status(), StatusCode::OK);
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -214,7 +254,9 @@ async fn zenoh_admin_space_is_blocked_by_default() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -234,7 +276,9 @@ async fn invalid_key_expression_returns_bad_request() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -245,7 +289,9 @@ async fn zenoh_admin_space_returns_router_status_when_enabled() {
     let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
     let task = tokio::spawn(supervisor.run(shutdown.clone()));
     wait_for_connection(&state).await;
-    let app = http::router(&state).expect("router should build").with_state(state);
+    let app = http::router(&state)
+        .expect("router should build")
+        .with_state(state);
 
     let response = app
         .oneshot(
@@ -259,14 +305,20 @@ async fn zenoh_admin_space_returns_router_status_when_enabled() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body =
-        to_bytes(response.into_body(), usize::MAX).await.expect("response body should be readable");
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
-    assert!(json.as_array().is_some_and(|items| !items.is_empty()));
+    assert!(
+        json.as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -318,8 +370,9 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
         .expect("router should respond");
     assert_eq!(get.status(), StatusCode::OK);
 
-    let body =
-        to_bytes(get.into_body(), usize::MAX).await.expect("response body should be readable");
+    let body = to_bytes(get.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
     assert_eq!(json[0]["value"], "patched");
@@ -338,7 +391,9 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
     assert_eq!(delete.status(), StatusCode::OK);
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -361,15 +416,18 @@ async fn post_query_forwards_payload_and_encoding() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body =
-        to_bytes(response.into_body(), usize::MAX).await.expect("response body should be readable");
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
     assert_eq!(json[0]["value"], "hello from query");
     assert_eq!(json[0]["encoding"], "text/plain");
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -391,16 +449,22 @@ async fn get_raw_returns_first_reply_payload() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
-        response.headers().get("content-type").expect("content-type should exist"),
+        response
+            .headers()
+            .get("content-type")
+            .expect("content-type should exist"),
         "text/plain",
     );
 
-    let body =
-        to_bytes(response.into_body(), usize::MAX).await.expect("response body should be readable");
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
     assert_eq!(body, "raw payload");
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -423,14 +487,17 @@ async fn get_html_renders_definition_list() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body =
-        to_bytes(response.into_body(), usize::MAX).await.expect("response body should be readable");
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
     let html = String::from_utf8(body.to_vec()).expect("response body should be valid UTF-8");
     assert!(html.contains("<dl>"));
     assert!(html.contains("&lt;hello&gt;"));
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -453,8 +520,9 @@ async fn get_liveliness_returns_live_tokens() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body =
-        to_bytes(response.into_body(), usize::MAX).await.expect("response body should be readable");
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
     assert_eq!(json[0]["key"], "demo/presence");
@@ -462,7 +530,9 @@ async fn get_liveliness_returns_live_tokens() {
 
     drop(token);
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -499,7 +569,9 @@ async fn liveliness_sse_stream_reports_history_and_drop() {
     assert!(dropped.contains("\"key\":\"demo/presence\""));
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -519,5 +591,7 @@ async fn liveliness_rejects_non_reserved_selector_parameters() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
     shutdown.request(ShutdownReason::ServerStopped);
-    task.await.expect("supervisor task should join").expect("supervisor should shut down");
+    task.await
+        .expect("supervisor task should join")
+        .expect("supervisor should shut down");
 }

@@ -1,11 +1,9 @@
-use std::{borrow::Cow, str::FromStr};
-
-use crate::{
-    error::{AppError, AppResult},
-    state::AppState,
-};
+use std::borrow::Cow;
+use std::str::FromStr;
 
 use super::super::KeyExpression;
+use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AdminOperation {
@@ -52,7 +50,7 @@ impl<'a> KeyResolver<'a> {
             value if value.starts_with("@/local/") => {
                 let suffix = value.trim_start_matches("@/local/");
                 Ok(Cow::Owned(format!("@/{zid}/{suffix}")))
-            }
+            },
             value => Ok(Cow::Borrowed(value)),
         }
     }
@@ -78,7 +76,11 @@ impl<'a> AdminSpaceGuard<'a> {
     fn ensure_allowed(&self, operation: AdminOperation) -> AppResult<()> {
         let settings = &self.state.loaded_config().settings;
 
-        if !settings.http.zenoh_rest.allow_admin_space {
+        if !settings
+            .http
+            .zenoh_rest
+            .allow_admin_space
+        {
             return Err(AppError::forbidden(
                 "Zenoh admin space access is disabled for this HTTP surface.",
             ));

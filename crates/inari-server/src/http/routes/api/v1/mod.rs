@@ -1,15 +1,26 @@
 pub mod protocol;
 pub mod zenoh;
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
 use serde::Serialize;
 
-use crate::{state::AppState, zenoh::ZenohStatus};
+use crate::state::AppState;
+use crate::zenoh::ZenohStatus;
 
 pub fn router(state: &AppState) -> Router<AppState> {
-    let router = Router::new().route("/", get(index)).nest("/protocol", protocol::router(state));
+    let router = Router::new()
+        .route("/", get(index))
+        .nest("/protocol", protocol::router(state));
 
-    if state.loaded_config().settings.http.zenoh_rest.enabled {
+    if state
+        .loaded_config()
+        .settings
+        .http
+        .zenoh_rest
+        .enabled
+    {
         router.nest("/zenoh", zenoh::router(state))
     } else {
         router

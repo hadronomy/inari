@@ -1,10 +1,15 @@
-use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::routing::get;
+use axum::{Json, Router};
 use serde::Serialize;
 
 use crate::state::{AppState, ReadinessSnapshot};
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/healthz", get(health)).route("/readyz", get(readiness))
+    Router::new()
+        .route("/healthz", get(health))
+        .route("/readyz", get(readiness))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

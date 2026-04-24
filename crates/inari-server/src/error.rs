@@ -1,12 +1,13 @@
-use std::{
-    borrow::Cow, error::Error as StdError, io, net::SocketAddr, path::PathBuf, time::Duration,
-};
+use std::borrow::Cow;
+use std::error::Error as StdError;
+use std::io;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
 
-use axum::{
-    Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use thiserror::Error;
 use tower::BoxError;
@@ -197,7 +198,7 @@ impl AppError {
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::ServiceUnavailable { .. } | Self::GracefulShutdownTimeout { .. } => {
                 StatusCode::SERVICE_UNAVAILABLE
-            }
+            },
             Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             Self::Observability { .. }
             | Self::RuntimeBuild { .. }

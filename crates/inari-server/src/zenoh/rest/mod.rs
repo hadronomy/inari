@@ -8,27 +8,21 @@ mod tests;
 
 use std::time::Duration;
 
-use axum::{
-    Json,
-    body::Bytes,
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
-};
+use axum::Json;
+use axum::body::Bytes;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+pub(crate) use handler::router;
 use serde::Serialize;
 
-use crate::{
-    error::{AppError, AppResult},
-    state::AppState,
+use self::resolver::{AdminOperation, KeyResolver};
+use self::response::{
+    ResponseKind, html_response, json_response, preferred_response_kind, raw_response,
 };
-
-use self::{
-    resolver::{AdminOperation, KeyResolver},
-    response::{ResponseKind, html_response, json_response, preferred_response_kind, raw_response},
-    sse::sse_response,
-};
+use self::sse::sse_response;
 use super::{KeyExpression, ZenohJsonSample, ZenohQueryRequest, reply_to_json_sample};
-
-pub(crate) use handler::router;
+use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 const RAW_KEY: &str = "_raw";
 const LIVELINESS_KEY: &str = "_liveliness";
@@ -52,7 +46,10 @@ impl ZenohRestService {
             service: "zenoh_rest",
             enabled: settings.http.zenoh_rest.enabled,
             admin_space: ZenohRestAdminSpaceResponse {
-                route_enabled: settings.http.zenoh_rest.allow_admin_space,
+                route_enabled: settings
+                    .http
+                    .zenoh_rest
+                    .allow_admin_space,
                 router_enabled: settings.zenoh.admin_space.enabled,
                 read: settings.zenoh.admin_space.read,
                 write: settings.zenoh.admin_space.write,
@@ -69,21 +66,35 @@ impl ZenohRestService {
         body: Bytes,
     ) -> AppResult<Response> {
         let key = self.resolve_key_expression(selector, AdminOperation::Read)?;
-        let config = self.state.loaded_config().settings.http.zenoh_rest.clone();
+        let config = self
+            .state
+            .loaded_config()
+            .settings
+            .http
+            .zenoh_rest
+            .clone();
         let response_kind = preferred_response_kind(&headers);
         let options = QueryOptions::parse(query)?;
 
         if response_kind == ResponseKind::EventStream {
             let buffer = config.sse_buffer.max(1);
             let subscription = match options.mode {
-                QueryMode::Standard => self.state.zenoh().subscribe(&key, buffer).await?,
+                QueryMode::Standard => {
+                    self.state
+                        .zenoh()
+                        .subscribe(&key, buffer)
+                        .await?
+                },
                 QueryMode::Liveliness { history } => {
                     self.ensure_empty_body(
                         &body,
                         "Zenoh liveliness requests do not accept query payloads.",
                     )?;
-                    self.state.zenoh().subscribe_liveliness(&key, buffer, history).await?
-                }
+                    self.state
+                        .zenoh()
+                        .subscribe_liveliness(&key, buffer, history)
+                        .await?
+                },
             };
             return Ok(sse_response(subscription, config.sse_keep_alive, buffer));
         }
@@ -99,13 +110,21 @@ impl ZenohRestService {
                 );
 
                 if resolved.raw {
-                    let reply = self.state.zenoh().query_first(resolved.request).await?;
+                    let reply = self
+                        .state
+                        .zenoh()
+                        .query_first(resolved.request)
+                        .await?;
                     return Ok(raw_response(reply));
                 }
 
-                let replies = self.state.zenoh().query(resolved.request).await?;
+                let replies = self
+                    .state
+                    .zenoh()
+                    .query(resolved.request)
+                    .await?;
                 Ok(render_replies(response_kind, replies))
-            }
+            },
             QueryMode::Liveliness { .. } => {
                 self.ensure_empty_body(
                     &body,
@@ -121,10 +140,13 @@ impl ZenohRestService {
                     return Ok(raw_response(reply));
                 }
 
-                let replies =
-                    self.state.zenoh().liveliness_query(&key, config.query_timeout).await?;
+                let replies = self
+                    .state
+                    .zenoh()
+                    .liveliness_query(&key, config.query_timeout)
+                    .await?;
                 Ok(render_replies(response_kind, replies))
-            }
+            },
         }
     }
 
@@ -138,7 +160,10 @@ impl ZenohRestService {
         let encoding =
             request_encoding(headers, ::zenoh::bytes::Encoding::APPLICATION_OCTET_STREAM);
 
-        self.state.zenoh().put_bytes(key, body, encoding).await?;
+        self.state
+            .zenoh()
+            .put_bytes(key, body, encoding)
+            .await?;
         Ok(StatusCode::OK)
     }
 
@@ -279,7 +304,11 @@ fn query_parameter_names(query: &str) -> impl Iterator<Item = (&str, &str)> {
     query
         .split(['&', ';'])
         .filter(|segment| !segment.is_empty())
-        .map(|segment| segment.split_once('=').unwrap_or((segment, "")))
+        .map(|segment| {
+            segment
+                .split_once('=')
+                .unwrap_or((segment, ""))
+        })
 }
 
 fn render_replies(response_kind: ResponseKind, replies: Vec<::zenoh::query::Reply>) -> Response {
@@ -287,7 +316,10 @@ fn render_replies(response_kind: ResponseKind, replies: Vec<::zenoh::query::Repl
         ResponseKind::EventStream => unreachable!("event-stream handled before querying"),
         ResponseKind::Html => html_response(replies),
         ResponseKind::Json => json_response(
-            replies.iter().map(reply_to_json_sample).collect::<Vec<ZenohJsonSample>>(),
+            replies
+                .iter()
+                .map(reply_to_json_sample)
+                .collect::<Vec<ZenohJsonSample>>(),
         ),
     }
 }

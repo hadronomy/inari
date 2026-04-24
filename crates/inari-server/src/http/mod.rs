@@ -1,31 +1,24 @@
 pub mod routes;
 
-use axum::{
-    Router,
-    error_handling::HandleErrorLayer,
-    extract::DefaultBodyLimit,
-    http::{
-        HeaderName, HeaderValue, Method,
-        header::{AUTHORIZATION, COOKIE},
-    },
-    response::IntoResponse,
-};
-use tower::{BoxError, ServiceBuilder, timeout::TimeoutLayer};
-use tower_http::{
-    catch_panic::CatchPanicLayer,
-    compression::CompressionLayer,
-    cors::{AllowOrigin, CorsLayer},
-    request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
-    sensitive_headers::SetSensitiveHeadersLayer,
-    trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
-};
+use axum::Router;
+use axum::error_handling::HandleErrorLayer;
+use axum::extract::DefaultBodyLimit;
+use axum::http::header::{AUTHORIZATION, COOKIE};
+use axum::http::{HeaderName, HeaderValue, Method};
+use axum::response::IntoResponse;
+use tower::timeout::TimeoutLayer;
+use tower::{BoxError, ServiceBuilder};
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::CompressionLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
+use tower_http::trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
-use crate::{
-    config::CorsConfig,
-    error::{AppError, AppResult, ConfigError},
-    state::AppState,
-};
+use crate::config::CorsConfig;
+use crate::error::{AppError, AppResult, ConfigError};
+use crate::state::AppState;
 
 pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
     let cors = state
@@ -37,7 +30,9 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
         .then(|| build_cors_layer(&state.loaded_config().settings.http.cors))
         .transpose()?;
 
-    let router = Router::new().merge(routes::system::router()).merge(routes::api::router(state));
+    let router = Router::new()
+        .merge(routes::system::router())
+        .merge(routes::api::router(state));
 
     Ok(apply_http_layers(router, state, cors))
 }
@@ -52,11 +47,23 @@ fn apply_http_layers(
     cors: Option<CorsLayer>,
 ) -> Router<AppState> {
     router
-        .layer(DefaultBodyLimit::max(state.loaded_config().settings.server.max_body_size_bytes))
+        .layer(DefaultBodyLimit::max(
+            state
+                .loaded_config()
+                .settings
+                .server
+                .max_body_size_bytes,
+        ))
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_middleware_error))
-                .layer(TimeoutLayer::new(state.loaded_config().settings.server.request_timeout))
+                .layer(TimeoutLayer::new(
+                    state
+                        .loaded_config()
+                        .settings
+                        .server
+                        .request_timeout,
+                ))
                 .layer(SetSensitiveHeadersLayer::new([AUTHORIZATION, COOKIE]))
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
@@ -83,9 +90,12 @@ fn build_cors_layer(config: &CorsConfig) -> Result<CorsLayer, ConfigError> {
         .allow_methods
         .iter()
         .map(|value| {
-            value.parse::<Method>().map_err(|source| {
-                ConfigError::invalid(format!("Invalid CORS method `{value}`.")).with_source(source)
-            })
+            value
+                .parse::<Method>()
+                .map_err(|source| {
+                    ConfigError::invalid(format!("Invalid CORS method `{value}`."))
+                        .with_source(source)
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -93,9 +103,12 @@ fn build_cors_layer(config: &CorsConfig) -> Result<CorsLayer, ConfigError> {
         .allow_headers
         .iter()
         .map(|value| {
-            value.parse::<HeaderName>().map_err(|source| {
-                ConfigError::invalid(format!("Invalid CORS header `{value}`.")).with_source(source)
-            })
+            value
+                .parse::<HeaderName>()
+                .map_err(|source| {
+                    ConfigError::invalid(format!("Invalid CORS header `{value}`."))
+                        .with_source(source)
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -103,10 +116,12 @@ fn build_cors_layer(config: &CorsConfig) -> Result<CorsLayer, ConfigError> {
         .expose_headers
         .iter()
         .map(|value| {
-            value.parse::<HeaderName>().map_err(|source| {
-                ConfigError::invalid(format!("Invalid exposed CORS header `{value}`."))
-                    .with_source(source)
-            })
+            value
+                .parse::<HeaderName>()
+                .map_err(|source| {
+                    ConfigError::invalid(format!("Invalid exposed CORS header `{value}`."))
+                        .with_source(source)
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -118,10 +133,12 @@ fn build_cors_layer(config: &CorsConfig) -> Result<CorsLayer, ConfigError> {
                 .allow_origins
                 .iter()
                 .map(|value| {
-                    value.parse::<HeaderValue>().map_err(|source| {
-                        ConfigError::invalid(format!("Invalid CORS origin `{value}`."))
-                            .with_source(source)
-                    })
+                    value
+                        .parse::<HeaderValue>()
+                        .map_err(|source| {
+                            ConfigError::invalid(format!("Invalid CORS origin `{value}`."))
+                                .with_source(source)
+                        })
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         )
@@ -141,27 +158,25 @@ fn build_cors_layer(config: &CorsConfig) -> Result<CorsLayer, ConfigError> {
 mod tests {
     use std::sync::Arc;
 
-    use axum::{
-        body::{Body, to_bytes},
-        http::{Request, StatusCode},
-    };
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request, StatusCode};
     use serde_json::Value;
     use tower::ServiceExt;
 
     use super::router;
-    use crate::{
-        config::{LoadedConfig, ZenohConfig},
-        protocol::NoopProtocolModule,
-        state::AppState,
-        zenoh::ZenohSupervisor,
-    };
+    use crate::config::{LoadedConfig, ZenohConfig};
+    use crate::protocol::NoopProtocolModule;
+    use crate::state::AppState;
+    use crate::zenoh::ZenohSupervisor;
 
     fn test_app() -> axum::Router {
         let loaded = LoadedConfig::default();
         let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
         let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
 
-        router(&state).expect("test router should build").with_state(state)
+        router(&state)
+            .expect("test router should build")
+            .with_state(state)
     }
 
     #[tokio::test]

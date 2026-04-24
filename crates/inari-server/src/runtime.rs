@@ -1,6 +1,7 @@
 use tokio::runtime::Runtime;
 
-use crate::{config::RuntimeConfig, error::AppError};
+use crate::config::RuntimeConfig;
+use crate::error::AppError;
 
 pub fn build_runtime(config: &RuntimeConfig) -> Result<Runtime, AppError> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
@@ -16,7 +17,9 @@ pub fn build_runtime(config: &RuntimeConfig) -> Result<Runtime, AppError> {
         .global_queue_interval(config.global_queue_interval)
         .thread_name_fn(runtime_thread_name);
 
-    builder.build().map_err(|source| AppError::RuntimeBuild { source })
+    builder
+        .build()
+        .map_err(|source| AppError::RuntimeBuild { source })
 }
 
 fn runtime_thread_name() -> String {

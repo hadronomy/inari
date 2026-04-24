@@ -1,13 +1,13 @@
-use std::{borrow::Cow, collections::BTreeSet};
+use std::borrow::Cow;
+use std::collections::BTreeSet;
 
-use axum::{
-    Json, Router,
-    extract::State,
-    routing::{get, post},
-};
+use axum::extract::State;
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::Serialize;
 
-use crate::{error::AppError, state::AppState};
+use crate::error::AppError;
+use crate::state::AppState;
 
 pub trait ProtocolModule: Send + Sync {
     fn descriptor(&self) -> ProtocolDescriptor;

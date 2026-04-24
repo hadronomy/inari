@@ -8,7 +8,12 @@ fn main() -> Result<(), AppError> {
 
     let runtime = build_runtime(&loaded.settings.runtime)?;
 
-    runtime.block_on(
-        async move { ServerBuilder::new().with_config(loaded).build().await?.run().await },
-    )
+    runtime.block_on(async move {
+        ServerBuilder::new()
+            .with_config(loaded)
+            .build()
+            .await?
+            .run()
+            .await
+    })
 }

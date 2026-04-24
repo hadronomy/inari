@@ -1,21 +1,21 @@
-use std::{borrow::Cow, fmt, marker::PhantomData, sync::Arc, time::Duration};
+use std::borrow::Cow;
+use std::fmt;
+use std::marker::PhantomData;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
-use tokio::{
-    net::TcpListener,
-    task::JoinSet,
-    time::{self, MissedTickBehavior},
-};
+use tokio::net::TcpListener;
+use tokio::task::JoinSet;
+use tokio::time::{self, MissedTickBehavior};
 
-use crate::{
-    config::LoadedConfig,
-    error::{AppError, AppResult},
-    http,
-    protocol::{NoopProtocolModule, ProtocolModule},
-    shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal},
-    state::{AppState, ComponentReadiness, ReadinessSnapshot},
-    zenoh::ZenohSupervisor,
-};
+use crate::config::LoadedConfig;
+use crate::error::{AppError, AppResult};
+use crate::http;
+use crate::protocol::{NoopProtocolModule, ProtocolModule};
+use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
+use crate::state::{AppState, ComponentReadiness, ReadinessSnapshot};
+use crate::zenoh::ZenohSupervisor;
 
 #[derive(Debug, Default)]
 pub struct MissingConfig;
@@ -37,7 +37,9 @@ impl Default for ServerBuilder<MissingConfig> {
 
 impl fmt::Debug for ServerBuilder<MissingConfig> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ServerBuilder").field("configured", &false).finish_non_exhaustive()
+        f.debug_struct("ServerBuilder")
+            .field("configured", &false)
+            .finish_non_exhaustive()
     }
 }
 
@@ -45,7 +47,13 @@ impl fmt::Debug for ServerBuilder<WithConfig> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServerBuilder")
             .field("configured", &true)
-            .field("origin", &self.loaded.as_ref().map(|config| &config.origin))
+            .field(
+                "origin",
+                &self
+                    .loaded
+                    .as_ref()
+                    .map(|config| &config.origin),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -72,8 +80,15 @@ impl<State> ServerBuilder<State> {
 
 impl ServerBuilder<WithConfig> {
     pub async fn build(self) -> AppResult<ServerApplication> {
-        let loaded = self.loaded.expect("configured builders always carry a loaded configuration");
-        let shutdown = ShutdownCoordinator::new(loaded.settings.server.shutdown_grace_period);
+        let loaded = self
+            .loaded
+            .expect("configured builders always carry a loaded configuration");
+        let shutdown = ShutdownCoordinator::new(
+            loaded
+                .settings
+                .server
+                .shutdown_grace_period,
+        );
         let (zenoh_handle, zenoh_supervisor) = ZenohSupervisor::new(loaded.settings.zenoh.clone());
         let state = AppState::new(loaded.clone(), zenoh_handle, self.protocol);
         let router = http::router(&state)?.with_state(state.clone());
@@ -154,7 +169,9 @@ impl ServerApplication {
         }));
 
         let shutdown = self.shutdown.clone();
-        let router = self.router.into_make_service_with_connect_info::<std::net::SocketAddr>();
+        let router = self
+            .router
+            .into_make_service_with_connect_info::<std::net::SocketAddr>();
         tasks.spawn(named("http-server", async move {
             let shutdown_signal = async move {
                 shutdown.wait_for_shutdown().await;
@@ -177,13 +194,14 @@ impl ServerApplication {
 
                         if name == "signal-listener" || name == "http-server" {
                             if name == "http-server" && !self.shutdown.is_requested() {
-                                self.shutdown.request(ShutdownReason::ServerStopped);
+                                self.shutdown
+                                    .request(ShutdownReason::ServerStopped);
                             }
 
                             should_drain = true;
                             break;
                         }
-                    }
+                    },
                     Err(error) => {
                         let error = error.log_for_server();
                         tracing::error!(task = name, error = %error, "background task failed");
@@ -191,11 +209,12 @@ impl ServerApplication {
                             failure = Some(error);
                         }
                         if !self.shutdown.is_requested() {
-                            self.shutdown.request(ShutdownReason::TaskFailed(Cow::Borrowed(name)));
+                            self.shutdown
+                                .request(ShutdownReason::TaskFailed(Cow::Borrowed(name)));
                         }
                         should_drain = true;
                         break;
-                    }
+                    },
                 },
                 Err(source) => {
                     let error = AppError::TaskJoin { source }.log_for_server();
@@ -208,13 +227,16 @@ impl ServerApplication {
                     }
                     should_drain = true;
                     break;
-                }
+                },
             }
         }
 
         if should_drain {
             let grace_period = self.shutdown.grace_period();
-            if time::timeout(grace_period, drain_remaining(&mut tasks)).await.is_err() {
+            if time::timeout(grace_period, drain_remaining(&mut tasks))
+                .await
+                .is_err()
+            {
                 tasks.abort_all();
                 let _ = drain_remaining(&mut tasks).await;
                 if failure.is_none() {
@@ -249,7 +271,7 @@ async fn drain_remaining(tasks: &mut JoinSet<NamedTaskResult>) -> AppResult<()> 
                 Err(error) => {
                     tracing::error!(task = task.name, error = %error, "task failed while draining");
                     return Err(error);
-                }
+                },
             },
             Err(source) => return Err(AppError::TaskJoin { source }),
         }
@@ -340,9 +362,15 @@ fn log_readiness_change(snapshot: &ReadinessSnapshot) {
 }
 
 fn component<'a>(snapshot: &'a ReadinessSnapshot, name: &str) -> &'a ComponentReadiness {
-    snapshot.components.get(name).unwrap_or_else(|| panic!("missing readiness component `{name}`"))
+    snapshot
+        .components
+        .get(name)
+        .unwrap_or_else(|| panic!("missing readiness component `{name}`"))
 }
 
 fn duration_millis(duration: Duration) -> u64 {
-    duration.as_millis().try_into().unwrap_or(u64::MAX)
+    duration
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }

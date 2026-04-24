@@ -1,21 +1,17 @@
-use std::{
-    borrow::Cow,
-    collections::BTreeMap,
-    fmt,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
-use crate::{
-    config::LoadedConfig,
-    error::AppError,
-    protocol::{ProtocolDescriptor, ProtocolModule},
-    zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus},
-};
+use crate::config::LoadedConfig;
+use crate::error::AppError;
+use crate::protocol::{ProtocolDescriptor, ProtocolModule};
+use crate::zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -55,7 +51,10 @@ impl AppState {
         Self {
             inner: Arc::new(AppStateInner {
                 protocol_budget: Arc::new(Semaphore::new(
-                    loaded.settings.protocol.max_concurrent_requests,
+                    loaded
+                        .settings
+                        .protocol
+                        .max_concurrent_requests,
                 )),
                 loaded,
                 started_at: Utc::now(),
@@ -107,13 +106,20 @@ impl AppState {
     }
 
     pub fn update_zenoh_readiness(&self, status: &ZenohStatus) {
-        self.inner.readiness.send_replace(ReadinessSnapshot::from_zenoh_status(status));
+        self.inner
+            .readiness
+            .send_replace(ReadinessSnapshot::from_zenoh_status(status));
     }
 
     pub async fn acquire_protocol_permit(&self) -> Result<OwnedSemaphorePermit, AppError> {
-        Arc::clone(&self.inner.protocol_budget).acquire_owned().await.map_err(|_| {
-            AppError::service_unavailable("The protocol execution budget is no longer available.")
-        })
+        Arc::clone(&self.inner.protocol_budget)
+            .acquire_owned()
+            .await
+            .map_err(|_| {
+                AppError::service_unavailable(
+                    "The protocol execution budget is no longer available.",
+                )
+            })
     }
 }
 
@@ -183,7 +189,7 @@ impl ReadinessSnapshot {
         let zenoh = match status.state {
             ZenohConnectionState::Disabled => {
                 ComponentReadiness::disabled("Zenoh integration is disabled.")
-            }
+            },
             ZenohConnectionState::Starting | ZenohConnectionState::Reconnecting => {
                 ComponentReadiness::starting(
                     status
@@ -191,16 +197,19 @@ impl ReadinessSnapshot {
                         .clone()
                         .unwrap_or_else(|| "Zenoh session is still starting.".into()),
                 )
-            }
+            },
             ZenohConnectionState::Connected => {
                 ComponentReadiness::ready("Zenoh session is connected.")
-            }
+            },
             ZenohConnectionState::Degraded => ComponentReadiness::degraded(
-                status.message.clone().unwrap_or_else(|| "Zenoh session is unavailable.".into()),
+                status
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "Zenoh session is unavailable.".into()),
             ),
             ZenohConnectionState::ShuttingDown => {
                 ComponentReadiness::degraded("Zenoh session is shutting down.")
-            }
+            },
         };
         components.insert(Cow::Borrowed("zenoh"), zenoh);
 

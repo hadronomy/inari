@@ -1,4 +1,5 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -27,7 +28,9 @@ pub(crate) fn sample_to_json_sample(sample: &::zenoh::sample::Sample) -> ZenohJs
         key: sample.key_expr().as_str().into(),
         value: payload_to_json(sample.payload(), sample.encoding()),
         encoding: sample.encoding().to_string(),
-        timestamp: sample.timestamp().map(ToString::to_string),
+        timestamp: sample
+            .timestamp()
+            .map(ToString::to_string),
     }
 }
 
@@ -46,18 +49,18 @@ pub(crate) fn payload_to_json(
             let bytes = payload.to_bytes();
             serde_json::from_slice(&bytes)
                 .unwrap_or_else(|_| Value::String(STANDARD.encode(bytes.as_ref())))
-        }
+        },
         &::zenoh::bytes::Encoding::TEXT_PLAIN | &::zenoh::bytes::Encoding::ZENOH_STRING => {
             let bytes = payload.to_bytes();
             match std::str::from_utf8(bytes.as_ref()) {
                 Ok(text) => Value::String(text.into()),
                 Err(_) => Value::String(STANDARD.encode(bytes.as_ref())),
             }
-        }
+        },
         _ => {
             let bytes = payload.to_bytes();
             Value::String(STANDARD.encode(bytes.as_ref()))
-        }
+        },
     }
 }
 

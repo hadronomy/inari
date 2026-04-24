@@ -1,4 +1,6 @@
-use std::{borrow::Cow, fmt, time::Duration};
+use std::borrow::Cow;
+use std::fmt;
+use std::time::Duration;
 
 use tokio::sync::watch;
 
@@ -118,7 +120,9 @@ pub async fn wait_for_shutdown_signal() -> Result<ShutdownReason, AppError> {
 
     #[cfg(not(unix))]
     {
-        tokio::signal::ctrl_c().await.map_err(|source| AppError::Signal { source })?;
+        tokio::signal::ctrl_c()
+            .await
+            .map_err(|source| AppError::Signal { source })?;
 
         Ok(ShutdownReason::Signal(SignalKind::CtrlC))
     }
