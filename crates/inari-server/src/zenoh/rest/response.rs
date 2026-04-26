@@ -1,25 +1,56 @@
+use std::borrow::Cow;
+
 use axum::Json;
 use axum::body::Bytes;
+use axum::extract::FromRequestParts;
 use axum::http::header::{self, CONTENT_ENCODING, CONTENT_TYPE};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use html_escape::encode_text_to_string;
+use mime::Mime;
+use zenoh::bytes::{Encoding, ZBytes};
+use zenoh::query::Reply;
 
-use super::super::ZenohJsonSample;
+use super::metadata::{decode_content_type_parameters, normalize_content_codings};
+use crate::zenoh::ZenohJsonSample;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResponseKind {
-    EventStream,
+pub(crate) enum ApiRenderKind {
     Html,
     Json,
 }
 
-pub(crate) fn preferred_response_kind(headers: &HeaderMap) -> ResponseKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AcceptPreference {
+    EventStream,
+    Api(ApiRenderKind),
+}
+
+impl AcceptPreference {
+    fn from_headers(headers: &HeaderMap) -> Self {
+        preferred_accept(headers)
+    }
+}
+
+impl<S> FromRequestParts<S> for AcceptPreference
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(Self::from_headers(&parts.headers))
+    }
+}
+
+fn preferred_accept(headers: &HeaderMap) -> AcceptPreference {
     let accept = headers
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok());
 
     let Some(value) = accept else {
-        return ResponseKind::Json;
+        return AcceptPreference::Api(ApiRenderKind::Json);
     };
 
     let mut best = None::<AcceptedResponse>;
@@ -38,17 +69,17 @@ pub(crate) fn preferred_response_kind(headers: &HeaderMap) -> ResponseKind {
     }
 
     best.map(|accepted| accepted.kind)
-        .unwrap_or(ResponseKind::Json)
+        .unwrap_or(AcceptPreference::Api(ApiRenderKind::Json))
 }
 
 pub(crate) fn json_response(samples: Vec<ZenohJsonSample>) -> Response {
     Json(samples).into_response()
 }
 
-pub(crate) fn html_response(replies: Vec<::zenoh::query::Reply>) -> Response {
+pub(crate) fn html_response<'a>(replies: impl IntoIterator<Item = &'a Reply>) -> Response {
     let mut body = String::from("<dl>\n");
 
-    for reply in &replies {
+    for reply in replies {
         body.push_str(&html_entry(reply));
     }
 
@@ -58,7 +89,7 @@ pub(crate) fn html_response(replies: Vec<::zenoh::query::Reply>) -> Response {
         .into_response()
 }
 
-pub(crate) fn raw_response(reply: Option<::zenoh::query::Reply>) -> Response {
+pub(crate) fn raw_response(reply: Option<Reply>) -> Response {
     let Some(reply) = reply else {
         return StatusCode::OK.into_response();
     };
@@ -78,7 +109,7 @@ pub(crate) fn raw_response(reply: Option<::zenoh::query::Reply>) -> Response {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AcceptedResponse {
-    kind: ResponseKind,
+    kind: AcceptPreference,
     quality: u16,
     specificity: u8,
     order: usize,
@@ -87,7 +118,7 @@ struct AcceptedResponse {
 impl AcceptedResponse {
     fn parse(media_range: &str, order: usize) -> Option<Self> {
         let mut segments = media_range.split(';').map(str::trim);
-        let media_type = segments.next()?.to_ascii_lowercase();
+        let media_type = segments.next()?;
         let mut quality = 1000;
 
         for parameter in segments {
@@ -97,14 +128,24 @@ impl AcceptedResponse {
             }
         }
 
-        let (kind, specificity) = match media_type.as_str() {
-            "text/event-stream" => (ResponseKind::EventStream, 3),
-            "text/html" => (ResponseKind::Html, 3),
-            "application/json" => (ResponseKind::Json, 3),
-            "application/*" => (ResponseKind::Json, 2),
-            "text/*" => (ResponseKind::Html, 2),
-            "*/*" => (ResponseKind::Json, 1),
-            _ => return None,
+        if quality == 0 {
+            return None;
+        }
+
+        let (kind, specificity) = if media_type.eq_ignore_ascii_case("text/event-stream") {
+            (AcceptPreference::EventStream, 3)
+        } else if media_type.eq_ignore_ascii_case("text/html") {
+            (AcceptPreference::Api(ApiRenderKind::Html), 3)
+        } else if media_type.eq_ignore_ascii_case("application/json") {
+            (AcceptPreference::Api(ApiRenderKind::Json), 3)
+        } else if media_type.eq_ignore_ascii_case("application/*") {
+            (AcceptPreference::Api(ApiRenderKind::Json), 2)
+        } else if media_type.eq_ignore_ascii_case("text/*") {
+            (AcceptPreference::Api(ApiRenderKind::Html), 2)
+        } else if media_type == "*/*" {
+            (AcceptPreference::Api(ApiRenderKind::Json), 1)
+        } else {
+            return None;
         };
 
         Some(Self { kind, quality, specificity, order })
@@ -126,123 +167,186 @@ struct RawReply {
 
 fn parse_quality(value: &str) -> Option<u16> {
     let value = value.trim();
-
-    if value == "1" || value == "1.0" || value == "1.00" || value == "1.000" {
-        return Some(1000);
+    match value.as_bytes() {
+        b"0" => Some(0),
+        b"1" | b"1.0" | b"1.00" | b"1.000" => Some(1000),
+        [b'0', b'.', decimals @ ..] => parse_fractional_quality(decimals),
+        [b'1', b'.', decimals @ ..]
+            if !decimals.is_empty()
+                && decimals.len() <= 3
+                && decimals
+                    .iter()
+                    .all(|byte| *byte == b'0') =>
+        {
+            Some(1000)
+        },
+        _ => None,
     }
-    if value == "0" || value == "0.0" || value == "0.00" || value == "0.000" {
-        return Some(0);
-    }
+}
 
-    let decimals = value.strip_prefix("0.")?;
+fn parse_fractional_quality(decimals: &[u8]) -> Option<u16> {
     if decimals.is_empty()
         || decimals.len() > 3
         || !decimals
-            .bytes()
+            .iter()
             .all(|byte| byte.is_ascii_digit())
     {
         return None;
     }
 
-    let mut padded = decimals.to_owned();
-    while padded.len() < 3 {
-        padded.push('0');
+    let mut quality = 0_u16;
+    for &byte in decimals {
+        quality = quality * 10 + u16::from(byte - b'0');
+    }
+    for _ in decimals.len()..3 {
+        quality *= 10;
     }
 
-    padded.parse().ok()
+    Some(quality)
 }
 
-fn html_entry(reply: &::zenoh::query::Reply) -> String {
+fn html_entry(reply: &Reply) -> String {
     match reply.result() {
-        Ok(sample) => {
-            let key = escape_html(sample.key_expr().as_str());
-            let value = escape_html(
-                &sample
-                    .payload()
-                    .try_to_string()
-                    .unwrap_or_default(),
-            );
-            format!("<dt>{key}</dt>\n<dd>{value}</dd>\n")
-        },
-        Err(error) => {
-            let value = escape_html(
-                &error
-                    .payload()
-                    .try_to_string()
-                    .unwrap_or_default(),
-            );
-            format!("<dt>ERROR</dt>\n<dd>{value}</dd>\n")
-        },
+        Ok(sample) => html_definition_entry(sample.key_expr().as_str(), sample.payload()),
+        Err(error) => html_definition_entry("ERROR", error.payload()),
     }
 }
 
-fn escape_html(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-
-    for character in value.chars() {
-        match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#39;"),
-            _ => escaped.push(character),
-        }
-    }
-
-    escaped
+fn html_definition_entry(label: &str, payload: &ZBytes) -> String {
+    let payload = html_payload(payload);
+    let mut entry = String::from("<dt>");
+    encode_text_to_string(label, &mut entry);
+    entry.push_str("</dt>\n<dd>");
+    encode_text_to_string(payload.as_ref(), &mut entry);
+    entry.push_str("</dd>\n");
+    entry
 }
 
-fn raw_reply(reply: ::zenoh::query::Reply) -> RawReply {
+fn html_payload(payload: &ZBytes) -> Cow<'_, str> {
+    payload
+        .try_to_string()
+        .unwrap_or_else(|_| format!("[binary payload: {} bytes]", payload.len()).into())
+}
+
+fn raw_reply(reply: Reply) -> RawReply {
     match reply.result() {
-        Ok(sample) => RawReply::from_parts(
-            sample.encoding(),
-            sample
-                .payload()
-                .to_bytes()
-                .into_owned()
-                .into(),
-        ),
-        Err(error) => RawReply::from_parts(
-            error.encoding(),
-            error
-                .payload()
-                .to_bytes()
-                .into_owned()
-                .into(),
-        ),
+        Ok(sample) => raw_reply_parts(sample.encoding(), sample.attachment(), sample.payload()),
+        Err(error) => raw_reply_parts(error.encoding(), None, error.payload()),
     }
+}
+
+fn raw_reply_parts(encoding: &Encoding, attachment: Option<&ZBytes>, payload: &ZBytes) -> RawReply {
+    RawReply::from_parts(encoding, attachment, payload.to_bytes().into_owned().into())
 }
 
 impl RawReply {
-    fn from_parts(encoding: &::zenoh::bytes::Encoding, body: Bytes) -> Self {
-        let mut content_type = None;
-        let mut content_encoding = None;
-
-        for (index, segment) in encoding
-            .to_string()
-            .split(';')
-            .map(str::trim)
-            .filter(|segment| !segment.is_empty())
-            .enumerate()
-        {
-            if index == 0 {
-                content_type = parse_header_value(segment, "content type");
-                continue;
-            }
-
-            let Some((name, value)) = segment.split_once('=') else {
-                continue;
-            };
-
-            if name.eq_ignore_ascii_case("content-encoding") {
-                content_encoding =
-                    parse_header_value(value.trim_matches('"').trim(), "content encoding");
-            }
-        }
+    fn from_parts(encoding: &Encoding, attachment: Option<&ZBytes>, body: Bytes) -> Self {
+        let parts = ZenohContentType::parse(encoding);
+        let content_type_parameters =
+            decode_content_type_parameters(attachment).unwrap_or_default();
+        let content_type = parts.as_ref().and_then(|content_type| {
+            parse_content_type_header(&content_type.media_type, &content_type_parameters)
+        });
+        let content_encoding = parts
+            .and_then(|content_type| content_type.content_encoding)
+            .and_then(parse_content_encoding_header);
 
         Self { body, content_type, content_encoding }
     }
+}
+
+#[derive(Debug, Clone)]
+struct ZenohContentType {
+    media_type: Mime,
+    content_encoding: Option<String>,
+}
+
+impl ZenohContentType {
+    fn parse(encoding: &Encoding) -> Option<Self> {
+        let encoding = encoding.to_string();
+        let (media_type, schema) = match encoding.split_once(';') {
+            Some((media_type, schema)) => (media_type.trim(), Some(schema.trim())),
+            None => (encoding.trim(), None),
+        };
+
+        Some(Self {
+            media_type: parse_media_type(media_type)?,
+            content_encoding: schema
+                .and_then(|schema| parse_content_encoding_schema(&encoding, schema)),
+        })
+    }
+}
+
+fn join_content_type(media_type: &str, parameters: &[String]) -> String {
+    if parameters.is_empty() {
+        media_type.to_owned()
+    } else {
+        format!("{media_type}; {}", parameters.join("; "))
+    }
+}
+
+fn parse_content_type_header(media_type: &Mime, parameters: &[String]) -> Option<HeaderValue> {
+    let base = format!("{}/{}", media_type.type_(), media_type.subtype());
+    let value = join_content_type(&base, parameters);
+    value
+        .parse::<Mime>()
+        .map_err(|error| {
+            tracing::debug!(
+                error = %error,
+                value,
+                "ignoring invalid HTTP content type reconstructed from Zenoh sample"
+            );
+        })
+        .ok()
+        .and_then(|mime| parse_header_value(mime.as_ref(), "content type"))
+}
+
+fn parse_content_encoding_header(value: String) -> Option<HeaderValue> {
+    parse_header_value(&value, "content encoding")
+}
+
+fn parse_media_type(value: &str) -> Option<Mime> {
+    if value.is_empty() {
+        return None;
+    }
+
+    value
+        .parse::<Mime>()
+        .map_err(|error| {
+            tracing::debug!(
+                error = %error,
+                value,
+                "ignoring invalid Zenoh media type while reconstructing HTTP headers"
+            );
+        })
+        .ok()
+}
+
+fn parse_content_encoding_schema(full_encoding: &str, schema: &str) -> Option<String> {
+    let schema = schema.trim();
+    if schema.is_empty() {
+        return None;
+    }
+
+    if schema.contains(';') {
+        tracing::debug!(
+            full_encoding,
+            schema,
+            "ignoring unsupported legacy Zenoh schema while reconstructing HTTP headers"
+        );
+        return None;
+    }
+
+    if let Some(codings) = normalize_content_codings(schema) {
+        return Some(codings);
+    }
+
+    tracing::debug!(
+        full_encoding,
+        schema,
+        "ignoring invalid Zenoh content-encoding schema while reconstructing HTTP headers"
+    );
+    None
 }
 
 fn parse_header_value(value: &str, label: &'static str) -> Option<HeaderValue> {
@@ -260,7 +364,12 @@ mod tests {
     use axum::http::{HeaderMap, header};
     use bytes::Bytes;
 
-    use super::{RawReply, ResponseKind, parse_quality, preferred_response_kind};
+    use crate::zenoh::rest::metadata::encode_content_type_parameters;
+
+    use super::{
+        AcceptPreference, ApiRenderKind, Encoding, RawReply, ZBytes, parse_quality,
+        preferred_accept,
+    };
 
     #[test]
     fn accept_header_prefers_highest_quality_response() {
@@ -272,7 +381,7 @@ mod tests {
                 .expect("header should parse"),
         );
 
-        assert_eq!(preferred_response_kind(&headers), ResponseKind::Json);
+        assert_eq!(preferred_accept(&headers), AcceptPreference::Api(ApiRenderKind::Json));
     }
 
     #[test]
@@ -285,7 +394,33 @@ mod tests {
                 .expect("header should parse"),
         );
 
-        assert_eq!(preferred_response_kind(&headers), ResponseKind::Html);
+        assert_eq!(preferred_accept(&headers), AcceptPreference::Api(ApiRenderKind::Html));
+    }
+
+    #[test]
+    fn accept_header_matches_media_types_case_insensitively() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            "Application/JSON"
+                .parse()
+                .expect("header should parse"),
+        );
+
+        assert_eq!(preferred_accept(&headers), AcceptPreference::Api(ApiRenderKind::Json));
+    }
+
+    #[test]
+    fn accept_header_ignores_zero_quality_media_ranges() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ACCEPT,
+            "text/html;q=0, application/json;q=0.5"
+                .parse()
+                .expect("header should parse"),
+        );
+
+        assert_eq!(preferred_accept(&headers), AcceptPreference::Api(ApiRenderKind::Json));
     }
 
     #[test]
@@ -297,9 +432,10 @@ mod tests {
     }
 
     #[test]
-    fn raw_reply_splits_content_encoding_from_zenoh_encoding() {
+    fn raw_reply_reads_content_encoding_from_zenoh_schema() {
         let raw = RawReply::from_parts(
-            &::zenoh::bytes::Encoding::from("application/json;content-encoding=gzip"),
+            &Encoding::from("application/json;gzip"),
+            None,
             Bytes::from_static(b"payload"),
         );
 
@@ -314,6 +450,125 @@ mod tests {
                 .as_ref()
                 .expect("content encoding should exist"),
             "gzip",
+        );
+    }
+
+    #[test]
+    fn raw_reply_supports_multiple_content_encoding_tokens() {
+        let raw = RawReply::from_parts(
+            &Encoding::from("application/json;gzip, br"),
+            None,
+            Bytes::from_static(b"payload"),
+        );
+
+        assert_eq!(
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
+            "application/json",
+        );
+        assert_eq!(
+            raw.content_encoding
+                .as_ref()
+                .expect("content encoding should exist"),
+            "gzip, br",
+        );
+    }
+
+    #[test]
+    fn raw_reply_ignores_legacy_mime_parameters_in_encoding() {
+        let raw = RawReply::from_parts(
+            &Encoding::from("text/html; charset=utf-8"),
+            None,
+            Bytes::from_static(b"payload"),
+        );
+
+        assert_eq!(
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
+            "text/html",
+        );
+        assert!(raw.content_encoding.is_none());
+    }
+
+    #[test]
+    fn raw_reply_ignores_legacy_multi_segment_encoding() {
+        let raw = RawReply::from_parts(
+            &Encoding::from("text/html; charset=utf-8;gzip"),
+            None,
+            Bytes::from_static(b"payload"),
+        );
+
+        assert_eq!(
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
+            "text/html",
+        );
+        assert!(raw.content_encoding.is_none());
+    }
+
+    #[test]
+    fn raw_reply_ignores_legacy_content_encoding_parameter() {
+        let raw = RawReply::from_parts(
+            &Encoding::from("application/json;content-encoding=gzip"),
+            None,
+            Bytes::from_static(b"payload"),
+        );
+
+        assert_eq!(
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
+            "application/json",
+        );
+        assert!(raw.content_encoding.is_none());
+    }
+
+    #[test]
+    fn raw_reply_passes_through_extension_content_encoding() {
+        let raw = RawReply::from_parts(
+            &Encoding::from("application/json;x-custom-coding"),
+            None,
+            Bytes::from_static(b"payload"),
+        );
+
+        assert_eq!(
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
+            "application/json",
+        );
+        assert_eq!(
+            raw.content_encoding
+                .as_ref()
+                .expect("content encoding should exist"),
+            "x-custom-coding",
+        );
+    }
+
+    #[test]
+    fn raw_reply_rebuilds_content_type_parameters_from_attachment() {
+        let attachment = encode_content_type_parameters(&["charset=utf-8"])
+            .expect("attachment should serialize");
+        let raw = RawReply::from_parts(
+            &Encoding::from("text/html;br"),
+            Some(&ZBytes::from(attachment)),
+            Bytes::from_static(b"payload"),
+        );
+
+        assert_eq!(
+            raw.content_type
+                .as_ref()
+                .expect("content type should exist"),
+            "text/html; charset=utf-8",
+        );
+        assert_eq!(
+            raw.content_encoding
+                .as_ref()
+                .expect("content encoding should exist"),
+            "br",
         );
     }
 }

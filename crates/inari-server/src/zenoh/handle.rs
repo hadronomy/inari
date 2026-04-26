@@ -1,8 +1,9 @@
 use std::fmt;
 
-use ::zenoh::bytes::Encoding;
 use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use zenoh::bytes::Encoding;
+use zenoh::query::Reply;
 
 use super::access::{
     SessionLease, SupervisorSignal, ZenohQueryRequest, ZenohSubscription,
@@ -49,7 +50,7 @@ impl ZenohHandle {
     }
 
     pub async fn publish_bytes(&self, key: KeyExpression, payload: Bytes) -> AppResult<()> {
-        self.put_bytes(key, payload, Encoding::default())
+        self.put_bytes(key, payload, Encoding::default(), None)
             .await
     }
 
@@ -58,10 +59,11 @@ impl ZenohHandle {
         key: KeyExpression,
         payload: Bytes,
         encoding: Encoding,
+        attachment: Option<Bytes>,
     ) -> AppResult<()> {
         let (respond_to, response) = oneshot::channel();
         self.commands
-            .send(Command::Publish { key, payload, encoding, respond_to })
+            .send(Command::Publish { key, payload, encoding, attachment, respond_to })
             .await
             .map_err(|_| {
                 AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
@@ -86,18 +88,12 @@ impl ZenohHandle {
         })?
     }
 
-    pub(crate) async fn query(
-        &self,
-        request: ZenohQueryRequest,
-    ) -> AppResult<Vec<::zenoh::query::Reply>> {
+    pub(crate) async fn query(&self, request: ZenohQueryRequest) -> AppResult<Vec<Reply>> {
         let session = self.connected_session()?;
         self.finish_session_operation(execute_query_collect(&session, request).await)
     }
 
-    pub(crate) async fn query_first(
-        &self,
-        request: ZenohQueryRequest,
-    ) -> AppResult<Option<::zenoh::query::Reply>> {
+    pub(crate) async fn query_first(&self, request: ZenohQueryRequest) -> AppResult<Option<Reply>> {
         let session = self.connected_session()?;
         self.finish_session_operation(execute_query_first(&session, request).await)
     }
@@ -106,7 +102,7 @@ impl ZenohHandle {
         &self,
         key: &KeyExpression,
         timeout: std::time::Duration,
-    ) -> AppResult<Vec<::zenoh::query::Reply>> {
+    ) -> AppResult<Vec<Reply>> {
         let session = self.connected_session()?;
         self.finish_session_operation(execute_liveliness_get_collect(&session, key, timeout).await)
     }
@@ -115,7 +111,7 @@ impl ZenohHandle {
         &self,
         key: &KeyExpression,
         timeout: std::time::Duration,
-    ) -> AppResult<Option<::zenoh::query::Reply>> {
+    ) -> AppResult<Option<Reply>> {
         let session = self.connected_session()?;
         self.finish_session_operation(execute_liveliness_get_first(&session, key, timeout).await)
     }
@@ -189,6 +185,7 @@ pub(super) enum Command {
         key: KeyExpression,
         payload: Bytes,
         encoding: Encoding,
+        attachment: Option<Bytes>,
         respond_to: oneshot::Sender<AppResult<()>>,
     },
     Delete {

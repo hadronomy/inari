@@ -7,6 +7,9 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use tower::ServiceExt;
+use zenoh::bytes::Encoding;
+use zenoh::liveliness::LivelinessToken;
+use zenoh::sample::SampleKind;
 
 use crate::config::{LoadedConfig, ZenohAdminSpaceConfig, ZenohConfig};
 use crate::http;
@@ -35,21 +38,68 @@ fn admin_enabled_config() -> LoadedConfig {
     loaded
 }
 
-async fn spawn_live_app()
--> (axum::Router, AppState, ShutdownCoordinator, JoinHandle<crate::AppResult<()>>) {
-    let loaded = enabled_config();
-    let (zenoh, supervisor) = ZenohSupervisor::new(loaded.settings.zenoh.clone());
-    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
-    let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
-    let task = tokio::spawn(supervisor.run(shutdown.clone()));
+struct TestApp {
+    router: axum::Router,
+    state: AppState,
+    shutdown: Option<ShutdownCoordinator>,
+    task: Option<JoinHandle<crate::AppResult<()>>>,
+}
 
-    wait_for_connection(&state).await;
+impl TestApp {
+    async fn spawn(loaded: LoadedConfig) -> Self {
+        let zenoh_settings = loaded.settings.zenoh.clone();
+        let zenoh_enabled = loaded.settings.zenoh.enabled;
+        let (zenoh, supervisor) = ZenohSupervisor::new(zenoh_settings);
+        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+        let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
+        let task = tokio::spawn(supervisor.run(shutdown.clone()));
 
-    let app = http::router(&state)
-        .expect("router should build")
-        .with_state(state.clone());
+        if zenoh_enabled {
+            wait_for_connection(&state).await;
+        }
 
-    (app, state, shutdown, task)
+        let router = http::router(&state)
+            .expect("router should build")
+            .with_state(state.clone());
+
+        Self { router, state, shutdown: Some(shutdown), task: Some(task) }
+    }
+
+    async fn request(&self, request: Request<Body>) -> axum::response::Response {
+        self.router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("router should respond")
+    }
+
+    fn state(&self) -> &AppState {
+        &self.state
+    }
+
+    async fn shutdown(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            shutdown.request(ShutdownReason::ServerStopped);
+        }
+
+        if let Some(task) = self.task.take() {
+            task.await
+                .expect("supervisor task should join")
+                .expect("supervisor should shut down");
+        }
+    }
+}
+
+impl Drop for TestApp {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.shutdown.take() {
+            shutdown.request(ShutdownReason::ServerStopped);
+        }
+
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
 }
 
 async fn wait_for_connection(state: &AppState) {
@@ -77,10 +127,7 @@ impl Drop for TestTasks {
     }
 }
 
-async fn declare_liveliness_token(
-    state: &AppState,
-    key: &'static str,
-) -> ::zenoh::liveliness::LivelinessToken {
+async fn declare_liveliness_token(state: &AppState, key: &'static str) -> LivelinessToken {
     state
         .zenoh()
         .session_snapshot()
@@ -99,7 +146,7 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
         .expect("session should be connected")
         .session()
         .clone();
-    let value = Arc::new(Mutex::new(None::<(Vec<u8>, ::zenoh::bytes::Encoding)>));
+    let value = Arc::new(Mutex::new(None::<(Vec<u8>, Encoding)>));
 
     let subscriber = session
         .declare_subscriber(key)
@@ -115,11 +162,11 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
         while let Ok(sample) = subscriber.recv_async().await {
             let mut guard = subscriber_value.lock().await;
             match sample.kind() {
-                ::zenoh::sample::SampleKind::Put => {
+                SampleKind::Put => {
                     *guard =
                         Some((sample.payload().to_bytes().into_owned(), sample.encoding().clone()));
                 },
-                ::zenoh::sample::SampleKind::Delete => {
+                SampleKind::Delete => {
                     *guard = None;
                 },
             }
@@ -217,91 +264,67 @@ async fn route_is_not_mounted_when_disabled() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn zenoh_root_reports_connection_state() {
-    let (app, _state, shutdown, task) = spawn_live_app().await;
+    let mut app = TestApp::spawn(enabled_config()).await;
 
     let response = app
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn zenoh_admin_space_is_blocked_by_default() {
-    let (app, _state, shutdown, task) = spawn_live_app().await;
+    let mut app = TestApp::spawn(enabled_config()).await;
 
     let response = app
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/@/local/router")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn invalid_key_expression_returns_bad_request() {
-    let (app, _state, shutdown, task) = spawn_live_app().await;
+    let mut app = TestApp::spawn(enabled_config()).await;
 
     let response = app
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/example/*eval")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn zenoh_admin_space_returns_router_status_when_enabled() {
-    let loaded = admin_enabled_config();
-    let (zenoh, supervisor) = ZenohSupervisor::new(loaded.settings.zenoh.clone());
-    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
-    let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
-    let task = tokio::spawn(supervisor.run(shutdown.clone()));
-    wait_for_connection(&state).await;
-    let app = http::router(&state)
-        .expect("router should build")
-        .with_state(state);
+    let mut app = TestApp::spawn(admin_enabled_config()).await;
 
     let response = app
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/@/local/router")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -314,21 +337,16 @@ async fn zenoh_admin_space_returns_router_status_when_enabled() {
         json.as_array()
             .is_some_and(|items| !items.is_empty())
     );
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn put_patch_get_delete_round_trip_through_http_surface() {
-    let (app, state, shutdown, task) = spawn_live_app().await;
-    let _queryable = install_materialized_queryable(&state, "demo/materialized").await;
+    let mut app = TestApp::spawn(enabled_config()).await;
+    let _queryable = install_materialized_queryable(app.state(), "demo/materialized").await;
 
     let put = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .method("PUT")
                 .uri("/api/v1/zenoh/demo/materialized")
@@ -336,15 +354,13 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
                 .body(Body::from("hello"))
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
     assert_eq!(put.status(), StatusCode::OK);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let patch = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .method("PATCH")
                 .uri("/api/v1/zenoh/demo/materialized")
@@ -352,22 +368,19 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
                 .body(Body::from("patched"))
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
     assert_eq!(patch.status(), StatusCode::OK);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let get = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/materialized")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
     assert_eq!(get.status(), StatusCode::OK);
 
     let body = to_bytes(get.into_body(), usize::MAX)
@@ -378,32 +391,25 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
     assert_eq!(json[0]["value"], "patched");
 
     let delete = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .method("DELETE")
                 .uri("/api/v1/zenoh/demo/materialized")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
     assert_eq!(delete.status(), StatusCode::OK);
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn post_query_forwards_payload_and_encoding() {
-    let (app, state, shutdown, task) = spawn_live_app().await;
-    let _queryable = install_echo_queryable(&state, "demo/echo").await;
+    let mut app = TestApp::spawn(enabled_config()).await;
+    let _queryable = install_echo_queryable(app.state(), "demo/echo").await;
 
     let response = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .method("POST")
                 .uri("/api/v1/zenoh/demo/echo")
@@ -411,8 +417,7 @@ async fn post_query_forwards_payload_and_encoding() {
                 .body(Body::from("hello from query"))
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -423,29 +428,23 @@ async fn post_query_forwards_payload_and_encoding() {
         serde_json::from_slice(&body).expect("response body should be JSON");
     assert_eq!(json[0]["value"], "hello from query");
     assert_eq!(json[0]["encoding"], "text/plain");
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_raw_returns_first_reply_payload() {
-    let (app, state, shutdown, task) = spawn_live_app().await;
-    let _queryable = install_echo_queryable(&state, "demo/raw").await;
+    let mut app = TestApp::spawn(enabled_config()).await;
+    let _queryable = install_echo_queryable(app.state(), "demo/raw").await;
 
     let response = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/raw?_raw")
                 .header("content-type", "text/plain")
                 .body(Body::from("raw payload"))
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -460,21 +459,16 @@ async fn get_raw_returns_first_reply_payload() {
         .await
         .expect("response body should be readable");
     assert_eq!(body, "raw payload");
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_html_renders_definition_list() {
-    let (app, state, shutdown, task) = spawn_live_app().await;
-    let _queryable = install_echo_queryable(&state, "demo/html").await;
+    let mut app = TestApp::spawn(enabled_config()).await;
+    let _queryable = install_echo_queryable(app.state(), "demo/html").await;
 
     let response = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/html")
                 .header("accept", "text/html")
@@ -482,8 +476,7 @@ async fn get_html_renders_definition_list() {
                 .body(Body::from("<hello>"))
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -493,30 +486,24 @@ async fn get_html_renders_definition_list() {
     let html = String::from_utf8(body.to_vec()).expect("response body should be valid UTF-8");
     assert!(html.contains("<dl>"));
     assert!(html.contains("&lt;hello&gt;"));
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn get_liveliness_returns_live_tokens() {
-    let (app, state, shutdown, task) = spawn_live_app().await;
-    let token = declare_liveliness_token(&state, "demo/presence").await;
+    let mut app = TestApp::spawn(enabled_config()).await;
+    let token = declare_liveliness_token(app.state(), "demo/presence").await;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let response = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/presence?_liveliness")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -529,30 +516,25 @@ async fn get_liveliness_returns_live_tokens() {
     assert_eq!(json[0]["value"], serde_json::Value::Null);
 
     drop(token);
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn liveliness_sse_stream_reports_history_and_drop() {
-    let (app, state, shutdown, task) = spawn_live_app().await;
-    let token = declare_liveliness_token(&state, "demo/presence").await;
+    let mut app = TestApp::spawn(enabled_config()).await;
+    let token = declare_liveliness_token(app.state(), "demo/presence").await;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let response = app
-        .clone()
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/presence?_liveliness&_history")
                 .header("accept", "text/event-stream")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -567,31 +549,22 @@ async fn liveliness_sse_stream_reports_history_and_drop() {
     let dropped = read_sse_event(&mut stream).await;
     assert!(dropped.contains("event: DELETE"));
     assert!(dropped.contains("\"key\":\"demo/presence\""));
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn liveliness_rejects_non_reserved_selector_parameters() {
-    let (app, _state, shutdown, task) = spawn_live_app().await;
+    let mut app = TestApp::spawn(enabled_config()).await;
 
     let response = app
-        .oneshot(
+        .request(
             Request::builder()
                 .uri("/api/v1/zenoh/demo/presence?_liveliness&foo=bar")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
-        .await
-        .expect("router should respond");
+        .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-    shutdown.request(ShutdownReason::ServerStopped);
-    task.await
-        .expect("supervisor task should join")
-        .expect("supervisor should shut down");
+    app.shutdown().await;
 }

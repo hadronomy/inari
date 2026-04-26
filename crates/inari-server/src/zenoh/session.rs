@@ -1,49 +1,52 @@
 use std::str::FromStr;
 
-use ::zenoh::bytes::{Encoding, ZBytes};
-use ::zenoh::config::EndPoint;
 use bytes::Bytes;
 use serde::Serialize;
 use serde_json::Value;
+use zenoh::bytes::{Encoding, ZBytes};
+use zenoh::config::EndPoint;
+use zenoh::{Config, Session, open};
 
 use super::KeyExpression;
 use crate::config::ZenohConfig;
 use crate::error::{AppError, AppResult};
 
-pub(super) async fn open_session(config: &ZenohConfig) -> AppResult<::zenoh::Session> {
-    let mut zenoh_config = ::zenoh::Config::default();
+pub(super) async fn open_session(config: &ZenohConfig) -> AppResult<Session> {
+    let mut zenoh_config = Config::default();
     configure_zenoh(&mut zenoh_config, config)?;
 
-    ::zenoh::open(zenoh_config)
+    open(zenoh_config)
         .await
         .map_err(|source| {
             AppError::service_unavailable(format!("Failed to open the Zenoh session: {source}"))
         })
 }
 
-pub(super) async fn close_session(session: ::zenoh::Session) {
+pub(super) async fn close_session(session: Session) {
     if let Err(source) = session.close().await {
         tracing::warn!(error = %source, "failed to close Zenoh session cleanly");
     }
 }
 
 pub(super) async fn publish(
-    session: &::zenoh::Session,
+    session: &Session,
     key: &KeyExpression,
     payload: Bytes,
     encoding: Encoding,
+    attachment: Option<Bytes>,
 ) -> AppResult<()> {
     let payload = ZBytes::from(payload);
     session
         .put(key, payload)
         .encoding(encoding)
+        .attachment(attachment.map(ZBytes::from))
         .await
         .map_err(|_| AppError::service_unavailable("Zenoh publish failed."))?;
 
     Ok(())
 }
 
-pub(super) async fn delete(session: &::zenoh::Session, key: &KeyExpression) -> AppResult<()> {
+pub(super) async fn delete(session: &Session, key: &KeyExpression) -> AppResult<()> {
     session
         .delete(key)
         .await
@@ -52,7 +55,7 @@ pub(super) async fn delete(session: &::zenoh::Session, key: &KeyExpression) -> A
     Ok(())
 }
 
-fn configure_zenoh(config: &mut ::zenoh::Config, settings: &ZenohConfig) -> AppResult<()> {
+fn configure_zenoh(config: &mut Config, settings: &ZenohConfig) -> AppResult<()> {
     insert_json5_serialized(config, "mode", settings.mode)?;
     insert_json5_serialized(config, "adminspace/enabled", settings.admin_space.enabled)?;
     insert_json5_serialized(config, "adminspace/permissions/read", settings.admin_space.read)?;
@@ -70,7 +73,7 @@ fn configure_zenoh(config: &mut ::zenoh::Config, settings: &ZenohConfig) -> AppR
 }
 
 fn apply_endpoints(
-    config: &mut ::zenoh::Config,
+    config: &mut Config,
     key: &'static str,
     kind: &'static str,
     endpoints: &[String],
@@ -84,11 +87,7 @@ fn apply_endpoints(
     insert_json5_value(config, key, Value::from(endpoints.to_vec()))
 }
 
-fn insert_json5_serialized<T>(
-    config: &mut ::zenoh::Config,
-    key: &'static str,
-    value: T,
-) -> AppResult<()>
+fn insert_json5_serialized<T>(config: &mut Config, key: &'static str, value: T) -> AppResult<()>
 where
     T: Serialize,
 {
@@ -103,11 +102,7 @@ where
     insert_json5_value(config, key, value)
 }
 
-fn insert_json5_value(
-    config: &mut ::zenoh::Config,
-    key: &'static str,
-    value: Value,
-) -> AppResult<()> {
+fn insert_json5_value(config: &mut Config, key: &'static str, value: Value) -> AppResult<()> {
     config
         .insert_json5(key, &value.to_string())
         .map_err(|source| {
@@ -123,12 +118,12 @@ fn insert_json5_value(
 
 #[cfg(test)]
 mod tests {
-    use super::configure_zenoh;
+    use super::{Config, configure_zenoh};
     use crate::config::{ZenohAdminSpaceConfig, ZenohConfig, ZenohMode};
 
     #[test]
     fn configure_zenoh_applies_mode() {
-        let mut config = ::zenoh::Config::default();
+        let mut config = Config::default();
         let settings = ZenohConfig {
             enabled: true,
             mode: ZenohMode::Router,
@@ -151,7 +146,7 @@ mod tests {
 
     #[test]
     fn configure_zenoh_rejects_invalid_endpoints() {
-        let mut config = ::zenoh::Config::default();
+        let mut config = Config::default();
         let settings = ZenohConfig {
             connect_endpoints: vec!["not-an-endpoint".into()],
             ..ZenohConfig::default()

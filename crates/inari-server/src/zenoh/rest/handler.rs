@@ -1,24 +1,19 @@
 use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Path, RawQuery, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::Response;
 use axum::routing::get;
 
-use super::{ZenohRestService, index_response};
+use super::request::{QueryOptions, RequestMetadata};
+use super::response::AcceptPreference;
+use super::{ReadSelector, WriteSelector, ZenohRestService, index_response};
 use crate::error::AppResult;
 use crate::state::AppState;
 
 pub(crate) fn router(_state: &AppState) -> Router<AppState> {
     Router::new()
-        .route(
-            "/",
-            get(index)
-                .post(empty_selector_query)
-                .put(empty_selector_write)
-                .patch(empty_selector_write)
-                .delete(empty_selector_write),
-        )
+        .route("/", get(index))
         .route(
             "/{*selector}",
             get(query)
@@ -29,46 +24,39 @@ pub(crate) fn router(_state: &AppState) -> Router<AppState> {
         )
 }
 
-async fn index(State(state): State<AppState>) -> Response {
-    index_response(ZenohRestService::new(state).index())
+async fn index(State(service): State<ZenohRestService>) -> Response {
+    index_response(service.index())
 }
 
 async fn query(
-    State(state): State<AppState>,
-    Path(selector): Path<String>,
-    RawQuery(query): RawQuery,
-    headers: HeaderMap,
+    State(service): State<ZenohRestService>,
+    selector: ReadSelector,
+    options: QueryOptions,
+    response_preference: AcceptPreference,
+    metadata: RequestMetadata,
     body: Bytes,
 ) -> AppResult<Response> {
-    ZenohRestService::new(state)
-        .query(&selector, query, headers, body)
+    service
+        .query(&selector, options, response_preference, metadata, body)
         .await
 }
 
 async fn write(
-    State(state): State<AppState>,
-    Path(selector): Path<String>,
-    headers: HeaderMap,
+    State(service): State<ZenohRestService>,
+    selector: WriteSelector,
+    metadata: RequestMetadata,
     body: Bytes,
 ) -> AppResult<StatusCode> {
-    ZenohRestService::new(state)
-        .write(&selector, &headers, body)
+    service
+        .write(&selector, metadata, body)
         .await
 }
 
 async fn remove(
-    State(state): State<AppState>,
-    Path(selector): Path<String>,
+    State(service): State<ZenohRestService>,
+    selector: WriteSelector,
 ) -> AppResult<StatusCode> {
-    ZenohRestService::new(state)
+    service
         .delete(&selector)
         .await
-}
-
-async fn empty_selector_query(State(state): State<AppState>) -> AppResult<Response> {
-    ZenohRestService::new(state).empty_selector_response()
-}
-
-async fn empty_selector_write(State(state): State<AppState>) -> AppResult<StatusCode> {
-    ZenohRestService::new(state).empty_selector_response()
 }

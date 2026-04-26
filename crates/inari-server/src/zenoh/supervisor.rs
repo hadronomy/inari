@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::{select, time};
+use zenoh::Session;
 
 use super::access::{SessionLease, SupervisorSignal};
 use super::handle::{Command, ZenohHandle};
@@ -167,7 +168,7 @@ impl ZenohSupervisor {
     async fn handle_command(
         &mut self,
         command: Option<Command>,
-        session: Option<&::zenoh::Session>,
+        session: Option<&Session>,
         attempt: u64,
     ) -> AppResult<Control> {
         let Some(command) = command else {
@@ -175,14 +176,16 @@ impl ZenohSupervisor {
         };
 
         match command {
-            Command::Publish { key, payload, encoding, respond_to } => {
+            Command::Publish { key, payload, encoding, attachment, respond_to } => {
                 self.emit_event(ZenohEvent::PublishRequested {
                     bytes: payload.len(),
                     key: key.clone(),
                 });
 
                 let response = match session {
-                    Some(active_session) => publish(active_session, &key, payload, encoding).await,
+                    Some(active_session) => {
+                        publish(active_session, &key, payload, encoding, attachment).await
+                    },
                     None => Err(AppError::service_unavailable("Zenoh session is not connected.")),
                 };
 
@@ -375,7 +378,7 @@ enum Control {
 #[derive(Debug)]
 enum SessionState {
     Disconnected { next_attempt_at: time::Instant },
-    Connected { session: ::zenoh::Session },
+    Connected { session: Session },
 }
 
 impl SessionState {
@@ -387,11 +390,11 @@ impl SessionState {
         Self::Disconnected { next_attempt_at: time::Instant::now() + delay }
     }
 
-    fn connected(session: ::zenoh::Session) -> Self {
+    fn connected(session: Session) -> Self {
         Self::Connected { session }
     }
 
-    fn session(&self) -> Option<&::zenoh::Session> {
+    fn session(&self) -> Option<&Session> {
         match self {
             Self::Disconnected { .. } => None,
             Self::Connected { session } => Some(session),
@@ -405,7 +408,7 @@ impl SessionState {
         }
     }
 
-    fn take_session(&mut self) -> Option<::zenoh::Session> {
+    fn take_session(&mut self) -> Option<Session> {
         match mem::replace(self, Self::disconnected_now()) {
             Self::Disconnected { .. } => None,
             Self::Connected { session } => Some(session),

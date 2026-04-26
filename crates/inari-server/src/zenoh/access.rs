@@ -1,29 +1,30 @@
 use std::fmt;
 use std::time::Duration;
 
-use ::zenoh::bytes::Encoding;
-use ::zenoh::handlers::{FifoChannel, FifoChannelHandler};
-use ::zenoh::pubsub::Subscriber;
-use ::zenoh::query::{QueryConsolidation, Reply, Selector};
-use ::zenoh::sample::Sample;
 use bytes::Bytes;
+use zenoh::Session;
+use zenoh::bytes::{Encoding, ZBytes};
+use zenoh::handlers::{FifoChannel, FifoChannelHandler};
+use zenoh::pubsub::Subscriber;
+use zenoh::query::{QueryConsolidation, Reply, Selector};
+use zenoh::sample::Sample;
 
 use super::KeyExpression;
 use crate::error::{AppError, AppResult};
 
 #[derive(Clone)]
 pub(crate) struct SessionLease {
-    session: ::zenoh::Session,
+    session: Session,
     zid: String,
     generation: u64,
 }
 
 impl SessionLease {
-    pub(crate) fn new(session: ::zenoh::Session, zid: String, generation: u64) -> Self {
+    pub(crate) fn new(session: Session, zid: String, generation: u64) -> Self {
         Self { session, zid, generation }
     }
 
-    pub(crate) fn session(&self) -> &::zenoh::Session {
+    pub(crate) fn session(&self) -> &Session {
         &self.session
     }
 
@@ -44,9 +45,16 @@ impl fmt::Debug for SessionLease {
 #[derive(Debug, Clone)]
 pub(crate) struct ZenohQueryRequest {
     selector: Selector<'static>,
-    payload: Option<(Bytes, Encoding)>,
+    payload: Option<ZenohRequestPayload>,
     timeout: Duration,
     consolidation: QueryConsolidation,
+}
+
+#[derive(Debug, Clone)]
+struct ZenohRequestPayload {
+    body: Bytes,
+    encoding: Encoding,
+    attachment: Option<Bytes>,
 }
 
 impl ZenohQueryRequest {
@@ -58,8 +66,13 @@ impl ZenohQueryRequest {
         Self { selector, payload: None, timeout, consolidation }
     }
 
-    pub(crate) fn with_payload(mut self, payload: Bytes, encoding: Encoding) -> Self {
-        self.payload = Some((payload, encoding));
+    pub(crate) fn with_payload(
+        mut self,
+        payload: Bytes,
+        encoding: Encoding,
+        attachment: Option<Bytes>,
+    ) -> Self {
+        self.payload = Some(ZenohRequestPayload { body: payload, encoding, attachment });
         self
     }
 }
@@ -136,10 +149,11 @@ async fn issue_query(
         .consolidation(request.consolidation)
         .timeout(request.timeout);
 
-    if let Some((payload, encoding)) = request.payload {
+    if let Some(payload) = request.payload {
         query = query
-            .payload(::zenoh::bytes::ZBytes::from(payload))
-            .encoding(encoding);
+            .payload(ZBytes::from(payload.body))
+            .encoding(payload.encoding)
+            .attachment(payload.attachment.map(ZBytes::from));
     }
 
     query.await.map_err(|source| {

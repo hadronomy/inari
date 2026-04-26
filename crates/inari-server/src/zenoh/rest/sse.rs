@@ -3,51 +3,38 @@ use std::time::Duration;
 
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+use futures_util::stream::unfold;
 
 use super::super::{ZenohSubscription, sample_to_json_sample};
 
-pub(crate) fn sse_response(
-    subscription: ZenohSubscription,
-    keep_alive: Duration,
-    buffer: usize,
-) -> Response {
-    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(buffer);
+pub(crate) fn sse_response(subscription: ZenohSubscription, keep_alive: Duration) -> Response {
+    let stream = unfold(subscription, |subscription| async move {
+        let sample = match subscription.recv_async().await {
+            Ok(sample) => sample,
+            Err(error) => {
+                tracing::debug!(
+                    error = %error,
+                    "closing SSE stream after Zenoh subscription ended"
+                );
+                return None;
+            },
+        };
 
-    tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                _ = tx.closed() => break,
-                sample = subscription.recv_async() => {
-                    let sample = match sample {
-                        Ok(sample) => sample,
-                        Err(error) => {
-                            tracing::debug!(error = %error, "closing SSE stream after Zenoh subscription ended");
-                            break;
-                        }
-                    };
+        let event = match Event::default()
+            .event(sample.kind().to_string())
+            .json_data(sample_to_json_sample(&sample))
+        {
+            Ok(event) => event,
+            Err(error) => {
+                tracing::error!(error = %error, "failed to serialize SSE event");
+                return None;
+            },
+        };
 
-                    let event = match Event::default()
-                        .event(sample.kind().to_string())
-                        .json_data(sample_to_json_sample(&sample))
-                    {
-                        Ok(event) => event,
-                        Err(error) => {
-                            tracing::error!(error = %error, "failed to serialize SSE event");
-                            break;
-                        }
-                    };
-
-                    if tx.send(Ok(event)).await.is_err() {
-                        break;
-                    }
-                }
-            }
-        }
+        Some((Ok::<_, Infallible>(event), subscription))
     });
 
-    Sse::new(ReceiverStream::new(rx))
+    Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(keep_alive))
         .into_response()
 }
