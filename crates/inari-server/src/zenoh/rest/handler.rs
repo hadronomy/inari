@@ -6,7 +6,7 @@ use axum::response::Response;
 use axum::routing::get;
 
 use super::request::{QueryOptions, RequestMetadata};
-use super::response::AcceptPreference;
+use super::response::NegotiatedResponse;
 use super::{ReadSelector, WriteSelector, ZenohRestService, index_response};
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -32,12 +32,12 @@ async fn query(
     State(service): State<ZenohRestService>,
     selector: ReadSelector,
     options: QueryOptions,
-    response_preference: AcceptPreference,
+    negotiated_response: NegotiatedResponse,
     metadata: RequestMetadata,
     body: Bytes,
 ) -> AppResult<Response> {
     service
-        .query(&selector, options, response_preference, metadata, body)
+        .query(&selector, options, negotiated_response, metadata, body)
         .await
 }
 
@@ -56,7 +56,5 @@ async fn remove(
     State(service): State<ZenohRestService>,
     selector: WriteSelector,
 ) -> AppResult<StatusCode> {
-    service
-        .delete(&selector)
-        .await
+    service.delete(&selector).await
 }

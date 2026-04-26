@@ -21,7 +21,9 @@ use zenoh::query::{Parameters, Reply, Selector};
 
 use self::request::{LivelinessMode, QueryOptions, RequestMetadata, StandardQueryOptions};
 pub(crate) use self::resolver::{ReadSelector, WriteSelector};
-use self::response::{AcceptPreference, ApiRenderKind, html_response, json_response, raw_response};
+use self::response::{
+    ApiBodyFormat, NegotiatedResponse, html_api_response, json_api_response, raw_zenoh_response,
+};
 use self::sse::sse_response;
 use super::{KeyExpression, ZenohJsonSample, ZenohQueryRequest, ZenohStatus, reply_to_json_sample};
 use crate::error::{AppError, AppResult};
@@ -60,7 +62,7 @@ impl ZenohRestService {
         &self,
         key: &KeyExpression,
         options: QueryOptions,
-        response_preference: AcceptPreference,
+        negotiated_response: NegotiatedResponse,
         metadata: RequestMetadata,
         body: Bytes,
     ) -> AppResult<Response> {
@@ -73,16 +75,17 @@ impl ZenohRestService {
             .clone();
 
         match options {
-            QueryOptions::Standard(standard) => match response_preference {
-                AcceptPreference::EventStream => {
+            QueryOptions::Standard(standard) => match negotiated_response {
+                NegotiatedResponse::EventStream => {
                     let subscription = self
                         .state
                         .zenoh()
                         .subscribe(key, config.sse_buffer.max(1))
                         .await?;
+
                     Ok(sse_response(subscription, config.sse_keep_alive))
                 },
-                AcceptPreference::Api(render_kind) => {
+                NegotiatedResponse::Api(body_format) => {
                     let request = self.build_query_request(
                         key,
                         &standard,
@@ -97,7 +100,7 @@ impl ZenohRestService {
                             .zenoh()
                             .query_first(request)
                             .await?;
-                        return Ok(raw_response(reply));
+                        return Ok(raw_zenoh_response(reply));
                     }
 
                     let replies = self
@@ -105,33 +108,37 @@ impl ZenohRestService {
                         .zenoh()
                         .query(request)
                         .await?;
-                    Ok(render_replies(render_kind, replies))
+                    Ok(render_replies(body_format, replies))
                 },
             },
+
             QueryOptions::Liveliness(liveliness) => {
                 self.ensure_empty_body(
                     &body,
                     "Zenoh liveliness requests do not accept query payloads.",
                 )?;
 
-                match response_preference {
-                    AcceptPreference::EventStream => {
+                match negotiated_response {
+                    NegotiatedResponse::EventStream => {
                         let history = matches!(liveliness.mode(), LivelinessMode::WithHistory);
+
                         let subscription = self
                             .state
                             .zenoh()
                             .subscribe_liveliness(key, config.sse_buffer.max(1), history)
                             .await?;
+
                         Ok(sse_response(subscription, config.sse_keep_alive))
                     },
-                    AcceptPreference::Api(render_kind) => {
+                    NegotiatedResponse::Api(body_format) => {
                         if liveliness.raw_response().is_raw() {
                             let reply = self
                                 .state
                                 .zenoh()
                                 .liveliness_query_first(key, config.query_timeout)
                                 .await?;
-                            return Ok(raw_response(reply));
+
+                            return Ok(raw_zenoh_response(reply));
                         }
 
                         let replies = self
@@ -139,7 +146,8 @@ impl ZenohRestService {
                             .zenoh()
                             .liveliness_query(key, config.query_timeout)
                             .await?;
-                        Ok(render_replies(render_kind, replies))
+
+                        Ok(render_replies(body_format, replies))
                     },
                 }
             },
@@ -158,6 +166,7 @@ impl ZenohRestService {
             .zenoh()
             .put_bytes(key.clone(), body, transport.encoding, transport.attachment)
             .await?;
+
         Ok(axum::http::StatusCode::OK)
     }
 
@@ -166,6 +175,7 @@ impl ZenohRestService {
             .zenoh()
             .delete(key.clone())
             .await?;
+
         Ok(axum::http::StatusCode::OK)
     }
 
@@ -184,6 +194,7 @@ impl ZenohRestService {
                 .to_owned(),
         );
         let selector = Selector::owned(key.clone(), parameters);
+
         let mut request = ZenohQueryRequest::new(selector, timeout, options.consolidation().into());
 
         if !body.is_empty() {
@@ -221,15 +232,17 @@ pub(crate) struct ZenohRestAdminSpaceResponse {
     write: bool,
 }
 
-fn render_replies(kind: ApiRenderKind, replies: Vec<Reply>) -> Response {
-    match kind {
-        ApiRenderKind::Html => html_response(&replies),
-        ApiRenderKind::Json => json_response(
-            replies
+fn render_replies(body_format: ApiBodyFormat, replies: Vec<Reply>) -> Response {
+    match body_format {
+        ApiBodyFormat::Html => html_api_response(&replies),
+        ApiBodyFormat::Json => {
+            let samples = replies
                 .iter()
                 .map(reply_to_json_sample)
-                .collect::<Vec<ZenohJsonSample>>(),
-        ),
+                .collect::<Vec<ZenohJsonSample>>();
+
+            json_api_response(samples)
+        },
     }
 }
 
