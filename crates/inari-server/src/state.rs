@@ -26,6 +26,7 @@ struct AppStateInner {
     zenoh: ZenohHandle,
     protocol: Arc<dyn ProtocolModule>,
     protocol_budget: Arc<Semaphore>,
+    zenoh_rest_query_budget: Arc<Semaphore>,
 }
 
 impl fmt::Debug for AppState {
@@ -55,6 +56,14 @@ impl AppState {
                         .settings
                         .protocol
                         .max_concurrent_requests,
+                )),
+                zenoh_rest_query_budget: Arc::new(Semaphore::new(
+                    loaded
+                        .settings
+                        .http
+                        .zenoh_rest
+                        .max_concurrent_queries
+                        .max(1),
                 )),
                 loaded,
                 started_at: Utc::now(),
@@ -118,6 +127,16 @@ impl AppState {
             .map_err(|_| {
                 AppError::service_unavailable(
                     "The protocol execution budget is no longer available.",
+                )
+            })
+    }
+
+    pub fn try_acquire_zenoh_rest_query_permit(&self) -> Result<OwnedSemaphorePermit, AppError> {
+        Arc::clone(&self.inner.zenoh_rest_query_budget)
+            .try_acquire_owned()
+            .map_err(|_| {
+                AppError::service_unavailable(
+                    "Too many concurrent Zenoh REST queries are already running.",
                 )
             })
     }

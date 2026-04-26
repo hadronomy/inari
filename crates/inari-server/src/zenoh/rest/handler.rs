@@ -1,9 +1,10 @@
-use axum::Router;
-use axum::body::Bytes;
-use axum::extract::State;
+use axum::body::{Body, Bytes};
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::{Router, middleware};
 
 use super::request::{QueryOptions, RequestMetadata};
 use super::response::NegotiatedResponse;
@@ -11,7 +12,7 @@ use super::{ReadSelector, WriteSelector, ZenohRestService, index_response};
 use crate::error::AppResult;
 use crate::state::AppState;
 
-pub(crate) fn router(_state: &AppState) -> Router<AppState> {
+pub(crate) fn router(state: &AppState) -> Router<AppState> {
     Router::new()
         .route("/", get(index))
         .route(
@@ -20,7 +21,11 @@ pub(crate) fn router(_state: &AppState) -> Router<AppState> {
                 .post(query)
                 .put(write)
                 .patch(write)
-                .delete(remove),
+                .delete(remove)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    shed_excess_zenoh_rest_requests,
+                )),
         )
 }
 
@@ -57,4 +62,16 @@ async fn remove(
     selector: WriteSelector,
 ) -> AppResult<StatusCode> {
     service.delete(&selector).await
+}
+
+async fn shed_excess_zenoh_rest_requests(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let Ok(_permit) = state.try_acquire_zenoh_rest_query_permit() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, [("retry-after", "1")], "busy\n").into_response();
+    };
+
+    next.run(request).await
 }

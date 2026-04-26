@@ -30,6 +30,7 @@ const DEFAULT_CORS_MAX_AGE: Duration = Duration::from_mins(10);
 const DEFAULT_ZENOH_REST_QUERY_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_ZENOH_REST_SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 const DEFAULT_ZENOH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES: usize = 64;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadedConfig {
@@ -257,6 +258,7 @@ pub struct ZenohRestConfig {
     #[serde(with = "humantime_serde")]
     pub sse_keep_alive: Duration,
     pub sse_buffer: usize,
+    pub max_concurrent_queries: usize,
 }
 
 impl Default for ZenohRestConfig {
@@ -267,6 +269,7 @@ impl Default for ZenohRestConfig {
             query_timeout: DEFAULT_ZENOH_REST_QUERY_TIMEOUT,
             sse_keep_alive: DEFAULT_ZENOH_REST_SSE_KEEP_ALIVE,
             sse_buffer: 64,
+            max_concurrent_queries: DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES,
         }
     }
 }
