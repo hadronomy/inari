@@ -63,12 +63,12 @@ pub(crate) struct Selector<R> {
 pub(crate) enum Read {}
 pub(crate) enum Write {}
 
-pub(crate) trait AdminRole: private::Sealed {
+pub(crate) trait AdminRole: sealed::Sealed {
     fn check_admin_perms(admin_space: &ZenohAdminSpaceConfig) -> bool;
     fn operation_name() -> &'static str;
 }
 
-mod private {
+mod sealed {
     pub trait Sealed {}
     impl Sealed for super::Read {}
     impl Sealed for super::Write {}
