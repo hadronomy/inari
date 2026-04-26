@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
@@ -17,7 +19,8 @@ struct HealthResponse {
     service: &'static str,
     version: &'static str,
     started_at: chrono::DateTime<chrono::Utc>,
-    uptime_secs: u64,
+    #[serde(with = "humantime_serde")]
+    uptime: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -32,13 +35,14 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         service: env!("CARGO_PKG_NAME"),
         version: env!("CARGO_PKG_VERSION"),
         started_at: state.started_at(),
-        uptime_secs: state.uptime().as_secs(),
+        uptime: state.uptime(),
     })
 }
 
 async fn readiness(State(state): State<AppState>) -> (StatusCode, Json<ReadinessResponse>) {
     let readiness = state.readiness_snapshot();
-    let status = if readiness.ready { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let status =
+        if readiness.is_ready() { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
 
     (
         status,

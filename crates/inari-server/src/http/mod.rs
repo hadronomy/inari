@@ -21,13 +21,12 @@ use crate::error::{AppError, AppResult, ConfigError};
 use crate::state::AppState;
 
 pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
-    let cors = state
-        .loaded_config()
-        .settings
+    let settings = &state.loaded_config().settings;
+    let cors = settings
         .http
         .cors
         .enabled
-        .then(|| build_cors_layer(&state.loaded_config().settings.http.cors))
+        .then(|| build_cors_layer(&settings.http.cors))
         .transpose()?;
 
     let router = Router::new()
@@ -46,24 +45,13 @@ fn apply_http_layers(
     state: &AppState,
     cors: Option<CorsLayer>,
 ) -> Router<AppState> {
+    let settings = &state.loaded_config().settings;
     router
-        .layer(DefaultBodyLimit::max(
-            state
-                .loaded_config()
-                .settings
-                .server
-                .max_body_size_bytes,
-        ))
+        .layer(DefaultBodyLimit::max(settings.server.max_body_size_bytes))
         .layer(
             ServiceBuilder::new()
                 .layer(HandleErrorLayer::new(handle_middleware_error))
-                .layer(TimeoutLayer::new(
-                    state
-                        .loaded_config()
-                        .settings
-                        .server
-                        .request_timeout,
-                ))
+                .layer(TimeoutLayer::new(settings.server.request_timeout))
                 .layer(SetSensitiveHeadersLayer::new([AUTHORIZATION, COOKIE]))
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
@@ -170,9 +158,22 @@ mod tests {
     use crate::zenoh::ZenohSupervisor;
 
     fn test_app() -> axum::Router {
-        let loaded = LoadedConfig::default();
+        let mut loaded = LoadedConfig::default();
+
+        loaded
+            .settings
+            .protocol
+            .max_concurrent_requests = 8;
+        loaded
+            .settings
+            .http
+            .zenoh_rest
+            .max_concurrent_queries = 8;
+
         let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
-        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+
+        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule))
+            .expect("test app state should build");
 
         router(&state)
             .expect("test router should build")
@@ -227,6 +228,7 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("response body should be readable");
+
         let payload: Value = serde_json::from_slice(&body).expect("response body should be JSON");
 
         assert_eq!(payload["error"]["code"], "not_implemented");

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt;
-use std::marker::PhantomData;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,26 +12,27 @@ use tokio::time::{self, MissedTickBehavior};
 use crate::config::LoadedConfig;
 use crate::error::{AppError, AppResult};
 use crate::http;
-use crate::protocol::{NoopProtocolModule, ProtocolModule};
+use crate::protocol::{DynProtocolModule, IntoDynProtocolModule, NoopProtocolModule};
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
-use crate::state::{AppState, ComponentReadiness, ReadinessSnapshot};
+use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MissingConfig;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct WithConfig;
+#[derive(Debug, Clone)]
+pub struct WithConfig {
+    loaded: LoadedConfig,
+}
 
-pub struct ServerBuilder<State> {
-    loaded: Option<LoadedConfig>,
-    protocol: Arc<dyn ProtocolModule>,
-    marker: PhantomData<State>,
+pub struct ServerBuilder<State = MissingConfig> {
+    state: State,
+    protocol: Arc<DynProtocolModule>,
 }
 
 impl Default for ServerBuilder<MissingConfig> {
     fn default() -> Self {
-        Self { loaded: None, protocol: Arc::new(NoopProtocolModule), marker: PhantomData }
+        Self { state: MissingConfig, protocol: Arc::new(NoopProtocolModule) }
     }
 }
 
@@ -47,13 +48,7 @@ impl fmt::Debug for ServerBuilder<WithConfig> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServerBuilder")
             .field("configured", &true)
-            .field(
-                "origin",
-                &self
-                    .loaded
-                    .as_ref()
-                    .map(|config| &config.origin),
-            )
+            .field("origin", &self.state.loaded.origin)
             .finish_non_exhaustive()
     }
 }
@@ -66,39 +61,42 @@ impl ServerBuilder<MissingConfig> {
 
     #[must_use]
     pub fn with_config(self, loaded: LoadedConfig) -> ServerBuilder<WithConfig> {
-        ServerBuilder { loaded: Some(loaded), protocol: self.protocol, marker: PhantomData }
+        ServerBuilder { state: WithConfig { loaded }, protocol: self.protocol }
     }
 }
 
 impl<State> ServerBuilder<State> {
     #[must_use]
-    pub fn with_protocol(mut self, protocol: Arc<dyn ProtocolModule>) -> Self {
-        self.protocol = protocol;
+    pub fn with_protocol<P>(mut self, protocol: P) -> Self
+    where
+        P: IntoDynProtocolModule,
+    {
+        self.protocol = protocol.into_dyn_protocol_module();
         self
     }
 }
 
 impl ServerBuilder<WithConfig> {
     pub async fn build(self) -> AppResult<ServerApplication> {
-        let loaded = self
-            .loaded
-            .expect("configured builders always carry a loaded configuration");
+        let loaded = self.state.loaded;
+
         let shutdown = ShutdownCoordinator::new(
             loaded
                 .settings
                 .server
                 .shutdown_grace_period,
         );
+
         let (zenoh_handle, zenoh_supervisor) = ZenohSupervisor::new(loaded.settings.zenoh.clone());
-        let state = AppState::new(loaded.clone(), zenoh_handle, self.protocol);
+
+        let state = AppState::new(loaded, zenoh_handle, self.protocol)?;
         let router = http::router(&state)?.with_state(state.clone());
 
-        Ok(ServerApplication { loaded, state, router, shutdown, zenoh_supervisor })
+        Ok(ServerApplication { state, router, shutdown, zenoh_supervisor })
     }
 }
 
 pub struct ServerApplication {
-    loaded: LoadedConfig,
     state: AppState,
     router: Router,
     shutdown: ShutdownCoordinator,
@@ -108,7 +106,7 @@ pub struct ServerApplication {
 impl fmt::Debug for ServerApplication {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ServerApplication")
-            .field("origin", &self.loaded.origin)
+            .field("origin", &self.state.loaded_config().origin)
             .field("readiness", &self.state.readiness_snapshot())
             .finish_non_exhaustive()
     }
@@ -116,65 +114,67 @@ impl fmt::Debug for ServerApplication {
 
 impl ServerApplication {
     pub async fn run(self) -> AppResult<()> {
-        let bind_address = self.loaded.settings.server.bind;
+        let ServerApplication { state, router, shutdown, zenoh_supervisor } = self;
+
+        let server_settings = &state.loaded_config().settings.server;
+        let bind_address = server_settings.bind;
+        let request_timeout = server_settings.request_timeout;
+        let shutdown_grace_period = server_settings.shutdown_grace_period;
+
         let listener = TcpListener::bind(bind_address)
             .await
             .map_err(|source| AppError::Bind { address: bind_address, source })?;
+
         let local_address = listener.local_addr()?;
 
-        if local_address == bind_address {
-            tracing::info!(
-                component = "http",
-                local_address = %local_address,
-                request_timeout = ?self.loaded.settings.server.request_timeout,
-                shutdown_grace_period = ?self.loaded.settings.server.shutdown_grace_period,
-                "http listener ready"
-            );
-        } else {
-            tracing::info!(
-                component = "http",
-                bind_address = %bind_address,
-                local_address = %local_address,
-                request_timeout = ?self.loaded.settings.server.request_timeout,
-                shutdown_grace_period = ?self.loaded.settings.server.shutdown_grace_period,
-                "http listener ready"
-            );
-        }
+        state.update_http_readiness(HttpReadiness::listening());
+
+        log_http_listener_ready(
+            bind_address,
+            local_address,
+            request_timeout,
+            shutdown_grace_period,
+        );
 
         let mut tasks = JoinSet::new();
-        let shutdown = self.shutdown.clone();
 
-        tasks.spawn(named("signal-listener", async move {
+        let signal_shutdown = shutdown.clone();
+        tasks.spawn(named(TaskName::SignalListener, async move {
             let reason = wait_for_shutdown_signal().await?;
-            tracing::info!(task = "signal-listener", %reason, "shutdown requested by signal");
-            shutdown.request(reason);
+
+            tracing::info!(
+                task = %TaskName::SignalListener,
+                %reason,
+                "shutdown requested by signal"
+            );
+
+            signal_shutdown.request(reason);
+
             Ok(())
         }));
 
-        let shutdown = self.shutdown.clone();
-        tasks.spawn(named("zenoh-supervisor", self.zenoh_supervisor.run(shutdown)));
+        tasks.spawn(named(TaskName::ZenohSupervisor, zenoh_supervisor.run(shutdown.clone())));
 
-        let shutdown = self.shutdown.clone();
-        let state = self.state.clone();
-        tasks.spawn(named("readiness-sync", async move {
-            sync_readiness(state, shutdown).await;
+        let readiness_sync_state = state.clone();
+        let readiness_sync_shutdown = shutdown.clone();
+        tasks.spawn(named(TaskName::ReadinessSync, async move {
+            sync_readiness(readiness_sync_state, readiness_sync_shutdown).await;
             Ok(())
         }));
 
-        let shutdown = self.shutdown.clone();
-        let state = self.state.clone();
-        tasks.spawn(named("readiness-monitor", async move {
-            monitor_service_readiness(state, shutdown).await;
+        let readiness_monitor_state = state.clone();
+        let readiness_monitor_shutdown = shutdown.clone();
+        tasks.spawn(named(TaskName::ReadinessMonitor, async move {
+            monitor_service_readiness(readiness_monitor_state, readiness_monitor_shutdown).await;
             Ok(())
         }));
 
-        let shutdown = self.shutdown.clone();
-        let router = self
-            .router
-            .into_make_service_with_connect_info::<std::net::SocketAddr>();
-        tasks.spawn(named("http-server", async move {
+        let router = router.into_make_service_with_connect_info::<SocketAddr>();
+        let http_shutdown = shutdown.clone();
+
+        tasks.spawn(named(TaskName::HttpServer, async move {
             let shutdown_signal = async move {
-                shutdown.wait_for_shutdown().await;
+                http_shutdown.wait_for_shutdown().await;
             };
 
             axum::serve(listener, router)
@@ -183,93 +183,203 @@ impl ServerApplication {
                 .map_err(|source| AppError::Serve { source })
         }));
 
-        let mut failure = None;
-        let mut should_drain = false;
-
-        while let Some(result) = tasks.join_next().await {
-            match result {
-                Ok(NamedTaskResult { name, outcome }) => match outcome {
-                    Ok(()) => {
-                        tracing::debug!(task = name, "background task completed cleanly");
-
-                        if name == "signal-listener" || name == "http-server" {
-                            if name == "http-server" && !self.shutdown.is_requested() {
-                                self.shutdown
-                                    .request(ShutdownReason::ServerStopped);
-                            }
-
-                            should_drain = true;
-                            break;
-                        }
-                    },
-                    Err(error) => {
-                        let error = error.log_for_server();
-                        tracing::error!(task = name, error = %error, "background task failed");
-                        if failure.is_none() {
-                            failure = Some(error);
-                        }
-                        if !self.shutdown.is_requested() {
-                            self.shutdown
-                                .request(ShutdownReason::TaskFailed(Cow::Borrowed(name)));
-                        }
-                        should_drain = true;
-                        break;
-                    },
-                },
-                Err(source) => {
-                    let error = AppError::TaskJoin { source }.log_for_server();
-                    if failure.is_none() {
-                        failure = Some(error);
-                    }
-                    if !self.shutdown.is_requested() {
-                        self.shutdown
-                            .request(ShutdownReason::TaskFailed(Cow::Borrowed("background-join")));
-                    }
-                    should_drain = true;
-                    break;
-                },
-            }
-        }
-
-        if should_drain {
-            let grace_period = self.shutdown.grace_period();
-            if time::timeout(grace_period, drain_remaining(&mut tasks))
-                .await
-                .is_err()
-            {
-                tasks.abort_all();
-                let _ = drain_remaining(&mut tasks).await;
-                if failure.is_none() {
-                    failure =
-                        Some(AppError::GracefulShutdownTimeout { grace_period }.log_for_server());
-                }
-            }
-        }
-
-        failure.map_or(Ok(()), Err)
+        supervise_tasks(&mut tasks, &shutdown).await
     }
+}
+
+fn log_http_listener_ready(
+    bind_address: SocketAddr,
+    local_address: SocketAddr,
+    request_timeout: Duration,
+    shutdown_grace_period: Duration,
+) {
+    if local_address == bind_address {
+        tracing::info!(
+            component = "http",
+            local_address = %local_address,
+            request_timeout = ?request_timeout,
+            shutdown_grace_period = ?shutdown_grace_period,
+            "http listener ready"
+        );
+    } else {
+        tracing::info!(
+            component = "http",
+            bind_address = %bind_address,
+            local_address = %local_address,
+            request_timeout = ?request_timeout,
+            shutdown_grace_period = ?shutdown_grace_period,
+            "http listener ready"
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum TaskName {
+    SignalListener,
+    ZenohSupervisor,
+    ReadinessSync,
+    ReadinessMonitor,
+    HttpServer,
+}
+
+impl TaskName {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::SignalListener => "signal-listener",
+            Self::ZenohSupervisor => "zenoh-supervisor",
+            Self::ReadinessSync => "readiness-sync",
+            Self::ReadinessMonitor => "readiness-monitor",
+            Self::HttpServer => "http-server",
+        }
+    }
+
+    const fn clean_exit_policy(self) -> CleanExitPolicy {
+        match self {
+            Self::SignalListener | Self::HttpServer => CleanExitPolicy::ShutdownApplication,
+            Self::ZenohSupervisor | Self::ReadinessSync | Self::ReadinessMonitor => {
+                CleanExitPolicy::KeepRunning
+            },
+        }
+    }
+}
+
+impl fmt::Display for TaskName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CleanExitPolicy {
+    ShutdownApplication,
+    KeepRunning,
 }
 
 #[derive(Debug)]
 struct NamedTaskResult {
-    name: &'static str,
+    name: TaskName,
     outcome: AppResult<()>,
 }
 
-async fn named<F>(name: &'static str, future: F) -> NamedTaskResult
+async fn named<F>(name: TaskName, future: F) -> NamedTaskResult
 where
-    F: std::future::Future<Output = AppResult<()>> + Send,
+    F: std::future::Future<Output = AppResult<()>> + Send + 'static,
 {
     NamedTaskResult { name, outcome: future.await }
+}
+
+async fn supervise_tasks(
+    tasks: &mut JoinSet<NamedTaskResult>,
+    shutdown: &ShutdownCoordinator,
+) -> AppResult<()> {
+    let mut failure = None;
+    let should_drain = loop {
+        let Some(result) = tasks.join_next().await else {
+            break false;
+        };
+
+        let NamedTaskResult { name, outcome } = match result {
+            Ok(result) => result,
+            Err(source) => {
+                let error = AppError::TaskJoin { source }.log_for_server();
+
+                tracing::error!(
+                    error = %error,
+                    "background task join failed"
+                );
+
+                failure.get_or_insert(error);
+
+                if !shutdown.is_requested() {
+                    shutdown.request(ShutdownReason::TaskFailed(Cow::Borrowed("background-join")));
+                }
+
+                break true;
+            },
+        };
+
+        match outcome {
+            Ok(()) => {
+                tracing::debug!(
+                    task = %name,
+                    "background task completed cleanly"
+                );
+
+                if name.clean_exit_policy() == CleanExitPolicy::ShutdownApplication {
+                    if name == TaskName::HttpServer && !shutdown.is_requested() {
+                        shutdown.request(ShutdownReason::ServerStopped);
+                    }
+
+                    break true;
+                }
+            },
+
+            Err(error) => {
+                let error = error.log_for_server();
+
+                tracing::error!(
+                    task = %name,
+                    error = %error,
+                    "background task failed"
+                );
+
+                failure.get_or_insert(error);
+
+                if !shutdown.is_requested() {
+                    shutdown.request(ShutdownReason::TaskFailed(Cow::Borrowed(name.as_str())));
+                }
+
+                break true;
+            },
+        }
+    };
+
+    if should_drain && let Err(error) = drain_with_timeout(tasks, shutdown).await {
+        let error = error.log_for_server();
+
+        if failure.is_none() {
+            failure = Some(error);
+        }
+    }
+
+    failure.map_or(Ok(()), Err)
+}
+
+async fn drain_with_timeout(
+    tasks: &mut JoinSet<NamedTaskResult>,
+    shutdown: &ShutdownCoordinator,
+) -> AppResult<()> {
+    let grace_period = shutdown.grace_period();
+
+    match time::timeout(grace_period, drain_remaining(tasks)).await {
+        Ok(result) => result,
+        Err(_) => {
+            tasks.abort_all();
+
+            let _ = drain_remaining(tasks).await;
+
+            Err(AppError::GracefulShutdownTimeout { grace_period })
+        },
+    }
 }
 
 async fn drain_remaining(tasks: &mut JoinSet<NamedTaskResult>) -> AppResult<()> {
     while let Some(result) = tasks.join_next().await {
         match result {
             Ok(task) => match task.outcome {
-                Ok(()) => tracing::debug!(task = task.name, "background task drained cleanly"),
+                Ok(()) => {
+                    tracing::debug!(
+                        task = %task.name,
+                        "background task drained cleanly"
+                    );
+                },
                 Err(error) => {
-                    tracing::error!(task = task.name, error = %error, "task failed while draining");
+                    tracing::error!(
+                        task = %task.name,
+                        error = %error,
+                        "task failed while draining"
+                    );
+
                     return Err(error);
                 },
             },
@@ -282,11 +392,13 @@ async fn drain_remaining(tasks: &mut JoinSet<NamedTaskResult>) -> AppResult<()> 
 
 async fn sync_readiness(state: AppState, shutdown: ShutdownCoordinator) {
     let mut zenoh = state.zenoh().subscribe_status();
+
     state.update_zenoh_readiness(&zenoh.borrow().clone());
 
     loop {
         tokio::select! {
             _ = shutdown.wait_for_shutdown() => return,
+
             changed = zenoh.changed() => {
                 if changed.is_err() {
                     return;
@@ -300,34 +412,43 @@ async fn sync_readiness(state: AppState, shutdown: ShutdownCoordinator) {
 
 async fn monitor_service_readiness(state: AppState, shutdown: ShutdownCoordinator) {
     let mut readiness = state.subscribe_readiness();
+
     let heartbeat_period = Duration::from_secs(30);
     let mut heartbeat =
         time::interval_at(time::Instant::now() + heartbeat_period, heartbeat_period);
+
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     let initial = state.readiness_snapshot();
     log_readiness_change(&initial);
-    let mut last_logged_ready = Some(initial.ready);
+
+    let mut last_logged = initial.to_string();
 
     loop {
         tokio::select! {
             _ = shutdown.wait_for_shutdown() => return,
+
             changed = readiness.changed() => {
                 if changed.is_err() {
                     return;
                 }
 
                 let snapshot = readiness.borrow().clone();
-                if last_logged_ready != Some(snapshot.ready) {
+                let current = snapshot.to_string();
+
+                if last_logged != current {
                     log_readiness_change(&snapshot);
-                    last_logged_ready = Some(snapshot.ready);
+                    last_logged = current;
                 }
-            },
+            }
+
             _ = heartbeat.tick() => {
                 let snapshot = state.readiness_snapshot();
+
                 tracing::debug!(
                     component = "service",
-                    ready = snapshot.ready,
+                    ready = snapshot.is_ready(),
+                    readiness = %snapshot,
                     uptime_ms = duration_millis(state.uptime()),
                     "service heartbeat"
                 );
@@ -336,36 +457,19 @@ async fn monitor_service_readiness(state: AppState, shutdown: ShutdownCoordinato
     }
 }
 
+#[inline(always)]
 fn log_readiness_change(snapshot: &ReadinessSnapshot) {
-    let http = component(snapshot, "http");
-    let zenoh = component(snapshot, "zenoh");
+    let http = snapshot.component::<Http>();
+    let zenoh = snapshot.component::<Zenoh>();
 
-    if snapshot.ready {
-        tracing::info!(
-            component = "service",
-            ready = true,
-            http_state = %http.level,
-            zenoh_state = %zenoh.level,
-            observed_at = %snapshot.observed_at,
-            "service became ready"
-        );
-    } else {
-        tracing::info!(
-            component = "service",
-            ready = false,
-            http_state = %http.level,
-            zenoh_state = %zenoh.level,
-            observed_at = %snapshot.observed_at,
-            "service became not ready"
-        );
-    }
-}
-
-fn component<'a>(snapshot: &'a ReadinessSnapshot, name: &str) -> &'a ComponentReadiness {
-    snapshot
-        .components
-        .get(name)
-        .unwrap_or_else(|| panic!("missing readiness component `{name}`"))
+    tracing::info!(
+        component = "service",
+        ready = snapshot.is_ready(),
+        http = %http.level(),
+        zenoh = %zenoh.level(),
+        observed_at = %snapshot.observed_at().to_rfc3339(),
+        "readiness changed"
+    );
 }
 
 fn duration_millis(duration: Duration) -> u64 {

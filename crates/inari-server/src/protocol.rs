@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use axum::extract::State;
 use axum::routing::{get, post};
@@ -12,6 +13,27 @@ use crate::state::AppState;
 pub trait ProtocolModule: Send + Sync {
     fn descriptor(&self) -> ProtocolDescriptor;
     fn routes(&self) -> Router<AppState>;
+}
+
+pub type DynProtocolModule = dyn ProtocolModule + Send + Sync + 'static;
+
+pub trait IntoDynProtocolModule {
+    fn into_dyn_protocol_module(self) -> Arc<DynProtocolModule>;
+}
+
+impl<P> IntoDynProtocolModule for P
+where
+    P: ProtocolModule + Send + Sync + 'static,
+{
+    fn into_dyn_protocol_module(self) -> Arc<DynProtocolModule> {
+        Arc::new(self)
+    }
+}
+
+impl IntoDynProtocolModule for Arc<DynProtocolModule> {
+    fn into_dyn_protocol_module(self) -> Arc<DynProtocolModule> {
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

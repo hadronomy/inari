@@ -18,16 +18,37 @@ use crate::shutdown::{ShutdownCoordinator, ShutdownReason};
 use crate::state::AppState;
 use crate::zenoh::ZenohSupervisor;
 
-fn enabled_config() -> LoadedConfig {
+fn base_config() -> LoadedConfig {
     let mut loaded = LoadedConfig::default();
+
+    // `AppState::new` now rejects invalid zero-sized budgets instead of
+    // silently coercing them with `.max(1)`, so tests make the invariant clear.
+    loaded
+        .settings
+        .protocol
+        .max_concurrent_requests = 8;
+    loaded
+        .settings
+        .http
+        .zenoh_rest
+        .max_concurrent_queries = 8;
+
+    loaded
+}
+
+fn enabled_config() -> LoadedConfig {
+    let mut loaded = base_config();
+
     loaded.settings.http.zenoh_rest.enabled = true;
     loaded.settings.zenoh.enabled = true;
     loaded.settings.zenoh.listen_endpoints = vec!["tcp/127.0.0.1:0".into()];
+
     loaded
 }
 
 fn admin_enabled_config() -> LoadedConfig {
     let mut loaded = enabled_config();
+
     loaded
         .settings
         .http
@@ -35,6 +56,7 @@ fn admin_enabled_config() -> LoadedConfig {
         .allow_admin_space = true;
     loaded.settings.zenoh.admin_space =
         ZenohAdminSpaceConfig { enabled: true, read: true, write: false };
+
     loaded
 }
 
@@ -49,8 +71,12 @@ impl TestApp {
     async fn spawn(loaded: LoadedConfig) -> Self {
         let zenoh_settings = loaded.settings.zenoh.clone();
         let zenoh_enabled = loaded.settings.zenoh.enabled;
+
         let (zenoh, supervisor) = ZenohSupervisor::new(zenoh_settings);
-        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+
+        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule))
+            .expect("test app state should build");
+
         let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
         let task = tokio::spawn(supervisor.run(shutdown.clone()));
 
@@ -111,6 +137,7 @@ async fn wait_for_connection(state: &AppState) {
         {
             return;
         }
+
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
@@ -146,21 +173,25 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
         .expect("session should be connected")
         .session()
         .clone();
+
     let value = Arc::new(Mutex::new(None::<(Vec<u8>, Encoding)>));
 
     let subscriber = session
         .declare_subscriber(key)
         .await
         .expect("subscriber should declare");
+
     let queryable = session
         .declare_queryable(key)
         .await
         .expect("queryable should declare");
 
     let subscriber_value = Arc::clone(&value);
+
     let subscriber_task = tokio::spawn(async move {
         while let Ok(sample) = subscriber.recv_async().await {
             let mut guard = subscriber_value.lock().await;
+
             match sample.kind() {
                 SampleKind::Put => {
                     *guard =
@@ -176,6 +207,7 @@ async fn install_materialized_queryable(state: &AppState, key: &'static str) -> 
     let query_task = tokio::spawn(async move {
         while let Ok(query) = queryable.recv_async().await {
             let reply = value.lock().await.clone();
+
             if let Some((payload, encoding)) = reply {
                 let result = query
                     .reply(key, payload)
@@ -196,6 +228,7 @@ async fn install_echo_queryable(state: &AppState, key: &'static str) -> TestTask
         .expect("session should be connected")
         .session()
         .clone();
+
     let queryable = session
         .declare_queryable(key)
         .await
@@ -207,14 +240,17 @@ async fn install_echo_queryable(state: &AppState, key: &'static str) -> TestTask
                 .payload()
                 .map(|payload| payload.to_bytes().into_owned())
                 .unwrap_or_default();
+
             let encoding = query
                 .encoding()
                 .cloned()
                 .unwrap_or_default();
+
             let result = query
                 .reply(key, payload)
                 .encoding(encoding)
                 .await;
+
             assert!(result.is_ok(), "query reply should succeed");
         }
     });
@@ -231,9 +267,11 @@ async fn read_sse_event(stream: &mut BodyDataStream) -> String {
             .expect("SSE event should arrive in time")
             .expect("SSE stream should remain open")
             .expect("SSE body chunk should be readable");
+
         frame.extend_from_slice(&chunk);
 
         let text = String::from_utf8_lossy(&frame);
+
         if text.contains("\n\n") || text.contains("\r\n\r\n") {
             return text.into_owned();
         }
@@ -242,9 +280,13 @@ async fn read_sse_event(stream: &mut BodyDataStream) -> String {
 
 #[tokio::test]
 async fn route_is_not_mounted_when_disabled() {
-    let loaded = LoadedConfig::default();
+    let loaded = base_config();
+
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
-    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+
+    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule))
+        .expect("test app state should build");
+
     let app = http::router(&state)
         .expect("router should build")
         .with_state(state);
@@ -276,6 +318,7 @@ async fn zenoh_root_reports_connection_state() {
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+
     app.shutdown().await;
 }
 
@@ -293,6 +336,7 @@ async fn zenoh_admin_space_is_blocked_by_default() {
         .await;
 
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
     app.shutdown().await;
 }
 
@@ -310,6 +354,7 @@ async fn invalid_key_expression_returns_bad_request() {
         .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
     app.shutdown().await;
 }
 
@@ -331,12 +376,15 @@ async fn zenoh_admin_space_returns_router_status_when_enabled() {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("response body should be readable");
+
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
+
     assert!(
         json.as_array()
             .is_some_and(|items| !items.is_empty())
     );
+
     app.shutdown().await;
 }
 
@@ -355,6 +403,7 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
                 .expect("request should be valid"),
         )
         .await;
+
     assert_eq!(put.status(), StatusCode::OK);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -369,6 +418,7 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
                 .expect("request should be valid"),
         )
         .await;
+
     assert_eq!(patch.status(), StatusCode::OK);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -381,13 +431,16 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
                 .expect("request should be valid"),
         )
         .await;
+
     assert_eq!(get.status(), StatusCode::OK);
 
     let body = to_bytes(get.into_body(), usize::MAX)
         .await
         .expect("response body should be readable");
+
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
+
     assert_eq!(json[0]["value"], "patched");
 
     let delete = app
@@ -399,7 +452,9 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
                 .expect("request should be valid"),
         )
         .await;
+
     assert_eq!(delete.status(), StatusCode::OK);
+
     app.shutdown().await;
 }
 
@@ -424,10 +479,13 @@ async fn post_query_forwards_payload_and_encoding() {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("response body should be readable");
+
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
+
     assert_eq!(json[0]["value"], "hello from query");
     assert_eq!(json[0]["encoding"], "text/plain");
+
     app.shutdown().await;
 }
 
@@ -447,6 +505,7 @@ async fn get_raw_returns_first_reply_payload() {
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+
     assert_eq!(
         response
             .headers()
@@ -458,7 +517,9 @@ async fn get_raw_returns_first_reply_payload() {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("response body should be readable");
+
     assert_eq!(body, "raw payload");
+
     app.shutdown().await;
 }
 
@@ -483,9 +544,12 @@ async fn get_html_renders_definition_list() {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("response body should be readable");
+
     let html = String::from_utf8(body.to_vec()).expect("response body should be valid UTF-8");
+
     assert!(html.contains("<dl>"));
     assert!(html.contains("&lt;hello&gt;"));
+
     app.shutdown().await;
 }
 
@@ -510,12 +574,15 @@ async fn get_liveliness_returns_live_tokens() {
     let body = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("response body should be readable");
+
     let json: serde_json::Value =
         serde_json::from_slice(&body).expect("response body should be JSON");
+
     assert_eq!(json[0]["key"], "demo/presence");
     assert_eq!(json[0]["value"], serde_json::Value::Null);
 
     drop(token);
+
     app.shutdown().await;
 }
 
@@ -539,6 +606,7 @@ async fn liveliness_sse_stream_reports_history_and_drop() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let mut stream = response.into_body().into_data_stream();
+
     let initial = read_sse_event(&mut stream).await;
     assert!(initial.contains("event: PUT"));
     assert!(initial.contains("\"key\":\"demo/presence\""));
@@ -549,6 +617,7 @@ async fn liveliness_sse_stream_reports_history_and_drop() {
     let dropped = read_sse_event(&mut stream).await;
     assert!(dropped.contains("event: DELETE"));
     assert!(dropped.contains("\"key\":\"demo/presence\""));
+
     app.shutdown().await;
 }
 
@@ -566,5 +635,6 @@ async fn liveliness_rejects_non_reserved_selector_parameters() {
         .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
     app.shutdown().await;
 }
