@@ -48,7 +48,7 @@ fn environment_overrides_cover_every_nested_field() {
             "tcp/127.0.0.1:7447,udp/127.0.0.1:7448".into(),
         ),
         ("INARI_SERVER_ZENOH__LISTEN_ENDPOINTS".into(), "tcp/0.0.0.0:7447".into()),
-        ("INARI_SERVER_ZENOH__RETRY_INTERVAL".into(), "7s".into()),
+        ("INARI_SERVER_ZENOH__OPEN_RETRY_INTERVAL".into(), "7s".into()),
         ("INARI_SERVER_ZENOH__COMMAND_BUFFER".into(), "512".into()),
         ("INARI_SERVER_ZENOH__EVENT_BUFFER".into(), "256".into()),
         ("INARI_SERVER_PROTOCOL__NAMESPACE".into(), "inari/test".into()),
@@ -201,7 +201,13 @@ fn environment_overrides_cover_every_nested_field() {
         vec!["tcp/127.0.0.1:7447", "udp/127.0.0.1:7448"]
     );
     assert_eq!(loaded.settings.zenoh.listen_endpoints, vec!["tcp/0.0.0.0:7447"]);
-    assert_eq!(loaded.settings.zenoh.retry_interval, Duration::from_secs(7));
+    assert_eq!(
+        loaded
+            .settings
+            .zenoh
+            .open_retry_interval,
+        Duration::from_secs(7)
+    );
     assert_eq!(loaded.settings.zenoh.command_buffer, 512);
     assert_eq!(loaded.settings.zenoh.event_buffer, 256);
     assert_eq!(loaded.settings.protocol.namespace, "inari/test");

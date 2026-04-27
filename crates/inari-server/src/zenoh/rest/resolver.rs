@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use axum::extract::{FromRef, FromRequestParts, Path};
 use axum::http::request::Parts;
+use zenoh::config::ZenohId;
 
 use super::super::KeyExpression;
 use crate::config::ZenohAdminSpaceConfig;
@@ -168,11 +169,11 @@ impl<'a, R: AdminRole> KeyResolver<'a, R> {
         }
     }
 
-    fn connected_zid(&self) -> AppResult<String> {
+    fn connected_zid(&self) -> AppResult<ZenohId> {
         self.state
             .zenoh()
             .session_snapshot()
-            .map(|session| session.zid().to_owned())
+            .map(|session| session.zid())
             .ok_or_else(|| AppError::service_unavailable("Zenoh session is not connected."))
     }
 }

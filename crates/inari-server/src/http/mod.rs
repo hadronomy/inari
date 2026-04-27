@@ -168,7 +168,7 @@ mod tests {
             .settings
             .http
             .zenoh_rest
-            .max_concurrent_queries = 8;
+            .max_concurrent_requests = 8;
 
         let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
 

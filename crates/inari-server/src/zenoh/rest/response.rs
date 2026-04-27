@@ -171,6 +171,20 @@ impl<'a> AcceptMediaRange<'a> {
     fn matches(self, representation: ServerRepresentation) -> Option<AcceptMatch> {
         let media_type = representation.media_type();
 
+        let exact = self
+            .type_
+            .eq_ignore_ascii_case(media_type.type_)
+            && self
+                .subtype
+                .eq_ignore_ascii_case(media_type.subtype);
+
+        // SSE is streaming and should be selected only when explicitly requested.
+        // Broad ranges like `text/*` or `*/*` must not accidentally opt clients
+        // into an event-stream response.
+        if representation == ServerRepresentation::EventStream && !exact {
+            return None;
+        }
+
         let specificity = if self.type_ == "*" && self.subtype == "*" {
             MediaRangeSpecificity::Any
         } else if self
@@ -179,13 +193,7 @@ impl<'a> AcceptMediaRange<'a> {
             && self.subtype == "*"
         {
             MediaRangeSpecificity::TypeWildcard
-        } else if self
-            .type_
-            .eq_ignore_ascii_case(media_type.type_)
-            && self
-                .subtype
-                .eq_ignore_ascii_case(media_type.subtype)
-        {
+        } else if exact {
             MediaRangeSpecificity::Exact
         } else {
             return None;

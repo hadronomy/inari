@@ -5,9 +5,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::extract::Request;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 use tokio::time::{self, MissedTickBehavior};
+use tower::ServiceBuilder;
+use tower_http::normalize_path::NormalizePathLayer;
 
 use crate::config::LoadedConfig;
 use crate::error::{AppError, AppResult};
@@ -169,7 +172,13 @@ impl ServerApplication {
             Ok(())
         }));
 
-        let router = router.into_make_service_with_connect_info::<SocketAddr>();
+        let service = ServiceBuilder::new()
+            .layer(NormalizePathLayer::trim_trailing_slash())
+            .service(router);
+
+        let service =
+            axum::ServiceExt::<Request>::into_make_service_with_connect_info::<SocketAddr>(service);
+
         let http_shutdown = shutdown.clone();
 
         tasks.spawn(named(TaskName::HttpServer, async move {
@@ -177,7 +186,7 @@ impl ServerApplication {
                 http_shutdown.wait_for_shutdown().await;
             };
 
-            axum::serve(listener, router)
+            axum::serve(listener, service)
                 .with_graceful_shutdown(shutdown_signal)
                 .await
                 .map_err(|source| AppError::Serve { source })

@@ -25,7 +25,10 @@ use self::response::{
     ApiBodyFormat, NegotiatedResponse, html_api_response, json_api_response, raw_zenoh_response,
 };
 use self::sse::sse_response;
-use super::{KeyExpression, ZenohJsonSample, ZenohQueryRequest, ZenohStatus, reply_to_json_sample};
+use super::{
+    ChannelCapacity, KeyExpression, ZenohJsonSample, ZenohQueryRequest, ZenohRequestPayload,
+    ZenohStatus, reply_to_json_sample,
+};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -77,14 +80,17 @@ impl ZenohRestService {
         match options {
             QueryOptions::Standard(standard) => match negotiated_response {
                 NegotiatedResponse::EventStream => {
+                    let capacity = sse_channel_capacity(config.sse_buffer)?;
+
                     let subscription = self
                         .state
                         .zenoh()
-                        .subscribe(key, config.sse_buffer.max(1))
+                        .subscribe(key, capacity)
                         .await?;
 
                     Ok(sse_response(subscription, config.sse_keep_alive))
                 },
+
                 NegotiatedResponse::Api(body_format) => {
                     let request = self.build_query_request(
                         key,
@@ -100,6 +106,7 @@ impl ZenohRestService {
                             .zenoh()
                             .query_first(request)
                             .await?;
+
                         return Ok(raw_zenoh_response(reply));
                     }
 
@@ -108,6 +115,7 @@ impl ZenohRestService {
                         .zenoh()
                         .query(request)
                         .await?;
+
                     Ok(render_replies(body_format, replies))
                 },
             },
@@ -121,15 +129,17 @@ impl ZenohRestService {
                 match negotiated_response {
                     NegotiatedResponse::EventStream => {
                         let history = matches!(liveliness.mode(), LivelinessMode::WithHistory);
+                        let capacity = sse_channel_capacity(config.sse_buffer)?;
 
                         let subscription = self
                             .state
                             .zenoh()
-                            .subscribe_liveliness(key, config.sse_buffer.max(1), history)
+                            .subscribe_liveliness(key, capacity, history)
                             .await?;
 
                         Ok(sse_response(subscription, config.sse_keep_alive))
                     },
+
                     NegotiatedResponse::Api(body_format) => {
                         if liveliness.raw_response().is_raw() {
                             let reply = self
@@ -193,16 +203,24 @@ impl ZenohRestService {
                 .unwrap_or_default()
                 .to_owned(),
         );
+
         let selector = Selector::owned(key.clone(), parameters);
 
-        let mut request = ZenohQueryRequest::new(selector, timeout, options.consolidation().into());
+        let request = ZenohQueryRequest::new(selector, timeout, options.consolidation().into());
 
-        if !body.is_empty() {
-            let transport = metadata.into_transport(Encoding::default());
-            request = request.with_payload(body, transport.encoding, transport.attachment);
+        if body.is_empty() {
+            return request;
         }
 
-        request
+        let transport = metadata.into_transport(Encoding::default());
+
+        let mut payload = ZenohRequestPayload::new(body, transport.encoding);
+
+        if let Some(attachment) = transport.attachment {
+            payload = payload.with_attachment(attachment);
+        }
+
+        request.with_payload(payload)
     }
 
     fn ensure_empty_body(&self, body: &Bytes, message: &'static str) -> AppResult<()> {
@@ -232,9 +250,14 @@ pub(crate) struct ZenohRestAdminSpaceResponse {
     write: bool,
 }
 
+fn sse_channel_capacity(buffer: usize) -> AppResult<ChannelCapacity> {
+    ChannelCapacity::try_from(buffer.max(1))
+}
+
 fn render_replies(body_format: ApiBodyFormat, replies: Vec<Reply>) -> Response {
     match body_format {
         ApiBodyFormat::Html => html_api_response(&replies),
+
         ApiBodyFormat::Json => {
             let samples = replies
                 .iter()

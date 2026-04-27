@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -6,19 +7,20 @@ use zenoh::bytes::Encoding;
 use zenoh::query::Reply;
 
 use super::access::{
-    SessionLease, SupervisorSignal, ZenohQueryRequest, ZenohSubscription,
+    ChannelCapacity, CurrentSession, ZenohQueryRequest, ZenohSubscription,
     declare_liveliness_subscription, declare_subscription, execute_liveliness_get_collect,
     execute_liveliness_get_first, execute_query_collect, execute_query_first,
 };
 use super::{KeyExpression, ZenohEvent, ZenohStatus};
 use crate::error::{AppError, AppResult};
+use crate::zenoh::supervisor::SupervisorSignal;
 
 #[derive(Clone)]
 pub struct ZenohHandle {
     pub(super) commands: mpsc::Sender<Command>,
     pub(super) signals: mpsc::Sender<SupervisorSignal>,
     status: watch::Receiver<ZenohStatus>,
-    session: watch::Receiver<Option<SessionLease>>,
+    session: watch::Receiver<Option<CurrentSession>>,
     events: broadcast::Sender<ZenohEvent>,
 }
 
@@ -27,16 +29,18 @@ impl ZenohHandle {
         commands: mpsc::Sender<Command>,
         signals: mpsc::Sender<SupervisorSignal>,
         status: watch::Receiver<ZenohStatus>,
-        session: watch::Receiver<Option<SessionLease>>,
+        session: watch::Receiver<Option<CurrentSession>>,
         events: broadcast::Sender<ZenohEvent>,
     ) -> Self {
         Self { commands, signals, status, session, events }
     }
 
+    #[must_use]
     pub fn status_snapshot(&self) -> ZenohStatus {
         self.status.borrow().clone()
     }
 
+    #[must_use]
     pub fn subscribe_status(&self) -> watch::Receiver<ZenohStatus> {
         self.status.clone()
     }
@@ -61,96 +65,108 @@ impl ZenohHandle {
         encoding: Encoding,
         attachment: Option<Bytes>,
     ) -> AppResult<()> {
-        let (respond_to, response) = oneshot::channel();
-        self.commands
-            .send(Command::Publish { key, payload, encoding, attachment, respond_to })
-            .await
-            .map_err(|_| {
-                AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
-            })?;
-
-        response.await.map_err(|_| {
-            AppError::service_unavailable("Zenoh supervisor stopped before completing the request.")
-        })?
+        self.send_unit_command(|respond_to| Command::Publish {
+            key,
+            payload,
+            encoding,
+            attachment,
+            respond_to,
+        })
+        .await
     }
 
     pub async fn delete(&self, key: KeyExpression) -> AppResult<()> {
-        let (respond_to, response) = oneshot::channel();
-        self.commands
-            .send(Command::Delete { key, respond_to })
+        self.send_unit_command(|respond_to| Command::Delete { key, respond_to })
             .await
-            .map_err(|_| {
-                AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
-            })?;
-
-        response.await.map_err(|_| {
-            AppError::service_unavailable("Zenoh supervisor stopped before completing the request.")
-        })?
     }
 
     pub(crate) async fn query(&self, request: ZenohQueryRequest) -> AppResult<Vec<Reply>> {
         let session = self.connected_session()?;
+
         self.finish_session_operation(execute_query_collect(&session, request).await)
     }
 
     pub(crate) async fn query_first(&self, request: ZenohQueryRequest) -> AppResult<Option<Reply>> {
         let session = self.connected_session()?;
+
         self.finish_session_operation(execute_query_first(&session, request).await)
     }
 
     pub(crate) async fn liveliness_query(
         &self,
         key: &KeyExpression,
-        timeout: std::time::Duration,
+        timeout: Duration,
     ) -> AppResult<Vec<Reply>> {
         let session = self.connected_session()?;
+
         self.finish_session_operation(execute_liveliness_get_collect(&session, key, timeout).await)
     }
 
     pub(crate) async fn liveliness_query_first(
         &self,
         key: &KeyExpression,
-        timeout: std::time::Duration,
+        timeout: Duration,
     ) -> AppResult<Option<Reply>> {
         let session = self.connected_session()?;
+
         self.finish_session_operation(execute_liveliness_get_first(&session, key, timeout).await)
     }
 
     pub(crate) async fn subscribe(
         &self,
         key: &KeyExpression,
-        buffer: usize,
+        capacity: ChannelCapacity,
     ) -> AppResult<ZenohSubscription> {
         let session = self.connected_session()?;
-        self.finish_session_operation(declare_subscription(&session, key, buffer).await)
+
+        self.finish_session_operation(declare_subscription(&session, key, capacity).await)
     }
 
     pub(crate) async fn subscribe_liveliness(
         &self,
         key: &KeyExpression,
-        buffer: usize,
+        capacity: ChannelCapacity,
         history: bool,
     ) -> AppResult<ZenohSubscription> {
         let session = self.connected_session()?;
+
         self.finish_session_operation(
-            declare_liveliness_subscription(&session, key, buffer, history).await,
+            declare_liveliness_subscription(&session, key, capacity, history).await,
         )
     }
 
     #[must_use]
-    pub(crate) fn session_snapshot(&self) -> Option<SessionLease> {
+    pub(crate) fn session_snapshot(&self) -> Option<CurrentSession> {
         self.session.borrow().clone()
     }
 
-    pub(crate) fn connected_session(&self) -> AppResult<SessionLease> {
+    pub(crate) fn connected_session(&self) -> AppResult<CurrentSession> {
         self.session_snapshot()
             .ok_or_else(|| AppError::service_unavailable("Zenoh session is not connected."))
+    }
+
+    async fn send_unit_command(
+        &self,
+        command: impl FnOnce(oneshot::Sender<AppResult<()>>) -> Command,
+    ) -> AppResult<()> {
+        let (respond_to, response) = oneshot::channel();
+
+        self.commands
+            .send(command(respond_to))
+            .await
+            .map_err(|_| {
+                AppError::service_unavailable("Zenoh supervisor is not accepting requests.")
+            })?;
+
+        response.await.map_err(|_| {
+            AppError::service_unavailable("Zenoh supervisor stopped before completing the request.")
+        })?
     }
 
     fn report_session_fault(&self, error: &AppError) {
         if let Err(send_error) = self
             .signals
-            .try_send(SupervisorSignal::SessionFault { message: error.to_string() })
+            .try_send(SupervisorSignal::OperationFailed { message: error.to_string() })
         {
             tracing::trace!(error = %send_error, "failed to report Zenoh session fault");
         }

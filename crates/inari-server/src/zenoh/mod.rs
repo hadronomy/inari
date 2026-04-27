@@ -6,7 +6,9 @@ mod session;
 mod status;
 mod supervisor;
 
-pub(crate) use access::{ZenohQueryRequest, ZenohSubscription};
+pub(crate) use access::{
+    ChannelCapacity, ZenohQueryRequest, ZenohRequestPayload, ZenohSubscription,
+};
 pub use handle::ZenohHandle;
 pub(crate) use reply::{ZenohJsonSample, reply_to_json_sample, sample_to_json_sample};
 pub use status::{ZenohConnectionState, ZenohEvent, ZenohStatus};

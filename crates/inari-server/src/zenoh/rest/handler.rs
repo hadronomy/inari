@@ -69,7 +69,7 @@ async fn shed_excess_zenoh_rest_requests(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    let Ok(_permit) = state.try_acquire_zenoh_rest_query_permit() else {
+    let Ok(_permit) = state.try_acquire_zenoh_rest_requests_permit() else {
         return (StatusCode::SERVICE_UNAVAILABLE, [("retry-after", "1")], "busy\n").into_response();
     };
 

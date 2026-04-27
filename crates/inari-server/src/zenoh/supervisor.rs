@@ -1,16 +1,23 @@
+use std::num::NonZeroU64;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::{select, time};
 use zenoh::Session;
 
-use super::access::{SessionLease, SupervisorSignal};
+use super::access::CurrentSession;
 use super::handle::{Command, ZenohHandle};
 use super::session::{close_session, delete, open_session, publish};
 use super::{ZenohEvent, ZenohStatus};
 use crate::config::ZenohConfig;
 use crate::error::{AppError, AppResult};
 use crate::shutdown::ShutdownCoordinator;
+use crate::zenoh::access::Generation;
+
+#[derive(Debug)]
+pub(crate) enum SupervisorSignal {
+    OperationFailed { message: String },
+}
 
 #[derive(Debug)]
 pub struct ZenohSupervisor {
@@ -57,8 +64,7 @@ impl ZenohSupervisor {
             },
 
             SupervisorMode::Enabled(config) => {
-                let machine = Supervisor::<Disconnected>::initial(config, io, publisher);
-                Machine::Disconnected(machine)
+                EnabledSupervisor::initial(config, io, publisher)
                     .run(shutdown)
                     .await
             },
@@ -74,10 +80,7 @@ enum SupervisorMode {
 
 impl From<ZenohConfig> for SupervisorMode {
     fn from(config: ZenohConfig) -> Self {
-        match EnabledZenohConfig::try_from(config) {
-            Ok(config) => Self::Enabled(config),
-            Err(_config) => Self::Disabled,
-        }
+        if config.enabled { Self::Enabled(EnabledZenohConfig::new(config)) } else { Self::Disabled }
     }
 }
 
@@ -90,29 +93,23 @@ struct EnabledZenohConfig {
 impl EnabledZenohConfig {
     const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
+    fn new(config: ZenohConfig) -> Self {
+        debug_assert!(config.enabled);
+
+        Self {
+            retry_interval: config
+                .open_retry_interval
+                .max(Self::MIN_RETRY_INTERVAL),
+            raw: config,
+        }
+    }
+
     fn raw(&self) -> &ZenohConfig {
         &self.raw
     }
 
     fn retry_interval(&self) -> Duration {
         self.retry_interval
-    }
-}
-
-impl TryFrom<ZenohConfig> for EnabledZenohConfig {
-    type Error = ZenohConfig;
-
-    fn try_from(config: ZenohConfig) -> Result<Self, Self::Error> {
-        if !config.enabled {
-            return Err(config);
-        }
-
-        Ok(Self {
-            retry_interval: config
-                .retry_interval
-                .max(Self::MIN_RETRY_INTERVAL),
-            raw: config,
-        })
     }
 }
 
@@ -162,7 +159,7 @@ impl DisabledSupervisor {
 
                 DisabledEvent::Command(Some(command)) => {
                     self.publisher
-                        .record(CommandRequested::from(&command));
+                        .record(command.requested_event());
                     command.reject_unavailable("Zenoh integration is disabled.");
                 },
 
@@ -170,8 +167,7 @@ impl DisabledSupervisor {
             }
         }
 
-        self.publisher
-            .enter(&ShuttingDown::without_active());
+        self.publisher.enter(&ShuttingDown);
 
         Ok(())
     }
@@ -184,308 +180,241 @@ enum DisabledEvent {
     Command(Option<Command>),
 }
 
-// === Enabled typestate machine ==============================================
+// === Enabled supervisor ======================================================
 
 #[derive(Debug)]
-enum Machine {
-    Disconnected(Supervisor<Disconnected>),
-    Connecting(Supervisor<Connecting>),
-    Connected(Supervisor<Connected>),
-    Reconnecting(Supervisor<Reconnecting>),
-    Degraded(Supervisor<Degraded>),
-    ShuttingDown(Supervisor<ShuttingDown>),
+struct EnabledSupervisor {
+    config: EnabledZenohConfig,
+    io: RuntimeIo,
+    publisher: RuntimePublisher,
+    attempts: AttemptCounter,
+    generation: Generation,
+    signals_closed: bool,
 }
 
-impl Machine {
-    async fn run(self, shutdown: ShutdownCoordinator) -> AppResult<()> {
-        let mut machine = self;
+impl EnabledSupervisor {
+    fn initial(config: EnabledZenohConfig, io: RuntimeIo, publisher: RuntimePublisher) -> Self {
+        Self {
+            config,
+            io,
+            publisher,
+            attempts: AttemptCounter::new(),
+            generation: Generation::ZERO,
+            signals_closed: false,
+        }
+    }
+
+    async fn run(mut self, shutdown: ShutdownCoordinator) -> AppResult<()> {
+        let first_attempt = self.next_attempt();
+        let mut state = self.enter(State::Opening(Opening { attempt: first_attempt }));
 
         loop {
-            machine = match machine {
-                Self::Disconnected(supervisor) => supervisor.step(&shutdown).await?,
-                Self::Connecting(supervisor) => supervisor.step(&shutdown).await?,
-                Self::Connected(supervisor) => supervisor.step(&shutdown).await?,
-                Self::Reconnecting(supervisor) => supervisor.step(&shutdown).await?,
-                Self::Degraded(supervisor) => supervisor.step(&shutdown).await?,
+            state = match state {
+                State::Opening(opening) => {
+                    self.step_opening(opening, &shutdown)
+                        .await
+                },
 
-                Self::ShuttingDown(supervisor) => {
-                    supervisor.finish().await;
+                State::Ready(ready) => self.step_ready(ready, &shutdown).await,
+
+                State::Degraded(degraded) => {
+                    self.step_degraded(degraded, &shutdown)
+                        .await
+                },
+
+                State::ShuttingDown(shutting_down) => {
+                    self.finish_shutdown(shutting_down)
+                        .await;
                     return Ok(());
                 },
             };
         }
     }
-}
 
-#[derive(Debug)]
-struct Supervisor<S> {
-    core: MachineCore,
-    state: S,
-}
+    async fn step_opening(&mut self, opening: Opening, shutdown: &ShutdownCoordinator) -> State {
+        let event = select! {
+            biased;
 
-impl Supervisor<Disconnected> {
-    fn initial(config: EnabledZenohConfig, io: RuntimeIo, publisher: RuntimePublisher) -> Self {
-        Self {
-            core: MachineCore {
-                config,
-                io,
-                publisher,
-                attempt: Attempt::ZERO,
-                generation: Generation::ZERO,
-                signals_closed: false,
+            _ = shutdown.wait_for_shutdown() => OpeningEvent::Shutdown,
+
+            result = open_session(self.config.raw()) => {
+                OpeningEvent::Opened(result)
+            }
+        };
+
+        match event {
+            OpeningEvent::Shutdown => {
+                self.enter(State::ShuttingDown(ShuttingDownState { session: None }))
             },
-            state: Disconnected::now(),
+
+            OpeningEvent::Opened(Ok(session)) => {
+                let generation = self.next_generation();
+                let lease = CurrentSession::new(session, generation);
+
+                self.enter(State::Ready(Ready { session: lease, attempt: opening.attempt }))
+            },
+
+            OpeningEvent::Opened(Err(error)) => self.enter(State::Degraded(Degraded::after(
+                opening.attempt,
+                error.to_string(),
+                self.config.retry_interval(),
+            ))),
         }
     }
-}
 
-impl<S> Supervisor<S> {
-    fn enter<T>(self, state: T) -> Supervisor<T>
-    where
-        T: PublishState,
-    {
-        let Self { mut core, .. } = self;
+    async fn step_ready(&mut self, ready: Ready, shutdown: &ShutdownCoordinator) -> State {
+        let event = select! {
+            biased;
 
-        core.publisher.enter(&state);
+            _ = shutdown.wait_for_shutdown() => ReadyEvent::Shutdown,
 
-        Supervisor { core, state }
+            signal = self.io.signals.recv(), if !self.signals_closed => {
+                ReadyEvent::Signal(signal)
+            }
+
+            command = self.io.commands.recv() => {
+                ReadyEvent::Command(command)
+            }
+        };
+
+        match event {
+            ReadyEvent::Shutdown => {
+                self.enter(State::ShuttingDown(ShuttingDownState { session: Some(ready.session) }))
+            },
+
+            ReadyEvent::Signal(Some(signal)) => self.handle_ready_signal(ready, signal),
+
+            ReadyEvent::Signal(None) => {
+                self.signals_closed = true;
+                State::Ready(ready)
+            },
+
+            ReadyEvent::Command(Some(command)) => {
+                self.handle_ready_command(ready, command)
+                    .await
+            },
+
+            ReadyEvent::Command(None) => {
+                self.enter(State::ShuttingDown(ShuttingDownState { session: Some(ready.session) }))
+            },
+        }
     }
-}
 
-impl<S> Supervisor<S>
-where
-    S: IntoShuttingDown,
-{
-    fn into_shutdown_machine(self) -> Machine {
-        let Self { mut core, state } = self;
-        let state = state.into_shutting_down();
-
-        core.publisher.enter(&state);
-
-        Machine::ShuttingDown(Supervisor { core, state })
-    }
-}
-
-impl<S> Supervisor<S>
-where
-    S: BackoffState + IntoShuttingDown,
-{
-    async fn run_backoff(mut self, shutdown: &ShutdownCoordinator) -> AppResult<Machine> {
-        let sleep = time::sleep_until(self.state.next_attempt_at());
+    async fn step_degraded(&mut self, degraded: Degraded, shutdown: &ShutdownCoordinator) -> State {
+        let sleep = time::sleep_until(degraded.retry_at);
         tokio::pin!(sleep);
 
         let event = select! {
             biased;
 
-            _ = shutdown.wait_for_shutdown() => BackoffEvent::Shutdown,
+            _ = shutdown.wait_for_shutdown() => DegradedEvent::Shutdown,
 
-            signal = self.core.io.signals.recv(), if !self.core.signals_closed => {
-                BackoffEvent::Signal(signal)
+            signal = self.io.signals.recv(), if !self.signals_closed => {
+                DegradedEvent::Signal(signal)
             }
 
-            command = self.core.io.commands.recv() => {
-                BackoffEvent::Command(command)
+            command = self.io.commands.recv() => {
+                DegradedEvent::Command(command)
             }
 
-            _ = &mut sleep => BackoffEvent::Retry,
+            _ = &mut sleep => DegradedEvent::Retry,
         };
 
         match event {
-            BackoffEvent::Shutdown => Ok(self.into_shutdown_machine()),
-
-            BackoffEvent::Signal(Some(signal)) => {
-                self.state.ignore_signal(signal);
-                Ok(S::machine(self))
+            DegradedEvent::Shutdown => {
+                self.enter(State::ShuttingDown(ShuttingDownState { session: None }))
             },
 
-            BackoffEvent::Signal(None) => {
-                self.core.signals_closed = true;
-                Ok(S::machine(self))
+            DegradedEvent::Signal(Some(signal)) => {
+                degraded.ignore_signal(signal);
+                State::Degraded(degraded)
             },
 
-            BackoffEvent::Command(Some(command)) => {
-                self.core
-                    .publisher
-                    .record(CommandRequested::from(&command));
-                command.reject_unavailable(self.state.unavailable_message());
-
-                Ok(S::machine(self))
+            DegradedEvent::Signal(None) => {
+                self.signals_closed = true;
+                State::Degraded(degraded)
             },
 
-            BackoffEvent::Command(None) => Ok(self.into_shutdown_machine()),
+            DegradedEvent::Command(Some(command)) => {
+                self.publisher
+                    .record(command.requested_event());
+                command.reject_unavailable(degraded.unavailable_message());
 
-            BackoffEvent::Retry => {
-                let attempt = self.core.next_attempt();
-                let connecting = Connecting { attempt };
+                State::Degraded(degraded)
+            },
 
-                Ok(Machine::Connecting(self.enter(connecting)))
+            DegradedEvent::Command(None) => {
+                self.enter(State::ShuttingDown(ShuttingDownState { session: None }))
+            },
+
+            DegradedEvent::Retry => {
+                let attempt = self.next_attempt();
+
+                self.enter(State::Opening(Opening { attempt }))
             },
         }
     }
-}
 
-impl Supervisor<Disconnected> {
-    async fn step(self, shutdown: &ShutdownCoordinator) -> AppResult<Machine> {
-        self.run_backoff(shutdown).await
-    }
-}
-
-impl Supervisor<Reconnecting> {
-    async fn step(self, shutdown: &ShutdownCoordinator) -> AppResult<Machine> {
-        self.run_backoff(shutdown).await
-    }
-}
-
-impl Supervisor<Degraded> {
-    async fn step(self, shutdown: &ShutdownCoordinator) -> AppResult<Machine> {
-        self.run_backoff(shutdown).await
-    }
-}
-
-impl Supervisor<Connecting> {
-    async fn step(self, shutdown: &ShutdownCoordinator) -> AppResult<Machine> {
-        let event = select! {
-            biased;
-
-            _ = shutdown.wait_for_shutdown() => ConnectingEvent::Shutdown,
-
-            result = open_session(self.core.config.raw()) => {
-                ConnectingEvent::Opened(result)
-            }
-        };
-
-        match event {
-            ConnectingEvent::Shutdown => Ok(self.into_shutdown_machine()),
-
-            ConnectingEvent::Opened(Ok(session)) => {
-                let attempt = self.state.attempt;
-                let mut supervisor = self;
-                let generation = supervisor.core.next_generation();
-
-                let connected = Connected::new(ActiveSession::new(session, generation), attempt);
-
-                Ok(Machine::Connected(supervisor.enter(connected)))
-            },
-
-            ConnectingEvent::Opened(Err(error)) => {
-                let attempt = self.state.attempt;
-                let retry_interval = self.core.config.retry_interval();
-
-                let degraded = Degraded::after(attempt, error.to_string(), retry_interval);
-
-                Ok(Machine::Degraded(self.enter(degraded)))
-            },
+    async fn finish_shutdown(&mut self, shutting_down: ShuttingDownState) {
+        if let Some(session) = shutting_down.session {
+            close_session(session.session().clone()).await;
         }
     }
-}
 
-impl Supervisor<Connected> {
-    async fn step(mut self, shutdown: &ShutdownCoordinator) -> AppResult<Machine> {
-        let event = select! {
-            biased;
+    fn handle_ready_signal(&mut self, ready: Ready, signal: SupervisorSignal) -> State {
+        match signal {
+            SupervisorSignal::OperationFailed { message } => {
+                if ready.session.session().is_closed() {
+                    self.enter(State::Degraded(Degraded::after(
+                        ready.attempt,
+                        message,
+                        self.config.retry_interval(),
+                    )))
+                } else {
+                    tracing::trace!(
+                        component = "zenoh",
+                        state = "ready",
+                        generation = u64::from(ready.session.generation()),
+                        error = %message,
+                        "ignoring Zenoh supervisor signal because the session remains open"
+                    );
 
-            _ = shutdown.wait_for_shutdown() => ConnectedEvent::Shutdown,
-
-            signal = self.core.io.signals.recv(), if !self.core.signals_closed => {
-                ConnectedEvent::Signal(signal)
-            }
-
-            command = self.core.io.commands.recv() => {
-                ConnectedEvent::Command(command)
-            }
-        };
-
-        match event {
-            ConnectedEvent::Shutdown => Ok(self.into_shutdown_machine()),
-
-            ConnectedEvent::Signal(Some(signal)) => match signal {
-                SupervisorSignal::SessionFault { message } => self.into_reconnecting(message).await,
-            },
-
-            ConnectedEvent::Signal(None) => {
-                self.core.signals_closed = true;
-                Ok(Machine::Connected(self))
-            },
-
-            ConnectedEvent::Command(Some(command)) => {
-                self.core
-                    .publisher
-                    .record(CommandRequested::from(&command));
-
-                let reconnect_reason = command
-                    .execute_connected(self.state.active.session())
-                    .await;
-
-                match reconnect_reason {
-                    Some(reason) => self.into_reconnecting(reason).await,
-                    None => Ok(Machine::Connected(self)),
+                    State::Ready(ready)
                 }
             },
-
-            ConnectedEvent::Command(None) => Ok(self.into_shutdown_machine()),
         }
     }
 
-    async fn into_reconnecting(self, reason: String) -> AppResult<Machine> {
-        let Supervisor { mut core, state } = self;
+    async fn handle_ready_command(&mut self, ready: Ready, command: Command) -> State {
+        self.publisher
+            .record(command.requested_event());
 
-        let retry_interval = core.config.retry_interval();
-        let (active, transitioned) = state.into_reconnecting(reason, retry_interval);
-        let reconnecting = transitioned.into_state();
+        let outcome = command
+            .execute_ready(ready.session.session())
+            .await;
 
-        core.publisher.enter(&reconnecting);
+        if outcome.session_closed {
+            let message = outcome
+                .error
+                .unwrap_or_else(|| "Zenoh session is closed.".to_owned());
 
-        active.close().await;
-
-        Ok(Machine::Reconnecting(Supervisor { core, state: reconnecting }))
-    }
-}
-
-impl Supervisor<ShuttingDown> {
-    async fn finish(self) {
-        if let Some(active) = self.state.active {
-            active.close().await;
+            return self.enter(State::Degraded(Degraded::after(
+                ready.attempt,
+                message,
+                self.config.retry_interval(),
+            )));
         }
+
+        State::Ready(ready)
     }
-}
 
-#[derive(Debug)]
-enum BackoffEvent {
-    Shutdown,
-    Signal(Option<SupervisorSignal>),
-    Command(Option<Command>),
-    Retry,
-}
+    fn enter(&mut self, state: State) -> State {
+        self.publisher.enter(&state);
+        state
+    }
 
-#[derive(Debug)]
-enum ConnectingEvent {
-    Shutdown,
-    Opened(AppResult<Session>),
-}
-
-#[derive(Debug)]
-enum ConnectedEvent {
-    Shutdown,
-    Signal(Option<SupervisorSignal>),
-    Command(Option<Command>),
-}
-
-// === Machine core ============================================================
-
-#[derive(Debug)]
-struct MachineCore {
-    config: EnabledZenohConfig,
-    io: RuntimeIo,
-    publisher: RuntimePublisher,
-    attempt: Attempt,
-    generation: Generation,
-    signals_closed: bool,
-}
-
-impl MachineCore {
     fn next_attempt(&mut self) -> Attempt {
-        self.attempt = self.attempt.next();
-        self.attempt
+        self.attempts.next()
     }
 
     fn next_generation(&mut self) -> Generation {
@@ -495,21 +424,96 @@ impl MachineCore {
 }
 
 #[derive(Debug)]
+enum OpeningEvent {
+    Shutdown,
+    Opened(AppResult<Session>),
+}
+
+#[derive(Debug)]
+enum ReadyEvent {
+    Shutdown,
+    Signal(Option<SupervisorSignal>),
+    Command(Option<Command>),
+}
+
+#[derive(Debug)]
+enum DegradedEvent {
+    Shutdown,
+    Signal(Option<SupervisorSignal>),
+    Command(Option<Command>),
+    Retry,
+}
+
+#[derive(Debug)]
 struct RuntimeIo {
     commands: mpsc::Receiver<Command>,
     signals: mpsc::Receiver<SupervisorSignal>,
 }
 
+// === Runtime states ==========================================================
+
+#[derive(Debug)]
+enum State {
+    Opening(Opening),
+    Ready(Ready),
+    Degraded(Degraded),
+    ShuttingDown(ShuttingDownState),
+}
+
+#[derive(Debug)]
+struct Opening {
+    attempt: Attempt,
+}
+
+#[derive(Debug)]
+struct Ready {
+    session: CurrentSession,
+    attempt: Attempt,
+}
+
+#[derive(Debug)]
+struct Degraded {
+    attempt: Attempt,
+    error: String,
+    retry_at: time::Instant,
+}
+
+impl Degraded {
+    fn after(attempt: Attempt, error: String, delay: Duration) -> Self {
+        Self { attempt, error, retry_at: time::Instant::now() + delay }
+    }
+
+    fn unavailable_message(&self) -> &'static str {
+        "Zenoh session is unavailable."
+    }
+
+    fn ignore_signal(&self, signal: SupervisorSignal) {
+        match signal {
+            SupervisorSignal::OperationFailed { message } => {
+                tracing::trace!(
+                    component = "zenoh",
+                    state = "degraded",
+                    attempt = u64::from(self.attempt),
+                    current_error = %self.error,
+                    error = %message,
+                    "ignoring Zenoh supervisor signal while degraded"
+                );
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ShuttingDownState {
+    session: Option<CurrentSession>,
+}
+
 // === Runtime publication =====================================================
-//
-// This is intentionally dumb. It cannot invent lifecycle transitions.
-// It can only publish typed lifecycle states that implement PublishState,
-// or typed non-state records that implement EventRecord.
 
 #[derive(Debug)]
 struct RuntimePublisher {
     status: watch::Sender<ZenohStatus>,
-    session: watch::Sender<Option<SessionLease>>,
+    session: watch::Sender<Option<CurrentSession>>,
     events: broadcast::Sender<ZenohEvent>,
     clock: StateClock,
 }
@@ -527,7 +531,7 @@ impl RuntimePublisher {
             .send_replace(publication.session.into_option());
 
         if let Some(event) = publication.event {
-            self.send_event(event);
+            self.record(event);
         }
 
         publication
@@ -535,16 +539,12 @@ impl RuntimePublisher {
             .emit(self.clock.take_elapsed_ms());
     }
 
-    fn record<E>(&self, event: E)
-    where
-        E: EventRecord,
-    {
-        self.send_event(event.into_event());
-    }
-
-    fn send_event(&self, event: ZenohEvent) {
+    fn record(&self, event: ZenohEvent) {
         if let Err(error) = self.events.send(event) {
-            tracing::trace!(event = %error.0, "dropping Zenoh event without subscribers");
+            tracing::trace!(
+                event = %error.0,
+                "dropping Zenoh event without subscribers"
+            );
         }
     }
 }
@@ -581,11 +581,11 @@ struct Publication {
 #[derive(Debug)]
 enum SessionSnapshot {
     Disconnected,
-    Connected(SessionLease),
+    Connected(CurrentSession),
 }
 
 impl SessionSnapshot {
-    fn into_option(self) -> Option<SessionLease> {
+    fn into_option(self) -> Option<CurrentSession> {
         match self {
             Self::Disconnected => None,
             Self::Connected(session) => Some(session),
@@ -599,8 +599,7 @@ enum LogRecord {
     Connecting { attempt: Attempt },
     Reconnecting { attempt: Attempt },
     Connected { attempt: Attempt, zid: String },
-    OpenFailed { attempt: Attempt, error: String },
-    SessionLost { attempt: Attempt, error: String },
+    Degraded { attempt: Attempt, error: String },
     ShuttingDown,
 }
 
@@ -622,7 +621,7 @@ impl LogRecord {
                     state = "connecting",
                     attempt = u64::from(attempt),
                     state_elapsed_ms,
-                    "zenoh connection attempt started"
+                    "zenoh session opening"
                 );
             },
 
@@ -632,7 +631,7 @@ impl LogRecord {
                     state = "reconnecting",
                     attempt = u64::from(attempt),
                     state_elapsed_ms,
-                    "zenoh reconnection attempt started"
+                    "zenoh session reopening after failed open or closed session"
                 );
             },
 
@@ -643,29 +642,18 @@ impl LogRecord {
                     attempt = u64::from(attempt),
                     zid,
                     state_elapsed_ms,
-                    "zenoh session established"
+                    "zenoh session available"
                 );
             },
 
-            Self::OpenFailed { attempt, error } => {
+            Self::Degraded { attempt, error } => {
                 tracing::warn!(
                     component = "zenoh",
                     state = "degraded",
                     attempt = u64::from(attempt),
                     error,
                     state_elapsed_ms,
-                    "zenoh session open failed"
-                );
-            },
-
-            Self::SessionLost { attempt, error } => {
-                tracing::warn!(
-                    component = "zenoh",
-                    state = "reconnecting",
-                    attempt = u64::from(attempt),
-                    error,
-                    state_elapsed_ms,
-                    "zenoh session lost"
+                    "zenoh session unavailable"
                 );
             },
 
@@ -681,55 +669,14 @@ impl LogRecord {
     }
 }
 
-// === Sealed lifecycle/event traits ==========================================
+// === Lifecycle publication ===================================================
 
-mod sealed {
-    pub trait Sealed {}
-}
-
-trait PublishState: sealed::Sealed {
+trait PublishState {
     fn publication(&self) -> Publication;
 }
 
-trait EventRecord: sealed::Sealed {
-    fn into_event(self) -> ZenohEvent;
-}
-
-trait IntoShuttingDown: sealed::Sealed + Sized {
-    fn into_shutting_down(self) -> ShuttingDown;
-}
-
-trait BackoffState: sealed::Sealed + Sized {
-    const STATE_NAME: &'static str;
-
-    fn next_attempt_at(&self) -> time::Instant;
-
-    fn unavailable_message(&self) -> &'static str {
-        "Zenoh session is not connected."
-    }
-
-    fn ignore_signal(&self, signal: SupervisorSignal) {
-        match signal {
-            SupervisorSignal::SessionFault { message } => {
-                tracing::trace!(
-                    component = "zenoh",
-                    state = Self::STATE_NAME,
-                    error = %message,
-                    "ignoring Zenoh session fault without an active session"
-                );
-            },
-        }
-    }
-
-    fn machine(supervisor: Supervisor<Self>) -> Machine;
-}
-
-// === Typed lifecycle states ==================================================
-
 #[derive(Debug)]
 struct Disabled;
-
-impl sealed::Sealed for Disabled {}
 
 impl PublishState for Disabled {
     fn publication(&self) -> Publication {
@@ -743,224 +690,7 @@ impl PublishState for Disabled {
 }
 
 #[derive(Debug)]
-struct Disconnected {
-    next_attempt_at: time::Instant,
-}
-
-impl Disconnected {
-    fn now() -> Self {
-        Self { next_attempt_at: time::Instant::now() }
-    }
-}
-
-impl sealed::Sealed for Disconnected {}
-
-impl BackoffState for Disconnected {
-    const STATE_NAME: &'static str = "disconnected";
-
-    fn next_attempt_at(&self) -> time::Instant {
-        self.next_attempt_at
-    }
-
-    fn machine(supervisor: Supervisor<Self>) -> Machine {
-        Machine::Disconnected(supervisor)
-    }
-}
-
-impl IntoShuttingDown for Disconnected {
-    fn into_shutting_down(self) -> ShuttingDown {
-        ShuttingDown::without_active()
-    }
-}
-
-#[derive(Debug)]
-struct Connecting {
-    attempt: Attempt,
-}
-
-impl sealed::Sealed for Connecting {}
-
-impl PublishState for Connecting {
-    fn publication(&self) -> Publication {
-        if self.attempt.is_first() {
-            return Publication {
-                status: ZenohStatus::starting(self.attempt.into()),
-                session: SessionSnapshot::Disconnected,
-                event: Some(ZenohEvent::Connecting { attempt: self.attempt.into() }),
-                log: LogRecord::Connecting { attempt: self.attempt },
-            };
-        }
-
-        let message = "Retrying Zenoh session establishment.".to_owned();
-
-        Publication {
-            status: ZenohStatus::reconnecting(self.attempt.into(), message.clone()),
-            session: SessionSnapshot::Disconnected,
-            event: Some(ZenohEvent::Reconnecting { attempt: self.attempt.into(), message }),
-            log: LogRecord::Reconnecting { attempt: self.attempt },
-        }
-    }
-}
-
-impl IntoShuttingDown for Connecting {
-    fn into_shutting_down(self) -> ShuttingDown {
-        ShuttingDown::without_active()
-    }
-}
-
-#[derive(Debug)]
-struct Connected {
-    active: ActiveSession,
-    attempt: Attempt,
-}
-
-impl Connected {
-    fn new(active: ActiveSession, attempt: Attempt) -> Self {
-        Self { active, attempt }
-    }
-
-    fn into_reconnecting(
-        self,
-        reason: String,
-        retry_interval: Duration,
-    ) -> (ActiveSession, Transitioned<Reconnecting>) {
-        let reconnecting = Reconnecting::after(self.attempt, reason, retry_interval);
-
-        (self.active, Transitioned::new(reconnecting))
-    }
-}
-
-impl sealed::Sealed for Connected {}
-
-impl PublishState for Connected {
-    fn publication(&self) -> Publication {
-        let zid = self.active.zid();
-
-        Publication {
-            status: ZenohStatus::connected(self.attempt.into()),
-            session: SessionSnapshot::Connected(self.active.lease()),
-            event: Some(ZenohEvent::Connected { attempt: self.attempt.into() }),
-            log: LogRecord::Connected { attempt: self.attempt, zid },
-        }
-    }
-}
-
-impl IntoShuttingDown for Connected {
-    fn into_shutting_down(self) -> ShuttingDown {
-        ShuttingDown::with_active(self.active)
-    }
-}
-
-#[derive(Debug)]
-struct Reconnecting {
-    attempt: Attempt,
-    reason: String,
-    next_attempt_at: time::Instant,
-}
-
-impl Reconnecting {
-    fn after(attempt: Attempt, reason: String, delay: Duration) -> Self {
-        Self { attempt, reason, next_attempt_at: time::Instant::now() + delay }
-    }
-}
-
-impl sealed::Sealed for Reconnecting {}
-
-impl PublishState for Reconnecting {
-    fn publication(&self) -> Publication {
-        Publication {
-            status: ZenohStatus::reconnecting(self.attempt.into(), self.reason.clone()),
-            session: SessionSnapshot::Disconnected,
-            event: Some(ZenohEvent::Reconnecting {
-                attempt: self.attempt.into(),
-                message: self.reason.clone(),
-            }),
-            log: LogRecord::SessionLost { attempt: self.attempt, error: self.reason.clone() },
-        }
-    }
-}
-
-impl BackoffState for Reconnecting {
-    const STATE_NAME: &'static str = "reconnecting";
-
-    fn next_attempt_at(&self) -> time::Instant {
-        self.next_attempt_at
-    }
-
-    fn machine(supervisor: Supervisor<Self>) -> Machine {
-        Machine::Reconnecting(supervisor)
-    }
-}
-
-impl IntoShuttingDown for Reconnecting {
-    fn into_shutting_down(self) -> ShuttingDown {
-        ShuttingDown::without_active()
-    }
-}
-
-#[derive(Debug)]
-struct Degraded {
-    attempt: Attempt,
-    error: String,
-    next_attempt_at: time::Instant,
-}
-
-impl Degraded {
-    fn after(attempt: Attempt, error: String, delay: Duration) -> Self {
-        Self { attempt, error, next_attempt_at: time::Instant::now() + delay }
-    }
-}
-
-impl sealed::Sealed for Degraded {}
-
-impl PublishState for Degraded {
-    fn publication(&self) -> Publication {
-        Publication {
-            status: ZenohStatus::degraded(self.attempt.into(), self.error.clone()),
-            session: SessionSnapshot::Disconnected,
-            event: Some(ZenohEvent::Failed {
-                attempt: self.attempt.into(),
-                message: self.error.clone(),
-            }),
-            log: LogRecord::OpenFailed { attempt: self.attempt, error: self.error.clone() },
-        }
-    }
-}
-
-impl BackoffState for Degraded {
-    const STATE_NAME: &'static str = "degraded";
-
-    fn next_attempt_at(&self) -> time::Instant {
-        self.next_attempt_at
-    }
-
-    fn machine(supervisor: Supervisor<Self>) -> Machine {
-        Machine::Degraded(supervisor)
-    }
-}
-
-impl IntoShuttingDown for Degraded {
-    fn into_shutting_down(self) -> ShuttingDown {
-        ShuttingDown::without_active()
-    }
-}
-
-#[derive(Debug)]
-struct ShuttingDown {
-    active: Option<ActiveSession>,
-}
-
-impl ShuttingDown {
-    fn without_active() -> Self {
-        Self { active: None }
-    }
-
-    fn with_active(active: ActiveSession) -> Self {
-        Self { active: Some(active) }
-    }
-}
-
-impl sealed::Sealed for ShuttingDown {}
+struct ShuttingDown;
 
 impl PublishState for ShuttingDown {
     fn publication(&self) -> Publication {
@@ -973,140 +703,123 @@ impl PublishState for ShuttingDown {
     }
 }
 
-// === Linear-ish active session owner ========================================
-
-#[derive(Debug)]
-struct ActiveSession {
-    session: Session,
-    generation: Generation,
-}
-
-impl ActiveSession {
-    fn new(session: Session, generation: Generation) -> Self {
-        Self { session, generation }
-    }
-
-    fn session(&self) -> &Session {
-        &self.session
-    }
-
-    fn zid(&self) -> String {
-        self.session.zid().to_string()
-    }
-
-    fn lease(&self) -> SessionLease {
-        let zid = self.zid();
-
-        SessionLease::new(self.session.clone(), zid, self.generation.into())
-    }
-
-    async fn close(self) {
-        close_session(self.session).await;
+impl PublishState for State {
+    fn publication(&self) -> Publication {
+        match self {
+            Self::Opening(opening) => opening.publication(),
+            Self::Ready(ready) => ready.publication(),
+            Self::Degraded(degraded) => degraded.publication(),
+            Self::ShuttingDown(_) => ShuttingDown.publication(),
+        }
     }
 }
 
-// === Must-use transition wrapper ============================================
+impl Opening {
+    fn publication(&self) -> Publication {
+        if self.attempt.is_first() {
+            return Publication {
+                status: ZenohStatus::starting(self.attempt.into()),
+                session: SessionSnapshot::Disconnected,
+                event: Some(ZenohEvent::Connecting { attempt: self.attempt.into() }),
+                log: LogRecord::Connecting { attempt: self.attempt },
+            };
+        }
 
-#[must_use = "state transitions must be installed back into the machine"]
-#[derive(Debug)]
-struct Transitioned<S> {
-    state: S,
-}
+        let message = "Retrying Zenoh session open.".to_owned();
 
-impl<S> Transitioned<S> {
-    fn new(state: S) -> Self {
-        Self { state }
+        Publication {
+            status: ZenohStatus::reconnecting(self.attempt.into(), message.clone()),
+            session: SessionSnapshot::Disconnected,
+            event: Some(ZenohEvent::Reconnecting { attempt: self.attempt.into(), message }),
+            log: LogRecord::Reconnecting { attempt: self.attempt },
+        }
     }
-
-    fn into_state(self) -> S {
-        self.state
-    }
 }
 
-// === Typed non-state runtime events =========================================
-
-#[derive(Debug)]
-struct CommandRequested {
-    event: ZenohEvent,
-}
-
-impl From<&Command> for CommandRequested {
-    fn from(command: &Command) -> Self {
-        let event = match command {
-            Command::Publish { key, payload, .. } => {
-                ZenohEvent::PublishRequested { bytes: payload.len(), key: key.clone() }
+impl Ready {
+    fn publication(&self) -> Publication {
+        Publication {
+            status: ZenohStatus::connected(self.attempt.into()),
+            session: SessionSnapshot::Connected(self.session.clone()),
+            event: Some(ZenohEvent::Connected { attempt: self.attempt.into() }),
+            log: LogRecord::Connected {
+                attempt: self.attempt,
+                zid: self.session.zid().to_string(),
             },
-
-            Command::Delete { key, .. } => ZenohEvent::DeleteRequested { key: key.clone() },
-        };
-
-        Self { event }
+        }
     }
 }
 
-impl sealed::Sealed for CommandRequested {}
-
-impl EventRecord for CommandRequested {
-    fn into_event(self) -> ZenohEvent {
-        self.event
+impl Degraded {
+    fn publication(&self) -> Publication {
+        Publication {
+            status: ZenohStatus::degraded(self.attempt.into(), self.error.clone()),
+            session: SessionSnapshot::Disconnected,
+            event: Some(ZenohEvent::Failed {
+                attempt: self.attempt.into(),
+                message: self.error.clone(),
+            }),
+            log: LogRecord::Degraded { attempt: self.attempt, error: self.error.clone() },
+        }
     }
 }
 
 // === Domain counters =========================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Attempt(u64);
+struct Attempt(NonZeroU64);
 
 impl Attempt {
-    const ZERO: Self = Self(0);
-
-    fn next(self) -> Self {
-        Self(self.0.saturating_add(1))
-    }
-
     fn is_first(self) -> bool {
-        self.0 == 1
+        self.0.get() == 1
     }
 }
 
 impl From<Attempt> for u64 {
     fn from(attempt: Attempt) -> Self {
-        attempt.0
+        attempt.0.get()
     }
 }
 
-impl From<u64> for Attempt {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AttemptCounter {
+    current: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Generation(u64);
-
-impl Generation {
-    const ZERO: Self = Self(0);
-
-    fn next(self) -> Self {
-        Self(self.0.saturating_add(1))
+impl AttemptCounter {
+    const fn new() -> Self {
+        Self { current: 0 }
     }
-}
 
-impl From<Generation> for u64 {
-    fn from(generation: Generation) -> Self {
-        generation.0
-    }
-}
+    fn next(&mut self) -> Attempt {
+        self.current = self.current.saturating_add(1).max(1);
 
-impl From<Generation> for String {
-    fn from(generation: Generation) -> Self {
-        generation.0.to_string()
+        let value = NonZeroU64::new(self.current)
+            .expect("attempt counter is always non-zero after increment");
+
+        Attempt(value)
     }
 }
 
 // === Command behavior ========================================================
 
+#[derive(Debug)]
+struct CommandOutcome {
+    session_closed: bool,
+    error: Option<String>,
+}
+
 impl Command {
+    fn requested_event(&self) -> ZenohEvent {
+        match self {
+            Self::Publish { key, payload, .. } => {
+                ZenohEvent::PublishRequested { bytes: payload.len(), key: key.clone() }
+            },
+
+            Self::Delete { key, .. } => ZenohEvent::DeleteRequested { key: key.clone() },
+        }
+    }
+
     fn reject_unavailable(self, message: &'static str) {
         match self {
             Self::Publish { respond_to, .. } => {
@@ -1119,30 +832,36 @@ impl Command {
         }
     }
 
-    async fn execute_connected(self, session: &Session) -> Option<String> {
+    async fn execute_ready(self, session: &Session) -> CommandOutcome {
         match self {
             Self::Publish { key, payload, encoding, attachment, respond_to } => {
                 let response = publish(session, &key, payload, encoding, attachment).await;
-                let reconnect_reason = response
+
+                let error = response
                     .as_ref()
                     .err()
                     .map(ToString::to_string);
 
+                let session_closed = session.is_closed();
+
                 let _ = respond_to.send(response);
 
-                reconnect_reason
+                CommandOutcome { session_closed, error }
             },
 
             Self::Delete { key, respond_to } => {
                 let response = delete(session, &key).await;
-                let reconnect_reason = response
+
+                let error = response
                     .as_ref()
                     .err()
                     .map(ToString::to_string);
 
+                let session_closed = session.is_closed();
+
                 let _ = respond_to.send(response);
 
-                reconnect_reason
+                CommandOutcome { session_closed, error }
             },
         }
     }

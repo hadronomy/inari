@@ -29,7 +29,7 @@ struct AppStateInner {
     zenoh: ZenohHandle,
     protocol: Arc<DynProtocolModule>,
     protocol_budget: Budget<ProtocolExecution>,
-    zenoh_rest_query_budget: Budget<ZenohRestQuery>,
+    zenoh_rest_request_budget: Budget<ZenohRestRequest>,
 }
 
 impl fmt::Debug for AppState {
@@ -57,13 +57,13 @@ impl AppState {
             "The protocol execution concurrency limit must be greater than zero.",
         )?;
 
-        let zenoh_rest_query_limit = non_zero_limit(
+        let zenoh_rest_requests_limit = non_zero_limit(
             loaded
                 .settings
                 .http
                 .zenoh_rest
-                .max_concurrent_queries,
-            "The Zenoh REST query concurrency limit must be greater than zero.",
+                .max_concurrent_requests,
+            "The Zenoh REST request concurrency limit must be greater than zero.",
         )?;
 
         let readiness = Readiness::new(ReadinessSnapshot::new(ReadinessComponents::new(
@@ -74,7 +74,7 @@ impl AppState {
         Ok(Self {
             inner: Arc::new(AppStateInner {
                 protocol_budget: Budget::new(protocol_limit),
-                zenoh_rest_query_budget: Budget::new(zenoh_rest_query_limit),
+                zenoh_rest_request_budget: Budget::new(zenoh_rest_requests_limit),
                 loaded,
                 started_at: Utc::now(),
                 started_at_instant: Instant::now(),
@@ -143,9 +143,9 @@ impl AppState {
             .await
     }
 
-    pub fn try_acquire_zenoh_rest_query_permit(&self) -> Result<ZenohRestQueryPermit, AppError> {
+    pub fn try_acquire_zenoh_rest_requests_permit(&self) -> Result<ZenohRestQueryPermit, AppError> {
         self.inner
-            .zenoh_rest_query_budget
+            .zenoh_rest_request_budget
             .try_acquire()
     }
 }
@@ -186,11 +186,11 @@ impl BudgetKind for ProtocolExecution {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ZenohRestQuery {}
+pub enum ZenohRestRequest {}
 
-impl budget_sealed::Sealed for ZenohRestQuery {}
+impl budget_sealed::Sealed for ZenohRestRequest {}
 
-impl BudgetKind for ZenohRestQuery {
+impl BudgetKind for ZenohRestRequest {
     const EXHAUSTED_MESSAGE: &'static str =
         "Too many concurrent Zenoh REST queries are already running.";
 
@@ -198,7 +198,7 @@ impl BudgetKind for ZenohRestQuery {
 }
 
 pub type ProtocolPermit = BudgetPermit<ProtocolExecution>;
-pub type ZenohRestQueryPermit = BudgetPermit<ZenohRestQuery>;
+pub type ZenohRestQueryPermit = BudgetPermit<ZenohRestRequest>;
 
 #[must_use = "dropping the permit immediately releases the reserved capacity"]
 pub struct BudgetPermit<K: BudgetKind> {

@@ -258,7 +258,7 @@ pub struct ZenohRestConfig {
     #[serde(with = "humantime_serde")]
     pub sse_keep_alive: Duration,
     pub sse_buffer: usize,
-    pub max_concurrent_queries: usize,
+    pub max_concurrent_requests: usize,
 }
 
 impl Default for ZenohRestConfig {
@@ -269,7 +269,7 @@ impl Default for ZenohRestConfig {
             query_timeout: DEFAULT_ZENOH_REST_QUERY_TIMEOUT,
             sse_keep_alive: DEFAULT_ZENOH_REST_SSE_KEEP_ALIVE,
             sse_buffer: 64,
-            max_concurrent_queries: DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES,
+            max_concurrent_requests: DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES,
         }
     }
 }
@@ -283,7 +283,7 @@ pub struct ZenohConfig {
     pub connect_endpoints: Vec<String>,
     pub listen_endpoints: Vec<String>,
     #[serde(with = "humantime_serde")]
-    pub retry_interval: Duration,
+    pub open_retry_interval: Duration,
     pub command_buffer: usize,
     pub event_buffer: usize,
 }
@@ -296,7 +296,7 @@ impl Default for ZenohConfig {
             admin_space: ZenohAdminSpaceConfig::default(),
             connect_endpoints: Vec::new(),
             listen_endpoints: Vec::new(),
-            retry_interval: DEFAULT_ZENOH_RETRY_INTERVAL,
+            open_retry_interval: DEFAULT_ZENOH_RETRY_INTERVAL,
             command_buffer: 256,
             event_buffer: 128,
         }
@@ -441,6 +441,6 @@ mod tests {
         assert_eq!(config.http.cors.max_age, Duration::from_secs(600));
         assert_eq!(config.http.zenoh_rest.query_timeout, Duration::from_secs(12));
         assert_eq!(config.http.zenoh_rest.sse_keep_alive, Duration::from_secs(20));
-        assert_eq!(config.zenoh.retry_interval, Duration::from_secs(5));
+        assert_eq!(config.zenoh.open_retry_interval, Duration::from_secs(5));
     }
 }
