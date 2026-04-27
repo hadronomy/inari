@@ -58,7 +58,7 @@ fn apply_http_layers(
                 .layer(
                     TraceLayer::new_for_http()
                         .on_request(DefaultOnRequest::new().level(Level::DEBUG))
-                        .on_response(DefaultOnResponse::new().level(Level::INFO))
+                        .on_response(DefaultOnResponse::new().level(Level::DEBUG))
                         .on_failure(DefaultOnFailure::new().level(Level::WARN)),
                 )
                 .layer(CatchPanicLayer::new())
