@@ -178,11 +178,13 @@ fn environment_overrides_cover_every_nested_field() {
         Duration::from_secs(20)
     );
     assert_eq!(
-        loaded
-            .settings
-            .http
-            .zenoh_rest
-            .sse_buffer,
+        usize::from(
+            loaded
+                .settings
+                .http
+                .zenoh_rest
+                .sse_buffer
+        ),
         128
     );
     assert!(loaded.settings.zenoh.enabled);
@@ -208,14 +210,16 @@ fn environment_overrides_cover_every_nested_field() {
             .open_retry_interval,
         Duration::from_secs(7)
     );
-    assert_eq!(loaded.settings.zenoh.command_buffer, 512);
-    assert_eq!(loaded.settings.zenoh.event_buffer, 256);
+    assert_eq!(usize::from(loaded.settings.zenoh.command_buffer), 512);
+    assert_eq!(usize::from(loaded.settings.zenoh.event_buffer), 256);
     assert_eq!(loaded.settings.protocol.namespace, "inari/test");
     assert_eq!(
-        loaded
-            .settings
-            .protocol
-            .max_concurrent_requests,
+        usize::from(
+            loaded
+                .settings
+                .protocol
+                .max_concurrent_requests
+        ),
         2048
     );
 }

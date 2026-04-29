@@ -92,7 +92,7 @@ impl ServerBuilder<WithConfig> {
 
         let (zenoh_handle, zenoh_supervisor) = ZenohSupervisor::new(loaded.settings.zenoh.clone());
 
-        let state = AppState::new(loaded, zenoh_handle, self.protocol)?;
+        let state = AppState::new(loaded, zenoh_handle, self.protocol);
         let router = http::router(&state)?.with_state(state.clone());
 
         Ok(ServerApplication { state, router, shutdown, zenoh_supervisor })

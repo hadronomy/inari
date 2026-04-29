@@ -7,11 +7,11 @@ use zenoh::bytes::{Encoding, ZBytes};
 use zenoh::config::EndPoint;
 use zenoh::{Config, Session, open};
 
-use super::KeyExpression;
+use super::super::KeyExpression;
 use crate::config::ZenohConfig;
 use crate::error::{AppError, AppResult};
 
-pub(super) async fn open_session(config: &ZenohConfig) -> AppResult<Session> {
+pub(crate) async fn open_session(config: &ZenohConfig) -> AppResult<Session> {
     let mut zenoh_config = Config::default();
     configure_zenoh(&mut zenoh_config, config)?;
 
@@ -22,13 +22,13 @@ pub(super) async fn open_session(config: &ZenohConfig) -> AppResult<Session> {
         })
 }
 
-pub(super) async fn close_session(session: Session) {
+pub(crate) async fn close_session(session: Session) {
     if let Err(source) = session.close().await {
         tracing::warn!(error = %source, "failed to close Zenoh session cleanly");
     }
 }
 
-pub(super) async fn publish(
+pub(crate) async fn publish(
     session: &Session,
     key: &KeyExpression,
     payload: Bytes,
@@ -46,7 +46,7 @@ pub(super) async fn publish(
     Ok(())
 }
 
-pub(super) async fn delete(session: &Session, key: &KeyExpression) -> AppResult<()> {
+pub(crate) async fn delete(session: &Session, key: &KeyExpression) -> AppResult<()> {
     session
         .delete(key)
         .await

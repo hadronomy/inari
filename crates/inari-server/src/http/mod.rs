@@ -152,10 +152,17 @@ mod tests {
     use tower::ServiceExt;
 
     use super::router;
+    use crate::ConcurrencyLimit;
     use crate::config::{LoadedConfig, ZenohConfig};
     use crate::protocol::NoopProtocolModule;
     use crate::state::AppState;
     use crate::zenoh::ZenohSupervisor;
+
+    fn limit(value: usize) -> ConcurrencyLimit {
+        value
+            .try_into()
+            .expect("test concurrency limit should be non-zero")
+    }
 
     fn test_app() -> axum::Router {
         let mut loaded = LoadedConfig::default();
@@ -163,17 +170,16 @@ mod tests {
         loaded
             .settings
             .protocol
-            .max_concurrent_requests = 8;
+            .max_concurrent_requests = limit(8);
         loaded
             .settings
             .http
             .zenoh_rest
-            .max_concurrent_requests = 8;
+            .max_concurrent_requests = limit(8);
 
         let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
 
-        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule))
-            .expect("test app state should build");
+        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
 
         router(&state)
             .expect("test router should build")

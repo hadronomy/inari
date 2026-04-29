@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+pub mod coordination;
+mod time;
+
 pub mod app;
 pub mod config;
 pub mod error;
@@ -16,6 +19,10 @@ pub use config::{
     AppConfig, ConfigOrigin, CorsConfig, HttpConfig, LoadedConfig, LogFormat, ObservabilityConfig,
     ProtocolConfig, RuntimeConfig, ServerConfig, ZenohAdminSpaceConfig, ZenohConfig, ZenohMode,
     ZenohRestConfig,
+};
+pub use coordination::{
+    ChannelCapacity, ConcurrencyLimit, InvalidChannelCapacity, InvalidConcurrencyLimit,
+    ProtocolExecution, ProtocolPermit, ZenohRestQueryPermit, ZenohRestRequest,
 };
 pub use error::{AppError, AppResult, ConfigError};
 pub use observability::init as init_observability;

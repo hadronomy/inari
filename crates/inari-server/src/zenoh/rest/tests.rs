@@ -11,6 +11,7 @@ use zenoh::bytes::Encoding;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::SampleKind;
 
+use crate::ConcurrencyLimit;
 use crate::config::{LoadedConfig, ZenohAdminSpaceConfig, ZenohConfig};
 use crate::http;
 use crate::protocol::NoopProtocolModule;
@@ -18,20 +19,24 @@ use crate::shutdown::{ShutdownCoordinator, ShutdownReason};
 use crate::state::AppState;
 use crate::zenoh::ZenohSupervisor;
 
+fn limit(value: usize) -> ConcurrencyLimit {
+    value
+        .try_into()
+        .expect("test concurrency limit should be non-zero")
+}
+
 fn base_config() -> LoadedConfig {
     let mut loaded = LoadedConfig::default();
 
-    // `AppState::new` now rejects invalid zero-sized budgets instead of
-    // silently coercing them with `.max(1)`, so tests make the invariant clear.
     loaded
         .settings
         .protocol
-        .max_concurrent_requests = 8;
+        .max_concurrent_requests = limit(8);
     loaded
         .settings
         .http
         .zenoh_rest
-        .max_concurrent_requests = 8;
+        .max_concurrent_requests = limit(8);
 
     loaded
 }
@@ -74,8 +79,7 @@ impl TestApp {
 
         let (zenoh, supervisor) = ZenohSupervisor::new(zenoh_settings);
 
-        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule))
-            .expect("test app state should build");
+        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
 
         let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
         let task = tokio::spawn(supervisor.run(shutdown.clone()));
@@ -284,8 +288,7 @@ async fn route_is_not_mounted_when_disabled() {
 
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
 
-    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule))
-        .expect("test app state should build");
+    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
 
     let app = http::router(&state)
         .expect("router should build")

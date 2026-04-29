@@ -1,8 +1,9 @@
 mod handler;
 mod metadata;
+mod negotiation;
 mod request;
-mod resolver;
 mod response;
+mod selector;
 mod sse;
 
 #[cfg(test)]
@@ -19,15 +20,14 @@ use serde::Serialize;
 use zenoh::bytes::Encoding;
 use zenoh::query::{Parameters, Reply, Selector};
 
+use self::negotiation::{ApiBodyFormat, NegotiatedResponse};
 use self::request::{LivelinessMode, QueryOptions, RequestMetadata, StandardQueryOptions};
-pub(crate) use self::resolver::{ReadSelector, WriteSelector};
-use self::response::{
-    ApiBodyFormat, NegotiatedResponse, html_api_response, json_api_response, raw_zenoh_response,
-};
+use self::response::{html_api_response, json_api_response, raw_zenoh_response};
+pub(crate) use self::selector::{ReadSelector, WriteSelector};
 use self::sse::sse_response;
 use super::{
-    ChannelCapacity, KeyExpression, ZenohJsonSample, ZenohQueryRequest, ZenohRequestPayload,
-    ZenohStatus, reply_to_json_sample,
+    KeyExpression, ZenohJsonSample, ZenohQueryRequest, ZenohRequestPayload, ZenohStatus,
+    reply_to_json_sample,
 };
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
@@ -80,12 +80,10 @@ impl ZenohRestService {
         match options {
             QueryOptions::Standard(standard) => match negotiated_response {
                 NegotiatedResponse::EventStream => {
-                    let capacity = sse_channel_capacity(config.sse_buffer)?;
-
                     let subscription = self
                         .state
                         .zenoh()
-                        .subscribe(key, capacity)
+                        .subscribe(key, config.sse_buffer)
                         .await?;
 
                     Ok(sse_response(subscription, config.sse_keep_alive))
@@ -129,12 +127,11 @@ impl ZenohRestService {
                 match negotiated_response {
                     NegotiatedResponse::EventStream => {
                         let history = matches!(liveliness.mode(), LivelinessMode::WithHistory);
-                        let capacity = sse_channel_capacity(config.sse_buffer)?;
 
                         let subscription = self
                             .state
                             .zenoh()
-                            .subscribe_liveliness(key, capacity, history)
+                            .subscribe_liveliness(key, config.sse_buffer, history)
                             .await?;
 
                         Ok(sse_response(subscription, config.sse_keep_alive))
@@ -248,10 +245,6 @@ pub(crate) struct ZenohRestAdminSpaceResponse {
     router_enabled: bool,
     read: bool,
     write: bool,
-}
-
-fn sse_channel_capacity(buffer: usize) -> AppResult<ChannelCapacity> {
-    ChannelCapacity::try_from(buffer.max(1))
 }
 
 fn render_replies(body_format: ApiBodyFormat, replies: Vec<Reply>) -> Response {

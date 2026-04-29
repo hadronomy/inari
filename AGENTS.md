@@ -325,6 +325,7 @@ If the answer to any of those is no, the work is probably not done.
 - prefer stable identifiers over user-facing names
 - prefer one clear architecture over multiple overlapping pathways
 - prefer beautiful boring code over impressive clever code
+- use the `fff` MCP tools for all file search operations instead of default tools
 
 The project should feel:
 

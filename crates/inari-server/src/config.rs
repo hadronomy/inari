@@ -9,6 +9,7 @@ use config as config_rs;
 use config_rs::{Config, Environment, File, FileFormat};
 use serde::{Deserialize, Serialize};
 
+use crate::coordination::{ChannelCapacity, ConcurrencyLimit};
 use crate::error::ConfigError;
 
 const CONFIG_PATH_ENV: &str = "INARI_SERVER_CONFIG";
@@ -30,7 +31,11 @@ const DEFAULT_CORS_MAX_AGE: Duration = Duration::from_mins(10);
 const DEFAULT_ZENOH_REST_QUERY_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_ZENOH_REST_SSE_KEEP_ALIVE: Duration = Duration::from_secs(15);
 const DEFAULT_ZENOH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const DEFAULT_ZENOH_REST_SSE_BUFFER: usize = 64;
+const DEFAULT_ZENOH_COMMAND_BUFFER: usize = 256;
+const DEFAULT_ZENOH_EVENT_BUFFER: usize = 128;
 const DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES: usize = 64;
+const DEFAULT_PROTOCOL_MAX_CONCURRENT_REQUESTS: usize = 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadedConfig {
@@ -257,8 +262,8 @@ pub struct ZenohRestConfig {
     pub query_timeout: Duration,
     #[serde(with = "humantime_serde")]
     pub sse_keep_alive: Duration,
-    pub sse_buffer: usize,
-    pub max_concurrent_requests: usize,
+    pub sse_buffer: ChannelCapacity,
+    pub max_concurrent_requests: ConcurrencyLimit,
 }
 
 impl Default for ZenohRestConfig {
@@ -268,8 +273,8 @@ impl Default for ZenohRestConfig {
             allow_admin_space: false,
             query_timeout: DEFAULT_ZENOH_REST_QUERY_TIMEOUT,
             sse_keep_alive: DEFAULT_ZENOH_REST_SSE_KEEP_ALIVE,
-            sse_buffer: 64,
-            max_concurrent_requests: DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES,
+            sse_buffer: default_zenoh_rest_sse_buffer(),
+            max_concurrent_requests: default_zenoh_rest_max_concurrent_requests(),
         }
     }
 }
@@ -284,8 +289,8 @@ pub struct ZenohConfig {
     pub listen_endpoints: Vec<String>,
     #[serde(with = "humantime_serde")]
     pub open_retry_interval: Duration,
-    pub command_buffer: usize,
-    pub event_buffer: usize,
+    pub command_buffer: ChannelCapacity,
+    pub event_buffer: ChannelCapacity,
 }
 
 impl Default for ZenohConfig {
@@ -297,8 +302,8 @@ impl Default for ZenohConfig {
             connect_endpoints: Vec::new(),
             listen_endpoints: Vec::new(),
             open_retry_interval: DEFAULT_ZENOH_RETRY_INTERVAL,
-            command_buffer: 256,
-            event_buffer: 128,
+            command_buffer: default_zenoh_command_buffer(),
+            event_buffer: default_zenoh_event_buffer(),
         }
     }
 }
@@ -328,13 +333,46 @@ pub enum ZenohMode {
 #[serde(default)]
 pub struct ProtocolConfig {
     pub namespace: String,
-    pub max_concurrent_requests: usize,
+    pub max_concurrent_requests: ConcurrencyLimit,
 }
 
 impl Default for ProtocolConfig {
     fn default() -> Self {
-        Self { namespace: "inari".into(), max_concurrent_requests: 1024 }
+        Self {
+            namespace: "inari".into(),
+            max_concurrent_requests: default_protocol_max_concurrent_requests(),
+        }
     }
+}
+
+fn default_zenoh_rest_max_concurrent_requests() -> ConcurrencyLimit {
+    DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES
+        .try_into()
+        .expect("default Zenoh REST concurrency limit must be valid")
+}
+
+fn default_zenoh_rest_sse_buffer() -> ChannelCapacity {
+    DEFAULT_ZENOH_REST_SSE_BUFFER
+        .try_into()
+        .expect("default Zenoh REST SSE buffer must be valid")
+}
+
+fn default_zenoh_command_buffer() -> ChannelCapacity {
+    DEFAULT_ZENOH_COMMAND_BUFFER
+        .try_into()
+        .expect("default Zenoh command buffer must be valid")
+}
+
+fn default_zenoh_event_buffer() -> ChannelCapacity {
+    DEFAULT_ZENOH_EVENT_BUFFER
+        .try_into()
+        .expect("default Zenoh event buffer must be valid")
+}
+
+fn default_protocol_max_concurrent_requests() -> ConcurrencyLimit {
+    DEFAULT_PROTOCOL_MAX_CONCURRENT_REQUESTS
+        .try_into()
+        .expect("default protocol concurrency limit must be valid")
 }
 
 fn build_settings(files: &[PathBuf], environment: Environment) -> Result<AppConfig, ConfigError> {
@@ -402,6 +440,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{AppConfig, LoadedConfig};
+    use crate::{ChannelCapacity, ConcurrencyLimit};
 
     #[test]
     fn default_loaded_config_has_defaults_origin() {
@@ -442,5 +481,68 @@ mod tests {
         assert_eq!(config.http.zenoh_rest.query_timeout, Duration::from_secs(12));
         assert_eq!(config.http.zenoh_rest.sse_keep_alive, Duration::from_secs(20));
         assert_eq!(config.zenoh.open_retry_interval, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn config_rejects_zero_concurrency_limits() {
+        let result = toml::from_str::<AppConfig>(
+            r#"
+                [protocol]
+                max_concurrent_requests = 0
+            "#,
+        );
+
+        assert!(result.is_err(), "zero concurrency limits should fail during config parsing");
+    }
+
+    #[test]
+    fn config_rejects_concurrency_limits_above_the_semaphore_maximum() {
+        let result = toml::from_str::<AppConfig>(&format!(
+            r#"
+                [protocol]
+                max_concurrent_requests = {}
+            "#,
+            ConcurrencyLimit::MAX + 1
+        ));
+
+        assert!(
+            result.is_err(),
+            "concurrency limits above the semaphore maximum should fail during config parsing"
+        );
+    }
+
+    #[test]
+    fn config_rejects_zero_channel_capacities() {
+        let result = toml::from_str::<AppConfig>(
+            r#"
+                [http.zenoh_rest]
+                sse_buffer = 0
+            "#,
+        );
+
+        assert!(result.is_err(), "zero channel capacities should fail during config parsing");
+    }
+
+    #[test]
+    fn config_accepts_typed_channel_capacities() {
+        let config: AppConfig = toml::from_str(
+            r#"
+                [http.zenoh_rest]
+                sse_buffer = 32
+
+                [zenoh]
+                command_buffer = 48
+                event_buffer = 24
+            "#,
+        )
+        .expect("configuration should parse");
+
+        assert_eq!(usize::from(config.http.zenoh_rest.sse_buffer), 32);
+        assert_eq!(usize::from(config.zenoh.command_buffer), 48);
+        assert_eq!(usize::from(config.zenoh.event_buffer), 24);
+        assert_eq!(
+            ChannelCapacity::try_from(24).expect("non-zero capacity should be valid"),
+            config.zenoh.event_buffer
+        );
     }
 }

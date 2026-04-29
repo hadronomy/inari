@@ -15,6 +15,7 @@ use crate::state::AppState;
 
 const EMPTY_SELECTOR_MESSAGE: &str = "Zenoh key expression cannot be empty.";
 
+/// Normalized non-empty selector as it appears on the HTTP Zenoh REST surface.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct NormalizedSelector(String);
 

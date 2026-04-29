@@ -1,15 +1,17 @@
 use std::fmt;
 use std::marker::PhantomData;
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde::ser::SerializeStruct;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError, watch};
+use tokio::sync::watch;
 
 use crate::config::LoadedConfig;
+use crate::coordination::{
+    Budget, ProtocolExecution, ProtocolPermit, ZenohRestQueryPermit, ZenohRestRequest,
+};
 use crate::error::AppError;
 use crate::protocol::{DynProtocolModule, ProtocolDescriptor};
 use crate::zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus};
@@ -32,6 +34,13 @@ struct AppStateInner {
     zenoh_rest_request_budget: Budget<ZenohRestRequest>,
 }
 
+impl Drop for AppStateInner {
+    fn drop(&mut self) {
+        self.protocol_budget.close();
+        self.zenoh_rest_request_budget.close();
+    }
+}
+
 impl fmt::Debug for AppState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppState")
@@ -43,38 +52,27 @@ impl fmt::Debug for AppState {
 }
 
 impl AppState {
-    pub fn new(
-        loaded: LoadedConfig,
-        zenoh: ZenohHandle,
-        protocol: Arc<DynProtocolModule>,
-    ) -> Result<Self, AppError> {
-        // TODO: Update the config so that these limits are `NonZeroUsize` directly, so that the invariants are enforced at config load time and we don't have to defensively check them here.
-        let protocol_limit = non_zero_limit(
-            loaded
-                .settings
-                .protocol
-                .max_concurrent_requests,
-            "The protocol execution concurrency limit must be greater than zero.",
-        )?;
-
-        let zenoh_rest_requests_limit = non_zero_limit(
-            loaded
-                .settings
-                .http
-                .zenoh_rest
-                .max_concurrent_requests,
-            "The Zenoh REST request concurrency limit must be greater than zero.",
-        )?;
-
+    pub fn new(loaded: LoadedConfig, zenoh: ZenohHandle, protocol: Arc<DynProtocolModule>) -> Self {
         let readiness = Readiness::new(ReadinessSnapshot::new(ReadinessComponents::new(
             HttpReadiness::bootstrapped(),
             ZenohReadiness::from(&zenoh.status_snapshot()),
         )));
 
-        Ok(Self {
+        Self {
             inner: Arc::new(AppStateInner {
-                protocol_budget: Budget::new(protocol_limit),
-                zenoh_rest_request_budget: Budget::new(zenoh_rest_requests_limit),
+                protocol_budget: Budget::new(
+                    loaded
+                        .settings
+                        .protocol
+                        .max_concurrent_requests,
+                ),
+                zenoh_rest_request_budget: Budget::new(
+                    loaded
+                        .settings
+                        .http
+                        .zenoh_rest
+                        .max_concurrent_requests,
+                ),
                 loaded,
                 started_at: Utc::now(),
                 started_at_instant: Instant::now(),
@@ -82,7 +80,7 @@ impl AppState {
                 zenoh,
                 protocol,
             }),
-        })
+        }
     }
 
     #[must_use]
@@ -150,106 +148,6 @@ impl AppState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ConcurrencyLimit(NonZeroUsize);
-
-impl ConcurrencyLimit {
-    #[must_use]
-    pub const fn get(self) -> usize {
-        self.0.get()
-    }
-}
-
-fn non_zero_limit(value: usize, error_message: &'static str) -> Result<ConcurrencyLimit, AppError> {
-    NonZeroUsize::new(value)
-        .map(ConcurrencyLimit)
-        .ok_or_else(|| AppError::service_unavailable(error_message))
-}
-
-mod budget_sealed {
-    pub trait Sealed {}
-}
-
-pub trait BudgetKind: budget_sealed::Sealed + 'static {
-    const EXHAUSTED_MESSAGE: &'static str;
-    const CLOSED_MESSAGE: &'static str;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ProtocolExecution {}
-
-impl budget_sealed::Sealed for ProtocolExecution {}
-
-impl BudgetKind for ProtocolExecution {
-    const EXHAUSTED_MESSAGE: &'static str = "The protocol execution budget is exhausted.";
-    const CLOSED_MESSAGE: &'static str = "The protocol execution budget is no longer available.";
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ZenohRestRequest {}
-
-impl budget_sealed::Sealed for ZenohRestRequest {}
-
-impl BudgetKind for ZenohRestRequest {
-    const EXHAUSTED_MESSAGE: &'static str =
-        "Too many concurrent Zenoh REST queries are already running.";
-
-    const CLOSED_MESSAGE: &'static str = "The Zenoh REST query budget is no longer available.";
-}
-
-pub type ProtocolPermit = BudgetPermit<ProtocolExecution>;
-pub type ZenohRestQueryPermit = BudgetPermit<ZenohRestRequest>;
-
-#[must_use = "dropping the permit immediately releases the reserved capacity"]
-pub struct BudgetPermit<K: BudgetKind> {
-    _permit: OwnedSemaphorePermit,
-    _kind: PhantomData<fn() -> K>,
-}
-
-impl<K: BudgetKind> fmt::Debug for BudgetPermit<K> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BudgetPermit")
-            .field("kind", &std::any::type_name::<K>())
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Debug)]
-struct Budget<K: BudgetKind> {
-    semaphore: Arc<Semaphore>,
-    _kind: PhantomData<fn() -> K>,
-}
-
-impl<K: BudgetKind> Budget<K> {
-    fn new(limit: ConcurrencyLimit) -> Self {
-        Self { semaphore: Arc::new(Semaphore::new(limit.get())), _kind: PhantomData }
-    }
-
-    async fn acquire(&self) -> Result<BudgetPermit<K>, AppError> {
-        let permit = self
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| AppError::service_unavailable(K::CLOSED_MESSAGE))?;
-
-        Ok(BudgetPermit { _permit: permit, _kind: PhantomData })
-    }
-
-    fn try_acquire(&self) -> Result<BudgetPermit<K>, AppError> {
-        let permit = self
-            .semaphore
-            .clone()
-            .try_acquire_owned()
-            .map_err(|error| match error {
-                TryAcquireError::NoPermits => AppError::service_unavailable(K::EXHAUSTED_MESSAGE),
-                TryAcquireError::Closed => AppError::service_unavailable(K::CLOSED_MESSAGE),
-            })?;
-
-        Ok(BudgetPermit { _permit: permit, _kind: PhantomData })
-    }
-}
-
 #[derive(Debug)]
 struct Readiness {
     sender: watch::Sender<ReadinessSnapshot>,
@@ -282,18 +180,18 @@ impl Readiness {
     }
 }
 
-mod component_sealed {
+mod sealed {
     pub trait Sealed {}
 }
 
-pub trait Component: component_sealed::Sealed + 'static {
+pub trait Component: sealed::Sealed + 'static {
     const NAME: &'static str;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Http {}
 
-impl component_sealed::Sealed for Http {}
+impl sealed::Sealed for Http {}
 
 impl Component for Http {
     const NAME: &'static str = "http";
@@ -302,7 +200,7 @@ impl Component for Http {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Zenoh {}
 
-impl component_sealed::Sealed for Zenoh {}
+impl sealed::Sealed for Zenoh {}
 
 impl Component for Zenoh {
     const NAME: &'static str = "zenoh";

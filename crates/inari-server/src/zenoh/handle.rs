@@ -7,11 +7,13 @@ use zenoh::bytes::Encoding;
 use zenoh::query::Reply;
 
 use super::access::{
-    ChannelCapacity, CurrentSession, ZenohQueryRequest, ZenohSubscription,
-    declare_liveliness_subscription, declare_subscription, execute_liveliness_get_collect,
-    execute_liveliness_get_first, execute_query_collect, execute_query_first,
+    ZenohQueryRequest, ZenohSubscription, declare_liveliness_subscription, declare_subscription,
+    execute_liveliness_get_collect, execute_liveliness_get_first, execute_query_collect,
+    execute_query_first,
 };
-use super::{KeyExpression, ZenohEvent, ZenohStatus};
+use super::command::Command;
+use super::{CurrentSession, KeyExpression, ZenohEvent, ZenohStatus};
+use crate::coordination::ChannelCapacity;
 use crate::error::{AppError, AppResult};
 use crate::zenoh::supervisor::SupervisorSignal;
 
@@ -193,19 +195,4 @@ impl fmt::Debug for ZenohHandle {
             .field("status", &self.status_snapshot())
             .finish_non_exhaustive()
     }
-}
-
-#[derive(Debug)]
-pub(super) enum Command {
-    Publish {
-        key: KeyExpression,
-        payload: Bytes,
-        encoding: Encoding,
-        attachment: Option<Bytes>,
-        respond_to: oneshot::Sender<AppResult<()>>,
-    },
-    Delete {
-        key: KeyExpression,
-        respond_to: oneshot::Sender<AppResult<()>>,
-    },
 }

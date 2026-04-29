@@ -1,107 +1,17 @@
 use std::fmt;
-use std::future::Future;
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use bytes::Bytes;
-use zenoh::Session;
 use zenoh::bytes::{Encoding, ZBytes};
-use zenoh::config::ZenohId;
 use zenoh::handlers::{FifoChannel, FifoChannelHandler};
 use zenoh::pubsub::Subscriber;
 use zenoh::query::{QueryConsolidation, Reply, Selector};
 use zenoh::sample::Sample;
 
-use super::KeyExpression;
+use super::{CurrentSession, KeyExpression};
+use crate::coordination::ChannelCapacity;
 use crate::error::{AppError, AppResult};
-
-#[derive(Clone)]
-pub(crate) struct CurrentSession {
-    session: Session,
-    generation: Generation,
-}
-
-impl CurrentSession {
-    pub(crate) fn new(session: Session, generation: Generation) -> Self {
-        Self { session, generation }
-    }
-
-    pub(crate) fn session(&self) -> &Session {
-        &self.session
-    }
-
-    pub(crate) fn generation(&self) -> Generation {
-        self.generation
-    }
-
-    pub(crate) fn zid(&self) -> ZenohId {
-        self.session.zid()
-    }
-}
-
-impl fmt::Debug for CurrentSession {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SessionLease")
-            .field("zid", &self.session.zid())
-            .field("generation", &self.generation)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Generation(u64);
-
-impl Generation {
-    pub(crate) const ZERO: Self = Self(0);
-
-    pub(crate) fn next(self) -> Self {
-        Self(self.0.saturating_add(1))
-    }
-}
-
-impl From<Generation> for u64 {
-    fn from(generation: Generation) -> Self {
-        generation.0
-    }
-}
-
-impl From<Generation> for String {
-    fn from(generation: Generation) -> Self {
-        generation.0.to_string()
-    }
-}
-
-// TODO: See if theses great new types can be reused in other parts of the codebase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct ChannelCapacity(NonZeroUsize);
-
-impl ChannelCapacity {
-    pub(crate) const fn new(capacity: NonZeroUsize) -> Self {
-        Self(capacity)
-    }
-
-    pub(crate) const fn get(self) -> usize {
-        self.0.get()
-    }
-}
-
-impl TryFrom<usize> for ChannelCapacity {
-    type Error = AppError;
-
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        NonZeroUsize::new(value)
-            .map(Self)
-            .ok_or_else(|| {
-                AppError::service_unavailable("Zenoh channel capacity must be greater than zero.")
-            })
-    }
-}
-
-impl From<NonZeroUsize> for ChannelCapacity {
-    fn from(value: NonZeroUsize) -> Self {
-        Self::new(value)
-    }
-}
+use crate::time::Deadline;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ZenohQueryRequest {
@@ -289,36 +199,6 @@ pub(crate) async fn declare_liveliness_subscription(
         )?;
 
     Ok(ZenohSubscription::new(subscriber))
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Deadline {
-    expires_at: tokio::time::Instant,
-}
-
-impl Deadline {
-    fn after(timeout: Duration) -> Self {
-        Self { expires_at: tokio::time::Instant::now() + timeout }
-    }
-
-    fn remaining(self) -> AppResult<Duration> {
-        let now = tokio::time::Instant::now();
-
-        if self.expires_at <= now {
-            return Err(AppError::RequestTimeout);
-        }
-
-        Ok(self.expires_at - now)
-    }
-
-    async fn timeout<F, T>(self, future: F) -> AppResult<T>
-    where
-        F: Future<Output = T>,
-    {
-        tokio::time::timeout(self.remaining()?, future)
-            .await
-            .map_err(|_| AppError::RequestTimeout)
-    }
 }
 
 struct Replies {

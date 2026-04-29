@@ -6,8 +6,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Router, middleware};
 
+use super::negotiation::NegotiatedResponse;
 use super::request::{QueryOptions, RequestMetadata};
-use super::response::NegotiatedResponse;
 use super::{ReadSelector, WriteSelector, ZenohRestService, index_response};
 use crate::error::AppResult;
 use crate::state::AppState;
