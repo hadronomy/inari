@@ -18,6 +18,7 @@ config.workspace             = true
 futures-util.workspace       = true
 html-escape.workspace        = true
 http.workspace               = true
+human-panic.workspace        = true
 humantime-serde.workspace    = true
 mime.workspace               = true
 serde.workspace              = true

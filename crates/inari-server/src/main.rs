@@ -1,6 +1,7 @@
 use inari_server::{AppError, LoadedConfig, ServerBuilder, build_runtime, init_observability};
 
 fn main() -> Result<(), AppError> {
+    human_panic::setup_panic!();
     let loaded = LoadedConfig::load()?;
     init_observability(&loaded.settings.observability)?;
 
