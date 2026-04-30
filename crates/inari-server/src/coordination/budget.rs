@@ -4,12 +4,8 @@ use std::sync::Arc;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
-use super::ConcurrencyLimit;
+use super::{ConcurrencyLimit, sealed};
 use crate::error::AppError;
-
-pub(crate) mod sealed {
-    pub trait Sealed {}
-}
 
 pub(crate) trait BudgetKind: sealed::Sealed + 'static {
     const EXHAUSTED_MESSAGE: &'static str;

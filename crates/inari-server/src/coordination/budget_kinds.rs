@@ -1,4 +1,4 @@
-use super::{BudgetKind, BudgetPermit, budget::sealed};
+use super::{BudgetKind, BudgetPermit, sealed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProtocolExecution {}
