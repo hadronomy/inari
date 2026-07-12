@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-from ..config import AgentSettings
+from typing import TYPE_CHECKING, Iterable, Mapping, Protocol
+
 from ..printing.commands import DeviceCommandKind
 from ..printing.jobs import PrintContentKind
-from ..runtime.devices.service import DeviceCatalog
-from ..runtime.jobs.service import JobService
-from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
-from ..security.certificates.store import CertificateLifecycleService
-from ..security.identity import AgentIdentityService
-from ..security.policies import SecurityPolicyService
 from ..core.version import API_VERSION, SERVICE_NAME
 from .edge.caddy import CaddyControllerProfile
-from .connector import GatewayConnector
 from .models import SUPPORTED_CONTROLLER_ACTIONS, resolve_mutual_tls_policy
 from .protocol import (
     GatewayCapabilityDescriptor,
+    GatewayDeviceInventory,
+    GatewayDeviceInventoryItem,
     GatewayDeviceSummary,
     GatewayProtocolDescriptor,
     GatewayQueueSummary,
@@ -22,7 +18,45 @@ from .protocol import (
     GatewaySecurityDescriptor,
     GatewaySnapshotPayload,
 )
-from .repositories import GatewayRepository
+
+if TYPE_CHECKING:
+    from ..config import AgentSettings
+    from ..runtime.models import DeviceRecord
+    from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
+    from ..security.certificates.store import ManagedCertificate
+    from ..security.identity import AgentIdentityService
+    from ..security.models import AgentIdentity, GatewaySecurityPolicy
+    from .connector import GatewayConnector
+    from .models import ManagedCertificateStatus
+
+
+class IdentitySource(Protocol):
+    def get_or_create_identity(self) -> AgentIdentity: ...
+
+
+class DeviceInventory(Protocol):
+    def list_devices(self) -> Iterable[DeviceRecord]: ...
+
+
+class QueueMetrics(Protocol):
+    def queue_counts(self) -> Mapping[str, int]: ...
+
+
+class GatewayMetrics(Protocol):
+    def summary(self) -> dict[str, int]: ...
+
+
+class SecurityPolicyView(Protocol):
+    @property
+    def policy(self) -> GatewaySecurityPolicy: ...
+
+
+class CertificateSource(Protocol):
+    def current_certificate(self) -> ManagedCertificate | None: ...
+
+
+class CertificateMonitor(Protocol):
+    def current_status(self) -> ManagedCertificateStatus: ...
 
 
 class GatewaySnapshotBuilder:
@@ -30,13 +64,13 @@ class GatewaySnapshotBuilder:
         self,
         *,
         settings: AgentSettings,
-        identity_service: AgentIdentityService,
-        device_catalog: DeviceCatalog,
-        job_service: JobService,
-        gateway_repository: GatewayRepository,
-        security_policy_service: SecurityPolicyService,
-        certificate_service: CertificateLifecycleService,
-        certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None,
+        identity_service: IdentitySource,
+        device_catalog: DeviceInventory,
+        job_service: QueueMetrics,
+        gateway_repository: GatewayMetrics,
+        security_policy_service: SecurityPolicyView,
+        certificate_service: CertificateSource,
+        certificate_lifecycle_manager: CertificateMonitor | None,
     ) -> None:
         self.settings = settings
         self.identity_service = identity_service
@@ -110,6 +144,28 @@ class GatewaySnapshotBuilder:
                         if device_summary.default_device is not None
                         else None
                     ),
+                ),
+                inventory=GatewayDeviceInventory(
+                    devices=tuple(
+                        GatewayDeviceInventoryItem(
+                            device_id=device.id,
+                            kind=device.kind.value,
+                            device_class=device.device_class.value,
+                            display_name=self.settings.device_labels.get(
+                                device.id, device.name
+                            ),
+                            system_name=device.name,
+                            driver_key=device.driver_key,
+                            connection_state=device.connection_state.value,
+                            capabilities=tuple(
+                                key
+                                for key, enabled in device.capabilities.items()
+                                if enabled
+                            ),
+                            metadata=_redact_device_metadata(dict(device.metadata)),
+                        )
+                        for device in devices
+                    )
                 ),
             ),
             capabilities=GatewayCapabilityDescriptor(
@@ -239,4 +295,21 @@ def _serialize_certificate_lifecycle(status) -> dict[str, object] | None:
         "failed_issue_count": status.failed_issue_count,
         "successful_renewal_count": status.successful_renewal_count,
         "failed_renewal_count": status.failed_renewal_count,
+    }
+
+
+_SENSITIVE_METADATA_PARTS = (
+    "credential",
+    "password",
+    "private",
+    "secret",
+    "token",
+)
+
+
+def _redact_device_metadata(value: dict[str, object]) -> dict[str, object]:
+    return {
+        str(key): item
+        for key, item in value.items()
+        if not any(part in str(key).casefold() for part in _SENSITIVE_METADATA_PARTS)
     }

@@ -3,15 +3,20 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from threading import Event
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TypeVar
 
 import httpx
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     JobResourceResponse,
     LiveUpdateMessage,
+    ManagedOnboardingDeviceConfirmationRequest,
+    ManagedOnboardingInvitationRequest,
+    ManagedOnboardingPreviewResponse,
+    ManagedOnboardingStartResponse,
+    ManagedOnboardingStatusResponse,
     SystemStatusResponse,
     TokenResponse,
 )
@@ -26,6 +31,7 @@ from .local_trust import (
 )
 
 LIVE_UPDATE_MESSAGE_ADAPTER = TypeAdapter(LiveUpdateMessage)
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class LocalTokenProvider(Protocol):
@@ -127,6 +133,73 @@ class AgentApiClient:
             response.raise_for_status()
         return JobResourceResponse.model_validate(response.json())
 
+    def preview_onboarding(
+        self,
+        invitation: str,
+        *,
+        controller_url: str | None = None,
+    ) -> ManagedOnboardingPreviewResponse:
+        request = ManagedOnboardingInvitationRequest(
+            invitation=invitation,
+            controller_url=controller_url,
+        )
+        return self._request_model(
+            "POST",
+            "/onboarding/managed/preview",
+            ManagedOnboardingPreviewResponse,
+            json=request.model_dump(mode="json"),
+        )
+
+    def start_onboarding(
+        self,
+        invitation: str,
+        *,
+        controller_url: str | None = None,
+    ) -> ManagedOnboardingStartResponse:
+        request = ManagedOnboardingInvitationRequest(
+            invitation=invitation,
+            controller_url=controller_url,
+        )
+        return self._request_model(
+            "POST",
+            "/onboarding/managed/start",
+            ManagedOnboardingStartResponse,
+            json=request.model_dump(mode="json"),
+        )
+
+    def get_onboarding_status(self) -> ManagedOnboardingStatusResponse:
+        return self._request_model(
+            "GET",
+            "/onboarding/status",
+            ManagedOnboardingStatusResponse,
+        )
+
+    def confirm_onboarding_devices(
+        self,
+        *,
+        device_ids: tuple[str, ...],
+        labels: dict[str, str],
+        default_printer_device_id: str | None,
+    ) -> ManagedOnboardingStatusResponse:
+        request = ManagedOnboardingDeviceConfirmationRequest(
+            device_ids=device_ids,
+            labels=labels,
+            default_printer_device_id=default_printer_device_id,
+        )
+        return self._request_model(
+            "POST",
+            "/onboarding/devices/confirm",
+            ManagedOnboardingStatusResponse,
+            json=request.model_dump(mode="json"),
+        )
+
+    def cancel_onboarding(self) -> ManagedOnboardingStatusResponse:
+        return self._request_model(
+            "POST",
+            "/onboarding/cancel",
+            ManagedOnboardingStatusResponse,
+        )
+
     def iter_live_updates(self, stop_event: Event) -> Iterator[LiveUpdateMessage]:
         token = self._ensure_token()
         with self._websocket_connect(
@@ -157,6 +230,24 @@ class AgentApiClient:
     def _authorization_headers(self, client: httpx.Client) -> dict[str, str]:
         token = self._ensure_token(client)
         return {"Authorization": f"Bearer {token.access_token}"}
+
+    def _request_model(
+        self,
+        method: str,
+        path: str,
+        model_type: type[ModelT],
+        *,
+        json: object | None = None,
+    ) -> ModelT:
+        with self._http_client_factory() as client:
+            response = client.request(
+                method,
+                path,
+                headers=self._authorization_headers(client),
+                json=json,
+            )
+            response.raise_for_status()
+        return model_type.model_validate(response.json())
 
     def _ensure_token(self, client: httpx.Client | None = None) -> TokenResponse:
         if (

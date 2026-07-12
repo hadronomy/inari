@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::Json;
-use axum::http::StatusCode;
+use axum::http::header::{CONTENT_TYPE, WWW_AUTHENTICATE};
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use thiserror::Error;
@@ -103,7 +104,11 @@ pub enum AppError {
     #[error("{message}")]
     BadRequest { code: &'static str, message: Cow<'static, str> },
     #[error("{message}")]
+    Unauthorized { code: &'static str, message: Cow<'static, str> },
+    #[error("{message}")]
     Forbidden { code: &'static str, message: Cow<'static, str> },
+    #[error("{message}")]
+    Conflict { code: &'static str, message: Cow<'static, str> },
     #[error("{message}")]
     NotFound { code: &'static str, message: Cow<'static, str> },
     #[error("{message}")]
@@ -126,8 +131,18 @@ impl AppError {
     }
 
     #[must_use]
+    pub fn unauthorized(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::Unauthorized { code: "unauthorized", message: message.into() }
+    }
+
+    #[must_use]
     pub fn forbidden(message: impl Into<Cow<'static, str>>) -> Self {
         Self::Forbidden { code: "forbidden", message: message.into() }
+    }
+
+    #[must_use]
+    pub fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::Conflict { code: "conflict", message: message.into() }
     }
 
     #[must_use]
@@ -181,7 +196,9 @@ impl AppError {
             Self::GracefulShutdownTimeout { .. } => "shutdown_timeout",
             Self::RequestTimeout => "request_timeout",
             Self::BadRequest { code, .. }
+            | Self::Unauthorized { code, .. }
             | Self::Forbidden { code, .. }
+            | Self::Conflict { code, .. }
             | Self::NotFound { code, .. }
             | Self::NotImplemented { code, .. }
             | Self::ServiceUnavailable { code, .. }
@@ -193,7 +210,9 @@ impl AppError {
     pub fn status_code(&self) -> StatusCode {
         match self {
             Self::BadRequest { .. } | Self::Config(_) => StatusCode::BAD_REQUEST,
+            Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
+            Self::Conflict { .. } => StatusCode::CONFLICT,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::ServiceUnavailable { .. } | Self::GracefulShutdownTimeout { .. } => {
@@ -223,7 +242,9 @@ impl AppError {
     pub fn log_for_server(self) -> Self {
         match &self {
             Self::BadRequest { .. }
+            | Self::Unauthorized { .. }
             | Self::Forbidden { .. }
+            | Self::Conflict { .. }
             | Self::NotFound { .. }
             | Self::NotImplemented { .. }
             | Self::ServiceUnavailable { .. }
@@ -245,6 +266,29 @@ impl From<io::Error> for AppError {
     }
 }
 
+impl From<serde_json::Error> for AppError {
+    fn from(source: serde_json::Error) -> Self {
+        Self::internal("serialization_error", "A protocol payload could not be serialized.")
+            .with_source(source)
+    }
+}
+
+impl From<inari_gateway::GatewayError> for AppError {
+    fn from(error: inari_gateway::GatewayError) -> Self {
+        match error {
+            inari_gateway::GatewayError::InvalidInput(message) => Self::bad_request(message),
+            inari_gateway::GatewayError::Forbidden(message) => Self::forbidden(message),
+            inari_gateway::GatewayError::NotFound(message) => Self::not_found(message),
+            inari_gateway::GatewayError::Conflict(message) => Self::conflict(message),
+            inari_gateway::GatewayError::Unavailable(message) => Self::service_unavailable(message),
+            source => {
+                Self::internal("managed_gateway_error", "The managed gateway operation failed.")
+                    .with_source(source)
+            },
+        }
+    }
+}
+
 impl From<BoxError> for AppError {
     fn from(error: BoxError) -> Self {
         Self::from_box_error(error)
@@ -252,22 +296,48 @@ impl From<BoxError> for AppError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ErrorEnvelope<'a> {
-    error: ErrorBody<'a>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ErrorBody<'a> {
+struct ProblemDetails<'a> {
+    #[serde(rename = "type")]
+    type_uri: String,
+    title: &'static str,
+    status: u16,
+    detail: String,
     code: &'a str,
-    message: String,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = self.status_code();
-        let envelope =
-            ErrorEnvelope { error: ErrorBody { code: self.code(), message: self.to_string() } };
+        let code = self.code();
+        let problem = ProblemDetails {
+            type_uri: format!("urn:inari:problem:{code}"),
+            title: problem_title(status),
+            status: status.as_u16(),
+            detail: self.to_string(),
+            code,
+        };
 
-        (status, Json(envelope)).into_response()
+        let mut response =
+            (status, [(CONTENT_TYPE, "application/problem+json")], Json(problem)).into_response();
+        if status == StatusCode::UNAUTHORIZED {
+            response
+                .headers_mut()
+                .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer realm=\"inari-api\""));
+        }
+        response
+    }
+}
+
+fn problem_title(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::BAD_REQUEST => "Bad Request",
+        StatusCode::UNAUTHORIZED => "Unauthorized",
+        StatusCode::FORBIDDEN => "Forbidden",
+        StatusCode::NOT_FOUND => "Not Found",
+        StatusCode::CONFLICT => "Conflict",
+        StatusCode::REQUEST_TIMEOUT => "Request Timeout",
+        StatusCode::NOT_IMPLEMENTED => "Not Implemented",
+        StatusCode::SERVICE_UNAVAILABLE => "Service Unavailable",
+        _ => "Internal Server Error",
     }
 }

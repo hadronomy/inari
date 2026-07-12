@@ -173,7 +173,7 @@ config_version = 1
 # Base URL for the external controller.
 # base_url = "https://controller.example.com"
 # Explicit enrollment endpoint. Leave commented to derive from `base_url` if your controller supports it.
-# enrollment_url = "https://bootstrap.controller.example.com/api/inari/enroll"
+# enrollment_url = "https://bootstrap.controller.example.com/api/inari/v1/enrollments"
 # How the agent authenticates to the controller during enrollment.
 # auth_provider = "controller"
 # Controller edge layout. `caddy` enables stricter profile validation.

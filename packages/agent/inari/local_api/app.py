@@ -31,7 +31,10 @@ from .routes import router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     container: AgentContainer = app.state.container
-    configure_logging(container.settings.log_level, log_dir=container.settings.log_dir)
+    configure_logging(
+        container.settings.log_level,
+        log_dir=container.settings.log_dir or "./logs",
+    )
     container.database_migrator.ensure_current()
     supervisor = container.application_supervisor or container.runtime_supervisor
     await supervisor.start()

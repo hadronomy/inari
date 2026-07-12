@@ -2,7 +2,7 @@
 title: Gateway Protocol
 summary: Managed-mode protocol specification for the controller <-> inari boundary over HTTPS enrollment and a Zenoh data plane.
 status: draft
-protocol_version: "2026-04-18"
+protocol_version: "2026-07-11"
 agent_api_version: "1.20.0a1"
 transport:
   enrollment: https
@@ -33,7 +33,7 @@ Use this together with:
 ## 1. Document Status
 
 - Protocol status: `draft`
-- Protocol version: `2026-04-18`
+- Protocol version: `2026-07-11`
 - Agent role: protocol client
 - Controller role: protocol server
 
@@ -116,12 +116,14 @@ The agent has a persistent logical identity consisting of:
 
 ### 6.1 Identity Binding Rules
 
-The controller SHOULD enforce these bindings:
+The controller MUST enforce these bindings:
 
 - `csr_pem` public key MUST match `public_jwk`
 - any issued client certificate MUST match the CSR public key
 - the agent certificate identity MUST bind to `agent_id`
 - if `authorized_sans` are supplied, the issued certificate MUST NOT contain SANs outside that set
+
+The Rust controller verifies the Ed25519 JWK, RFC 7638 thumbprint, PKCS#10 signature, CSR subject key, and any supplied certificate as one identity before it consumes an enrollment credential.
 
 ## 7. Protocol Version Selection
 
@@ -140,25 +142,47 @@ The selected version MUST be one of the versions advertised by the agent. If the
 
 ## 8. Enrollment
 
+### 8.0 Invitation Bootstrap
+
+Operators create, list, and revoke invitations through authenticated Leptos server functions. These operations are not public REST endpoints. The operator token is submitted to a server function, wrapped as secret material immediately, and retained only in browser memory for the current hydrated session.
+
+The setup link has this shape:
+
+```text
+https://controller.example.com/setup/{invitation_id}#code=INR-...
+```
+
+The fragment is never sent in an HTTP request. The server renders an inert setup page during SSR; hydrated Rust reads the fragment, validates it, and creates the equivalent `inari://enroll?...#code=...` deep link without authored JavaScript.
+
+An agent may inspect non-secret invitation metadata before enrollment:
+
+```http
+GET /api/inari/v1/invitations/{invitation_id}
+```
+
+The preview contains the invitation identifier and state, expiry, controller identity, supported protocol versions, and certificate posture. It never contains a credential digest or fragment secret. The invitation credential is supplied as the bearer token to `POST /api/inari/v1/enrollments` and can be consumed only once.
+
 ### 8.1 Request
 
 The standard enrollment request is:
 
 ```http
-POST /api/inari/enroll
+POST /api/inari/v1/enrollments
 Authorization: Bearer <enrollment-token>
 Content-Type: application/json
 ```
 
-The `Authorization` header MAY be omitted only when enrollment authentication is delegated to an external provider such as ZITADEL.
+The `Authorization` header is required by the Rust controller. The credential is either a configured enrollment token or the one-use invitation code.
+
+All `/api/**` failures use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details with `Content-Type: application/problem+json`. The API router owns its own JSON fallback; Leptos routes and static-file fallbacks never handle API paths. Private Leptos server functions are mounted under `/_server/inari`, outside the public API namespace.
 
 Request body:
 
 ```json
 {
   "protocol": {
-    "version": "2026-04-18",
-    "supported_versions": ["2026-04-18"]
+    "version": "2026-07-11",
+    "supported_versions": ["2026-07-11"]
   },
   "agent_id": "agt_123",
   "key_id": "kid_123",
@@ -191,7 +215,7 @@ The recommended enrollment response shape is:
 
 ```json
 {
-  "selected_protocol_version": "2026-04-18",
+  "selected_protocol_version": "2026-07-11",
   "controller": {
     "name": "Acme IoT Controller",
     "instance_id": "controller-01"
@@ -238,7 +262,7 @@ The recommended enrollment response shape is:
       "requires_mutual_tls_after_issuance": true
     }
   },
-  "enrolled_at": "2026-04-18T10:00:02Z"
+  "enrolled_at": "2026-07-11T10:00:02Z"
 }
 ```
 
@@ -268,7 +292,7 @@ sequenceDiagram
     end
 
     Installer->>Agent: Provide short-lived enrollment_token
-    Agent->>Controller: POST /api/inari/enroll<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
+    Agent->>Controller: POST /api/inari/v1/enrollments<br/>Authorization: Bearer enrollment_token<br/>CSR + snapshot
     Controller->>Controller: Validate enrollment policy<br/>Select protocol version<br/>Grant controller actions
     Controller->>Controller: Mint short-lived step-ca OTT
     Controller-->>Agent: Enrollment response<br/>data_plane + certificate.enrollment
@@ -312,9 +336,9 @@ Within the agent namespace, the protocol uses these keys:
 
 | Purpose | Key |
 |---|---|
-| Presence | `{namespace}/presence` |
+| Presence | `{namespace}/presence/agent` |
 | Latest status snapshot | `{namespace}/status/latest` |
-| Live controller commands | `{namespace}/commands/live` |
+| Live controller commands | `{namespace}/commands/live/{command_id}` |
 | Command history query root | `{namespace}/commands/history` |
 | Accepted command results | `{namespace}/results/{command_id}` |
 | Runtime events | `{namespace}/events/{message_id}` |
@@ -322,16 +346,16 @@ Within the agent namespace, the protocol uses these keys:
 
 For an agent with namespace `iot/v1/agents/agt_123`, that becomes:
 
-- `iot/v1/agents/agt_123/presence`
+- `iot/v1/agents/agt_123/presence/agent`
 - `iot/v1/agents/agt_123/status/latest`
-- `iot/v1/agents/agt_123/commands/live`
+- `iot/v1/agents/agt_123/commands/live/cmd_456`
 - `iot/v1/agents/agt_123/commands/history`
 - `iot/v1/agents/agt_123/results/cmd_456`
 - `iot/v1/agents/agt_123/events/gevt_789`
 
 ### 9.3 Presence
 
-The agent SHOULD maintain a Zenoh liveliness token at `{namespace}/presence`.
+The agent SHOULD maintain a Zenoh liveliness token at `{namespace}/presence/agent`.
 
 Presence is advisory. It is not a substitute for application-level command recovery.
 
@@ -341,9 +365,31 @@ The agent periodically publishes an `agent.status.snapshot` document to `{namesp
 
 The current implementation publishes the full `GatewaySnapshotPayload`. A future revision MAY introduce a lighter status document, but the key and publication semantics remain the same.
 
+The controller records these publications and exposes the latest observed
+snapshot as a stable, typed HTTP resource:
+
+```http
+GET /api/inari/v1/agents/{agent_id}/status
+Authorization: Bearer <read-api-token>
+Accept: application/json
+```
+
+This endpoint reads the controller's durable observation and therefore remains
+available when the agent is temporarily offline. It returns the agent ID,
+publication message ID, controller receipt time, and the typed gateway snapshot.
+Unknown agents and agents with no observed status return RFC 9457 problem
+details.
+
+When the optional Zenoh compatibility surface is enabled, the underlying
+keyspace remains directly accessible without another wrapper:
+
+```http
+GET /api/zenoh/v1/iot/v1/agents/{agent_id}/status/latest
+```
+
 ### 9.5 Live Commands
 
-The controller publishes live commands to `{namespace}/commands/live`.
+The controller publishes live commands to `{namespace}/commands/live/{command_id}`.
 
 Commands MUST carry:
 
@@ -351,7 +397,7 @@ Commands MUST carry:
 - `command_id`
 - `sequence`
 
-The agent subscribes to the live command key and dispatches commands as they arrive.
+The agent subscribes to `{namespace}/commands/live/**` and dispatches commands as they arrive.
 
 ### 9.6 History Recovery
 
@@ -387,7 +433,7 @@ The current implementation persists outbound publications locally and clears the
   "message_id": "msg_100",
   "command_id": "cmd_100",
   "sequence": 105,
-  "issued_at": "2026-04-18T10:05:00Z",
+  "issued_at": "2026-07-11T10:05:00Z",
   "payload": {
     "content": {
       "kind": "text",
@@ -417,7 +463,7 @@ The current implementation persists outbound publications locally and clears the
   "message_id": "msg_101",
   "command_id": "cmd_101",
   "sequence": 106,
-  "issued_at": "2026-04-18T10:06:00Z",
+  "issued_at": "2026-07-11T10:06:00Z",
   "payload": {
     "target": {
       "device_id": "dev_123",
@@ -442,7 +488,7 @@ The current implementation persists outbound publications locally and clears the
   "message_id": "msg_102",
   "command_id": "cmd_102",
   "sequence": 107,
-  "issued_at": "2026-04-18T10:07:00Z",
+  "issued_at": "2026-07-11T10:07:00Z",
   "job_id": "job_123"
 }
 ```
@@ -567,6 +613,10 @@ For larger content such as PDF, HTML, or large images, the protocol SHOULD intro
 
 ## 15. Deployment Notes
 
+The Rust controller is built with `cargo leptos build --release`. Deploy the server binary together with the generated `target/site` directory and set `LEPTOS_SITE_ROOT` to its deployed location. The generated wasm-bindgen JavaScript is a build artifact; the application contains no authored JavaScript.
+
+Managed-gateway state is stored in SQLite at `data/inari-server/managed-gateway.sqlite3` by default. Embedded migrations complete before HTTP readiness. The database uses foreign keys, WAL, a busy timeout, transactions, and uniqueness constraints for invitation consumption and protocol idempotency.
+
 ### 15.1 Controller HTTP Edge
 
 The enrollment endpoint SHOULD use `HTTPS`. A controller may place Axum behind a traditional HTTP edge such as Caddy for this enrollment surface.
@@ -602,13 +652,14 @@ A controller is compatible with this draft if it:
 
 The current codebase implements the core contract in this document, including:
 
-- HTTPS enrollment with `enrollment_token`
+- HTTPS enrollment with `enrollment_token` in `inari-server`
 - explicit `selected_protocol_version`
 - nested enrollment `permissions`, `data_plane`, and `certificate` structures
-- Zenoh-backed status publication, live command delivery, and history recovery
+- Zenoh-backed status publication, per-command live delivery, and history recovery
 - protocol-native command payload models
 - explicit controller-action permissions
 - managed step-ca certificate lifecycle supervision
+- controller-side command state and agent publication ingestion
 
 Future work remains around:
 

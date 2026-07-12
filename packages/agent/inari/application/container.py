@@ -16,6 +16,7 @@ from ..di import (
 )
 from ..drivers import DriverRegistry
 from ..gateway.service import GatewayService
+from ..gateway.onboarding import ManagedOnboardingService
 from ..gateway.supervisor import GatewaySupervisor
 from ..printing.service import PrinterService
 from ..runtime.events import EventHub
@@ -48,6 +49,7 @@ class AgentContainer:
     tls_context_factory: TlsContextFactory | None = None
     certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None = None
     gateway_service: GatewayService | None = None
+    onboarding_service: ManagedOnboardingService | None = None
     gateway_supervisor: GatewaySupervisor | None = None
     application_supervisor: ApplicationSupervisor | None = None
 
@@ -79,6 +81,7 @@ def build_container(settings: AgentSettings) -> AgentContainer:
             ManagedCertificateLifecycleManager
         ),
         gateway_service=dependency_container.get(GatewayService),
+        onboarding_service=dependency_container.get(ManagedOnboardingService),
         gateway_supervisor=dependency_container.get(GatewaySupervisor),
         application_supervisor=dependency_container.get(ApplicationSupervisor),
     )

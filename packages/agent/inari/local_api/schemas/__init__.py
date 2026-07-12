@@ -62,6 +62,13 @@ from .jobs import (
     StructuredReceiptContentInput,
     TextDocumentContentInput,
 )
+from .onboarding import (
+    ManagedOnboardingDeviceConfirmationRequest,
+    ManagedOnboardingInvitationRequest,
+    ManagedOnboardingPreviewResponse,
+    ManagedOnboardingStartResponse,
+    ManagedOnboardingStatusResponse,
+)
 from .system import (
     LiveEventUpdateResponse,
     LiveSnapshotResponse,
@@ -106,6 +113,11 @@ __all__ = [
     "LiveEventUpdateResponse",
     "LiveSnapshotResponse",
     "LiveUpdateMessage",
+    "ManagedOnboardingDeviceConfirmationRequest",
+    "ManagedOnboardingInvitationRequest",
+    "ManagedOnboardingPreviewResponse",
+    "ManagedOnboardingStartResponse",
+    "ManagedOnboardingStatusResponse",
     "LocalTokenRequest",
     "LocalChallengeRequest",
     "LocalChallengeResponse",

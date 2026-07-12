@@ -70,6 +70,22 @@ class GatewayDeviceSummary(GatewayProtocolModel):
     default_device_name: str | None = None
 
 
+class GatewayDeviceInventoryItem(GatewayProtocolModel):
+    device_id: str
+    kind: str
+    device_class: str
+    display_name: str
+    system_name: str
+    driver_key: str
+    connection_state: str
+    capabilities: tuple[str, ...] = ()
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GatewayDeviceInventory(GatewayProtocolModel):
+    devices: tuple[GatewayDeviceInventoryItem, ...] = ()
+
+
 class GatewayQueueSummary(GatewayProtocolModel):
     total: int
     queued: int = 0
@@ -84,6 +100,7 @@ class GatewayQueueSummary(GatewayProtocolModel):
 class GatewayRuntimeSummary(GatewayProtocolModel):
     queue: GatewayQueueSummary
     devices: GatewayDeviceSummary
+    inventory: GatewayDeviceInventory = Field(default_factory=GatewayDeviceInventory)
 
 
 class GatewayRuntimeEventPayload(GatewayProtocolModel):

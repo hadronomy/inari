@@ -38,6 +38,10 @@ fn environment_overrides_cover_every_nested_field() {
         ("INARI_SERVER_HTTP__ZENOH_REST__QUERY_TIMEOUT".into(), "11s".into()),
         ("INARI_SERVER_HTTP__ZENOH_REST__SSE_KEEP_ALIVE".into(), "20s".into()),
         ("INARI_SERVER_HTTP__ZENOH_REST__SSE_BUFFER".into(), "128".into()),
+        (
+            "INARI_SERVER_MANAGED_GATEWAY__API__READ_TOKEN_HASHES".into(),
+            "52f5356b451cde75f687831123aa0d4be18e9fd77cab01f541539d3956c45dae".into(),
+        ),
         ("INARI_SERVER_ZENOH__ENABLED".into(), "true".into()),
         ("INARI_SERVER_ZENOH__MODE".into(), "router".into()),
         ("INARI_SERVER_ZENOH__ADMIN_SPACE__ENABLED".into(), "true".into()),
@@ -186,6 +190,15 @@ fn environment_overrides_cover_every_nested_field() {
                 .sse_buffer
         ),
         128
+    );
+    assert_eq!(
+        loaded
+            .settings
+            .managed_gateway
+            .api
+            .read_token_hashes[0]
+            .to_string(),
+        "52f5356b451cde75f687831123aa0d4be18e9fd77cab01f541539d3956c45dae",
     );
     assert!(loaded.settings.zenoh.enabled);
     assert_eq!(loaded.settings.zenoh.mode, ZenohMode::Router);

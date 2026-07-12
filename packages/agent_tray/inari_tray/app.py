@@ -9,7 +9,7 @@ import time
 import webbrowser
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Protocol, cast
 
 from inari.local_api.schemas import (
     JobResourceResponse,
@@ -69,6 +69,12 @@ class TrayControlBridge(Protocol):
     def shutdown(self) -> None: ...
 
 
+class SetupAssistantPresenter(Protocol):
+    def show_with_invitation(self, invitation: str | None = None) -> None: ...
+
+    def dismiss(self) -> None: ...
+
+
 class AgentTrayApplication:
     def __init__(
         self,
@@ -79,6 +85,9 @@ class AgentTrayApplication:
         host: TrayHost | None = None,
         device_center: DeviceCenterPresenter | None = None,
         device_center_factory: Callable[..., DeviceCenterPresenter] | None = None,
+        setup_assistant: SetupAssistantPresenter | None = None,
+        setup_assistant_factory: Callable[..., SetupAssistantPresenter] | None = None,
+        pending_invitation: str | None = None,
     ) -> None:
         self.settings = settings
         self._pairing_context = TrayPairingContext()
@@ -95,6 +104,11 @@ class AgentTrayApplication:
         self._device_center_factory = (
             device_center_factory or self._default_device_center_factory
         )
+        self._setup_assistant = setup_assistant
+        self._setup_assistant_factory = (
+            setup_assistant_factory or self._default_setup_assistant_factory
+        )
+        self._pending_invitation = pending_invitation
         self.links = TrayLinks(
             api_base_url=settings.agent_api_base_url,
             docs_url=settings.agent_docs_url,
@@ -113,8 +127,13 @@ class AgentTrayApplication:
         )
 
     @classmethod
-    def from_settings(cls, settings: TraySettings) -> AgentTrayApplication:
-        return cls(settings)
+    def from_settings(
+        cls,
+        settings: TraySettings,
+        *,
+        pending_invitation: str | None = None,
+    ) -> AgentTrayApplication:
+        return cls(settings, pending_invitation=pending_invitation)
 
     @property
     def snapshot(self) -> TraySnapshot:
@@ -149,6 +168,7 @@ class AgentTrayApplication:
         ]
         for thread in self._threads:
             thread.start()
+        self._offer_setup_assistant()
         logger.info("Started %d tray background threads", len(self._threads))
 
     def _ensure_local_agent_started(self) -> None:
@@ -312,6 +332,10 @@ class AgentTrayApplication:
                     "Open Device Center",
                     callback=self._open_device_center,
                 ),
+                TrayMenuEntry(
+                    "Connect to Inari Server",
+                    callback=self._open_setup_assistant,
+                ),
                 TrayMenuEntry("Open Queue", callback=self._open_jobs),
                 TrayMenuEntry("Open Logs", callback=self._open_logs),
                 TrayMenuEntry.separator_item(),
@@ -386,6 +410,8 @@ class AgentTrayApplication:
         try:
             if self._device_center is not None:
                 self._device_center.close()
+            if self._setup_assistant is not None:
+                self._setup_assistant.dismiss()
             self.bridge.shutdown()
         finally:
             if self.host is not None:
@@ -476,6 +502,37 @@ class AgentTrayApplication:
             self._device_center.update_connection_snapshot(self.snapshot)
         return self._device_center
 
+    def _open_setup_assistant(self, *_: object) -> None:
+        self._ensure_local_agent_started()
+        self._get_setup_assistant().show_with_invitation()
+
+    def _offer_setup_assistant(self) -> None:
+        invitation = self._pending_invitation
+        self._pending_invitation = None
+        if invitation is not None:
+            self._get_setup_assistant().show_with_invitation(invitation)
+            return
+        from .qt_host import QtTrayHost
+        from .setup_assistant.window import (
+            mark_first_run_setup_offered,
+            should_offer_first_run_setup,
+        )
+
+        if not isinstance(self.host, QtTrayHost) or not should_offer_first_run_setup():
+            return
+        mark_first_run_setup_offered()
+        self._get_setup_assistant().show_with_invitation()
+
+    def _get_setup_assistant(self) -> SetupAssistantPresenter:
+        if self._setup_assistant is None:
+            self._setup_assistant = self._setup_assistant_factory(
+                self.settings,
+                client=self.client,
+                bridge=self.bridge,
+                on_ready=self._open_device_center,
+            )
+        return self._setup_assistant
+
     def _notify_from_device_center(
         self, title: str, subtitle: str | None = None
     ) -> None:
@@ -489,6 +546,24 @@ class AgentTrayApplication:
         notify: Callable[[str, str | None], None] | None = None,
     ) -> DeviceCenterPresenter:
         return create_device_center(settings, client=client, notify=notify)
+
+    @staticmethod
+    def _default_setup_assistant_factory(
+        settings: TraySettings,
+        *,
+        client: TrayApiClient,
+        bridge: TrayControlBridge,
+        on_ready: Callable[[], None] | None = None,
+    ) -> SetupAssistantPresenter:
+        from .setup_assistant import create_setup_assistant
+        from .setup_assistant.window import SetupClient
+
+        return create_setup_assistant(
+            settings,
+            client=cast(SetupClient, client),
+            bridge=bridge,
+            on_ready=on_ready,
+        )
 
     @staticmethod
     def _can_start(snapshot: TraySnapshot) -> bool:

@@ -7,6 +7,8 @@ from typing import Protocol
 import keyring
 from keyring.errors import KeyringError, NoKeyringError, PasswordDeleteError
 
+from .files import write_text_owner_only
+
 
 class SecretStore(Protocol):
     def get_secret(self, key: str) -> str | None: ...
@@ -54,9 +56,10 @@ class FileSecretStore:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def _save(self, payload: dict[str, str]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        write_text_owner_only(
+            self.path,
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
         )
 
 

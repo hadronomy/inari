@@ -297,7 +297,7 @@ async fn route_is_not_mounted_when_disabled() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/zenoh")
+                .uri("/api/zenoh/v1")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -314,7 +314,7 @@ async fn zenoh_root_reports_connection_state() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh")
+                .uri("/api/zenoh/v1")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -326,13 +326,38 @@ async fn zenoh_root_reports_connection_state() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn legacy_zenoh_mount_is_not_retained() {
+    let mut app = TestApp::spawn(enabled_config()).await;
+
+    let response = app
+        .request(
+            Request::builder()
+                .uri("/api/v1/zenoh/demo/example")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .expect("content type should exist"),
+        "application/problem+json",
+    );
+
+    app.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn zenoh_admin_space_is_blocked_by_default() {
     let mut app = TestApp::spawn(enabled_config()).await;
 
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/@/local/router")
+                .uri("/api/zenoh/v1/@/local/router")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -350,7 +375,7 @@ async fn invalid_key_expression_returns_bad_request() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/example/*eval")
+                .uri("/api/zenoh/v1/demo/example/*eval")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -368,7 +393,7 @@ async fn zenoh_admin_space_returns_router_status_when_enabled() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/@/local/router")
+                .uri("/api/zenoh/v1/@/local/router")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -400,7 +425,7 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
         .request(
             Request::builder()
                 .method("PUT")
-                .uri("/api/v1/zenoh/demo/materialized")
+                .uri("/api/zenoh/v1/demo/materialized")
                 .header("content-type", "text/plain")
                 .body(Body::from("hello"))
                 .expect("request should be valid"),
@@ -415,7 +440,7 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
         .request(
             Request::builder()
                 .method("PATCH")
-                .uri("/api/v1/zenoh/demo/materialized")
+                .uri("/api/zenoh/v1/demo/materialized")
                 .header("content-type", "text/plain")
                 .body(Body::from("patched"))
                 .expect("request should be valid"),
@@ -429,7 +454,7 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
     let get = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/materialized")
+                .uri("/api/zenoh/v1/demo/materialized")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -450,7 +475,7 @@ async fn put_patch_get_delete_round_trip_through_http_surface() {
         .request(
             Request::builder()
                 .method("DELETE")
-                .uri("/api/v1/zenoh/demo/materialized")
+                .uri("/api/zenoh/v1/demo/materialized")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -470,7 +495,7 @@ async fn post_query_forwards_payload_and_encoding() {
         .request(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/zenoh/demo/echo")
+                .uri("/api/zenoh/v1/demo/echo")
                 .header("content-type", "text/plain")
                 .body(Body::from("hello from query"))
                 .expect("request should be valid"),
@@ -500,7 +525,7 @@ async fn get_raw_returns_first_reply_payload() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/raw?_raw")
+                .uri("/api/zenoh/v1/demo/raw?_raw")
                 .header("content-type", "text/plain")
                 .body(Body::from("raw payload"))
                 .expect("request should be valid"),
@@ -534,7 +559,7 @@ async fn get_html_renders_definition_list() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/html")
+                .uri("/api/zenoh/v1/demo/html")
                 .header("accept", "text/html")
                 .header("content-type", "text/plain")
                 .body(Body::from("<hello>"))
@@ -566,7 +591,7 @@ async fn get_liveliness_returns_live_tokens() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/presence?_liveliness")
+                .uri("/api/zenoh/v1/demo/presence?_liveliness")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )
@@ -599,7 +624,7 @@ async fn liveliness_sse_stream_reports_history_and_drop() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/presence?_liveliness&_history")
+                .uri("/api/zenoh/v1/demo/presence?_liveliness&_history")
                 .header("accept", "text/event-stream")
                 .body(Body::empty())
                 .expect("request should be valid"),
@@ -631,7 +656,7 @@ async fn liveliness_rejects_non_reserved_selector_parameters() {
     let response = app
         .request(
             Request::builder()
-                .uri("/api/v1/zenoh/demo/presence?_liveliness&foo=bar")
+                .uri("/api/zenoh/v1/demo/presence?_liveliness&foo=bar")
                 .body(Body::empty())
                 .expect("request should be valid"),
         )

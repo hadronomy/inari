@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.x509.oid import NameOID
 
+from .files import write_bytes_owner_only
 from .models import AgentIdentity
 
 
@@ -70,12 +71,13 @@ class AgentIdentityService:
             return private_key
         private_key = Ed25519PrivateKey.generate()
         self.identity_path.parent.mkdir(parents=True, exist_ok=True)
-        self.identity_path.write_bytes(
+        write_bytes_owner_only(
+            self.identity_path,
             private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption(),
-            )
+            ),
         )
         return private_key
 

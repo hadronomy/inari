@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import runpy
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from types import ModuleType
 from typing import Any, cast
@@ -179,7 +180,7 @@ def test_service_class_uses_python_module_host(mocker) -> None:
 
     service_class = create_windows_service_class(settings=AgentSettings())
 
-    assert service_class._exe_name_.endswith("python.exe")
+    assert Path(service_class._exe_name_).name.startswith("python")
     assert service_class._exe_args_ == "-m inari.host_service.windows_entrypoint"
 
 

@@ -7,6 +7,7 @@ pub mod app;
 pub mod config;
 pub mod error;
 pub mod http;
+pub mod managed_gateway;
 pub mod observability;
 pub mod protocol;
 pub mod runtime;
@@ -16,9 +17,11 @@ pub mod zenoh;
 
 pub use app::{ServerApplication, ServerBuilder};
 pub use config::{
-    AppConfig, ConfigOrigin, CorsConfig, HttpConfig, LoadedConfig, LogFormat, ObservabilityConfig,
-    ProtocolConfig, RuntimeConfig, ServerConfig, ZenohAdminSpaceConfig, ZenohConfig, ZenohMode,
-    ZenohRestConfig,
+    AppConfig, ConfigOrigin, CorsConfig, HttpConfig, LoadedConfig, LogFormat,
+    ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode, ManagedGatewayConfig,
+    ManagedGatewayDataPlaneConfig, ObservabilityConfig, ProtocolConfig, RuntimeConfig,
+    ServerConfig, ZenohAccessControlConfig, ZenohAclPermission, ZenohAdminSpaceConfig, ZenohConfig,
+    ZenohMode, ZenohRestConfig, ZenohTlsConfig,
 };
 pub use coordination::{
     ChannelCapacity, ConcurrencyLimit, InvalidChannelCapacity, InvalidConcurrencyLimit,
@@ -26,7 +29,9 @@ pub use coordination::{
 };
 pub use error::{AppError, AppResult, ConfigError};
 pub use observability::init as init_observability;
-pub use protocol::{NoopProtocolModule, ProtocolDescriptor, ProtocolModule, ProtocolStage};
+pub use protocol::{
+    InariProtocolModule, NoopProtocolModule, ProtocolDescriptor, ProtocolModule, ProtocolStage,
+};
 pub use runtime::build_runtime;
 pub use state::{AppState, ComponentReadiness, ReadinessLevel, ReadinessSnapshot};
 pub use zenoh::{

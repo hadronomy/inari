@@ -10,10 +10,12 @@ from .dependencies import (
     get_event_hub,
     get_gateway_service,
     get_job_service,
+    get_onboarding_service,
     get_standalone_trust_service,
 )
 from ..core.exceptions import AgentError
 from ..gateway.service import GatewayService
+from ..gateway.onboarding import ManagedOnboardingService
 from ..printing.commands import DeviceCommandKind
 from ..printing.jobs import PrintContentKind
 from ..runtime.events import EventHub
@@ -53,6 +55,11 @@ from .schemas import (
     PrintJobRequest,
     QueueSummaryResponse,
     RuntimeEventResponse,
+    ManagedOnboardingDeviceConfirmationRequest,
+    ManagedOnboardingInvitationRequest,
+    ManagedOnboardingPreviewResponse,
+    ManagedOnboardingStartResponse,
+    ManagedOnboardingStatusResponse,
     ServiceDescriptorResponse,
     SystemStatusResponse,
     TokenResponse,
@@ -62,6 +69,7 @@ from .schemas import (
 router = APIRouter()
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 gateway_router = APIRouter(prefix="/gateway", tags=["gateway"])
+onboarding_router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 system_router = APIRouter(prefix="/system", tags=["system"])
 devices_router = APIRouter(prefix="/devices", tags=["devices"])
 jobs_router = APIRouter(tags=["jobs"])
@@ -74,6 +82,9 @@ AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
 ]
 GatewayServiceDependency = Annotated[GatewayService, Depends(get_gateway_service)]
+OnboardingServiceDependency = Annotated[
+    ManagedOnboardingService, Depends(get_onboarding_service)
+]
 StandaloneTrustServiceDependency = Annotated[
     StandaloneTrustService, Depends(get_standalone_trust_service)
 ]
@@ -256,6 +267,96 @@ async def gateway_upstream_status(
     _require_scopes(authorization_service, principal, AccessScope.ADMIN_READ)
     return GatewayUpstreamStatusResponse.from_status(
         gateway_service.get_upstream_status()
+    )
+
+
+def _onboarding_status_response(
+    onboarding_service: ManagedOnboardingService,
+    device_catalog: DeviceCatalog,
+):
+    status = onboarding_service.status()
+    return ManagedOnboardingStatusResponse.from_domain(
+        status,
+        devices=[_device_response(device_catalog, device) for device in status.devices],
+    )
+
+
+@onboarding_router.post(
+    "/managed/preview", response_model=ManagedOnboardingPreviewResponse
+)
+async def preview_managed_onboarding(
+    request: ManagedOnboardingInvitationRequest,
+    onboarding_service: OnboardingServiceDependency,
+    authorization_service: AuthorizationServiceDependency,
+    connection: Request,
+) -> ManagedOnboardingPreviewResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_READ)
+    preview = await onboarding_service.preview(
+        request.invitation, controller_url=request.controller_url
+    )
+    return ManagedOnboardingPreviewResponse.from_domain(preview)
+
+
+@onboarding_router.post("/managed/start", response_model=ManagedOnboardingStartResponse)
+async def start_managed_onboarding(
+    request: ManagedOnboardingInvitationRequest,
+    onboarding_service: OnboardingServiceDependency,
+    authorization_service: AuthorizationServiceDependency,
+    connection: Request,
+) -> ManagedOnboardingStartResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_WRITE)
+    preview, restart_required = await onboarding_service.start(
+        request.invitation, controller_url=request.controller_url
+    )
+    return ManagedOnboardingStartResponse.from_start(
+        preview, restart_required=restart_required
+    )
+
+
+@onboarding_router.get("/status", response_model=ManagedOnboardingStatusResponse)
+async def managed_onboarding_status(
+    onboarding_service: OnboardingServiceDependency,
+    device_catalog: DeviceCatalogDependency,
+    authorization_service: AuthorizationServiceDependency,
+    connection: Request,
+) -> ManagedOnboardingStatusResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_READ)
+    return _onboarding_status_response(onboarding_service, device_catalog)
+
+
+@onboarding_router.post(
+    "/devices/confirm", response_model=ManagedOnboardingStatusResponse
+)
+async def confirm_onboarding_devices(
+    request: ManagedOnboardingDeviceConfirmationRequest,
+    onboarding_service: OnboardingServiceDependency,
+    device_catalog: DeviceCatalogDependency,
+    authorization_service: AuthorizationServiceDependency,
+    connection: Request,
+) -> ManagedOnboardingStatusResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_WRITE)
+    onboarding_service.confirm_devices(
+        device_ids=request.device_ids,
+        labels=request.labels,
+        default_printer_device_id=request.default_printer_device_id,
+    )
+    return _onboarding_status_response(onboarding_service, device_catalog)
+
+
+@onboarding_router.post("/cancel", response_model=ManagedOnboardingStatusResponse)
+async def cancel_managed_onboarding(
+    onboarding_service: OnboardingServiceDependency,
+    authorization_service: AuthorizationServiceDependency,
+    connection: Request,
+) -> ManagedOnboardingStatusResponse:
+    principal = _current_principal(authorization_service, connection)
+    _require_scopes(authorization_service, principal, AccessScope.ADMIN_WRITE)
+    return ManagedOnboardingStatusResponse.from_domain(
+        onboarding_service.cancel(), devices=[]
     )
 
 
@@ -466,6 +567,7 @@ async def stream_events(
 
 router.include_router(auth_router)
 router.include_router(gateway_router)
+router.include_router(onboarding_router)
 router.include_router(system_router)
 router.include_router(devices_router)
 router.include_router(jobs_router)

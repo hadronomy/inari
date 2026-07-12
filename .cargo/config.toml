@@ -1,0 +1,6 @@
+[env]
+# Keep direct `cargo run` builds aligned with cargo-leptos' generated asset names.
+LEPTOS_OUTPUT_NAME = "inari-web"
+
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

@@ -70,6 +70,7 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("devices", "printing"): (
         "Default printer behavior and optional network printer definitions.",
     ),
+    ("devices",): ("Discovered-device preferences managed by the setup assistant.",),
     ("runtime", "discovery"): ("Device discovery cadence.",),
     ("runtime", "scheduler"): ("Job scheduler tuning.",),
     ("runtime", "jobs", "retry"): ("Job retry policy.",),
@@ -141,6 +142,9 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
         "Default transport strategy when a driver supports more than one mode.",
     ),
     ("devices", "printing", "enable_html"): ("Allow HTML receipt/document rendering.",),
+    ("devices", "labels"): (
+        "Friendly labels keyed by stable Inari device id. These do not rename operating-system devices.",
+    ),
     ("runtime", "discovery", "interval"): (
         "How often the agent refreshes device discovery.",
     ),
@@ -315,7 +319,7 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     (
         "controller",
         "enrollment_url",
-    ): "https://bootstrap.controller.example.com/api/inari/enroll",
+    ): "https://bootstrap.controller.example.com/api/inari/v1/enrollments",
     ("controller", "bootstrap", "enrollment_token"): "enrollment-token",
     (
         "transport",
@@ -515,6 +519,7 @@ class DevicesPrintingConfig(BaseModel):
 class DevicesConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
+    labels: dict[str, str] = Field(default_factory=dict)
     printing: DevicesPrintingConfig = Field(default_factory=DevicesPrintingConfig)
 
 
@@ -749,6 +754,7 @@ class AgentConfigFile(BaseModel):
             "runtime_database_path": runtime_database_path,
             "security_state_dir": security_state_dir,
             "default_printer_name": self.devices.printing.default_printer,
+            "device_labels": dict(self.devices.labels),
             "default_printer_mode": self.devices.printing.default_transport,
             "html_print_enabled": self.devices.printing.enable_html,
             "network_printers": [
@@ -925,6 +931,7 @@ class AgentSettings(BaseModel):
         default_factory=lambda: ["127.0.0.1", "localhost", "testserver"]
     )
     default_printer_name: str | None = None
+    device_labels: dict[str, str] = Field(default_factory=dict)
     log_level: LogLevel = "INFO"
     html_print_enabled: bool = True
     default_printer_mode: PrinterMode = "auto"
@@ -997,6 +1004,7 @@ class AgentSettings(BaseModel):
     gateway_outbox_poll_interval_seconds: FloatDurationSeconds = 0.5
     gateway_backoff_base_seconds: FloatDurationSeconds = 1.0
     gateway_backoff_max_seconds: FloatDurationSeconds = 60.0
+    resolved_config_path: Path | None = Field(default=None, exclude=True, repr=False)
 
     @property
     def resolved_data_dir(self) -> Path:
@@ -1049,6 +1057,7 @@ class AgentSettings(BaseModel):
         "tls_ca_path",
         "zitadel_service_account_key_path",
         "zitadel_private_key_path",
+        "resolved_config_path",
         mode="before",
     )
     @classmethod
@@ -1157,7 +1166,9 @@ def load_settings(
         **settings_payload,
         **env_payload,
     }
-    return AgentSettings.model_validate(merged_payload)
+    return AgentSettings.model_validate(
+        {**merged_payload, "resolved_config_path": resolved_config_path}
+    )
 
 
 @lru_cache(maxsize=8)
@@ -1192,7 +1203,7 @@ def resolve_config_path(
             raise FileNotFoundError(f"Config file not found: {candidate}")
         return candidate
 
-    requested_profile = env.get(f"{ENV_PREFIX}PATH_PROFILE", "auto")
+    requested_profile = parse_path_profile(env.get(f"{ENV_PREFIX}PATH_PROFILE", "auto"))
     for candidate in default_config_candidates(
         working_directory=working_directory,
         profile=requested_profile,

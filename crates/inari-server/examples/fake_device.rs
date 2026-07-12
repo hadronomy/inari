@@ -43,15 +43,15 @@ Options:
   -h, --help                Show this help text
 
 What it exposes:
-  <namespace>/presence      Zenoh liveliness token
+  <namespace>/presence/agent Zenoh liveliness token
   <namespace>/status/latest JSON status publisher + queryable
   <namespace>/telemetry     JSON telemetry publisher
 
 Try it with:
   cargo run -p inari-server --example fake_device -- --namespace iot/v1/agents/agt_123
-  curl -s http://127.0.0.1:8080/api/v1/zenoh/iot/v1/agents/agt_123/status/latest | jq
-  curl -N -H 'accept: text/event-stream' http://127.0.0.1:8080/api/v1/zenoh/iot/v1/agents/agt_123/telemetry
-  curl -N -g -H 'accept: text/event-stream' 'http://127.0.0.1:8080/api/v1/zenoh/iot/v1/agents/**/presence?_liveliness&_history'
+  curl -s http://127.0.0.1:8080/api/zenoh/v1/iot/v1/agents/agt_123/status/latest | jq
+  curl -N -H 'accept: text/event-stream' http://127.0.0.1:8080/api/zenoh/v1/iot/v1/agents/agt_123/telemetry
+  curl -N -g -H 'accept: text/event-stream' 'http://127.0.0.1:8080/api/zenoh/v1/iot/v1/agents/**/presence/agent?_liveliness&_history'
 ";
 
 type AnyError = Box<dyn StdError + Send + Sync + 'static>;
@@ -109,7 +109,7 @@ impl Default for FakeDeviceConfig {
 
         Self {
             connect_endpoint: DEFAULT_CONNECT_ENDPOINT.into(),
-            presence_key: parse_key(format!("{namespace}/presence"), "--namespace")
+            presence_key: parse_key(format!("{namespace}/presence/agent"), "--namespace")
                 .expect("default presence key should be valid"),
             status_key: parse_key(format!("{namespace}/status/latest"), "--namespace")
                 .expect("default status key should be valid"),
@@ -174,7 +174,8 @@ impl FakeDeviceConfig {
                 .unwrap_or_else(|| "agt_demo".into());
         }
 
-        config.presence_key = parse_key(format!("{}/presence", config.namespace), "--namespace")?;
+        config.presence_key =
+            parse_key(format!("{}/presence/agent", config.namespace), "--namespace")?;
         config.status_key =
             parse_key(format!("{}/status/latest", config.namespace), "--namespace")?;
         config.telemetry_key = parse_key(format!("{}/telemetry", config.namespace), "--namespace")?;

@@ -17,6 +17,7 @@ from tests.factories import (
     enrollment_record as _enrollment_record,
 )
 from inari.config import AgentSettings
+from inari.core.exceptions import AgentError
 from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 from inari.gateway.edge.caddy import CaddyControllerProfile
 from inari.gateway.enrollment.auth import (
@@ -225,6 +226,41 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     assert reloaded.certificate_enrollment is not None
     assert reloaded.certificate_enrollment.bootstrap_auth is not None
     assert reloaded.certificate_enrollment.bootstrap_auth.token == "ott_bootstrap_token"
+
+
+@pytest.mark.anyio
+async def test_enrollment_rejects_unsupported_selected_protocol_version(
+    tmp_path: Path,
+) -> None:
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    certificate_service = CertificateLifecycleService(
+        certificate_path=tmp_path / "upstream-client-cert.pem",
+        private_key_path=tmp_path / "identity.pem",
+        ca_path=tmp_path / "upstream-ca.pem",
+    )
+    payload = _enrollment_response_payload(certificate=None)
+    payload["selected_protocol_version"] = "1900-01-01"
+    service = GatewayEnrollmentService(
+        settings=AgentSettings(
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_base_url="https://controller.example.com",
+            upstream_certificate_mode=UpstreamCertificateMode.NONE,
+            upstream_enrollment_token="bootstrap-token",
+        ),
+        identity_service=identity_service,
+        secret_store=MemorySecretStore(),
+        tls_context_factory=TlsContextFactory(AgentSettings()),
+        certificate_service=certificate_service,
+        auth_provider=cast(UpstreamAuthProvider, StaticAuthProvider({})),
+        metadata_path=tmp_path / "upstream-enrollment.json",
+        snapshot_provider=_gateway_snapshot_payload,
+        http_client_factory=_http_client_factory(FakeAsyncHttpClient(payload)),
+    )
+
+    with pytest.raises(AgentError, match="unsupported gateway protocol version"):
+        await service.ensure_enrolled()
+
+    assert not (tmp_path / "upstream-enrollment.json").exists()
 
 
 @pytest.mark.anyio
@@ -681,7 +717,11 @@ class StepCaHttpClient:
             self.sign_calls += 1
             assert json is not None
             csr = x509.load_pem_x509_csr(json["csr"].encode("utf-8"))
-            certificate = _issue_certificate_from_csr(csr, self.ca_key)
+            certificate = _issue_certificate_from_csr(
+                csr,
+                self.ca_key,
+                issuer_name=_certificate_common_name(self.root_pem),
+            )
             return FakeAsyncResponse(
                 {
                     "crt": certificate.public_bytes(serialization.Encoding.PEM).decode(
@@ -747,13 +787,16 @@ def _issue_certificate(
     return builder.sign(issuer_key, hashes.SHA256())
 
 
-def _issue_certificate_from_csr(csr: x509.CertificateSigningRequest, issuer_key):
+def _issue_certificate_from_csr(
+    csr: x509.CertificateSigningRequest,
+    issuer_key,
+    *,
+    issuer_name: str = "Example Step CA",
+):
     builder = (
         x509.CertificateBuilder()
         .subject_name(csr.subject)
-        .issuer_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Example Step CA")])
-        )
+        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)]))
         .public_key(csr.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))
@@ -771,6 +814,12 @@ def _issue_certificate_from_csr(csr: x509.CertificateSigningRequest, issuer_key)
 
 def _fingerprint(certificate: x509.Certificate) -> str:
     return certificate.fingerprint(hashes.SHA256()).hex()
+
+
+def _certificate_common_name(certificate_pem: str) -> str:
+    certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
+    values = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    return str(values[0].value) if values else "Example Step CA"
 
 
 def _gateway_snapshot_payload() -> GatewaySnapshotPayload:

@@ -512,7 +512,7 @@ def test_spawned_process_bridge_uses_uv_workspace_fallback(mocker) -> None:
         "C:/bin/uv.exe",
         "run",
         "--directory",
-        "C:\\repo\\packages\\agent",
+        str(Path("C:/repo/packages/agent")),
         "inari",
     )
 
@@ -615,7 +615,7 @@ def test_query_state_uses_user_systemd_scope() -> None:
     assert "user" in (state.detail or "")
 
 
-def test_query_state_parses_running_launchd_job() -> None:
+def test_query_state_parses_running_launchd_job(mocker) -> None:
     commands: list[tuple[str, ...]] = []
 
     def runner(command):
@@ -632,7 +632,7 @@ def test_query_state_parses_running_launchd_job() -> None:
         ),
         runner=runner,
     )
-
+    mocker.patch("inari_tray.bridge._current_user_id", return_value=0)
     state = bridge.query_state()
 
     assert commands == [("launchctl", "print", "gui/0/com.example.inari")]

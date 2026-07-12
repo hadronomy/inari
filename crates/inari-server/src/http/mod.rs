@@ -1,11 +1,18 @@
 pub mod routes;
+mod ssr_render;
 
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::DefaultBodyLimit;
 use axum::http::header::{AUTHORIZATION, COOKIE};
 use axum::http::{HeaderName, HeaderValue, Method};
+use axum::middleware;
 use axum::response::IntoResponse;
+use leptos::prelude::provide_context;
+use leptos::reactive::diagnostics::SpecialNonReactiveZone;
+use leptos_axum::{
+    AxumRouteListing, ErrorHandler, LeptosRoutes, generate_route_list, site_pkg_dir_service,
+};
 use tower::timeout::TimeoutLayer;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
@@ -29,11 +36,34 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
         .then(|| build_cors_layer(&settings.http.cors))
         .transpose()?;
 
+    let onboarding = inari_web::OnboardingContext::from(state.onboarding().cloned());
+    let leptos_options = state.leptos_options().clone();
+    let web_routes = discover_web_routes();
+    let provide_onboarding_context = move || {
+        provide_context(onboarding.clone());
+    };
+    let site_service =
+        site_pkg_dir_service(&leptos_options).fallback(ErrorHandler::new_with_context(
+            provide_onboarding_context.clone(),
+            inari_web::shell,
+            leptos_options.clone(),
+        ));
     let router = Router::new()
         .merge(routes::system::router())
-        .merge(routes::api::router(state));
+        .nest("/api", routes::api::router(state))
+        .leptos_routes_with_context(state, web_routes, provide_onboarding_context, {
+            let leptos_options = leptos_options.clone();
+            move || inari_web::shell(leptos_options.clone())
+        })
+        .fallback_service(site_service)
+        .layer(middleware::from_fn(ssr_render::serve));
 
     Ok(apply_http_layers(router, state, cors))
+}
+
+fn discover_web_routes() -> Vec<AxumRouteListing> {
+    let _non_reactive = SpecialNonReactiveZone::enter();
+    generate_route_list(inari_web::App)
 }
 
 async fn handle_middleware_error(error: BoxError) -> impl IntoResponse {
@@ -217,7 +247,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn protocol_stub_returns_uniform_error_shape() {
+    async fn protocol_stub_returns_problem_details() {
         let response = test_app()
             .oneshot(
                 Request::builder()
@@ -237,6 +267,37 @@ mod tests {
 
         let payload: Value = serde_json::from_slice(&body).expect("response body should be JSON");
 
-        assert_eq!(payload["error"]["code"], "not_implemented");
+        assert_eq!(payload["type"], "urn:inari:problem:not_implemented");
+        assert_eq!(payload["title"], "Not Implemented");
+        assert_eq!(payload["status"], 501);
+        assert_eq!(payload["code"], "not_implemented");
+    }
+
+    #[tokio::test]
+    async fn unknown_api_routes_never_fall_through_to_leptos() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/does-not-exist")
+                    .body(Body::empty())
+                    .expect("request should be valid"),
+            )
+            .await
+            .expect("router should respond");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .unwrap(),
+            "application/problem+json"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let payload: Value = serde_json::from_slice(&body).expect("response body should be JSON");
+        assert_eq!(payload["code"], "not_found");
+        assert_eq!(payload["detail"], "No API resource exists at `/api/does-not-exist`.");
     }
 }

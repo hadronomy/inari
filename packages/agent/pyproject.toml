@@ -19,6 +19,7 @@ dependencies = [
   "joserfc>=1.6.3",
   "keyring>=25.7.0",
   "platformdirs>=4.4.0",
+  "tomli-w>=1.2.0,<2.0.0",
   "scalar-fastapi>=1.8.2",
   "eclipse-zenoh>=1.9.0,<2.0.0",
 ]

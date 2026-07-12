@@ -19,6 +19,7 @@ from tests.factories import (
     enrollment_record as _enrollment_record,
 )
 from inari.config import AgentSettings
+from inari.core.exceptions import AgentError
 from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
     GatewayEnrollmentRecord,
@@ -225,6 +226,57 @@ async def test_lifecycle_marks_rebootstrap_required_after_renewal_rejection(
     status = lifecycle.current_status()
     assert status.state is ManagedCertificateState.REBOOTSTRAP_REQUIRED
     assert status.failure_reason is ManagedCertificateFailureReason.AUTH_FAILED
+
+
+@pytest.mark.anyio
+async def test_step_ca_provider_rejects_certificate_signed_by_wrong_ca(
+    tmp_path: Path,
+) -> None:
+    trusted_ca_key = ec.generate_private_key(ec.SECP256R1())
+    trusted_ca_cert = _issue_certificate(
+        subject_name="Example Step CA",
+        issuer_name="Example Step CA",
+        subject_key=trusted_ca_key.public_key(),
+        issuer_key=trusted_ca_key,
+        not_valid_after=datetime.now(tz=UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    rogue_ca_key = ec.generate_private_key(ec.SECP256R1())
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    certificate_service = CertificateLifecycleService(
+        certificate_path=tmp_path / "upstream-client-cert.pem",
+        private_key_path=tmp_path / "identity.pem",
+        ca_path=tmp_path / "upstream-ca.pem",
+    )
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
+            step_ca_url="https://step-ca.example.com",
+        ),
+        certificate_service=certificate_service,
+        http_client_factory=_http_client_factory(
+            StepCaHttpClient(
+                root_pem=trusted_ca_cert.public_bytes(
+                    serialization.Encoding.PEM
+                ).decode("utf-8"),
+                ca_key=rogue_ca_key,
+                certificate_service=certificate_service,
+            )
+        ),
+    )
+
+    with pytest.raises(AgentError, match="does not chain"):
+        await provider.enroll(
+            CertificateEnrollmentRequest(
+                enrollment=_certificate_enrollment(
+                    root_fingerprint=_fingerprint(trusted_ca_cert),
+                    token="ott_bootstrap_token",
+                    subject="agt_test",
+                ),
+                csr_pem=identity_service.build_csr_pem(),
+            )
+        )
 
 
 @pytest.mark.anyio

@@ -12,12 +12,14 @@ from pydantic import ValidationError
 
 from ...config import AgentSettings
 from ...core.exceptions import AgentError
+from ...core.version import SUPPORTED_GATEWAY_PROTOCOL_VERSIONS
 from ...security.certificates.store import (
     CertificateLifecycleService,
     ManagedCertificate,
 )
 from ...security.identity import AgentIdentityService
 from ...security.secrets import SecretStore
+from ...security.files import write_text_owner_only
 from ...security.tls import TlsContextFactory
 from ..models import (
     CertificateBootstrapAuth,
@@ -208,6 +210,12 @@ class GatewayEnrollmentService:
         fallback_agent_id: str,
     ) -> GatewayEnrollmentRecord:
         data_plane = payload.data_plane
+        if payload.selected_protocol_version not in SUPPORTED_GATEWAY_PROTOCOL_VERSIONS:
+            raise AgentError(
+                "UNSUPPORTED_GATEWAY_PROTOCOL_VERSION",
+                f"The controller selected unsupported gateway protocol version {payload.selected_protocol_version!r}.",
+                status_code=502,
+            )
         if data_plane.kind is not UpstreamDataPlaneKind.ZENOH:
             raise AgentError(
                 "UNSUPPORTED_DATA_PLANE",
@@ -278,6 +286,8 @@ class GatewayEnrollmentService:
             certificate_enrollment=certificate_enrollment,
         )
         self._store_enrollment(record)
+        self.secret_store.delete_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
+        self.secret_store.delete_secret(LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY)
         return record
 
     def persist_certificate_state(
@@ -314,11 +324,12 @@ class GatewayEnrollmentService:
         self._save_enrollment(record)
 
     def _save_enrollment(self, record: GatewayEnrollmentRecord) -> None:
-        self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
         raw_payload = record.to_persisted_dict()
         payload = {key: _serialize_value(value) for key, value in raw_payload.items()}
-        self.metadata_path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        write_text_owner_only(
+            self.metadata_path,
+            json.dumps(payload, indent=2, sort_keys=True),
+            encoding="utf-8",
         )
 
     def _resolve_connect_endpoints(self, data_plane) -> tuple[str, ...]:
@@ -344,7 +355,7 @@ class GatewayEnrollmentService:
         if self.settings.upstream_enrollment_url:
             return self.settings.upstream_enrollment_url
         if self.settings.upstream_base_url:
-            return f"{self.settings.upstream_base_url}/api/inari/enroll"
+            return f"{self.settings.upstream_base_url}/api/inari/v1/enrollments"
         return None
 
     def _client(self) -> httpx.AsyncClient:

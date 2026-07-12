@@ -6,16 +6,19 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::Request;
+use inari_gateway::onboarding::{CertificateMode, OnboardingConfig, OnboardingService};
+use leptos::prelude::get_configuration;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 use tokio::time::{self, MissedTickBehavior};
 use tower::ServiceBuilder;
 use tower_http::normalize_path::NormalizePathLayer;
+use url::Url;
 
 use crate::config::LoadedConfig;
 use crate::error::{AppError, AppResult};
 use crate::http;
-use crate::protocol::{DynProtocolModule, IntoDynProtocolModule, NoopProtocolModule};
+use crate::protocol::{DynProtocolModule, InariProtocolModule, IntoDynProtocolModule};
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
@@ -35,7 +38,7 @@ pub struct ServerBuilder<State = MissingConfig> {
 
 impl Default for ServerBuilder<MissingConfig> {
     fn default() -> Self {
-        Self { state: MissingConfig, protocol: Arc::new(NoopProtocolModule) }
+        Self { state: MissingConfig, protocol: Arc::new(InariProtocolModule) }
     }
 }
 
@@ -92,11 +95,78 @@ impl ServerBuilder<WithConfig> {
 
         let (zenoh_handle, zenoh_supervisor) = ZenohSupervisor::new(loaded.settings.zenoh.clone());
 
-        let state = AppState::new(loaded, zenoh_handle, self.protocol);
+        let leptos_options = get_configuration(leptos_manifest())
+            .map_err(|source| {
+                AppError::internal(
+                    "leptos_configuration",
+                    "Failed to load the Leptos runtime configuration.",
+                )
+                .with_source(source)
+            })?
+            .leptos_options;
+        let onboarding = initialize_onboarding(&loaded).await?;
+        let state = AppState::new_with_onboarding(
+            loaded,
+            zenoh_handle,
+            self.protocol,
+            leptos_options,
+            onboarding,
+        );
         let router = http::router(&state)?.with_state(state.clone());
 
         Ok(ServerApplication { state, router, shutdown, zenoh_supervisor })
     }
+}
+
+fn leptos_manifest() -> Option<&'static str> {
+    let configured_by_cargo_leptos = option_env!("LEPTOS_OUTPUT_NAME").is_some()
+        || std::env::var_os("LEPTOS_OUTPUT_NAME").is_some();
+    (!configured_by_cargo_leptos).then_some("Cargo.toml")
+}
+
+async fn initialize_onboarding(loaded: &LoadedConfig) -> AppResult<Option<OnboardingService>> {
+    let config = &loaded.settings.managed_gateway;
+    if !config.enabled {
+        return Ok(None);
+    }
+    let public_base_url = config
+        .onboarding
+        .public_base_url
+        .as_deref()
+        .map(str::parse::<Url>)
+        .transpose()
+        .map_err(|source| {
+            AppError::internal(
+                "managed_gateway_public_url",
+                "Managed onboarding public_base_url is invalid.",
+            )
+            .with_source(source)
+        })?;
+    OnboardingService::initialize(OnboardingConfig {
+        database_path: config.database_path.clone(),
+        enabled: config.onboarding.enabled,
+        public_base_url,
+        controller_name: config.controller_name.clone(),
+        controller_instance_id: config.controller_instance_id.clone(),
+        operator_token_hashes: config
+            .onboarding
+            .operator_token_hashes
+            .clone(),
+        invitation_ttl: config.onboarding.invite_ttl,
+        supported_protocol_versions: config
+            .supported_protocol_versions
+            .clone(),
+        certificate_mode: match config.certificate.mode {
+            crate::config::ManagedGatewayCertificateMode::None => CertificateMode::None,
+            crate::config::ManagedGatewayCertificateMode::StepCa => CertificateMode::StepCa,
+        },
+        requires_mutual_tls_after_issuance: config
+            .certificate
+            .requires_mutual_tls_after_issuance,
+    })
+    .await
+    .map(Some)
+    .map_err(AppError::from)
 }
 
 pub struct ServerApplication {
@@ -157,6 +227,12 @@ impl ServerApplication {
         }));
 
         tasks.spawn(named(TaskName::ZenohSupervisor, zenoh_supervisor.run(shutdown.clone())));
+
+        let managed_gateway = state.managed_gateway().clone();
+        tasks.spawn(named(
+            TaskName::ManagedGatewayDataPlane,
+            managed_gateway.run_data_plane(shutdown.clone()),
+        ));
 
         let readiness_sync_state = state.clone();
         let readiness_sync_shutdown = shutdown.clone();
@@ -226,6 +302,7 @@ fn log_http_listener_ready(
 enum TaskName {
     SignalListener,
     ZenohSupervisor,
+    ManagedGatewayDataPlane,
     ReadinessSync,
     ReadinessMonitor,
     HttpServer,
@@ -236,6 +313,7 @@ impl TaskName {
         match self {
             Self::SignalListener => "signal-listener",
             Self::ZenohSupervisor => "zenoh-supervisor",
+            Self::ManagedGatewayDataPlane => "managed-gateway-data-plane",
             Self::ReadinessSync => "readiness-sync",
             Self::ReadinessMonitor => "readiness-monitor",
             Self::HttpServer => "http-server",
@@ -245,9 +323,10 @@ impl TaskName {
     const fn clean_exit_policy(self) -> CleanExitPolicy {
         match self {
             Self::SignalListener | Self::HttpServer => CleanExitPolicy::ShutdownApplication,
-            Self::ZenohSupervisor | Self::ReadinessSync | Self::ReadinessMonitor => {
-                CleanExitPolicy::KeepRunning
-            },
+            Self::ZenohSupervisor
+            | Self::ManagedGatewayDataPlane
+            | Self::ReadinessSync
+            | Self::ReadinessMonitor => CleanExitPolicy::KeepRunning,
         }
     }
 }

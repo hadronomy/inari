@@ -1,0 +1,31 @@
+[package]
+name              = "inari-gateway"
+version.workspace = true
+
+authors.workspace     = true
+description.workspace = true
+edition.workspace     = true
+license.workspace     = true
+publish.workspace     = true
+repository.workspace  = true
+
+[dependencies]
+base64.workspace       = true
+chrono.workspace       = true
+data-encoding.workspace = true
+getrandom.workspace    = true
+hex.workspace          = true
+jsonwebtoken.workspace = true
+secrecy.workspace      = true
+serde.workspace        = true
+serde_json.workspace   = true
+sha2.workspace         = true
+sqlx.workspace         = true
+subtle.workspace       = true
+thiserror.workspace    = true
+tokio.workspace        = true
+url.workspace          = true
+x509-parser.workspace  = true
+
+[dev-dependencies]
+tempfile = "3"

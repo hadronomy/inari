@@ -9,6 +9,7 @@ from ..gateway.enrollment.auth import UpstreamAuthProvider
 from ..gateway.connector import GatewayConnector
 from ..gateway.data_plane import ZenohGatewayTransport
 from ..gateway.enrollment import GatewayEnrollmentService
+from ..gateway.onboarding import ManagedOnboardingService
 from ..gateway.repositories import GatewayRepository
 from ..gateway.bridges.runtime import (
     GatewayCommandDispatcher,
@@ -35,6 +36,7 @@ class GatewayStack:
     certificate_lifecycle_manager: ManagedCertificateLifecycleManager
     connector: GatewayConnector
     gateway_service: GatewayService
+    onboarding_service: ManagedOnboardingService
     gateway_supervisor: GatewaySupervisor
 
 
@@ -119,6 +121,13 @@ class GatewayProvider(Provider):
             snapshot_builder=snapshot_builder,
             certificate_lifecycle_manager=certificate_lifecycle_manager,
         )
+        onboarding_service = ManagedOnboardingService(
+            settings=settings,
+            secret_store=secret_store,
+            gateway_service=gateway_service,
+            device_catalog=device_catalog,
+            status_path=settings.resolved_security_state_dir / "onboarding.json",
+        )
         gateway_supervisor = GatewaySupervisor(
             settings=settings,
             connector=connector,
@@ -131,6 +140,7 @@ class GatewayProvider(Provider):
             certificate_lifecycle_manager=certificate_lifecycle_manager,
             connector=connector,
             gateway_service=gateway_service,
+            onboarding_service=onboarding_service,
             gateway_supervisor=gateway_supervisor,
         )
 
@@ -158,6 +168,12 @@ class GatewayProvider(Provider):
     @provide
     def gateway_service(self, gateway_stack: GatewayStack) -> GatewayService:
         return gateway_stack.gateway_service
+
+    @provide
+    def onboarding_service(
+        self, gateway_stack: GatewayStack
+    ) -> ManagedOnboardingService:
+        return gateway_stack.onboarding_service
 
     @provide
     def gateway_supervisor(self, gateway_stack: GatewayStack) -> GatewaySupervisor:

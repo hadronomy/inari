@@ -8,6 +8,8 @@ status: implemented
 
 This document defines a concrete design for exposing the documented Zenoh REST API from `crates/inari-server` using Axum and the public `zenoh` crate.
 
+This REST surface is an operator/debug interface; the managed gateway protocol uses HTTPS enrollment plus native Zenoh keys and should not route steady-state agent traffic through this REST bridge.
+
 It intentionally does not embed `zenoh-plugin-rest`:
 
 - the plugin crate is explicitly internal-only and unstable
@@ -41,26 +43,31 @@ The module should not:
 
 ## 2. Public HTTP Contract
 
-The Axum-native surface should live under the existing versioned API namespace:
+The Axum-native surface has its own family-first API namespace. Everything after
+`/api/zenoh/v1/` is the Zenoh selector or key expression itself; the HTTP layer
+does not add another keyspace wrapper:
 
-- `GET /api/v1/zenoh`
-- `GET /api/v1/zenoh/*selector`
-- `POST /api/v1/zenoh/*selector`
-- `PUT /api/v1/zenoh/*keyexpr`
-- `PATCH /api/v1/zenoh/*keyexpr`
-- `DELETE /api/v1/zenoh/*keyexpr`
+- `GET /api/zenoh/v1`
+- `GET /api/zenoh/v1/*selector`
+- `POST /api/zenoh/v1/*selector`
+- `PUT /api/zenoh/v1/*keyexpr`
+- `PATCH /api/zenoh/v1/*keyexpr`
+- `DELETE /api/zenoh/v1/*keyexpr`
 
 This keeps the current API composition clean and avoids conflicting with the root application router.
 
 The mounted surface intentionally keeps one app-specific addition beyond upstream parity:
 
-- `GET /api/v1/zenoh` returns module metadata for the host server
+- `GET /api/zenoh/v1` returns module metadata for the host server
 
-All selector-bearing routes beneath `/api/v1/zenoh/*selector` now aim to match the upstream REST plugin behavior.
+All selector-bearing routes beneath `/api/zenoh/v1/*selector` preserve the
+upstream REST plugin behavior. For example, the HTTP path
+`/api/zenoh/v1/iot/v1/agents/agt_123/status/latest` maps directly to the Zenoh
+key expression `iot/v1/agents/agt_123/status/latest`.
 
 ### 2.1 Root Endpoint
 
-`GET /api/v1/zenoh`
+`GET /api/zenoh/v1`
 
 Returns module metadata and live connection state, for example:
 
@@ -87,7 +94,7 @@ This is intentionally separate from `GET /api/v1`, which should stay small and h
 
 ### 2.2 Query Endpoint
 
-`GET /api/v1/zenoh/*selector`
+`GET /api/zenoh/v1/*selector`
 
 This maps to `session.get(...)` over Zenoh and returns:
 
@@ -132,8 +139,8 @@ Reserved selector parameters:
 
 Examples:
 
-- `GET /api/v1/zenoh/iot/v1/agents/**/presence?_liveliness`
-- `GET /api/v1/zenoh/iot/v1/agents/**/presence?_liveliness&_history` with `Accept: text/event-stream`
+- `GET /api/zenoh/v1/iot/v1/agents/**/presence?_liveliness`
+- `GET /api/zenoh/v1/iot/v1/agents/**/presence?_liveliness&_history` with `Accept: text/event-stream`
 
 This is intentionally additive:
 
@@ -143,7 +150,7 @@ This is intentionally additive:
 
 ### 2.3 SSE Endpoint
 
-`GET /api/v1/zenoh/*selector` with `Accept: text/event-stream`
+`GET /api/zenoh/v1/*selector` with `Accept: text/event-stream`
 
 This declares a Zenoh subscriber and streams events with Axum SSE:
 
@@ -154,18 +161,18 @@ If the underlying Zenoh session drops, the SSE stream should close cleanly. The 
 
 ### 2.4 Write Endpoints
 
-`PUT /api/v1/zenoh/*keyexpr`
+`PUT /api/zenoh/v1/*keyexpr`
 
 - request body: raw bytes
 - `Content-Type`: mapped to Zenoh `Encoding`
 - response: `200 OK`
 
-`PATCH /api/v1/zenoh/*keyexpr`
+`PATCH /api/zenoh/v1/*keyexpr`
 
 - same behavior as `PUT`
 - response: `200 OK`
 
-`DELETE /api/v1/zenoh/*keyexpr`
+`DELETE /api/zenoh/v1/*keyexpr`
 
 - no body
 - response: `200 OK`
@@ -231,9 +238,9 @@ The implementation should separate HTTP adaptation from Zenoh operations.
 
 ### 4.1 HTTP Layer
 
-Add:
+The HTTP facade lives at:
 
-- [`crates/inari-server/src/http/routes/api/v1/zenoh.rs`](../crates/inari-server/src/http/routes/api/v1/)
+- [`crates/inari-server/src/http/routes/api/zenoh.rs`](../crates/inari-server/src/http/routes/api/zenoh.rs)
 
 Responsibilities:
 
@@ -243,10 +250,10 @@ Responsibilities:
 - map Zenoh replies into JSON and SSE responses
 - keep error handling in terms of `AppError`
 
-`v1/mod.rs` should then nest:
+`api/mod.rs` mounts that facade without changing selector semantics:
 
 ```rust
-.nest("/zenoh", zenoh::router(state))
+.nest("/zenoh/v1", zenoh::router(state))
 ```
 
 ### 4.2 Zenoh Service Layer
@@ -340,7 +347,7 @@ Rules:
 
 1. The Axum route uses a wildcard tail.
 2. The tail is percent-decoded once.
-3. Empty tails are only valid for the mounted metadata route `GET /api/v1/zenoh`.
+3. Empty tails are only valid for the mounted metadata route `GET /api/zenoh/v1`.
 4. Admin-space access is rejected unless `allow_admin_space = true`.
 5. `@/local` and `@/local/...` are rewritten to `@/{zid}` and `@/{zid}/...` using the connected session ZID.
 
@@ -463,7 +470,7 @@ Add tests at three layers.
 
 In the HTTP route module:
 
-- `GET /api/v1/zenoh` returns module metadata
+- `GET /api/zenoh/v1` returns module metadata
 - disconnected Zenoh returns `503`
 - invalid selector returns `400`
 - disabled admin space rejects `@/...`

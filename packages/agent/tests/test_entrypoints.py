@@ -33,9 +33,9 @@ def test_cli_serve_accepts_explicit_config_path(tmp_path, mocker) -> None:
     )()
 
     mocked_build_container = mocker.patch(
-        "inari.cli.build_container", return_value=fake_container
+        "inari.commands.serve.build_container", return_value=fake_container
     )
-    mocked_serve = mocker.patch("inari.cli.serve_agent")
+    mocked_serve = mocker.patch("inari.commands.serve.serve_agent")
 
     from inari.cli import app
 

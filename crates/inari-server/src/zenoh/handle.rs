@@ -51,6 +51,11 @@ impl ZenohHandle {
         self.events.subscribe()
     }
 
+    #[must_use]
+    pub(crate) fn subscribe_session(&self) -> watch::Receiver<Option<CurrentSession>> {
+        self.session.clone()
+    }
+
     pub async fn snapshot(&self) -> AppResult<ZenohStatus> {
         Ok(self.status_snapshot())
     }

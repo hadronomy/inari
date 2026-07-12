@@ -4,6 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use inari_gateway::GatewayRepository;
+use inari_gateway::onboarding::OnboardingService;
+use leptos::prelude::LeptosOptions;
 use serde::Serialize;
 use serde::ser::SerializeStruct;
 use tokio::sync::watch;
@@ -13,6 +16,7 @@ use crate::coordination::{
     Budget, ProtocolExecution, ProtocolPermit, ZenohRestQueryPermit, ZenohRestRequest,
 };
 use crate::error::AppError;
+use crate::managed_gateway::ManagedGatewayController;
 use crate::protocol::{DynProtocolModule, ProtocolDescriptor};
 use crate::zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus};
 
@@ -29,6 +33,9 @@ struct AppStateInner {
     started_at_instant: Instant,
     readiness: Readiness,
     zenoh: ZenohHandle,
+    managed_gateway: ManagedGatewayController,
+    onboarding: Option<OnboardingService>,
+    leptos_options: LeptosOptions,
     protocol: Arc<DynProtocolModule>,
     protocol_budget: Budget<ProtocolExecution>,
     zenoh_rest_request_budget: Budget<ZenohRestRequest>,
@@ -53,10 +60,38 @@ impl fmt::Debug for AppState {
 
 impl AppState {
     pub fn new(loaded: LoadedConfig, zenoh: ZenohHandle, protocol: Arc<DynProtocolModule>) -> Self {
+        Self::new_with_onboarding(
+            loaded,
+            zenoh,
+            protocol,
+            LeptosOptions::builder()
+                .output_name("inari-web")
+                .build(),
+            None,
+        )
+    }
+
+    pub fn new_with_onboarding(
+        loaded: LoadedConfig,
+        zenoh: ZenohHandle,
+        protocol: Arc<DynProtocolModule>,
+        leptos_options: LeptosOptions,
+        onboarding: Option<OnboardingService>,
+    ) -> Self {
         let readiness = Readiness::new(ReadinessSnapshot::new(ReadinessComponents::new(
             HttpReadiness::bootstrapped(),
             ZenohReadiness::from(&zenoh.status_snapshot()),
         )));
+        let gateway_repository = onboarding
+            .as_ref()
+            .map(|onboarding| onboarding.repository().clone())
+            .unwrap_or_else(GatewayRepository::disconnected);
+        let managed_gateway = ManagedGatewayController::new(
+            loaded.settings.managed_gateway.clone(),
+            loaded.settings.zenoh.clone(),
+            zenoh.clone(),
+            gateway_repository,
+        );
 
         Self {
             inner: Arc::new(AppStateInner {
@@ -78,6 +113,9 @@ impl AppState {
                 started_at_instant: Instant::now(),
                 readiness,
                 zenoh,
+                managed_gateway,
+                onboarding,
+                leptos_options,
                 protocol,
             }),
         }
@@ -101,6 +139,21 @@ impl AppState {
     #[must_use]
     pub fn zenoh(&self) -> &ZenohHandle {
         &self.inner.zenoh
+    }
+
+    #[must_use]
+    pub fn managed_gateway(&self) -> &ManagedGatewayController {
+        &self.inner.managed_gateway
+    }
+
+    #[must_use]
+    pub fn onboarding(&self) -> Option<&OnboardingService> {
+        self.inner.onboarding.as_ref()
+    }
+
+    #[must_use]
+    pub fn leptos_options(&self) -> &LeptosOptions {
+        &self.inner.leptos_options
     }
 
     #[must_use]
@@ -145,6 +198,12 @@ impl AppState {
         self.inner
             .zenoh_rest_request_budget
             .try_acquire()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for LeptosOptions {
+    fn from_ref(state: &AppState) -> Self {
+        state.inner.leptos_options.clone()
     }
 }
 

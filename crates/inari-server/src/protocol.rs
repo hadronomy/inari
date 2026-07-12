@@ -2,12 +2,16 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Serialize;
 
 use crate::error::AppError;
+use crate::managed_gateway::{
+    AgentPublicationList, CommandHistoryResponse, SubmitControllerCommandRequest,
+    SubmitControllerCommandResponse,
+};
 use crate::state::AppState;
 
 pub trait ProtocolModule: Send + Sync {
@@ -54,13 +58,44 @@ pub enum ProtocolStage {
 }
 
 #[derive(Debug, Default)]
+pub struct InariProtocolModule;
+
+impl ProtocolModule for InariProtocolModule {
+    fn descriptor(&self) -> ProtocolDescriptor {
+        ProtocolDescriptor {
+            name: Cow::Borrowed("inari"),
+            version: Cow::Borrowed("2026-07-11"),
+            summary: Cow::Borrowed("Managed gateway enrollment and Zenoh command protocol."),
+            stage: ProtocolStage::Active,
+            mount_path: Cow::Borrowed("/api/v1/protocol"),
+            features: BTreeSet::from([
+                Cow::Borrowed("managed-enrollment"),
+                Cow::Borrowed("durable-command-history"),
+                Cow::Borrowed("zenoh-live-commands"),
+                Cow::Borrowed("agent-publication-ingest"),
+                Cow::Borrowed("request-budget"),
+                Cow::Borrowed("consistent-http-errors"),
+            ]),
+        }
+    }
+
+    fn routes(&self) -> Router<AppState> {
+        Router::new()
+            .route("/", get(protocol_descriptor))
+            .route("/commands", post(submit_controller_command))
+            .route("/agents/{agent_id}/commands", get(command_history))
+            .route("/agents/{agent_id}/publications", get(agent_publications))
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct NoopProtocolModule;
 
 impl ProtocolModule for NoopProtocolModule {
     fn descriptor(&self) -> ProtocolDescriptor {
         ProtocolDescriptor {
             name: Cow::Borrowed("inari"),
-            version: Cow::Borrowed("2026-04-18"),
+            version: Cow::Borrowed("2026-07-11"),
             summary: Cow::Borrowed("Protocol surfaces are scaffolded and ready to be filled in."),
             stage: ProtocolStage::Scaffolded,
             mount_path: Cow::Borrowed("/api/v1/protocol"),
@@ -83,6 +118,42 @@ impl ProtocolModule for NoopProtocolModule {
 
 async fn protocol_descriptor(State(state): State<AppState>) -> Json<ProtocolDescriptor> {
     Json(state.protocol_descriptor())
+}
+
+async fn submit_controller_command(
+    State(state): State<AppState>,
+    Json(request): Json<SubmitControllerCommandRequest>,
+) -> Result<Json<SubmitControllerCommandResponse>, AppError> {
+    let _permit = state.acquire_protocol_permit().await?;
+    state
+        .managed_gateway()
+        .enqueue_command(request)
+        .await
+        .map(Json)
+}
+
+async fn command_history(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<CommandHistoryResponse>, AppError> {
+    let _permit = state.acquire_protocol_permit().await?;
+    state
+        .managed_gateway()
+        .list_commands(&agent_id)
+        .await
+        .map(Json)
+}
+
+async fn agent_publications(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<AgentPublicationList>, AppError> {
+    let _permit = state.acquire_protocol_permit().await?;
+    state
+        .managed_gateway()
+        .list_publications(&agent_id)
+        .await
+        .map(Json)
 }
 
 async fn protocol_command_stub(

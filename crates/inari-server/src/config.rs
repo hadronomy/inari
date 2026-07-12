@@ -12,6 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::coordination::{ChannelCapacity, ConcurrencyLimit};
 use crate::error::ConfigError;
 
+mod managed_gateway;
+
+pub use self::managed_gateway::{
+    ManagedGatewayApiConfig, ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode,
+    ManagedGatewayConfig, ManagedGatewayDataPlaneConfig, ManagedGatewayOnboardingConfig,
+};
+
 const CONFIG_PATH_ENV: &str = "INARI_SERVER_CONFIG";
 const ENV_PREFIX: &str = "INARI_SERVER";
 const ENV_SEPARATOR: &str = "__";
@@ -21,6 +28,14 @@ const ENV_LIST_KEYS: &[&str] = &[
     "http.cors.allow_methods",
     "http.cors.allow_headers",
     "http.cors.expose_headers",
+    "managed_gateway.controller_actions",
+    "managed_gateway.enrollment_token_hashes",
+    "managed_gateway.api.read_token_hashes",
+    "managed_gateway.onboarding.operator_token_hashes",
+    "managed_gateway.supported_protocol_versions",
+    "managed_gateway.data_plane.connect_endpoints",
+    "managed_gateway.certificate.step_ca_authorized_sans",
+    "zenoh.access_control.managed_gateway_cert_common_names",
     "zenoh.connect_endpoints",
     "zenoh.listen_endpoints",
 ];
@@ -116,8 +131,16 @@ pub struct AppConfig {
     pub runtime: RuntimeConfig,
     pub observability: ObservabilityConfig,
     pub http: HttpConfig,
+    pub managed_gateway: ManagedGatewayConfig,
     pub zenoh: ZenohConfig,
     pub protocol: ProtocolConfig,
+}
+
+impl AppConfig {
+    fn validate(self) -> Result<Self, ConfigError> {
+        self.managed_gateway.validate()?;
+        Ok(self)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,6 +310,8 @@ pub struct ZenohConfig {
     pub admin_space: ZenohAdminSpaceConfig,
     pub connect_endpoints: Vec<String>,
     pub listen_endpoints: Vec<String>,
+    pub tls: ZenohTlsConfig,
+    pub access_control: ZenohAccessControlConfig,
     #[serde(with = "humantime_serde")]
     pub open_retry_interval: Duration,
     pub command_buffer: ChannelCapacity,
@@ -301,6 +326,8 @@ impl Default for ZenohConfig {
             admin_space: ZenohAdminSpaceConfig::default(),
             connect_endpoints: Vec::new(),
             listen_endpoints: Vec::new(),
+            tls: ZenohTlsConfig::default(),
+            access_control: ZenohAccessControlConfig::default(),
             open_retry_interval: DEFAULT_ZENOH_RETRY_INTERVAL,
             command_buffer: default_zenoh_command_buffer(),
             event_buffer: default_zenoh_event_buffer(),
@@ -327,6 +354,44 @@ impl Default for ZenohAdminSpaceConfig {
 pub enum ZenohMode {
     #[default]
     Router,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ZenohTlsConfig {
+    pub root_ca_certificate: Option<PathBuf>,
+    pub listen_certificate: Option<PathBuf>,
+    pub listen_private_key: Option<PathBuf>,
+    pub enable_mtls: bool,
+    pub close_link_on_expiration: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ZenohAccessControlConfig {
+    pub enabled: bool,
+    pub default_permission: ZenohAclPermission,
+    pub managed_gateway_namespace_prefix: Option<String>,
+    pub managed_gateway_cert_common_names: Vec<String>,
+}
+
+impl Default for ZenohAccessControlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_permission: ZenohAclPermission::Deny,
+            managed_gateway_namespace_prefix: None,
+            managed_gateway_cert_common_names: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZenohAclPermission {
+    Allow,
+    #[default]
+    Deny,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -392,6 +457,7 @@ fn build_settings(files: &[PathBuf], environment: Environment) -> Result<AppConf
     config
         .try_deserialize()
         .map_err(|source| ConfigError::Deserialize { source })
+        .and_then(AppConfig::validate)
 }
 
 fn config_files(explicit_path: Option<PathBuf>) -> Result<Vec<PathBuf>, ConfigError> {

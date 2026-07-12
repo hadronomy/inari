@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from secrets import token_urlsafe
 from threading import Lock
 from typing import Protocol
@@ -23,6 +22,7 @@ from inari.security.local_trust.crypto import (
     sign_local_challenge,
 )
 from inari.security.local_trust.models import LocalChallengePurpose
+from inari.security.files import write_text_owner_only
 
 from .config import TraySettings
 
@@ -142,9 +142,7 @@ class TrayIdentityStore:
         return self.fallback_path.read_text(encoding="utf-8")
 
     def _save_fallback(self, value: str) -> None:
-        self.fallback_path.parent.mkdir(parents=True, exist_ok=True)
-        self.fallback_path.write_text(value, encoding="utf-8")
-        _restrict_file_to_current_user(self.fallback_path)
+        write_text_owner_only(self.fallback_path, value, encoding="utf-8")
 
 
 class TrayLocalTrustClient:
@@ -295,10 +293,3 @@ def _error_code(response: httpx.Response) -> str | None:
         return None
     value = payload.get("code")
     return value if isinstance(value, str) else None
-
-
-def _restrict_file_to_current_user(path: Path) -> None:
-    try:
-        path.chmod(0o600)
-    except OSError:
-        return

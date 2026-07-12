@@ -6,6 +6,8 @@ from pathlib import Path
 
 from cryptography import x509
 
+from ..files import write_text_owner_only
+
 
 @dataclass(slots=True, frozen=True)
 class ManagedCertificate:
@@ -44,18 +46,15 @@ class CertificateLifecycleService:
         if not certificate_pem:
             return self.current_certificate()
 
-        self.certificate_path.parent.mkdir(parents=True, exist_ok=True)
-        self.certificate_path.write_text(certificate_pem, encoding="utf-8")
+        write_text_owner_only(self.certificate_path, certificate_pem, encoding="utf-8")
         if self.ca_path is not None and ca_certificate_pem:
-            self.ca_path.parent.mkdir(parents=True, exist_ok=True)
-            self.ca_path.write_text(ca_certificate_pem, encoding="utf-8")
+            write_text_owner_only(self.ca_path, ca_certificate_pem, encoding="utf-8")
         return self.current_certificate()
 
     def install_certificate_authority(self, ca_certificate_pem: str) -> Path | None:
         if self.ca_path is None:
             return None
-        self.ca_path.parent.mkdir(parents=True, exist_ok=True)
-        self.ca_path.write_text(ca_certificate_pem, encoding="utf-8")
+        write_text_owner_only(self.ca_path, ca_certificate_pem, encoding="utf-8")
         return self.ca_path
 
     def current_certificate(self) -> ManagedCertificate | None:

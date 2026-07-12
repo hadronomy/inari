@@ -6,6 +6,7 @@ from starlette.requests import HTTPConnection
 from ..config import AgentSettings
 from ..application.container import AgentContainer, get_default_container
 from ..gateway.service import GatewayService
+from ..gateway.onboarding import ManagedOnboardingService
 from ..runtime.events import EventHub
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
@@ -70,3 +71,11 @@ def get_gateway_service(
     if container.gateway_service is None:
         raise RuntimeError("GatewayService is not configured.")
     return container.gateway_service
+
+
+def get_onboarding_service(
+    container: AgentContainer = Depends(get_container),
+) -> ManagedOnboardingService:
+    if container.onboarding_service is None:
+        raise RuntimeError("ManagedOnboardingService is not configured.")
+    return container.onboarding_service

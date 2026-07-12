@@ -19,8 +19,11 @@ from .models import (
 
 
 class ServiceManager(Protocol):
-    identity: ServiceIdentity
-    scope: ServiceScope
+    @property
+    def identity(self) -> ServiceIdentity: ...
+
+    @property
+    def scope(self) -> ServiceScope: ...
 
     def install(self) -> str: ...
 

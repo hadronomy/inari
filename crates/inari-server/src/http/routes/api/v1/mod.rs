@@ -1,5 +1,4 @@
 pub mod protocol;
-pub mod zenoh;
 
 use axum::extract::State;
 use axum::routing::get;
@@ -10,21 +9,9 @@ use crate::state::AppState;
 use crate::zenoh::ZenohStatus;
 
 pub fn router(state: &AppState) -> Router<AppState> {
-    let router = Router::new()
+    Router::new()
         .route("/", get(index))
-        .nest("/protocol", protocol::router(state));
-
-    if state
-        .loaded_config()
-        .settings
-        .http
-        .zenoh_rest
-        .enabled
-    {
-        router.nest("/zenoh", zenoh::router(state))
-    } else {
-        router
-    }
+        .nest("/protocol", protocol::router(state))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

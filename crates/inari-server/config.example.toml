@@ -1,0 +1,90 @@
+# Example inari-server configuration for a managed gateway controller.
+#
+# Keep secrets out of this file. Enrollment tokens are configured by SHA-256
+# digest so the server never needs to persist bootstrap token plaintext.
+
+[server]
+bind = "127.0.0.1:8080"
+
+[http.zenoh_rest]
+# The REST bridge is for operator diagnostics and local tests. Keep it disabled
+# for production managed-gateway traffic.
+enabled = false
+allow_admin_space = false
+
+[managed_gateway]
+# Enable only after enrollment token hashes, public Zenoh endpoints, and TLS
+# material are configured.
+enabled = false
+database_path = "data/inari-server/managed-gateway.sqlite3"
+controller_name = "Inari Controller"
+controller_instance_id = "controller-prod-1"
+supported_protocol_versions = ["2026-07-11"]
+controller_actions = [
+  "system:read",
+  "devices:read",
+  "events:read",
+  "jobs:create",
+  "jobs:cancel",
+  "commands:execute",
+]
+# SHA-256 digests of short-lived bootstrap credentials. The all-zero digest is
+# an inert placeholder and must be replaced before accepting enrollments.
+enrollment_token_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
+
+[managed_gateway.api]
+# Protects typed operational reads such as
+# `GET /api/inari/v1/agents/{agent_id}/status`. These credentials are separate
+# from invitation-administration tokens.
+read_token_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
+
+[managed_gateway.onboarding]
+# The operator interface remains available while onboarding is disabled, but
+# invitation actions return a typed 503 response.
+enabled = false
+public_base_url = "https://controller.example.com"
+# SHA-256 digests of high-entropy operator tokens. The all-zero digest is an
+# inert placeholder and must be replaced before enabling onboarding.
+operator_token_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
+invite_ttl = "10m"
+failed_attempt_window = "1m"
+max_failed_attempts = 5
+
+[managed_gateway.data_plane]
+# These are the endpoints returned to enrolled agents. In production they
+# should be TLS-capable public router endpoints.
+connect_endpoints = ["tls/controller.example.com:7447"]
+namespace_prefix = "iot/v1/agents"
+close_link_on_expiration = true
+
+[managed_gateway.certificate]
+# `step_ca` returns step-ca enrollment material to the agent. Leave the OTT
+# unset unless a deployment workflow injects a short-lived one at startup.
+mode = "step_ca"
+step_ca_base_url = "https://step-ca.example.com"
+step_ca_root_fingerprint = "replace-with-root-sha256-fingerprint"
+requires_mutual_tls_after_issuance = true
+
+[zenoh]
+enabled = true
+listen_endpoints = ["tls/0.0.0.0:7447"]
+
+[zenoh.admin_space]
+enabled = false
+read = true
+write = false
+
+[zenoh.tls]
+root_ca_certificate = "/etc/inari/pki/root-ca.pem"
+listen_certificate = "/etc/inari/pki/router.pem"
+listen_private_key = "/etc/inari/pki/router-key.pem"
+enable_mtls = true
+close_link_on_expiration = true
+
+[zenoh.access_control]
+enabled = true
+default_permission = "deny"
+managed_gateway_namespace_prefix = "iot/v1/agents"
+# Optional: narrow ACL subjects to certificate common names once enrollment
+# policy fixes agent certificate subjects.
+managed_gateway_cert_common_names = []

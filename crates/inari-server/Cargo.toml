@@ -11,18 +11,31 @@ repository.workspace  = true
 
 [dependencies]
 axum.workspace               = true
+axum-extra.workspace         = true
 base64.workspace             = true
 bytes.workspace              = true
 chrono.workspace             = true
 config.workspace             = true
 futures-util.workspace       = true
+getrandom.workspace          = true
+hex.workspace                = true
 html-escape.workspace        = true
 http.workspace               = true
+http-body.workspace          = true
 human-panic.workspace        = true
 humantime-serde.workspace    = true
+inari-gateway = { path = "../inari-gateway" }
+inari-web = { path = "../inari-web", default-features = false, features = ["ssr"] }
+leptos = { workspace = true, features = ["ssr"] }
+leptos_axum.workspace        = true
 mime.workspace               = true
+qrcode.workspace             = true
+secrecy.workspace            = true
 serde.workspace              = true
 serde_json.workspace         = true
+sha2.workspace               = true
+sqlx.workspace               = true
+subtle.workspace             = true
 thiserror.workspace          = true
 tokio.workspace              = true
 tokio-stream.workspace       = true
@@ -31,4 +44,9 @@ tower.workspace              = true
 tower-http.workspace         = true
 tracing.workspace            = true
 tracing-subscriber.workspace = true
+url.workspace                = true
+x509-parser.workspace        = true
 zenoh.workspace              = true
+
+[dev-dependencies]
+tempfile = "3"

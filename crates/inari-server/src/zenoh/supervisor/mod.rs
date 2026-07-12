@@ -67,7 +67,7 @@ impl ZenohSupervisor {
                     .await
             },
             SupervisorMode::Enabled(config) => {
-                EnabledSupervisor::initial(config, io, publisher)
+                EnabledSupervisor::initial(*config, io, publisher)
                     .run(shutdown)
                     .await
             },
@@ -78,12 +78,16 @@ impl ZenohSupervisor {
 #[derive(Debug)]
 enum SupervisorMode {
     Disabled,
-    Enabled(EnabledZenohConfig),
+    Enabled(Box<EnabledZenohConfig>),
 }
 
 impl From<ZenohConfig> for SupervisorMode {
     fn from(config: ZenohConfig) -> Self {
-        if config.enabled { Self::Enabled(EnabledZenohConfig::new(config)) } else { Self::Disabled }
+        if config.enabled {
+            Self::Enabled(Box::new(EnabledZenohConfig::new(config)))
+        } else {
+            Self::Disabled
+        }
     }
 }
 
