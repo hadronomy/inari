@@ -8,6 +8,7 @@ Inari is an IoT agent and managed gateway. The Python agent runs beside local ha
 - `packages/agent_tray`: user-session setup and status companion
 - `crates/inari-server`: Axum composition root and concrete Zenoh adapter
 - `crates/inari-gateway`: managed-gateway protocol, security, services, and PostgreSQL repository
+- `crates/inari-migration`: embedded, forward-only SeaORM controller migrations
 - `crates/inari-web`: shared Leptos application and server functions
 - `crates/inari-web-frontend`: minimal browser WASM hydration entrypoint
 - `docs`: protocol and deployment documentation
@@ -62,8 +63,10 @@ The UI is written in Rust and hydrated as WebAssembly. There is no authored appl
 cargo leptos build --release
 ```
 
-Deploy the release binary together with `target/site`. Set `LEPTOS_SITE_ROOT` to that deployed site directory and configure the server through environment variables or a configuration file. Production controller state lives in externally managed PostgreSQL. Run `inari-server database migrate` before rolling controller replicas, or retain `database.migrate_on_startup = true` for a single-process development environment.
+Deploy the release binary together with `target/site`. Set `LEPTOS_SITE_ROOT` to that deployed site directory and configure the server through environment variables or a configuration file. Production controller state lives in externally managed PostgreSQL. Run `inari-server database migrate` before rolling controller replicas and use `inari-server database status` to verify that the schema is current. Retain `database.migrate_on_startup = true` only for a single-process development environment.
 
 The production Helm chart lives at [`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller separately from the Zenoh router StatefulSet and references existing Kubernetes Secrets rather than embedding credentials in values.
+
+Controller migration ownership and recovery policy are documented in [docs/controller_database.md](docs/controller_database.md).
 
 The public protocol is documented in [docs/gateway_protocol.md](docs/gateway_protocol.md). The generated operator site must be served by the Rust binary so its CSP nonce, hydration scripts, static-asset handling, and Leptos routes remain consistent.

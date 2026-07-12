@@ -15,9 +15,7 @@ pub enum GatewayError {
     #[error("{0}")]
     Unavailable(String),
     #[error("managed gateway persistence failed")]
-    Persistence(#[from] sqlx::Error),
-    #[error("managed gateway migration failed")]
-    Migration(#[from] sqlx::migrate::MigrateError),
+    Persistence(#[from] sea_orm::DbErr),
     #[error("managed gateway serialization failed")]
     Serialization(#[from] serde_json::Error),
     #[error("managed gateway state is inconsistent: {0}")]

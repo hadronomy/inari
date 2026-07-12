@@ -1,7 +1,7 @@
 use clap::{ArgAction, Parser, Subcommand};
-use secrecy::SecretString;
 use toml::Value;
 
+use crate::database::ControllerDatabase;
 use crate::{AppError, AppResult, LoadedConfig};
 
 #[derive(Debug, Parser)]
@@ -29,6 +29,8 @@ enum Command {
 enum DatabaseCommand {
     /// Apply all embedded PostgreSQL migrations and exit.
     Migrate,
+    /// Report whether the controller schema is current and exit.
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -49,6 +51,7 @@ enum ConfigCommand {
 pub enum CommandOutcome {
     Serve,
     MigrateDatabase,
+    DatabaseStatus,
     Complete,
 }
 
@@ -76,29 +79,36 @@ impl Cli {
                 }
                 Ok(CommandOutcome::Complete)
             },
-            Command::Database { command: DatabaseCommand::Migrate } => {
-                Ok(CommandOutcome::MigrateDatabase)
-            },
+            Command::Database { command } => Ok(match command {
+                DatabaseCommand::Migrate => CommandOutcome::MigrateDatabase,
+                DatabaseCommand::Status => CommandOutcome::DatabaseStatus,
+            }),
         }
     }
 }
 
 pub async fn migrate_database(loaded: &LoadedConfig) -> AppResult<()> {
-    let path = &loaded.settings.database.url_file;
-    let database_url = tokio::fs::read_to_string(path)
-        .await
-        .map_err(|source| {
-            AppError::internal(
-                "database_secret",
-                "The PostgreSQL connection secret could not be read.",
-            )
-            .with_source(source)
-        })?;
-    inari_gateway::GatewayRepository::migrate(&SecretString::from(database_url.trim().to_owned()))
-        .await
-        .map_err(AppError::from)?;
-    println!("Controller database migrations are current.");
+    let database = ControllerDatabase::connect(&loaded.settings.database).await?;
+    let report = database.migrate().await?;
+    println!(
+        "Controller database migrations are current ({} applied, {} pending).",
+        report.applied.len(),
+        report.pending.len(),
+    );
     Ok(())
+}
+
+pub async fn database_status(loaded: &LoadedConfig) -> AppResult<()> {
+    let database = ControllerDatabase::connect(&loaded.settings.database).await?;
+    let report = database.status().await?;
+    if report.pending.is_empty() {
+        println!("Controller database migrations are current.");
+        return Ok(());
+    }
+    Err(AppError::internal(
+        "database_migrations_pending",
+        format!("{} controller database migration(s) are pending.", report.pending.len()),
+    ))
 }
 
 fn print_explanation(loaded: &LoadedConfig) {

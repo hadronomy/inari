@@ -26,6 +26,7 @@ http-body.workspace          = true
 human-panic.workspace        = true
 humantime-serde.workspace    = true
 inari-gateway = { path = "../inari-gateway" }
+inari-migration = { path = "../inari-migration" }
 inari-web = { path = "../inari-web", default-features = false, features = ["ssr"] }
 jsonwebtoken.workspace        = true
 leptos = { workspace = true, features = ["ssr"] }
@@ -34,6 +35,7 @@ mime.workspace               = true
 openidconnect.workspace      = true
 qrcode.workspace             = true
 secrecy.workspace            = true
+sea-orm.workspace            = true
 serde.workspace              = true
 serde_json.workspace         = true
 sha2.workspace               = true

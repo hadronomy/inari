@@ -31,7 +31,7 @@ impl ManagedGatewayController {
         if publish_result.is_ok() {
             self.inner
                 .store
-                .mark_command_published(&command.agent_id, &command.command_id)
+                .mark_command_published(command.agent_id.as_str(), command.command_id.as_str())
                 .await?;
         } else if let Err(error) = &publish_result {
             tracing::debug!(
@@ -86,7 +86,7 @@ impl ManagedGatewayController {
         let key = namespace
             .join("commands")
             .and_then(|key| key.join("live"))
-            .and_then(|key| key.join(&command.command_id))
+            .and_then(|key| key.join(command.command_id.as_str()))
             .map_err(|source| {
                 AppError::bad_request(format!("Invalid Zenoh command key: {source}"))
             })?;

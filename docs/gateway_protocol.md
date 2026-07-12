@@ -615,7 +615,7 @@ For larger content such as PDF, HTML, or large images, the protocol SHOULD intro
 
 The Rust controller is built with `cargo leptos build --release`. Deploy the server binary together with the generated `target/site` directory and set `LEPTOS_SITE_ROOT` to its deployed location. The generated wasm-bindgen JavaScript is a build artifact; the application contains no authored JavaScript.
 
-Managed-gateway state is stored in externally operated PostgreSQL. Embedded migrations are applied by `inari-server database migrate` before a Kubernetes rollout; development may opt into startup migration. Transactions, row locks, advisory locks, and uniqueness constraints protect invitation consumption, competing workers, and protocol idempotency across controller replicas.
+Managed-gateway state is stored in externally operated PostgreSQL. Forward-only SeaORM migrations are embedded through the dedicated `inari-migration` crate and applied by `inari-server database migrate` before a Kubernetes rollout; `inari-server database status` verifies that replicas will start against a current schema. Development may opt into startup migration. Transactions, row locks, advisory locks, and uniqueness constraints protect invitation consumption, competing workers, and protocol idempotency across controller replicas.
 
 ### 15.1 Controller HTTP Edge
 

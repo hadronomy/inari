@@ -1,1 +1,0 @@
-DROP TABLE consumed_enrollment_tokens;

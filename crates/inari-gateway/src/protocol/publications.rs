@@ -15,7 +15,7 @@ pub struct StoredAgentPublication {
     pub message: AgentPublication,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AgentPublication {
     #[serde(rename = "agent.command.accepted")]
@@ -105,7 +105,7 @@ impl AgentPublication {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeEvent {
     pub sequence: u64,
     pub resource_kind: String,

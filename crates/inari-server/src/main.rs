@@ -1,5 +1,5 @@
 use clap::Parser;
-use inari_server::cli::{Cli, CommandOutcome, migrate_database};
+use inari_server::cli::{Cli, CommandOutcome, database_status, migrate_database};
 use inari_server::{AppError, LoadedConfig, ServerBuilder, build_runtime, init_observability};
 
 fn main() -> Result<(), AppError> {
@@ -18,6 +18,7 @@ fn main() -> Result<(), AppError> {
     runtime.block_on(async move {
         match command {
             CommandOutcome::MigrateDatabase => migrate_database(&loaded).await,
+            CommandOutcome::DatabaseStatus => database_status(&loaded).await,
             CommandOutcome::Serve => {
                 ServerBuilder::new()
                     .with_config(loaded)

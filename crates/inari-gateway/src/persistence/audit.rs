@@ -1,39 +1,44 @@
-use sqlx::Row;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 
-use super::GatewayRepository;
+use super::entity::audit_event;
+use super::{GatewayRepository, utc_time};
 use crate::audit::{AuditAction, AuditEvent, AuditEventDraft, AuditOutcome, AuditResource};
 use crate::identity::ActorId;
 use crate::protocol::OrganizationId;
 use crate::{GatewayError, GatewayResult};
 
-pub(super) async fn insert_audit_event(
-    connection: &mut sqlx::PgConnection,
+pub(super) async fn insert_audit_event<C>(
+    connection: &C,
     draft: &AuditEventDraft,
-) -> GatewayResult<()> {
+) -> GatewayResult<()>
+where
+    C: ConnectionTrait,
+{
     let (resource_kind, resource_id) = draft.resource.storage_parts();
-    sqlx::query(
-        "INSERT INTO audit_events (
-            organization_id, actor_id, action, resource_kind, resource_id,
-            outcome, request_id
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-    )
-    .bind(draft.organization_id.as_str())
-    .bind(draft.actor_id.as_str())
-    .bind(draft.action.as_str())
-    .bind(resource_kind)
-    .bind(resource_id)
-    .bind(draft.outcome.as_str())
-    .bind(&draft.request_id)
-    .execute(connection)
+    audit_event::ActiveModel {
+        organization_id: Set(draft
+            .organization_id
+            .as_str()
+            .to_owned()),
+        actor_id: Set(draft.actor_id.as_str().to_owned()),
+        action: Set(draft.action.as_str().to_owned()),
+        resource_kind: Set(resource_kind.to_owned()),
+        resource_id: Set(resource_id.map(str::to_owned)),
+        outcome: Set(draft.outcome.as_str().to_owned()),
+        request_id: Set(draft.request_id.clone()),
+        ..Default::default()
+    }
+    .insert(connection)
     .await?;
     Ok(())
 }
 
 impl GatewayRepository {
     pub async fn record_audit_event(&self, draft: &AuditEventDraft) -> GatewayResult<()> {
-        let mut connection = self.pool.acquire().await?;
-        insert_audit_event(&mut connection, draft).await?;
-        Ok(())
+        insert_audit_event(&self.database, draft).await
     }
 
     pub async fn audit_events(
@@ -42,36 +47,35 @@ impl GatewayRepository {
         before: Option<i64>,
         limit: u16,
     ) -> GatewayResult<Vec<AuditEvent>> {
-        let rows = sqlx::query(
-            "SELECT event_id, actor_id, action, resource_kind, resource_id,
-                    outcome, request_id, occurred_at
-             FROM audit_events
-             WHERE organization_id = $1
-               AND ($2::BIGINT IS NULL OR event_id < $2)
-             ORDER BY event_id DESC
-             LIMIT $3",
-        )
-        .bind(organization_id.as_str())
-        .bind(before)
-        .bind(i64::from(limit))
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|row| {
-                let resource_kind: String = row.try_get("resource_kind")?;
-                let resource_id: Option<String> = row.try_get("resource_id")?;
-                Ok(AuditEvent {
-                    event_id: row.try_get("event_id")?,
-                    actor_id: ActorId::try_from(row.try_get::<String, _>("actor_id")?)?,
-                    action: parse_action(&row.try_get::<String, _>("action")?)?,
-                    resource: AuditResource::from_storage(&resource_kind, resource_id)?,
-                    outcome: parse_outcome(&row.try_get::<String, _>("outcome")?)?,
-                    request_id: row.try_get("request_id")?,
-                    occurred_at: row.try_get("occurred_at")?,
-                })
-            })
+        let mut query = audit_event::Entity::find().filter(
+            audit_event::COLUMN
+                .organization_id
+                .eq(organization_id.as_str()),
+        );
+        if let Some(before) = before {
+            query = query.filter(audit_event::COLUMN.event_id.lt(before));
+        }
+        query
+            .order_by_desc(audit_event::COLUMN.event_id)
+            .limit(u64::from(limit))
+            .all(&self.database)
+            .await?
+            .into_iter()
+            .map(audit_from_model)
             .collect()
     }
+}
+
+fn audit_from_model(model: audit_event::Model) -> GatewayResult<AuditEvent> {
+    Ok(AuditEvent {
+        event_id: model.event_id,
+        actor_id: ActorId::try_from(model.actor_id)?,
+        action: parse_action(&model.action)?,
+        resource: AuditResource::from_storage(&model.resource_kind, model.resource_id)?,
+        outcome: parse_outcome(&model.outcome)?,
+        request_id: model.request_id,
+        occurred_at: utc_time(model.occurred_at),
+    })
 }
 
 fn parse_action(value: &str) -> GatewayResult<AuditAction> {

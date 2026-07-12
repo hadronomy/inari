@@ -14,9 +14,11 @@ use tokio::task::JoinSet;
 use tokio::time::{self, MissedTickBehavior};
 use tower::ServiceBuilder;
 use tower_http::normalize_path::NormalizePathLayer;
+use tower_sessions::session_store::ExpiredDeletion;
 use url::Url;
 
 use crate::config::LoadedConfig;
+use crate::database::ControllerDatabase;
 use crate::error::{AppError, AppResult};
 use crate::http;
 use crate::identity::{IdentityRuntime, IdentityService};
@@ -94,8 +96,9 @@ impl ServerBuilder<WithConfig> {
                 .with_source(source)
             })?
             .leptos_options;
-        let onboarding = initialize_onboarding(&loaded).await?;
-        let identity = initialize_identity(&loaded, onboarding.as_ref()).await?;
+        let database = initialize_database(&loaded).await?;
+        let onboarding = initialize_onboarding(&loaded, database.as_ref()).await?;
+        let identity = initialize_identity(&loaded, database.as_ref()).await?;
         let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
         let state = AppState::new_with_onboarding(
             loaded,
@@ -138,7 +141,7 @@ async fn initialize_certificate_issuer(
 
 async fn initialize_identity(
     loaded: &LoadedConfig,
-    onboarding: Option<&OnboardingService>,
+    database: Option<&ControllerDatabase>,
 ) -> AppResult<Option<IdentityRuntime>> {
     let config = &loaded.settings.identity.oidc;
     if !config.enabled {
@@ -168,18 +171,10 @@ async fn initialize_identity(
         )),
         None => None,
     };
-    let onboarding = onboarding.ok_or_else(|| {
+    let database = database.ok_or_else(|| {
         AppError::internal("oidc_database", "OIDC requires the managed controller database.")
     })?;
-    let sessions =
-        tower_sessions_sqlx_store::PostgresStore::new(onboarding.repository().pool().clone());
-    sessions
-        .migrate()
-        .await
-        .map_err(|source| {
-            AppError::internal("oidc_session_migration", "OIDC session migration failed.")
-                .with_source(source)
-        })?;
+    let sessions = tower_sessions_sqlx_store::PostgresStore::new(database.pool().clone());
     let service = IdentityService::discover(config, public_url, client_secret).await?;
     Ok(Some(IdentityRuntime::new(service, sessions)))
 }
@@ -190,7 +185,34 @@ fn leptos_manifest() -> Option<&'static str> {
     (!configured_by_cargo_leptos).then_some("Cargo.toml")
 }
 
-async fn initialize_onboarding(loaded: &LoadedConfig) -> AppResult<Option<OnboardingService>> {
+async fn initialize_database(loaded: &LoadedConfig) -> AppResult<Option<ControllerDatabase>> {
+    if !loaded.settings.managed_gateway.enabled && !loaded.settings.identity.oidc.enabled {
+        return Ok(None);
+    }
+    let database = ControllerDatabase::connect(&loaded.settings.database).await?;
+    if loaded
+        .settings
+        .database
+        .migrate_on_startup
+    {
+        let report = database.migrate().await?;
+        tracing::info!(
+            component = "database",
+            applied = report.applied.len(),
+            pending = report.pending.len(),
+            lock_wait_ms = u64::try_from(report.lock_wait.as_millis()).unwrap_or(u64::MAX),
+            "controller database migrations applied"
+        );
+    } else {
+        database.ensure_current().await?;
+    }
+    Ok(Some(database))
+}
+
+async fn initialize_onboarding(
+    loaded: &LoadedConfig,
+    database: Option<&ControllerDatabase>,
+) -> AppResult<Option<OnboardingService>> {
     let config = &loaded.settings.managed_gateway;
     if !config.enabled {
         return Ok(None);
@@ -208,55 +230,48 @@ async fn initialize_onboarding(loaded: &LoadedConfig) -> AppResult<Option<Onboar
             )
             .with_source(source)
         })?;
-    let database_url = tokio::fs::read_to_string(&loaded.settings.database.url_file)
-        .await
-        .map_err(|source| {
-            AppError::internal(
-                "managed_gateway_database_secret",
-                "The managed gateway database secret could not be read.",
-            )
-            .with_source(source)
-        })?;
-    OnboardingService::initialize(OnboardingConfig {
-        database_url: SecretString::from(database_url.trim().to_owned()),
-        database_min_connections: loaded.settings.database.min_connections,
-        database_max_connections: loaded.settings.database.max_connections,
-        migrate_database: loaded
-            .settings
-            .database
-            .migrate_on_startup,
-        organization_id: loaded.settings.organization.id.clone(),
-        organization_name: loaded
-            .settings
-            .organization
-            .name
-            .clone(),
-        default_site_id: loaded
-            .settings
-            .organization
-            .default_site_id
-            .clone(),
-        default_site_name: loaded
-            .settings
-            .organization
-            .default_site_name
-            .clone(),
-        enabled: config.onboarding.enabled,
-        public_base_url,
-        controller_name: config.controller_name.clone(),
-        controller_instance_id: config.controller_instance_id.clone(),
-        invitation_ttl: config.onboarding.invite_ttl,
-        supported_protocol_versions: config
-            .supported_protocol_versions
-            .clone(),
-        certificate_mode: match config.certificate.mode {
-            crate::config::ManagedGatewayCertificateMode::None => CertificateMode::None,
-            crate::config::ManagedGatewayCertificateMode::StepCa => CertificateMode::StepCa,
+    let database = database.ok_or_else(|| {
+        AppError::internal(
+            "managed_gateway_database",
+            "Managed onboarding requires the controller database.",
+        )
+    })?;
+    OnboardingService::initialize(
+        OnboardingConfig {
+            organization_id: loaded.settings.organization.id.clone(),
+            organization_name: loaded
+                .settings
+                .organization
+                .name
+                .clone(),
+            default_site_id: loaded
+                .settings
+                .organization
+                .default_site_id
+                .clone(),
+            default_site_name: loaded
+                .settings
+                .organization
+                .default_site_name
+                .clone(),
+            enabled: config.onboarding.enabled,
+            public_base_url,
+            controller_name: config.controller_name.clone(),
+            controller_instance_id: config.controller_instance_id.clone(),
+            invitation_ttl: config.onboarding.invite_ttl,
+            supported_protocol_versions: config
+                .supported_protocol_versions
+                .clone(),
+            certificate_mode: match config.certificate.mode {
+                crate::config::ManagedGatewayCertificateMode::None => CertificateMode::None,
+                crate::config::ManagedGatewayCertificateMode::StepCa => CertificateMode::StepCa,
+            },
+            requires_mutual_tls_after_issuance: config
+                .certificate
+                .requires_mutual_tls_after_issuance,
         },
-        requires_mutual_tls_after_issuance: config
-            .certificate
-            .requires_mutual_tls_after_issuance,
-    })
+        inari_gateway::GatewayRepository::new(database.sea_orm().clone()),
+    )
     .await
     .map(Some)
     .map_err(AppError::from)
@@ -320,6 +335,25 @@ impl ServerApplication {
         }));
 
         tasks.spawn(named(TaskName::ZenohSupervisor, zenoh_supervisor.run(shutdown.clone())));
+
+        if let Some(identity) = state.identity() {
+            let sessions = identity.sessions().clone();
+            let session_shutdown = shutdown.clone();
+            tasks.spawn(named(TaskName::SessionCleanup, async move {
+                tokio::select! {
+                    result = sessions.continuously_delete_expired(Duration::from_secs(300)) => {
+                        result.map_err(|source| {
+                            AppError::internal(
+                                "session_cleanup",
+                                "The expired session cleanup task failed.",
+                            )
+                            .with_source(source)
+                        })
+                    }
+                    _ = session_shutdown.wait_for_shutdown() => Ok(()),
+                }
+            }));
+        }
 
         let managed_gateway = state.managed_gateway().clone();
         tasks.spawn(named(
@@ -395,6 +429,7 @@ fn log_http_listener_ready(
 enum TaskName {
     SignalListener,
     ZenohSupervisor,
+    SessionCleanup,
     ManagedGatewayDataPlane,
     ReadinessSync,
     ReadinessMonitor,
@@ -406,6 +441,7 @@ impl TaskName {
         match self {
             Self::SignalListener => "signal-listener",
             Self::ZenohSupervisor => "zenoh-supervisor",
+            Self::SessionCleanup => "session-cleanup",
             Self::ManagedGatewayDataPlane => "managed-gateway-data-plane",
             Self::ReadinessSync => "readiness-sync",
             Self::ReadinessMonitor => "readiness-monitor",
@@ -417,6 +453,7 @@ impl TaskName {
         match self {
             Self::SignalListener | Self::HttpServer => CleanExitPolicy::ShutdownApplication,
             Self::ZenohSupervisor
+            | Self::SessionCleanup
             | Self::ManagedGatewayDataPlane
             | Self::ReadinessSync
             | Self::ReadinessMonitor => CleanExitPolicy::KeepRunning,

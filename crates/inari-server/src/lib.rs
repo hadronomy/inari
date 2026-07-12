@@ -6,6 +6,7 @@ mod time;
 pub mod app;
 pub mod cli;
 pub mod config;
+pub mod database;
 pub mod error;
 pub mod http;
 pub mod identity;

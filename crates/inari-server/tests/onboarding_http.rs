@@ -6,43 +6,51 @@ use inari_gateway::onboarding::{
     CertificateMode, CreateInvitation, OnboardingConfig, OnboardingService,
 };
 use inari_gateway::protocol::ProtocolVersion;
+use inari_migration::{Migrator, MigratorTrait};
 use inari_server::config::{LoadedConfig, ZenohConfig};
 use inari_server::http;
 use inari_server::state::AppState;
 use inari_server::zenoh::ZenohSupervisor;
 use leptos::prelude::LeptosOptions;
-use secrecy::SecretString;
+use sea_orm::DatabaseConnection;
 use tower::ServiceExt;
 
 async fn test_app() -> (axum::Router, OnboardingService) {
     let database_url = std::env::var("INARI_TEST_DATABASE_URL")
         .expect("INARI_TEST_DATABASE_URL is required for PostgreSQL integration tests");
-    let onboarding = OnboardingService::initialize(OnboardingConfig {
-        database_url: SecretString::from(database_url),
-        database_min_connections: 1,
-        database_max_connections: 4,
-        migrate_database: true,
-        organization_id: "org_test"
-            .parse()
-            .expect("organization ID should parse"),
-        organization_name: "Test organization".into(),
-        default_site_id: "site_test"
-            .parse()
-            .expect("site ID should parse"),
-        default_site_name: "Test site".into(),
-        enabled: true,
-        public_base_url: Some(
-            "https://controller.example.com/"
+    let pool = sqlx::PgPool::connect(&database_url)
+        .await
+        .expect("test database should connect");
+    let database = DatabaseConnection::from(pool);
+    Migrator::up(&database, None)
+        .await
+        .expect("test database should migrate");
+    let repository = inari_gateway::GatewayRepository::new(database);
+    let onboarding = OnboardingService::initialize(
+        OnboardingConfig {
+            organization_id: "org_test"
                 .parse()
-                .expect("test URL should parse"),
-        ),
-        controller_name: Some("Test Controller".into()),
-        controller_instance_id: "controller-test".into(),
-        invitation_ttl: std::time::Duration::from_secs(600),
-        supported_protocol_versions: vec![ProtocolVersion::current()],
-        certificate_mode: CertificateMode::StepCa,
-        requires_mutual_tls_after_issuance: true,
-    })
+                .expect("organization ID should parse"),
+            organization_name: "Test organization".into(),
+            default_site_id: "site_test"
+                .parse()
+                .expect("site ID should parse"),
+            default_site_name: "Test site".into(),
+            enabled: true,
+            public_base_url: Some(
+                "https://controller.example.com/"
+                    .parse()
+                    .expect("test URL should parse"),
+            ),
+            controller_name: Some("Test Controller".into()),
+            controller_instance_id: "controller-test".into(),
+            invitation_ttl: std::time::Duration::from_secs(600),
+            supported_protocol_versions: vec![ProtocolVersion::current()],
+            certificate_mode: CertificateMode::StepCa,
+            requires_mutual_tls_after_issuance: true,
+        },
+        repository,
+    )
     .await
     .expect("onboarding should initialize");
     let mut loaded = LoadedConfig::default();

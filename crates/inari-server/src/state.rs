@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use inari_gateway::GatewayRepository;
 use inari_gateway::certificate::CertificateIssuerHandle;
 use inari_gateway::onboarding::OnboardingService;
 use leptos::prelude::LeptosOptions;
@@ -81,7 +80,7 @@ impl AppState {
         identity: Option<IdentityRuntime>,
         certificate_issuer: Option<CertificateIssuerHandle>,
     ) -> Self {
-        let database_readiness = if onboarding.is_some() {
+        let database_readiness = if onboarding.is_some() || identity.is_some() {
             DatabaseReadiness::ready("PostgreSQL connection pool is available.")
         } else {
             DatabaseReadiness::disabled("Controller persistence is disabled.")
@@ -116,8 +115,7 @@ impl AppState {
         )));
         let gateway_repository = onboarding
             .as_ref()
-            .map(|onboarding| onboarding.repository().clone())
-            .unwrap_or_else(GatewayRepository::disconnected);
+            .map(|onboarding| onboarding.repository().clone());
         let managed_gateway = ManagedGatewayController::new(
             loaded.settings.managed_gateway.clone(),
             loaded.settings.organization.clone(),

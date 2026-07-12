@@ -47,7 +47,7 @@ impl ManagedGatewayController {
         let certificate = self.certificate_payload(&request.agent_id, &identity.csr_fingerprint)?;
 
         let enrollment = StoredAgentEnrollment {
-            agent_id: request.agent_id.to_string(),
+            agent_id: request.agent_id.clone(),
             organization_id: self.inner.organization.id.clone(),
             site_id: self
                 .inner
@@ -133,7 +133,7 @@ impl ManagedGatewayController {
         let invitation_id = code.id().to_string();
         self.inner
             .store
-            .repository
+            .repository()?
             .claim_invitation(
                 &code,
                 agent_id,

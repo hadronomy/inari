@@ -43,7 +43,7 @@ impl ManagedGatewayController {
         organization: OrganizationConfig,
         zenoh_config: ZenohConfig,
         zenoh: ZenohHandle,
-        repository: GatewayRepository,
+        repository: Option<GatewayRepository>,
         certificate_issuer: Option<CertificateIssuerHandle>,
     ) -> Self {
         let store = ManagedGatewayStore::new(repository);
@@ -65,7 +65,7 @@ impl ManagedGatewayController {
     }
 
     fn ensure_enabled(&self) -> AppResult<()> {
-        if self.inner.config.enabled {
+        if self.inner.config.enabled && self.inner.store.is_available() {
             Ok(())
         } else {
             Err(AppError::service_unavailable("Managed gateway controller is not enabled."))

@@ -172,11 +172,6 @@ impl AppConfig {
         self.database
             .validate(self.managed_gateway.enabled || self.identity.oidc.enabled)?;
         self.organization.validate()?;
-        if self.identity.oidc.enabled && !self.managed_gateway.enabled {
-            return Err(ConfigError::invalid(
-                "managed_gateway.enabled must be true when OIDC is enabled because sessions require the controller database.",
-            ));
-        }
         if self.server.production && self.managed_gateway.enabled && !self.identity.oidc.enabled {
             return Err(ConfigError::invalid(
                 "identity.oidc.enabled must be true for a production managed controller.",

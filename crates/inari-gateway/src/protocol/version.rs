@@ -119,7 +119,7 @@ impl From<ProtocolVersion> for String {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolDescriptor {
     pub version: ProtocolVersion,

@@ -51,7 +51,7 @@ impl ManagedGatewayController {
         self.ensure_enabled()?;
         self.inner
             .store
-            .repository
+            .repository()?
             .audit_events(&self.inner.organization.id, before, limit)
             .await
             .map_err(Into::into)
@@ -61,7 +61,7 @@ impl ManagedGatewayController {
         self.ensure_enabled()?;
         self.inner
             .store
-            .repository
+            .repository()?
             .record_audit_event(&draft)
             .await
             .map_err(Into::into)

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ProtocolDescriptor, StructuredFields};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewaySnapshot {
     pub generated_at: DateTime<Utc>,
@@ -16,7 +16,7 @@ pub struct GatewaySnapshot {
     pub observability: StructuredFields,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ServiceDescriptor {
     #[serde(default)]
     pub name: Option<String>,
@@ -26,7 +26,7 @@ pub struct ServiceDescriptor {
     pub attributes: StructuredFields,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SecurityDescriptor {
     pub mode: String,
     pub exposure: String,
@@ -40,7 +40,7 @@ pub struct SecurityDescriptor {
     pub attributes: StructuredFields,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeDescriptor {
     #[serde(default)]
     pub queue: std::collections::BTreeMap<String, u64>,
@@ -50,7 +50,7 @@ pub struct RuntimeDescriptor {
     pub inventory: StructuredFields,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityDescriptor {
     #[serde(default)]
     pub supported_content_kinds: Vec<String>,

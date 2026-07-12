@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use chrono::Utc;
-use secrecy::SecretString;
 use url::Url;
 
 use super::{
@@ -14,10 +13,6 @@ use crate::{GatewayError, GatewayRepository, GatewayResult};
 
 #[derive(Debug, Clone)]
 pub struct OnboardingConfig {
-    pub database_url: SecretString,
-    pub database_min_connections: u32,
-    pub database_max_connections: u32,
-    pub migrate_database: bool,
     pub organization_id: OrganizationId,
     pub organization_name: String,
     pub default_site_id: SiteId,
@@ -48,16 +43,10 @@ pub struct OnboardingService {
 }
 
 impl OnboardingService {
-    pub async fn initialize(config: OnboardingConfig) -> GatewayResult<Self> {
-        if config.migrate_database {
-            GatewayRepository::migrate(&config.database_url).await?;
-        }
-        let repository = GatewayRepository::connect(
-            &config.database_url,
-            config.database_min_connections,
-            config.database_max_connections,
-        )
-        .await?;
+    pub async fn initialize(
+        config: OnboardingConfig,
+        repository: GatewayRepository,
+    ) -> GatewayResult<Self> {
         repository
             .ensure_organization(
                 &config.organization_id,
