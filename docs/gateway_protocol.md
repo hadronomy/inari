@@ -2,7 +2,7 @@
 title: Gateway Protocol
 summary: Managed-mode protocol specification for the controller <-> inari boundary over HTTPS enrollment and a Zenoh data plane.
 status: draft
-protocol_version: "2026-07-11"
+protocol_version: "2026-07-12"
 agent_api_version: "1.20.0a1"
 transport:
   enrollment: https
@@ -33,7 +33,7 @@ Use this together with:
 ## 1. Document Status
 
 - Protocol status: `draft`
-- Protocol version: `2026-07-11`
+- Protocol version: `2026-07-12`
 - Agent role: protocol client
 - Controller role: protocol server
 
@@ -144,7 +144,7 @@ The selected version MUST be one of the versions advertised by the agent. If the
 
 ### 8.0 Invitation Bootstrap
 
-Operators create, list, and revoke invitations through authenticated Leptos server functions. These operations are not public REST endpoints. The operator token is submitted to a server function, wrapped as secret material immediately, and retained only in browser memory for the current hydrated session.
+Operators create, list, and revoke invitations through authenticated Leptos server functions. These operations are not public REST endpoints. Human access uses an OIDC Authorization Code flow with PKCE, state, and nonce; the resulting opaque controller session is held in a Secure, HttpOnly cookie and authorized with typed roles.
 
 The setup link has this shape:
 
@@ -181,8 +181,8 @@ Request body:
 ```json
 {
   "protocol": {
-    "version": "2026-07-11",
-    "supported_versions": ["2026-07-11"]
+    "version": "2026-07-12",
+    "supported_versions": ["2026-07-12"]
   },
   "agent_id": "agt_123",
   "key_id": "kid_123",
@@ -215,7 +215,7 @@ The recommended enrollment response shape is:
 
 ```json
 {
-  "selected_protocol_version": "2026-07-11",
+  "selected_protocol_version": "2026-07-12",
   "controller": {
     "name": "Acme IoT Controller",
     "instance_id": "controller-01"
@@ -615,7 +615,7 @@ For larger content such as PDF, HTML, or large images, the protocol SHOULD intro
 
 The Rust controller is built with `cargo leptos build --release`. Deploy the server binary together with the generated `target/site` directory and set `LEPTOS_SITE_ROOT` to its deployed location. The generated wasm-bindgen JavaScript is a build artifact; the application contains no authored JavaScript.
 
-Managed-gateway state is stored in SQLite at `data/inari-server/managed-gateway.sqlite3` by default. Embedded migrations complete before HTTP readiness. The database uses foreign keys, WAL, a busy timeout, transactions, and uniqueness constraints for invitation consumption and protocol idempotency.
+Managed-gateway state is stored in externally operated PostgreSQL. Embedded migrations are applied by `inari-server database migrate` before a Kubernetes rollout; development may opt into startup migration. Transactions, row locks, advisory locks, and uniqueness constraints protect invitation consumption, competing workers, and protocol idempotency across controller replicas.
 
 ### 15.1 Controller HTTP Edge
 
@@ -626,7 +626,7 @@ The enrollment endpoint SHOULD use `HTTPS`. A controller may place Axum behind a
 The recommended production shape is:
 
 - HTTP enrollment handled by the controller
-- Zenoh routers handling the managed data plane
+- a separately operated Zenoh router StatefulSet handling the managed data plane
 - agent sessions in Zenoh `client` mode
 - TLS with client certificates on the Zenoh transport
 

@@ -1,7 +1,5 @@
-mod auth;
 mod extract;
 mod inari;
-pub mod v1;
 mod zenoh;
 
 use axum::Router;
@@ -11,9 +9,7 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 pub fn router(state: &AppState) -> Router<AppState> {
-    let router = Router::new()
-        .nest("/v1", v1::router(state))
-        .nest("/inari/v1", inari::router());
+    let router = Router::new().nest("/inari/v1", inari::router());
 
     let router = if state
         .loaded_config()

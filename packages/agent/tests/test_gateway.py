@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 
 from inari.config import AgentSettings
+from inari.drivers import DeviceIdentity, DeviceTransport
 from inari.gateway.connector import GatewayConnector
 from inari.gateway.data_plane.base import GatewayDataPlaneTransport
 from inari.gateway.enrollment import GatewayEnrollmentService
@@ -255,6 +256,10 @@ class StubJobService:
             PrinterDevice(
                 name="Kitchen Printer",
                 driver_key="tests.fake-printers",
+                identity=DeviceIdentity(
+                    transport=DeviceTransport.SPOOLER,
+                    os_instance_id="test-queue:kitchen",
+                ),
                 is_default=True,
                 preferred_transport=PrinterTransport.RAW,
                 capabilities=PrinterCapabilities(

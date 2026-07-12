@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use inari_gateway::GatewayRepository;
+use inari_gateway::certificate::CertificateIssuerHandle;
 use inari_gateway::onboarding::OnboardingService;
 use leptos::prelude::LeptosOptions;
 use serde::Serialize;
@@ -13,11 +14,11 @@ use tokio::sync::watch;
 
 use crate::config::LoadedConfig;
 use crate::coordination::{
-    Budget, ProtocolExecution, ProtocolPermit, ZenohRestQueryPermit, ZenohRestRequest,
+    Budget, InariApiPermit, InariApiRequest, ZenohRestQueryPermit, ZenohRestRequest,
 };
 use crate::error::AppError;
+use crate::identity::IdentityRuntime;
 use crate::managed_gateway::ManagedGatewayController;
-use crate::protocol::{DynProtocolModule, ProtocolDescriptor};
 use crate::zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus};
 
 pub type ReadinessSummary = Arc<str>;
@@ -35,15 +36,15 @@ struct AppStateInner {
     zenoh: ZenohHandle,
     managed_gateway: ManagedGatewayController,
     onboarding: Option<OnboardingService>,
+    identity: Option<IdentityRuntime>,
     leptos_options: LeptosOptions,
-    protocol: Arc<DynProtocolModule>,
-    protocol_budget: Budget<ProtocolExecution>,
+    inari_api_budget: Budget<InariApiRequest>,
     zenoh_rest_request_budget: Budget<ZenohRestRequest>,
 }
 
 impl Drop for AppStateInner {
     fn drop(&mut self) {
-        self.protocol_budget.close();
+        self.inari_api_budget.close();
         self.zenoh_rest_request_budget.close();
     }
 }
@@ -59,14 +60,15 @@ impl fmt::Debug for AppState {
 }
 
 impl AppState {
-    pub fn new(loaded: LoadedConfig, zenoh: ZenohHandle, protocol: Arc<DynProtocolModule>) -> Self {
+    pub fn new(loaded: LoadedConfig, zenoh: ZenohHandle) -> Self {
         Self::new_with_onboarding(
             loaded,
             zenoh,
-            protocol,
             LeptosOptions::builder()
                 .output_name("inari-web")
                 .build(),
+            None,
+            None,
             None,
         )
     }
@@ -74,12 +76,42 @@ impl AppState {
     pub fn new_with_onboarding(
         loaded: LoadedConfig,
         zenoh: ZenohHandle,
-        protocol: Arc<DynProtocolModule>,
         leptos_options: LeptosOptions,
         onboarding: Option<OnboardingService>,
+        identity: Option<IdentityRuntime>,
+        certificate_issuer: Option<CertificateIssuerHandle>,
     ) -> Self {
+        let database_readiness = if onboarding.is_some() {
+            DatabaseReadiness::ready("PostgreSQL connection pool is available.")
+        } else {
+            DatabaseReadiness::disabled("Controller persistence is disabled.")
+        };
+        let identity_readiness = if identity.is_some() {
+            IdentityReadiness::ready("OIDC discovery and session storage are available.")
+        } else {
+            IdentityReadiness::disabled("Organization identity is disabled.")
+        };
+        let certificate_readiness = if certificate_issuer.is_some() {
+            CertificateReadiness::ready("Agent certificate issuer is available.")
+        } else {
+            CertificateReadiness::disabled("Managed certificate issuance is disabled.")
+        };
+        let enrollment_readiness = if loaded
+            .settings
+            .managed_gateway
+            .onboarding
+            .enabled
+        {
+            EnrollmentReadiness::ready("Invitation enrollment is available.")
+        } else {
+            EnrollmentReadiness::disabled("Invitation enrollment is disabled.")
+        };
         let readiness = Readiness::new(ReadinessSnapshot::new(ReadinessComponents::new(
             HttpReadiness::bootstrapped(),
+            database_readiness,
+            identity_readiness,
+            certificate_readiness,
+            enrollment_readiness,
             ZenohReadiness::from(&zenoh.status_snapshot()),
         )));
         let gateway_repository = onboarding
@@ -88,17 +120,20 @@ impl AppState {
             .unwrap_or_else(GatewayRepository::disconnected);
         let managed_gateway = ManagedGatewayController::new(
             loaded.settings.managed_gateway.clone(),
+            loaded.settings.organization.clone(),
             loaded.settings.zenoh.clone(),
             zenoh.clone(),
             gateway_repository,
+            certificate_issuer,
         );
 
         Self {
             inner: Arc::new(AppStateInner {
-                protocol_budget: Budget::new(
+                inari_api_budget: Budget::new(
                     loaded
                         .settings
-                        .protocol
+                        .http
+                        .inari_api
                         .max_concurrent_requests,
                 ),
                 zenoh_rest_request_budget: Budget::new(
@@ -115,8 +150,8 @@ impl AppState {
                 zenoh,
                 managed_gateway,
                 onboarding,
+                identity,
                 leptos_options,
-                protocol,
             }),
         }
     }
@@ -152,17 +187,13 @@ impl AppState {
     }
 
     #[must_use]
-    pub fn leptos_options(&self) -> &LeptosOptions {
-        &self.inner.leptos_options
+    pub fn identity(&self) -> Option<&IdentityRuntime> {
+        self.inner.identity.as_ref()
     }
 
     #[must_use]
-    pub fn protocol_descriptor(&self) -> ProtocolDescriptor {
-        self.inner.protocol.descriptor()
-    }
-
-    pub fn protocol_routes(&self) -> axum::Router<Self> {
-        self.inner.protocol.routes()
+    pub fn leptos_options(&self) -> &LeptosOptions {
+        &self.inner.leptos_options
     }
 
     #[must_use]
@@ -187,9 +218,9 @@ impl AppState {
             .update_http(readiness);
     }
 
-    pub async fn acquire_protocol_permit(&self) -> Result<ProtocolPermit, AppError> {
+    pub async fn acquire_inari_api_permit(&self) -> Result<InariApiPermit, AppError> {
         self.inner
-            .protocol_budget
+            .inari_api_budget
             .acquire()
             .await
     }
@@ -264,6 +295,26 @@ impl sealed::Sealed for Zenoh {}
 impl Component for Zenoh {
     const NAME: &'static str = "zenoh";
 }
+
+macro_rules! readiness_component {
+    ($marker:ident, $alias:ident, $name:literal) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum $marker {}
+
+        impl sealed::Sealed for $marker {}
+
+        impl Component for $marker {
+            const NAME: &'static str = $name;
+        }
+
+        pub type $alias = ComponentReadiness<$marker>;
+    };
+}
+
+readiness_component!(Database, DatabaseReadiness, "database");
+readiness_component!(Identity, IdentityReadiness, "identity");
+readiness_component!(Certificate, CertificateReadiness, "certificate");
+readiness_component!(Enrollment, EnrollmentReadiness, "enrollment");
 
 pub type HttpReadiness = ComponentReadiness<Http>;
 pub type ZenohReadiness = ComponentReadiness<Zenoh>;
@@ -473,13 +524,24 @@ impl From<ZenohStatus> for ComponentReadiness<Zenoh> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReadinessComponents {
     http: HttpReadiness,
+    database: DatabaseReadiness,
+    identity: IdentityReadiness,
+    certificate: CertificateReadiness,
+    enrollment: EnrollmentReadiness,
     zenoh: ZenohReadiness,
 }
 
 impl ReadinessComponents {
     #[must_use]
-    pub fn new(http: HttpReadiness, zenoh: ZenohReadiness) -> Self {
-        Self { http, zenoh }
+    pub fn new(
+        http: HttpReadiness,
+        database: DatabaseReadiness,
+        identity: IdentityReadiness,
+        certificate: CertificateReadiness,
+        enrollment: EnrollmentReadiness,
+        zenoh: ZenohReadiness,
+    ) -> Self {
+        Self { http, database, identity, certificate, enrollment, zenoh }
     }
 
     #[must_use]
@@ -511,11 +573,20 @@ impl ReadinessComponents {
 
     #[must_use]
     pub fn is_ready(&self) -> bool {
-        self.http.counts_as_ready() && self.zenoh.counts_as_ready()
+        self.iter()
+            .all(ReadinessEntry::counts_as_ready)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = ReadinessEntry<'_>> {
-        [ReadinessEntry::new(&self.http), ReadinessEntry::new(&self.zenoh)].into_iter()
+        [
+            ReadinessEntry::new(&self.http),
+            ReadinessEntry::new(&self.database),
+            ReadinessEntry::new(&self.identity),
+            ReadinessEntry::new(&self.certificate),
+            ReadinessEntry::new(&self.enrollment),
+            ReadinessEntry::new(&self.zenoh),
+        ]
+        .into_iter()
     }
 }
 
@@ -543,6 +614,25 @@ impl ComponentSlot<Zenoh> for ReadinessComponents {
         self.zenoh = readiness;
     }
 }
+
+macro_rules! component_slot {
+    ($marker:ident, $field:ident, $readiness:ident) => {
+        impl ComponentSlot<$marker> for ReadinessComponents {
+            fn get(&self) -> &$readiness {
+                &self.$field
+            }
+
+            fn set(&mut self, readiness: $readiness) {
+                self.$field = readiness;
+            }
+        }
+    };
+}
+
+component_slot!(Database, database, DatabaseReadiness);
+component_slot!(Identity, identity, IdentityReadiness);
+component_slot!(Certificate, certificate, CertificateReadiness);
+component_slot!(Enrollment, enrollment, EnrollmentReadiness);
 
 #[derive(Debug, Clone, Copy)]
 pub struct ReadinessEntry<'a> {

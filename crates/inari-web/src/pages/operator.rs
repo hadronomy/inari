@@ -3,14 +3,17 @@ use leptos::prelude::*;
 use leptos_meta::Title;
 
 use crate::components::{AppFrame, InlineNotice, StateBadge};
-use crate::server_fns::{IssueInvitation, LoadInvitations, RevokeInvitation};
+use crate::server_fns::{IssueInvitation, OnboardingError, RevokeInvitation, load_invitations};
 
 #[component]
 pub fn OperatorPage() -> impl IntoView {
     let issue = ServerAction::<IssueInvitation>::new();
-    let load = ServerAction::<LoadInvitations>::new();
     let revoke = ServerAction::<RevokeInvitation>::new();
-    let operator_token = RwSignal::new(String::new());
+    let refresh = RwSignal::new(0_u64);
+    let invitations = Resource::new(
+        move || (issue.version().get(), revoke.version().get(), refresh.get()),
+        |_| load_invitations(),
+    );
 
     view! {
         <Title text="Managed onboarding — Inari"/>
@@ -20,9 +23,9 @@ pub fn OperatorPage() -> impl IntoView {
                     <div>
                         <p class="eyebrow">"Operator workspace"</p>
                         <h1>"Invite an edge agent."</h1>
-                        <p>"Credentials stay in this browser session and are never written to a URL, log, or database."</p>
+                        <p>"Invitations are short-lived, one-use, and bound to the enrolling agent identity."</p>
                     </div>
-                    <span class="security-note"><span aria-hidden="true">"◆"</span>"Memory only"</span>
+                    <span class="security-note"><span aria-hidden="true">"◆"</span>"OIDC protected"</span>
                 </header>
 
                 <section class="operator-grid">
@@ -33,19 +36,6 @@ pub fn OperatorPage() -> impl IntoView {
                         </div>
                         <ActionForm action=issue>
                             <div class="form-stack">
-                                <label>
-                                    <span>"Operator token"</span>
-                                    <input
-                                        type="password"
-                                        name="operator_token"
-                                        autocomplete="off"
-                                        spellcheck="false"
-                                        required
-                                        prop:value=move || operator_token.get()
-                                        on:input:target=move |event| operator_token.set(event.target().value())
-                                        placeholder="Paste the high-entropy token"
-                                    />
-                                </label>
                                 <label>
                                     <span>"Agent label" <small>"Optional"</small></span>
                                     <input name="label" maxlength="120" placeholder="Front desk"/>
@@ -68,6 +58,9 @@ pub fn OperatorPage() -> impl IntoView {
                                     </div>
                                 </div>
                             }.into_any(),
+                            Err(OnboardingError::Forbidden) => view! {
+                                <InlineNotice kind="error">"Sign in with an enrollment administrator role to issue invitations. "<a href="/auth/login?return_to=/onboarding">"Sign in"</a></InlineNotice>
+                            }.into_any(),
                             Err(error) => view! { <InlineNotice kind="error">{error.to_string()}</InlineNotice> }.into_any(),
                         })}
                     </div>
@@ -75,14 +68,10 @@ pub fn OperatorPage() -> impl IntoView {
                     <aside class="panel ledger-panel">
                         <div class="panel-heading">
                             <div><span class="step">"02"</span><h2>"Invitation ledger"</h2></div>
-                            <ActionForm action=load>
-                                <input type="hidden" name="operator_token" value=move || operator_token.get()/>
-                                <button class="button button-quiet" type="submit" disabled=move || load.pending().get()>
-                                    {move || if load.pending().get() { "Loading…" } else { "Refresh" }}
-                                </button>
-                            </ActionForm>
+                            <button class="button button-quiet" type="button" on:click=move |_| refresh.update(|version| *version += 1)>"Refresh"</button>
                         </div>
-                        {move || load.value().get().map(|result| match result {
+                        <Suspense fallback=move || view! { <div class="empty-state" aria-busy="true"><p>"Loading invitations…"</p></div> }>
+                        {move || invitations.get().map(|result| match result {
                             Ok(invitations) if invitations.is_empty() => view! {
                                 <div class="empty-state"><span aria-hidden="true">"◇"</span><p>"No invitations yet."</p></div>
                             }.into_any(),
@@ -100,7 +89,6 @@ pub fn OperatorPage() -> impl IntoView {
                                                 <div class="record-footer">
                                                     <time>{invitation.expires_at.to_rfc3339()}</time>
                                                     <ActionForm action=revoke>
-                                                        <input type="hidden" name="operator_token" value=move || operator_token.get()/>
                                                         <input type="hidden" name="invitation_id" value=invitation_id/>
                                                         <button class="button button-danger" type="submit" disabled=move || revoke.pending().get()>"Revoke"</button>
                                                     </ActionForm>
@@ -110,8 +98,12 @@ pub fn OperatorPage() -> impl IntoView {
                                     }).collect_view()}
                                 </ul>
                             }.into_any(),
+                            Err(OnboardingError::Forbidden) => view! {
+                                <InlineNotice kind="error">"Sign in with an enrollment administrator role to view invitations. "<a href="/auth/login?return_to=/onboarding">"Sign in"</a></InlineNotice>
+                            }.into_any(),
                             Err(error) => view! { <InlineNotice kind="error">{error.to_string()}</InlineNotice> }.into_any(),
                         })}
+                        </Suspense>
                         {move || revoke.value().get().map(|result| match result {
                             Ok(invitation) => view! { <InlineNotice kind="success">{format!("{} is now {}.", invitation.invitation_id, invitation.state.label())}</InlineNotice> }.into_any(),
                             Err(error) => view! { <InlineNotice kind="error">{error.to_string()}</InlineNotice> }.into_any(),

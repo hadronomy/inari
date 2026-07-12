@@ -7,7 +7,13 @@ import pytest
 
 from inari.printing.payloads import BinaryPayload
 from inari.config import AgentSettings
-from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
+from inari.drivers import (
+    DeviceIdentity,
+    DeviceKind,
+    DeviceTransport,
+    DriverMetadata,
+    DriverRegistry,
+)
 from inari.printing.drivers.base import PrinterDriver
 from inari.core.exceptions import PrinterServiceError
 from inari.printing.jobs import PrintJob, ReceiptImageContent
@@ -19,6 +25,13 @@ from inari.printing.protocols import (
     PrinterTransport,
     RenderedDocument,
 )
+
+
+def _test_identity(instance_id: str) -> DeviceIdentity:
+    return DeviceIdentity(
+        transport=DeviceTransport.SPOOLER,
+        os_instance_id=f"test-queue:{instance_id}",
+    )
 
 
 @dataclass(slots=True)
@@ -140,6 +153,7 @@ def test_print_receipt_data_routes_raw_jobs_through_selected_driver() -> None:
     printer = PrinterDevice(
         name="EPSON TM-T20III",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=_test_identity("epson-receipt"),
         is_default=True,
         preferred_transport=PrinterTransport.RAW,
         capabilities=PrinterCapabilities(
@@ -171,6 +185,7 @@ def test_print_job_dispatches_receipt_image_through_image_renderer() -> None:
     printer = PrinterDevice(
         name="EPSON TM-T20III",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=_test_identity("epson-receipt"),
         is_default=True,
         preferred_transport=PrinterTransport.RAW,
         capabilities=PrinterCapabilities(
@@ -204,6 +219,7 @@ def test_open_cash_drawer_checks_printer_capability_not_default_transport_policy
     printer = PrinterDevice(
         name="EPSON TM-T20III",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=_test_identity("epson-receipt"),
         is_default=True,
         preferred_transport=PrinterTransport.RAW,
         capabilities=PrinterCapabilities(
@@ -223,6 +239,7 @@ def test_print_receipt_rejects_non_raw_printers() -> None:
     office_printer = PrinterDevice(
         name="HP LaserJet",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=_test_identity("office-laser"),
         is_default=True,
         preferred_transport=PrinterTransport.DOCUMENT,
         capabilities=PrinterCapabilities(
@@ -251,6 +268,7 @@ def test_print_rendered_document_uses_default_printer_name_when_configured() -> 
     primary = PrinterDevice(
         name="Back Office",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=_test_identity("back-office"),
         preferred_transport=PrinterTransport.DOCUMENT,
         capabilities=PrinterCapabilities(
             raw=False, text=True, documents=True, cash_drawer=False
@@ -259,6 +277,7 @@ def test_print_rendered_document_uses_default_printer_name_when_configured() -> 
     kitchen = PrinterDevice(
         name="Kitchen Receipt Printer",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=_test_identity("kitchen"),
         preferred_transport=PrinterTransport.RAW,
         capabilities=PrinterCapabilities(
             raw=True, text=True, documents=True, cash_drawer=True

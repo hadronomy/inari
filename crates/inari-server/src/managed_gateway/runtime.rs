@@ -3,7 +3,7 @@ use zenoh::bytes::Encoding;
 use zenoh::sample::SampleKind;
 
 use super::ManagedGatewayController;
-use super::models::CommandHistoryResponse;
+use super::models::CommandHistory;
 use crate::error::{AppError, AppResult};
 use crate::shutdown::ShutdownCoordinator;
 use crate::zenoh::CurrentSession;
@@ -145,7 +145,7 @@ impl ManagedGatewayController {
         &self,
         key: &str,
         from_sequence: u64,
-    ) -> AppResult<Option<CommandHistoryResponse>> {
+    ) -> AppResult<Option<CommandHistory>> {
         let Some(agent_id) = self.agent_id_from_key(key) else {
             return Ok(None);
         };

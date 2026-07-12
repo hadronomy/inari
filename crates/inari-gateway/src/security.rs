@@ -3,6 +3,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use jsonwebtoken::jwk::{
     AlgorithmParameters, EllipticCurve, Jwk, KeyAlgorithm, PublicKeyUse, ThumbprintHash,
 };
+use sha2::{Digest, Sha256};
 use x509_parser::certification_request::X509CertificationRequest;
 use x509_parser::parse_x509_certificate;
 use x509_parser::pem::parse_x509_pem;
@@ -15,6 +16,7 @@ pub struct ValidatedIdentity {
     pub key_id: String,
     pub jwk_thumbprint: String,
     pub public_key: [u8; 32],
+    pub csr_fingerprint: String,
 }
 
 pub fn validate_identity(
@@ -83,6 +85,7 @@ pub fn validate_identity(
         key_id: key_id.into(),
         jwk_thumbprint: jwk.thumbprint(ThumbprintHash::SHA256),
         public_key,
+        csr_fingerprint: URL_SAFE_NO_PAD.encode(Sha256::digest(&pem.contents)),
     })
 }
 

@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from inari.config import AgentSettings
-from inari.drivers import DeviceKind
+from inari.drivers import DeviceIdentity, DeviceKind, DeviceTransport
 from inari.gateway.models import (
     UpstreamCertificateMode,
     UpstreamConnectionState,
@@ -102,7 +102,7 @@ def preview_client_factory(**kwargs):
                 "state": "created",
                 "controller_name": "Inari Production",
                 "controller_instance_id": "controller-1",
-                "supported_protocol_versions": ["2026-07-11"],
+                "supported_protocol_versions": ["2026-07-12"],
                 "certificate_mode": "step_ca",
                 "requires_mutual_tls_after_issuance": True,
             },
@@ -185,6 +185,10 @@ def test_device_confirmation_persists_labels_and_default_printer(tmp_path) -> No
         id="dev_printer",
         kind=DeviceKind.PRINTER,
         driver_key="test.printer",
+        identity=DeviceIdentity(
+            transport=DeviceTransport.SPOOLER,
+            os_instance_id="test-queue:system-printer",
+        ),
         name="System Printer",
         connection_state=DeviceConnectionState.ONLINE,
         first_seen_at=now,
@@ -214,6 +218,10 @@ def test_gateway_snapshot_contains_redacted_full_device_inventory(tmp_path) -> N
         id="dev_printer",
         kind=DeviceKind.PRINTER,
         driver_key="test.printer",
+        identity=DeviceIdentity(
+            transport=DeviceTransport.SPOOLER,
+            os_instance_id="test-queue:system-printer",
+        ),
         name="System Printer",
         connection_state=DeviceConnectionState.ONLINE,
         first_seen_at=now,

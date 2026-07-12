@@ -80,30 +80,64 @@ class KeyringSecretStore:
             return
 
 
-class ResilientSecretStore:
-    def __init__(self, *, primary: SecretStore, fallback: SecretStore) -> None:
+class ProtectedSecretStoreUnavailable(RuntimeError):
+    """Raised when protected credential storage is required but unavailable."""
+
+
+class ProtectedSecretStore:
+    def __init__(
+        self,
+        *,
+        primary: SecretStore,
+        fallback: SecretStore | None = None,
+    ) -> None:
         self.primary = primary
         self.fallback = fallback
 
     def get_secret(self, key: str) -> str | None:
         try:
             value = self.primary.get_secret(key)
-        except (KeyringError, NoKeyringError):
-            value = None
+        except (KeyringError, NoKeyringError) as exc:
+            if self.fallback is None:
+                raise ProtectedSecretStoreUnavailable(
+                    "The operating-system credential store is unavailable."
+                ) from exc
+            return self.fallback.get_secret(key)
         if value is not None:
             return value
-        return self.fallback.get_secret(key)
+        if self.fallback is None:
+            return None
+
+        legacy_value = self.fallback.get_secret(key)
+        if legacy_value is None:
+            return None
+        try:
+            self.primary.set_secret(key, legacy_value)
+        except (KeyringError, NoKeyringError):
+            return legacy_value
+        self.fallback.delete_secret(key)
+        return legacy_value
 
     def set_secret(self, key: str, value: str) -> None:
-        self.fallback.set_secret(key, value)
         try:
             self.primary.set_secret(key, value)
-        except (KeyringError, NoKeyringError):
+        except (KeyringError, NoKeyringError) as exc:
+            if self.fallback is None:
+                raise ProtectedSecretStoreUnavailable(
+                    "The operating-system credential store is unavailable."
+                ) from exc
+            self.fallback.set_secret(key, value)
             return
+        if self.fallback is not None:
+            self.fallback.delete_secret(key)
 
     def delete_secret(self, key: str) -> None:
-        self.fallback.delete_secret(key)
         try:
             self.primary.delete_secret(key)
-        except (KeyringError, NoKeyringError):
-            return
+        except (KeyringError, NoKeyringError) as exc:
+            if self.fallback is None:
+                raise ProtectedSecretStoreUnavailable(
+                    "The operating-system credential store is unavailable."
+                ) from exc
+        if self.fallback is not None:
+            self.fallback.delete_secret(key)

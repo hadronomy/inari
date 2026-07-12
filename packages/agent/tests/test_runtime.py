@@ -8,7 +8,13 @@ from typing import ClassVar
 import pytest
 
 from inari.config import AgentSettings
-from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
+from inari.drivers import (
+    DeviceIdentity,
+    DeviceKind,
+    DeviceTransport,
+    DriverMetadata,
+    DriverRegistry,
+)
 from inari.printing.drivers.base import PrinterDriver
 from inari.local_api.schemas import PrintJobRequest
 from inari.printing.service import PrinterService
@@ -28,7 +34,7 @@ from inari.runtime.jobs.execution import (
     PrinterOperationExecutor,
     RuntimeJobExecutor,
 )
-from inari.runtime.models import JobRecord, JobState, build_device_id
+from inari.runtime.models import DeviceRecord, JobRecord, JobState, build_device_id
 from inari.runtime.repositories import DeviceRepository, JobRepository
 from inari.runtime.devices.service import DeviceCatalog
 from inari.runtime.jobs.service import JobService
@@ -110,6 +116,30 @@ class FakePrinterDriver(PrinterDriver):
         )
 
 
+def test_device_id_is_independent_from_the_display_name() -> None:
+    identity = DeviceIdentity(
+        transport=DeviceTransport.USB,
+        vendor_id=0x04B8,
+        product_id=0x0E28,
+        serial_number="printer-serial-01",
+    )
+    before_rename = PrinterDevice(
+        name="Kitchen Printer",
+        driver_key=FakePrinterDriver.metadata.key,
+        identity=identity,
+    )
+    after_rename = PrinterDevice(
+        name="Front Counter Printer",
+        driver_key=FakePrinterDriver.metadata.key,
+        identity=identity,
+    )
+
+    assert (
+        DeviceRecord.from_printer(before_rename).id
+        == DeviceRecord.from_printer(after_rename).id
+    )
+
+
 @pytest.mark.anyio
 async def test_discovery_ignores_timestamp_only_device_changes(
     tmp_path: Path,
@@ -117,6 +147,10 @@ async def test_discovery_ignores_timestamp_only_device_changes(
     printer = PrinterDevice(
         name="OneNote (Desktop)",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=DeviceIdentity(
+            transport=DeviceTransport.SPOOLER,
+            os_instance_id="test-queue:onenote",
+        ),
         is_default=False,
         preferred_transport=PrinterTransport.TEXT,
         capabilities=PrinterCapabilities(
@@ -137,7 +171,7 @@ async def test_discovery_ignores_timestamp_only_device_changes(
     device_id = build_device_id(
         kind=DeviceKind.PRINTER,
         driver_key=printer.driver_key,
-        name=printer.name,
+        identity=printer.identity,
     )
 
     await discovery.sync_once()
@@ -155,6 +189,10 @@ async def test_supervisor_executes_queued_print_jobs_asynchronously(
     printer = PrinterDevice(
         name="Kitchen Printer",
         driver_key=FakePrinterDriver.metadata.key,
+        identity=DeviceIdentity(
+            transport=DeviceTransport.SPOOLER,
+            os_instance_id="test-queue:kitchen",
+        ),
         is_default=True,
         preferred_transport=PrinterTransport.TEXT,
         capabilities=PrinterCapabilities(

@@ -16,7 +16,7 @@ from ..db.schema import (
     job_events_table,
     jobs_table,
 )
-from ..drivers import DeviceKind
+from ..drivers import DeviceIdentity, DeviceKind, DeviceTransport
 from ..printing.protocols import PrinterTransport
 from .models import (
     DeviceConnectionState,
@@ -47,6 +47,12 @@ class DeviceRepository:
             id=record.id,
             kind=record.kind.value,
             driver_key=record.driver_key,
+            identity_transport=record.identity.transport.value,
+            identity_serial_number=record.identity.serial_number,
+            identity_vendor_id=record.identity.vendor_id,
+            identity_product_id=record.identity.product_id,
+            identity_os_instance_id=record.identity.os_instance_id,
+            identity_port_id=record.identity.port_id,
             name=record.name,
             connection_state=record.connection_state.value,
             first_seen_at=timestamp_to_iso(first_seen_at),
@@ -64,6 +70,12 @@ class DeviceRepository:
             set_={
                 "kind": record.kind.value,
                 "driver_key": record.driver_key,
+                "identity_transport": record.identity.transport.value,
+                "identity_serial_number": record.identity.serial_number,
+                "identity_vendor_id": record.identity.vendor_id,
+                "identity_product_id": record.identity.product_id,
+                "identity_os_instance_id": record.identity.os_instance_id,
+                "identity_port_id": record.identity.port_id,
                 "name": record.name,
                 "connection_state": record.connection_state.value,
                 "last_seen_at": timestamp_to_iso(record.last_seen_at),
@@ -553,6 +565,24 @@ def _row_to_device(row: RowMapping | Mapping[str, Any]) -> DeviceRecord:
         id=str(row["id"]),
         kind=DeviceKind(str(row["kind"])),
         driver_key=str(row["driver_key"]),
+        identity=DeviceIdentity(
+            transport=DeviceTransport(str(row["identity_transport"])),
+            serial_number=str(row["identity_serial_number"])
+            if row["identity_serial_number"] is not None
+            else None,
+            vendor_id=int(row["identity_vendor_id"])
+            if row["identity_vendor_id"] is not None
+            else None,
+            product_id=int(row["identity_product_id"])
+            if row["identity_product_id"] is not None
+            else None,
+            os_instance_id=str(row["identity_os_instance_id"])
+            if row["identity_os_instance_id"] is not None
+            else None,
+            port_id=str(row["identity_port_id"])
+            if row["identity_port_id"] is not None
+            else None,
+        ),
         name=str(row["name"]),
         connection_state=DeviceConnectionState(str(row["connection_state"])),
         first_seen_at=normalize_timestamp(str(row["first_seen_at"])) or utc_now(),

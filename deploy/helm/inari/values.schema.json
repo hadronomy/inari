@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["organization", "server", "identity", "secrets", "managedGateway", "zenoh"],
+  "properties": {
+    "replicaCount": {"type": "integer", "minimum": 2},
+    "image": {"$ref": "#/$defs/image"},
+    "imagePullSecrets": {"type": "array"},
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "organization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "defaultSiteId", "defaultSiteName"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^org_[a-z0-9_]+$"},
+        "name": {"type": "string", "minLength": 1},
+        "defaultSiteId": {"type": "string", "pattern": "^site_[a-z0-9_]+$"},
+        "defaultSiteName": {"type": "string", "minLength": 1}
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publicUrl", "ingress"],
+      "properties": {
+        "publicUrl": {"type": "string", "pattern": "^https://"},
+        "ingress": {"type": "object"}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuerUrl", "clientId", "roleClaim", "roleMapping"],
+      "properties": {
+        "issuerUrl": {"type": "string", "pattern": "^https://"},
+        "clientId": {"type": "string", "minLength": 1},
+        "roleClaim": {"type": "string", "minLength": 1},
+        "roleMapping": {"type": "object", "minProperties": 1, "additionalProperties": {"enum": ["viewer", "operator", "enrollment_admin", "administrator"]}}
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["database", "oidc", "stepCa", "zenohTls"],
+      "properties": {
+        "database": {"$ref": "#/$defs/secretKey"},
+        "oidc": {"$ref": "#/$defs/secretKey"},
+        "stepCa": {"$ref": "#/$defs/secretKey"},
+        "zenohTls": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}, "additionalProperties": false}
+      }
+    },
+    "managedGateway": {"type": "object"},
+    "zenoh": {
+      "type": "object",
+      "required": ["image", "replicas", "existingConfigMap", "configKey", "service", "storage"],
+      "properties": {
+        "image": {"$ref": "#/$defs/image"},
+        "replicas": {"type": "integer", "minimum": 1},
+        "existingConfigMap": {"type": "string", "minLength": 1},
+        "configKey": {"type": "string", "minLength": 1},
+        "service": {"type": "object"},
+        "storage": {"type": "object"}
+      }
+    },
+    "serviceAccount": {"type": "object"},
+    "podAnnotations": {"type": "object"},
+    "podLabels": {"type": "object"},
+    "resources": {"type": "object"},
+    "podDisruptionBudget": {"type": "object"},
+    "networkPolicy": {"type": "object"},
+    "nodeSelector": {"type": "object"},
+    "tolerations": {"type": "array"},
+    "affinity": {"type": "object"}
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      },
+      "additionalProperties": false
+    },
+    "secretKey": {
+      "type": "object",
+      "required": ["name", "key"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "key": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}

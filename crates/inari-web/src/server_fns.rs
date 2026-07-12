@@ -61,6 +61,7 @@ pub struct IssuedInvitation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationStatus {
     pub invitation_id: String,
+    pub site_id: String,
     pub label: Option<String>,
     pub state: InvitationState,
     pub expires_at: DateTime<Utc>,
@@ -70,6 +71,7 @@ pub struct InvitationStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationPreview {
     pub invitation_id: String,
+    pub site_id: String,
     pub expires_at: DateTime<Utc>,
     pub state: InvitationState,
     pub controller_name: Option<String>,
@@ -77,6 +79,23 @@ pub struct InvitationPreview {
     pub supported_protocol_versions: Vec<NaiveDate>,
     pub certificate_mode: CertificateMode,
     pub requires_mutual_tls_after_issuance: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetOverview {
+    pub site_count: usize,
+    pub agent_count: usize,
+    pub online_agent_count: usize,
+    pub device_count: u64,
+    pub sites: Vec<SiteOverview>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiteOverview {
+    pub site_id: String,
+    pub name: String,
+    pub agent_count: u64,
+    pub device_count: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,16 +152,55 @@ impl CertificateMode {
 }
 
 #[server(prefix = "/_server/inari")]
-pub async fn issue_invitation(
-    operator_token: String,
-    label: Option<String>,
-) -> Result<IssuedInvitation, OnboardingError> {
+pub async fn load_fleet_overview() -> Result<FleetOverview, OnboardingError> {
     use self::ssr::*;
 
-    let invitation = onboarding()?
+    let service = onboarding()?;
+    let _identity = require_permission(Permission::FleetRead).await?;
+    let repository = service.repository();
+    let sites = repository
+        .sites(service.organization_id())
+        .await
+        .map_err(onboarding_error)?;
+    let agents = repository
+        .agents(service.organization_id(), None)
+        .await
+        .map_err(onboarding_error)?;
+    let online_agent_count = agents
+        .iter()
+        .filter(|agent| agent.health.state == AgentHealthState::Online)
+        .count();
+    let device_count = sites
+        .iter()
+        .map(|site| site.device_count)
+        .sum();
+    Ok(FleetOverview {
+        site_count: sites.len(),
+        agent_count: agents.len(),
+        online_agent_count,
+        device_count,
+        sites: sites
+            .into_iter()
+            .map(|site| SiteOverview {
+                site_id: site.site_id.to_string(),
+                name: site.name,
+                agent_count: site.agent_count,
+                device_count: site.device_count,
+            })
+            .collect(),
+    })
+}
+
+#[server(prefix = "/_server/inari")]
+pub async fn issue_invitation(label: Option<String>) -> Result<IssuedInvitation, OnboardingError> {
+    use self::ssr::*;
+
+    let service = onboarding()?;
+    let identity = require_permission(Permission::EnrollmentManage).await?;
+    let invitation = service
         .create_invitation(
-            SecretString::from(operator_token),
             inari_gateway::onboarding::CreateInvitation { label },
+            &audit_context(&identity),
         )
         .await
         .map_err(onboarding_error)?;
@@ -157,13 +215,13 @@ pub async fn issue_invitation(
 }
 
 #[server(prefix = "/_server/inari")]
-pub async fn load_invitations(
-    operator_token: String,
-) -> Result<Vec<InvitationStatus>, OnboardingError> {
+pub async fn load_invitations() -> Result<Vec<InvitationStatus>, OnboardingError> {
     use self::ssr::*;
 
-    onboarding()?
-        .invitations(SecretString::from(operator_token))
+    let service = onboarding()?;
+    let _identity = require_permission(Permission::EnrollmentManage).await?;
+    service
+        .invitations()
         .await
         .map(|invitations| {
             invitations
@@ -175,17 +233,16 @@ pub async fn load_invitations(
 }
 
 #[server(prefix = "/_server/inari")]
-pub async fn revoke_invitation(
-    operator_token: String,
-    invitation_id: String,
-) -> Result<InvitationStatus, OnboardingError> {
+pub async fn revoke_invitation(invitation_id: String) -> Result<InvitationStatus, OnboardingError> {
     use self::ssr::*;
 
+    let service = onboarding()?;
+    let identity = require_permission(Permission::EnrollmentManage).await?;
     let invitation_id = invitation_id
         .parse()
         .map_err(onboarding_error)?;
-    onboarding()?
-        .revoke_invitation(SecretString::from(operator_token), &invitation_id)
+    service
+        .revoke_invitation(&invitation_id, &audit_context(&identity))
         .await
         .map(InvitationStatus::from)
         .map_err(onboarding_error)
@@ -206,156 +263,5 @@ pub async fn load_invitation(invitation_id: String) -> Result<InvitationPreview,
 }
 
 #[cfg(feature = "ssr")]
-mod ssr {
-    pub(super) use base64::Engine;
-    pub(super) use leptos::prelude::*;
-    pub(super) use qrcode::{QrCode, render::svg};
-    pub(super) use secrecy::SecretString;
-
-    use http::StatusCode;
-    use inari_gateway::onboarding::OnboardingService;
-    use leptos_axum::ResponseOptions;
-
-    use super::{
-        CertificateMode, InvitationPreview, InvitationState, InvitationStatus, OnboardingContext,
-        OnboardingError,
-    };
-
-    pub(super) fn onboarding() -> Result<OnboardingService, OnboardingError> {
-        let Some(context) = use_context::<OnboardingContext>() else {
-            return Err(internal_error("Leptos onboarding context was not provided"));
-        };
-        context.0.ok_or_else(|| {
-            error_response(OnboardingError::Disabled, StatusCode::SERVICE_UNAVAILABLE)
-        })
-    }
-
-    pub(super) fn onboarding_error(error: inari_gateway::GatewayError) -> OnboardingError {
-        use inari_gateway::GatewayError;
-
-        match error {
-            GatewayError::InvalidInput(detail) => {
-                error_response(OnboardingError::InvalidRequest(detail), StatusCode::BAD_REQUEST)
-            },
-            GatewayError::Forbidden(_) => {
-                error_response(OnboardingError::Forbidden, StatusCode::FORBIDDEN)
-            },
-            GatewayError::NotFound(_) => {
-                error_response(OnboardingError::NotFound, StatusCode::NOT_FOUND)
-            },
-            GatewayError::Conflict(detail) => {
-                error_response(OnboardingError::Conflict(detail), StatusCode::CONFLICT)
-            },
-            GatewayError::Unavailable(_) => {
-                error_response(OnboardingError::Unavailable, StatusCode::SERVICE_UNAVAILABLE)
-            },
-            error => internal_error(error),
-        }
-    }
-
-    pub(super) fn internal_error(error: impl std::fmt::Display) -> OnboardingError {
-        tracing::error!(error = %error, "managed onboarding request failed");
-        error_response(OnboardingError::Internal, StatusCode::INTERNAL_SERVER_ERROR)
-    }
-
-    fn error_response(error: OnboardingError, status: StatusCode) -> OnboardingError {
-        if let Some(response) = use_context::<ResponseOptions>() {
-            response.set_status(status);
-        }
-        error
-    }
-
-    pub(super) fn qr_data_uri(value: &str) -> Result<String, String> {
-        let code = QrCode::new(value.as_bytes()).map_err(|error| error.to_string())?;
-        let image = code
-            .render()
-            .min_dimensions(280, 280)
-            .dark_color(svg::Color("#17211d"))
-            .light_color(svg::Color("#ffffff"))
-            .build();
-        let encoded = base64::engine::general_purpose::STANDARD.encode(image.as_bytes());
-        Ok(format!("data:image/svg+xml;base64,{encoded}"))
-    }
-
-    impl From<inari_gateway::onboarding::InvitationStatus> for InvitationStatus {
-        fn from(invitation: inari_gateway::onboarding::InvitationStatus) -> Self {
-            Self {
-                invitation_id: invitation.invitation_id.to_string(),
-                label: invitation.label,
-                state: invitation.state.into(),
-                expires_at: invitation.expires_at,
-                agent_id: invitation.agent_id,
-            }
-        }
-    }
-
-    impl From<inari_gateway::onboarding::InvitationPreview> for InvitationPreview {
-        fn from(preview: inari_gateway::onboarding::InvitationPreview) -> Self {
-            Self {
-                invitation_id: preview.invitation_id.to_string(),
-                expires_at: preview.expires_at,
-                state: preview.state.into(),
-                controller_name: preview.controller_name,
-                controller_instance_id: preview.controller_instance_id,
-                supported_protocol_versions: preview
-                    .supported_protocol_versions
-                    .into_iter()
-                    .map(|version| {
-                        version
-                            .as_str()
-                            .parse()
-                            .expect("gateway protocol versions are validated dates")
-                    })
-                    .collect(),
-                certificate_mode: match preview.certificate_mode {
-                    inari_gateway::onboarding::CertificateMode::None => CertificateMode::None,
-                    inari_gateway::onboarding::CertificateMode::Controller => {
-                        CertificateMode::Controller
-                    },
-                    inari_gateway::onboarding::CertificateMode::StepCa => CertificateMode::StepCa,
-                },
-                requires_mutual_tls_after_issuance: preview.requires_mutual_tls_after_issuance,
-            }
-        }
-    }
-
-    impl From<inari_gateway::onboarding::InvitationState> for InvitationState {
-        fn from(state: inari_gateway::onboarding::InvitationState) -> Self {
-            match state {
-                inari_gateway::onboarding::InvitationState::Created => Self::Created,
-                inari_gateway::onboarding::InvitationState::Claimed => Self::Claimed,
-                inari_gateway::onboarding::InvitationState::Enrolled => Self::Enrolled,
-                inari_gateway::onboarding::InvitationState::Online => Self::Online,
-                inari_gateway::onboarding::InvitationState::Expired => Self::Expired,
-                inari_gateway::onboarding::InvitationState::Failed => Self::Failed,
-                inari_gateway::onboarding::InvitationState::Revoked => Self::Revoked,
-            }
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn disabled_onboarding_returns_a_typed_error() {
-            let owner = Owner::new();
-            owner.with(|| {
-                provide_context(OnboardingContext::from(None));
-                assert_eq!(
-                    onboarding().expect_err("onboarding should be disabled"),
-                    OnboardingError::Disabled
-                );
-            });
-        }
-
-        #[test]
-        fn operator_failures_do_not_expose_gateway_details() {
-            let error = onboarding_error(inari_gateway::GatewayError::Forbidden(
-                "sensitive authentication detail".into(),
-            ));
-            assert_eq!(error, OnboardingError::Forbidden);
-            assert!(!error.to_string().contains("sensitive"));
-        }
-    }
-}
+#[path = "server_fns/ssr.rs"]
+mod ssr;

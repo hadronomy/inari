@@ -17,7 +17,8 @@ from ..security.certificates.store import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
 from ..security.local_trust import LocalTrustStore, StandaloneTrustService
 from ..security.policies import SecurityPolicyService
-from ..security.secrets import FileSecretStore, KeyringSecretStore, ResilientSecretStore
+from ..security.models import GatewayMode
+from ..security.secrets import FileSecretStore, KeyringSecretStore, ProtectedSecretStore
 from ..security.tls import TlsContextFactory
 from ..security.tokens import TokenService
 
@@ -51,17 +52,22 @@ class SecurityProvider(Provider):
         )
 
     @provide
-    def secret_store(self, settings: AgentSettings) -> ResilientSecretStore:
+    def secret_store(self, settings: AgentSettings) -> ProtectedSecretStore:
         security_state_dir = settings.resolved_security_state_dir
-        return ResilientSecretStore(
+        fallback = (
+            FileSecretStore(security_state_dir / "secrets.json")
+            if settings.gateway_mode is GatewayMode.STANDALONE
+            else None
+        )
+        return ProtectedSecretStore(
             primary=KeyringSecretStore(
                 service_name=settings.secret_store_service_name,
             ),
-            fallback=FileSecretStore(security_state_dir / "secrets.json"),
+            fallback=fallback,
         )
 
     @provide
-    def local_trust_store(self, secret_store: ResilientSecretStore) -> LocalTrustStore:
+    def local_trust_store(self, secret_store: ProtectedSecretStore) -> LocalTrustStore:
         return LocalTrustStore(secret_store)
 
     @provide
@@ -114,7 +120,7 @@ class SecurityProvider(Provider):
     def token_service(
         self,
         settings: AgentSettings,
-        secret_store: ResilientSecretStore,
+        secret_store: ProtectedSecretStore,
         identity_service: AgentIdentityService,
     ) -> TokenService:
         return TokenService(

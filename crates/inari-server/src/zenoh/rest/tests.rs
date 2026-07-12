@@ -1,20 +1,25 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::{Body, BodyDataStream, to_bytes};
-use axum::http::{Request, StatusCode};
+use axum::http::header::{COOKIE, SET_COOKIE};
+use axum::http::{HeaderValue, Request, StatusCode};
+use axum::routing::get;
+use chrono::Utc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
 use tower::ServiceExt;
+use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
 use zenoh::bytes::Encoding;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::SampleKind;
 
 use crate::ConcurrencyLimit;
-use crate::config::{LoadedConfig, ZenohAdminSpaceConfig, ZenohConfig};
+use crate::config::{LoadedConfig, ZenohAdminSpaceConfig, ZenohConfig, ZenohMode};
 use crate::http;
-use crate::protocol::NoopProtocolModule;
+use crate::identity::{AccessRole, ActorId, SESSION_IDENTITY_KEY, SessionIdentity};
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason};
 use crate::state::AppState;
 use crate::zenoh::ZenohSupervisor;
@@ -30,7 +35,8 @@ fn base_config() -> LoadedConfig {
 
     loaded
         .settings
-        .protocol
+        .http
+        .inari_api
         .max_concurrent_requests = limit(8);
     loaded
         .settings
@@ -46,6 +52,7 @@ fn enabled_config() -> LoadedConfig {
 
     loaded.settings.http.zenoh_rest.enabled = true;
     loaded.settings.zenoh.enabled = true;
+    loaded.settings.zenoh.mode = ZenohMode::Router;
     loaded.settings.zenoh.listen_endpoints = vec!["tcp/127.0.0.1:0".into()];
 
     loaded
@@ -67,6 +74,7 @@ fn admin_enabled_config() -> LoadedConfig {
 
 struct TestApp {
     router: axum::Router,
+    session_cookie: HeaderValue,
     state: AppState,
     shutdown: Option<ShutdownCoordinator>,
     task: Option<JoinHandle<crate::AppResult<()>>>,
@@ -79,7 +87,7 @@ impl TestApp {
 
         let (zenoh, supervisor) = ZenohSupervisor::new(zenoh_settings);
 
-        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+        let state = AppState::new(loaded, zenoh);
 
         let shutdown = ShutdownCoordinator::new(Duration::from_secs(1));
         let task = tokio::spawn(supervisor.run(shutdown.clone()));
@@ -90,12 +98,44 @@ impl TestApp {
 
         let router = http::router(&state)
             .expect("router should build")
-            .with_state(state.clone());
+            .route("/test/authenticate", get(authenticate_test_session))
+            .with_state(state.clone())
+            .layer(SessionManagerLayer::new(MemoryStore::default()).with_secure(false));
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/test/authenticate")
+                    .body(Body::empty())
+                    .expect("authentication request should be valid"),
+            )
+            .await
+            .expect("authentication route should respond");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let session_cookie = response
+            .headers()
+            .get(SET_COOKIE)
+            .expect("authentication should create a session cookie")
+            .to_str()
+            .expect("session cookie should be ASCII")
+            .split(';')
+            .next()
+            .expect("session cookie should contain a name and value")
+            .parse()
+            .expect("session cookie should be a valid header value");
 
-        Self { router, state, shutdown: Some(shutdown), task: Some(task) }
+        Self { router, session_cookie, state, shutdown: Some(shutdown), task: Some(task) }
     }
 
-    async fn request(&self, request: Request<Body>) -> axum::response::Response {
+    async fn request(&self, mut request: Request<Body>) -> axum::response::Response {
+        request
+            .headers_mut()
+            .insert(COOKIE, self.session_cookie.clone());
+        self.unauthenticated_request(request)
+            .await
+    }
+
+    async fn unauthenticated_request(&self, request: Request<Body>) -> axum::response::Response {
         self.router
             .clone()
             .oneshot(request)
@@ -118,6 +158,23 @@ impl TestApp {
                 .expect("supervisor should shut down");
         }
     }
+}
+
+async fn authenticate_test_session(session: Session) -> StatusCode {
+    session
+        .insert(
+            SESSION_IDENTITY_KEY,
+            SessionIdentity {
+                actor_id: ActorId::from_oidc_subject("zenoh-rest-tests"),
+                display_name: Some("Zenoh REST tests".to_owned()),
+                email: None,
+                roles: BTreeSet::from([AccessRole::Administrator]),
+                expires_at: Utc::now() + chrono::Duration::hours(1),
+            },
+        )
+        .await
+        .expect("test identity should be stored in the session");
+    StatusCode::NO_CONTENT
 }
 
 impl Drop for TestApp {
@@ -288,7 +345,7 @@ async fn route_is_not_mounted_when_disabled() {
 
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
 
-    let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+    let state = AppState::new(loaded, zenoh);
 
     let app = http::router(&state)
         .expect("router should build")
@@ -305,6 +362,31 @@ async fn route_is_not_mounted_when_disabled() {
         .expect("router should respond");
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn zenoh_surface_requires_an_authenticated_session() {
+    let mut app = TestApp::spawn(enabled_config()).await;
+
+    let response = app
+        .unauthenticated_request(
+            Request::builder()
+                .uri("/api/zenoh/v1")
+                .body(Body::empty())
+                .expect("request should be valid"),
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .expect("content type should exist"),
+        "application/problem+json",
+    );
+
+    app.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

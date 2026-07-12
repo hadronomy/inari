@@ -8,6 +8,7 @@ use axum::Router;
 use axum::extract::Request;
 use inari_gateway::onboarding::{CertificateMode, OnboardingConfig, OnboardingService};
 use leptos::prelude::get_configuration;
+use secrecy::SecretString;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 use tokio::time::{self, MissedTickBehavior};
@@ -18,7 +19,8 @@ use url::Url;
 use crate::config::LoadedConfig;
 use crate::error::{AppError, AppResult};
 use crate::http;
-use crate::protocol::{DynProtocolModule, InariProtocolModule, IntoDynProtocolModule};
+use crate::identity::{IdentityRuntime, IdentityService};
+use crate::managed_gateway::StepCaIssuer;
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
@@ -33,12 +35,11 @@ pub struct WithConfig {
 
 pub struct ServerBuilder<State = MissingConfig> {
     state: State,
-    protocol: Arc<DynProtocolModule>,
 }
 
 impl Default for ServerBuilder<MissingConfig> {
     fn default() -> Self {
-        Self { state: MissingConfig, protocol: Arc::new(InariProtocolModule) }
+        Self { state: MissingConfig }
     }
 }
 
@@ -67,18 +68,7 @@ impl ServerBuilder<MissingConfig> {
 
     #[must_use]
     pub fn with_config(self, loaded: LoadedConfig) -> ServerBuilder<WithConfig> {
-        ServerBuilder { state: WithConfig { loaded }, protocol: self.protocol }
-    }
-}
-
-impl<State> ServerBuilder<State> {
-    #[must_use]
-    pub fn with_protocol<P>(mut self, protocol: P) -> Self
-    where
-        P: IntoDynProtocolModule,
-    {
-        self.protocol = protocol.into_dyn_protocol_module();
-        self
+        ServerBuilder { state: WithConfig { loaded } }
     }
 }
 
@@ -105,17 +95,93 @@ impl ServerBuilder<WithConfig> {
             })?
             .leptos_options;
         let onboarding = initialize_onboarding(&loaded).await?;
+        let identity = initialize_identity(&loaded, onboarding.as_ref()).await?;
+        let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
         let state = AppState::new_with_onboarding(
             loaded,
             zenoh_handle,
-            self.protocol,
             leptos_options,
             onboarding,
+            identity,
+            certificate_issuer,
         );
         let router = http::router(&state)?.with_state(state.clone());
 
         Ok(ServerApplication { state, router, shutdown, zenoh_supervisor })
     }
+}
+
+async fn initialize_certificate_issuer(
+    loaded: &LoadedConfig,
+) -> AppResult<Option<inari_gateway::certificate::CertificateIssuerHandle>> {
+    use crate::config::ManagedGatewayCertificateMode;
+
+    if !loaded.settings.managed_gateway.enabled
+        || loaded
+            .settings
+            .managed_gateway
+            .certificate
+            .mode
+            == ManagedGatewayCertificateMode::None
+    {
+        return Ok(None);
+    }
+    let issuer = StepCaIssuer::load(
+        &loaded
+            .settings
+            .managed_gateway
+            .certificate,
+    )
+    .await?;
+    Ok(Some(Arc::new(issuer)))
+}
+
+async fn initialize_identity(
+    loaded: &LoadedConfig,
+    onboarding: Option<&OnboardingService>,
+) -> AppResult<Option<IdentityRuntime>> {
+    let config = &loaded.settings.identity.oidc;
+    if !config.enabled {
+        return Ok(None);
+    }
+    let public_url = loaded
+        .settings
+        .server
+        .public_url
+        .as_ref()
+        .ok_or_else(|| {
+            AppError::internal("oidc_configuration", "OIDC requires server.public_url.")
+        })?;
+    let client_secret = match config.client_secret_file.as_ref() {
+        Some(path) => Some(SecretString::from(
+            tokio::fs::read_to_string(path)
+                .await
+                .map_err(|source| {
+                    AppError::internal(
+                        "oidc_client_secret",
+                        "The OIDC client secret could not be read.",
+                    )
+                    .with_source(source)
+                })?
+                .trim()
+                .to_owned(),
+        )),
+        None => None,
+    };
+    let onboarding = onboarding.ok_or_else(|| {
+        AppError::internal("oidc_database", "OIDC requires the managed controller database.")
+    })?;
+    let sessions =
+        tower_sessions_sqlx_store::PostgresStore::new(onboarding.repository().pool().clone());
+    sessions
+        .migrate()
+        .await
+        .map_err(|source| {
+            AppError::internal("oidc_session_migration", "OIDC session migration failed.")
+                .with_source(source)
+        })?;
+    let service = IdentityService::discover(config, public_url, client_secret).await?;
+    Ok(Some(IdentityRuntime::new(service, sessions)))
 }
 
 fn leptos_manifest() -> Option<&'static str> {
@@ -142,16 +208,43 @@ async fn initialize_onboarding(loaded: &LoadedConfig) -> AppResult<Option<Onboar
             )
             .with_source(source)
         })?;
+    let database_url = tokio::fs::read_to_string(&loaded.settings.database.url_file)
+        .await
+        .map_err(|source| {
+            AppError::internal(
+                "managed_gateway_database_secret",
+                "The managed gateway database secret could not be read.",
+            )
+            .with_source(source)
+        })?;
     OnboardingService::initialize(OnboardingConfig {
-        database_path: config.database_path.clone(),
+        database_url: SecretString::from(database_url.trim().to_owned()),
+        database_min_connections: loaded.settings.database.min_connections,
+        database_max_connections: loaded.settings.database.max_connections,
+        migrate_database: loaded
+            .settings
+            .database
+            .migrate_on_startup,
+        organization_id: loaded.settings.organization.id.clone(),
+        organization_name: loaded
+            .settings
+            .organization
+            .name
+            .clone(),
+        default_site_id: loaded
+            .settings
+            .organization
+            .default_site_id
+            .clone(),
+        default_site_name: loaded
+            .settings
+            .organization
+            .default_site_name
+            .clone(),
         enabled: config.onboarding.enabled,
         public_base_url,
         controller_name: config.controller_name.clone(),
         controller_instance_id: config.controller_instance_id.clone(),
-        operator_token_hashes: config
-            .onboarding
-            .operator_token_hashes
-            .clone(),
         invitation_ttl: config.onboarding.invite_ttl,
         supported_protocol_versions: config
             .supported_protocol_versions

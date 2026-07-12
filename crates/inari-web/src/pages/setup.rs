@@ -14,26 +14,26 @@ struct SetupParams {
 #[component]
 pub fn SetupPage() -> impl IntoView {
     let params = use_params::<SetupParams>();
-    let invitation_id = move || {
+    let invitation_id = Memo::new(move |_| {
         params
             .read()
             .as_ref()
             .ok()
             .and_then(|params| params.invitation_id.clone())
             .unwrap_or_default()
-    };
-    let preview = Resource::new(invitation_id, load_invitation);
+    });
+    let preview = Resource::new(move || invitation_id.get(), load_invitation);
     let deep_link = RwSignal::new(None::<String>);
 
-    Effect::new(move |_| deep_link.set(browser::enrollment_link(&invitation_id())));
+    browser::install_deep_link(invitation_id, deep_link);
 
     view! {
         <Title text="Connect this agent — Inari"/>
         <main class="setup-page">
             <div class="setup-brand"><Brand/></div>
             <Suspense fallback=SetupSkeleton>
-                {move || Suspend::new(async move {
-                    match preview.await {
+                {move || preview.get().map(|result| {
+                    match result {
                         Ok(invitation) => view! { <SetupCard invitation deep_link/> }.into_any(),
                         Err(error) => view! { <SetupFailure detail=error.to_string()/> }.into_any(),
                     }
@@ -95,11 +95,18 @@ fn SetupFailure(detail: String) -> impl IntoView {
     }
 }
 
-#[cfg(feature = "hydrate")]
+#[cfg(all(feature = "hydrate", target_arch = "wasm32"))]
 mod browser {
-    use leptos::prelude::window;
+    use leptos::prelude::{Effect, Get, Memo, RwSignal, Set, window};
 
-    pub(super) fn enrollment_link(invitation_id: &str) -> Option<String> {
+    pub(super) fn install_deep_link(
+        invitation_id: Memo<String>,
+        deep_link: RwSignal<Option<String>>,
+    ) {
+        Effect::new(move |_| deep_link.set(enrollment_link(&invitation_id.get())));
+    }
+
+    fn enrollment_link(invitation_id: &str) -> Option<String> {
         let location = window().location();
         let fragment = location.hash().ok()?;
         let code = fragment.strip_prefix("#code=")?;
@@ -113,9 +120,13 @@ mod browser {
     }
 }
 
-#[cfg(not(feature = "hydrate"))]
+#[cfg(not(all(feature = "hydrate", target_arch = "wasm32")))]
 mod browser {
-    pub(super) fn enrollment_link(_invitation_id: &str) -> Option<String> {
-        None
+    use leptos::prelude::{Memo, RwSignal};
+
+    pub(super) fn install_deep_link(
+        _invitation_id: Memo<String>,
+        _deep_link: RwSignal<Option<String>>,
+    ) {
     }
 }

@@ -1,23 +1,19 @@
 use chrono::{DateTime, Utc};
-use inari_gateway::protocol::{ControllerCommand, ProtocolVersion};
-use serde_json::Value;
+use inari_gateway::protocol::{ControllerCommand, OrganizationId, ProtocolVersion, SiteId};
+use jsonwebtoken::jwk::Jwk;
 
 pub use inari_gateway::protocol::{
-    AgentPublicationList, CommandHistoryResponse, ControllerCommandState,
-    SubmitControllerCommandRequest, SubmitControllerCommandResponse,
+    AgentPublicationList, CommandHistory, JobList, JobReceipt, JobRequest,
 };
-
-pub(super) enum EnrollmentCredential {
-    ConfiguredToken { token_hash: String },
-    Invite { invite_id: String },
-}
 
 #[derive(Debug, Clone)]
 pub(super) struct StoredAgentEnrollment {
     pub(super) agent_id: String,
+    pub(super) organization_id: OrganizationId,
+    pub(super) site_id: SiteId,
     pub(super) key_id: String,
     pub(super) public_jwk_fingerprint: String,
-    pub(super) public_jwk: Value,
+    pub(super) public_jwk: Jwk,
     pub(super) certificate_pem: Option<String>,
     pub(super) namespace: String,
     pub(super) protocol_version: ProtocolVersion,

@@ -1,0 +1,107 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/hadronomy/inari-server
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+organization:
+  id: org_example
+  name: Example organization
+  defaultSiteId: site_headquarters
+  defaultSiteName: Headquarters
+
+server:
+  publicUrl: https://inari.example.com
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: inari.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+identity:
+  issuerUrl: https://identity.example.com
+  clientId: inari-controller
+  roleClaim: urn:zitadel:iam:org:project:roles
+  roleMapping:
+    inari.viewer: viewer
+    inari.operator: operator
+    inari.enrollment-admin: enrollment_admin
+    inari.administrator: administrator
+
+secrets:
+  database:
+    name: inari-database
+    key: url
+  oidc:
+    name: inari-oidc
+    key: client-secret
+  stepCa:
+    name: inari-step-ca
+    key: provisioner-key.pem
+  zenohTls:
+    name: inari-controller-zenoh-tls
+
+managedGateway:
+  controllerName: Inari Controller
+  controllerInstanceId: controller-production
+  invitationTtl: 10m
+  zenohPublicEndpoints:
+    - tls/inari-zenoh.example.com:7447
+  stepCa:
+    baseUrl: https://step-ca.example.com
+    rootFingerprint: ""
+    provisioner: inari-agents
+    keyId: ""
+    signingAlgorithm: ed_dsa
+
+zenoh:
+  image:
+    repository: eclipse/zenoh
+    tag: 1.9.0
+    pullPolicy: IfNotPresent
+  replicas: 3
+  existingConfigMap: inari-zenoh-router
+  configKey: config.json5
+  service:
+    type: ClusterIP
+    port: 7447
+  storage:
+    size: 1Gi
+    storageClass: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podDisruptionBudget:
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceSelector: {}
+  ingressPodSelector: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

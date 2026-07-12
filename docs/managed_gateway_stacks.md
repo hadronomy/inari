@@ -12,7 +12,7 @@ This document is about the **managed upstream boundary**:
 - the steady-state managed data plane over `Zenoh`
 - managed client certificates issued by `step-ca`
 - optional enrollment authorization through `ZITADEL`
-- optional `Caddy` in front of the controller's HTTP enrollment surface
+- a Kubernetes ingress in front of the controller's HTTP enrollment surface
 
 It does **not** describe the local desktop or POS-facing boundary. The local tray and local browser clients still talk to the loopback agent over the authenticated local HTTP and WebSocket APIs.
 
@@ -36,7 +36,7 @@ Inari  ---- HTTPS enrollment ----> Controller API ----------------------> ZITADE
 Two deployment points are worth making explicit:
 
 - The **agent always connects outward**. Managed mode does not require inbound connections opened toward the agent host.
-- The controller service and the Zenoh router are commonly intended to **coexist on the same server boundary**. They are different responsibilities, but they are expected to live together cleanly in the production deployment.
+- The controller service and Zenoh router belong to the same private platform but run as **separate Kubernetes workloads**. The controller is stateless; the router has stable StatefulSet identity and explicit mesh configuration.
 
 ## What Moves Over Which Boundary
 
@@ -185,19 +185,15 @@ But the recommended serious managed posture is:
 
 That keeps bootstrap ergonomic without weakening the steady-state trust model.
 
-## Controller and Router Colocation
+## Controller and Router Separation
 
-The expected production architecture is usually:
+The production architecture is:
 
-- controller HTTP API
-- Zenoh router
-- controller workers / command logic
+- a stateless controller Deployment for HTTP, Leptos, and application services
+- a Zenoh router StatefulSet with stable identities
+- externally managed PostgreSQL for controller state
 
-on the same server boundary.
-
-That means the deployment is conceptually one managed control plane, even though the HTTP enrollment API and Zenoh router are different technical concerns.
-
-This is why the protocol documentation models them separately but treats their coexistence as the expected deployment shape.
+They remain one managed platform, but their lifecycle, readiness, scaling, and network policy are independent. The controller connects to Zenoh in client mode and production configuration rejects an embedded router topology.
 
 ## Recommended Production Combination
 

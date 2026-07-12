@@ -98,6 +98,20 @@ fn apply_tls(config: &mut Config, settings: &ZenohConfig) -> AppResult<()> {
             path.display().to_string(),
         )?;
     }
+    if let Some(path) = &settings.tls.connect_private_key {
+        insert_json5_serialized(
+            config,
+            "transport/link/tls/connect_private_key",
+            path.display().to_string(),
+        )?;
+    }
+    if let Some(path) = &settings.tls.connect_certificate {
+        insert_json5_serialized(
+            config,
+            "transport/link/tls/connect_certificate",
+            path.display().to_string(),
+        )?;
+    }
     if settings.tls.enable_mtls {
         insert_json5_serialized(config, "transport/link/tls/enable_mtls", true)?;
     }
@@ -275,6 +289,8 @@ mod tests {
                 root_ca_certificate: Some("/etc/inari/ca.pem".into()),
                 listen_private_key: Some("/etc/inari/router-key.pem".into()),
                 listen_certificate: Some("/etc/inari/router.pem".into()),
+                connect_private_key: Some("/etc/inari/client-key.pem".into()),
+                connect_certificate: Some("/etc/inari/client.pem".into()),
                 enable_mtls: true,
                 close_link_on_expiration: true,
             },
@@ -293,6 +309,14 @@ mod tests {
         assert_eq!(
             serialized["transport"]["link"]["tls"]["root_ca_certificate"],
             serde_json::Value::String("/etc/inari/ca.pem".into())
+        );
+        assert_eq!(
+            serialized["transport"]["link"]["tls"]["connect_private_key"],
+            serde_json::Value::String("/etc/inari/client-key.pem".into())
+        );
+        assert_eq!(
+            serialized["transport"]["link"]["tls"]["connect_certificate"],
+            serde_json::Value::String("/etc/inari/client.pem".into())
         );
         assert_eq!(
             serialized["transport"]["link"]["tls"]["listen_private_key"],

@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "inari.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "inari.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "inari.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: {{ include "inari.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["database", "migrate"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          env:
+            - name: INARI_SERVER_DATABASE__URL_FILE
+              value: /var/run/secrets/inari/database/url
+          volumeMounts:
+            - name: database
+              mountPath: /var/run/secrets/inari/database
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: database
+          secret:
+            secretName: {{ .Values.secrets.database.name }}
+            items:
+              - key: {{ .Values.secrets.database.key }}
+                path: url
+        - name: tmp
+          emptyDir: {}

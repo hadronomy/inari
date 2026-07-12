@@ -14,7 +14,7 @@ from ..protocols.types import (
     PrinterTransport,
     RenderedDocument,
 )
-from ...drivers.base import DeviceKind, DriverMetadata
+from ...drivers.base import DeviceIdentity, DeviceKind, DeviceTransport, DriverMetadata
 from .base import PrinterDriver
 
 
@@ -108,6 +108,10 @@ class RawSocketPrinterDriver(PrinterDriver):
         return PrinterDevice(
             name=config.name,
             driver_key=self.metadata.key,
+            identity=DeviceIdentity(
+                transport=DeviceTransport.NETWORK,
+                os_instance_id=f"tcp://{config.host}:{config.port}",
+            ),
             is_default=config.is_default,
             preferred_transport=PrinterTransport(config.preferred_transport),
             capabilities=PrinterCapabilities(

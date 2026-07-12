@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "inari.fullname" . }}
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "inari.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "inari.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "inari.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: controller
+          image: {{ include "inari.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          env:
+            - name: INARI_SERVER_CONFIG
+              value: /etc/inari/inari-server.toml
+            - name: LEPTOS_SITE_ROOT
+              value: /app/site
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/inari
+              readOnly: true
+            - name: database
+              mountPath: /var/run/secrets/inari/database
+              readOnly: true
+            - name: oidc
+              mountPath: /var/run/secrets/inari/oidc
+              readOnly: true
+            - name: step-ca
+              mountPath: /var/run/secrets/inari/step-ca
+              readOnly: true
+            - name: zenoh-tls
+              mountPath: /var/run/secrets/inari/zenoh
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "inari.fullname" . }}
+        - name: database
+          secret:
+            secretName: {{ .Values.secrets.database.name }}
+            items:
+              - key: {{ .Values.secrets.database.key }}
+                path: url
+        - name: oidc
+          secret:
+            secretName: {{ .Values.secrets.oidc.name }}
+            items:
+              - key: {{ .Values.secrets.oidc.key }}
+                path: client-secret
+        - name: step-ca
+          secret:
+            secretName: {{ .Values.secrets.stepCa.name }}
+            items:
+              - key: {{ .Values.secrets.stepCa.key }}
+                path: provisioner-key.pem
+        - name: zenoh-tls
+          secret:
+            secretName: {{ .Values.secrets.zenohTls.name }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

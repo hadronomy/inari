@@ -18,12 +18,12 @@ pub fn AppFrame(children: Children) -> impl IntoView {
         <div class="app-shell">
             <header class="app-bar">
                 <Brand/>
-                <span class="environment"><span class="presence-dot"></span>"Controller online"</span>
+                <span class="environment">"Private device operations"</span>
             </header>
             {children()}
             <footer class="app-footer">
                 <span>"Inari managed gateway"</span>
-                <span>"Protocol 2026-07-11"</span>
+                <span>"Protocol 2026-07-12"</span>
             </footer>
         </div>
     }

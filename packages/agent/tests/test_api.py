@@ -15,7 +15,13 @@ from httpx import ASGITransport, AsyncClient
 
 from inari.config import AgentSettings
 from inari.application.container import AgentContainer
-from inari.drivers import DeviceKind, DriverMetadata, DriverRegistry
+from inari.drivers import (
+    DeviceIdentity,
+    DeviceKind,
+    DeviceTransport,
+    DriverMetadata,
+    DriverRegistry,
+)
 from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.local_api.app import create_app
@@ -328,6 +334,10 @@ async def test_list_devices_marks_virtual_windows_printers(mocker) -> None:
         PrinterDevice(
             name="Microsoft Print to PDF",
             driver_key="windows.printers",
+            identity=DeviceIdentity(
+                transport=DeviceTransport.SPOOLER,
+                os_instance_id="windows-queue:Microsoft Print to PDF",
+            ),
             capabilities=PrinterCapabilities(
                 raw=False, text=True, documents=True, cash_drawer=False
             ),
@@ -651,6 +661,10 @@ def make_test_container(
         PrinterDevice(
             name="Kitchen Printer",
             driver_key="tests.fake-printers",
+            identity=DeviceIdentity(
+                transport=DeviceTransport.SPOOLER,
+                os_instance_id="test-queue:kitchen",
+            ),
             is_default=True,
             preferred_transport=PrinterTransport.RAW,
             capabilities=PrinterCapabilities(

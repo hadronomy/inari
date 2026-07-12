@@ -1,30 +1,35 @@
-use std::sync::Arc;
-
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
-use inari_gateway::credentials::TokenDigest;
+use inari_gateway::audit::AuditContext;
+use inari_gateway::identity::ActorId;
 use inari_gateway::onboarding::{
     CertificateMode, CreateInvitation, OnboardingConfig, OnboardingService,
 };
 use inari_gateway::protocol::ProtocolVersion;
 use inari_server::config::{LoadedConfig, ZenohConfig};
 use inari_server::http;
-use inari_server::protocol::InariProtocolModule;
 use inari_server::state::AppState;
 use inari_server::zenoh::ZenohSupervisor;
 use leptos::prelude::LeptosOptions;
 use secrecy::SecretString;
-use sha2::{Digest, Sha256};
-use tempfile::TempDir;
 use tower::ServiceExt;
 
-async fn test_app() -> (axum::Router, OnboardingService, TempDir) {
-    let temp = tempfile::tempdir().expect("temporary directory should be created");
-    let operator_hash = hex::encode(Sha256::digest(b"operator-token"))
-        .parse::<TokenDigest>()
-        .expect("operator token digest should parse");
+async fn test_app() -> (axum::Router, OnboardingService) {
+    let database_url = std::env::var("INARI_TEST_DATABASE_URL")
+        .expect("INARI_TEST_DATABASE_URL is required for PostgreSQL integration tests");
     let onboarding = OnboardingService::initialize(OnboardingConfig {
-        database_path: temp.path().join("gateway.sqlite3"),
+        database_url: SecretString::from(database_url),
+        database_min_connections: 1,
+        database_max_connections: 4,
+        migrate_database: true,
+        organization_id: "org_test"
+            .parse()
+            .expect("organization ID should parse"),
+        organization_name: "Test organization".into(),
+        default_site_id: "site_test"
+            .parse()
+            .expect("site ID should parse"),
+        default_site_name: "Test site".into(),
         enabled: true,
         public_base_url: Some(
             "https://controller.example.com/"
@@ -33,7 +38,6 @@ async fn test_app() -> (axum::Router, OnboardingService, TempDir) {
         ),
         controller_name: Some("Test Controller".into()),
         controller_instance_id: "controller-test".into(),
-        operator_token_hashes: vec![operator_hash],
         invitation_ttl: std::time::Duration::from_secs(600),
         supported_protocol_versions: vec![ProtocolVersion::current()],
         certificate_mode: CertificateMode::StepCa,
@@ -46,10 +50,6 @@ async fn test_app() -> (axum::Router, OnboardingService, TempDir) {
     loaded
         .settings
         .managed_gateway
-        .database_path = temp.path().join("gateway.sqlite3");
-    loaded
-        .settings
-        .managed_gateway
         .onboarding
         .enabled = true;
     loaded
@@ -57,34 +57,30 @@ async fn test_app() -> (axum::Router, OnboardingService, TempDir) {
         .managed_gateway
         .onboarding
         .public_base_url = Some("https://controller.example.com/".into());
-    loaded
-        .settings
-        .managed_gateway
-        .onboarding
-        .operator_token_hashes = vec![operator_hash];
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
     let state = AppState::new_with_onboarding(
         loaded,
         zenoh,
-        Arc::new(InariProtocolModule),
         LeptosOptions::builder()
             .output_name("inari-web")
             .site_root("target/site")
             .build(),
         Some(onboarding.clone()),
+        None,
+        None,
     );
     let app = http::router(&state)
         .expect("router should build")
         .with_state(state);
-    (app, onboarding, temp)
+    (app, onboarding)
 }
 
 async fn assert_public_preview_and_setup_never_expose_invitation_secret() {
-    let (app, onboarding, _temp) = test_app().await;
+    let (app, onboarding) = test_app().await;
     let invitation = onboarding
         .create_invitation(
-            SecretString::from("operator-token"),
             CreateInvitation { label: Some("Front desk".into()) },
+            &AuditContext::new(ActorId::from_oidc_subject("test-operator"), None),
         )
         .await
         .expect("invitation should be created");
@@ -136,6 +132,7 @@ async fn assert_public_preview_and_setup_never_expose_invitation_secret() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "requires INARI_TEST_DATABASE_URL"]
 async fn public_preview_and_setup_never_expose_invitation_secret() {
     tokio::task::LocalSet::new()
         .run_until(assert_public_preview_and_setup_never_expose_invitation_secret())

@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping
 
+from ...drivers import DeviceIdentity
+
 
 class PrinterTransport(StrEnum):
     AUTO = "auto"
@@ -29,6 +31,7 @@ class PrinterCapabilities:
 class PrinterDevice:
     name: str
     driver_key: str
+    identity: DeviceIdentity
     is_default: bool = False
     preferred_transport: PrinterTransport = PrinterTransport.DOCUMENT
     capabilities: PrinterCapabilities = field(default_factory=PrinterCapabilities)

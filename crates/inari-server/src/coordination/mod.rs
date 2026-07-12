@@ -9,7 +9,7 @@ mod sealed {
 
 pub(crate) use self::budget::{Budget, BudgetKind, BudgetPermit};
 pub use self::budget_kinds::{
-    ProtocolExecution, ProtocolPermit, ZenohRestQueryPermit, ZenohRestRequest,
+    InariApiPermit, InariApiRequest, ZenohRestQueryPermit, ZenohRestRequest,
 };
 pub use self::channel_capacity::{ChannelCapacity, InvalidChannelCapacity};
 pub use self::concurrency_limit::{ConcurrencyLimit, InvalidConcurrencyLimit};

@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from hashlib import sha1
 from typing import Any, Mapping
+from uuid import UUID, uuid5
 
-from ..drivers import DeviceKind
+from ..drivers import DeviceIdentity, DeviceKind
 from ..printing.protocols import PrinterCapabilities, PrinterDevice, PrinterTransport
 
 
@@ -61,11 +61,14 @@ class JobState(StrEnum):
     CANCELLED = "cancelled"
 
 
-def build_device_id(*, kind: DeviceKind, driver_key: str, name: str) -> str:
-    digest = sha1(
-        f"{kind.value}:{driver_key}:{name.casefold()}".encode("utf-8")
-    ).hexdigest()
-    return f"dev_{digest[:24]}"
+INARI_DEVICE_NAMESPACE = UUID("efdbfb52-14ac-5c5c-a01c-b2a846f71d76")
+
+
+def build_device_id(
+    *, kind: DeviceKind, driver_key: str, identity: DeviceIdentity
+) -> str:
+    identity_key = f"{kind.value}\0{driver_key}\0{identity.stable_key()}"
+    return f"dev_{uuid5(INARI_DEVICE_NAMESPACE, identity_key).hex}"
 
 
 VIRTUAL_PRINTER_NAMES = {
@@ -95,6 +98,7 @@ class DeviceRecord:
     id: str
     kind: DeviceKind
     driver_key: str
+    identity: DeviceIdentity
     name: str
     connection_state: DeviceConnectionState
     first_seen_at: datetime
@@ -118,10 +122,11 @@ class DeviceRecord:
             id=build_device_id(
                 kind=DeviceKind.PRINTER,
                 driver_key=printer.driver_key,
-                name=printer.name,
+                identity=printer.identity,
             ),
             kind=DeviceKind.PRINTER,
             driver_key=printer.driver_key,
+            identity=printer.identity,
             name=printer.name,
             connection_state=connection_state,
             first_seen_at=observed,
@@ -149,6 +154,7 @@ class DeviceRecord:
         return PrinterDevice(
             name=self.name,
             driver_key=self.driver_key,
+            identity=self.identity,
             is_default=self.is_default,
             preferred_transport=self.preferred_transport or PrinterTransport.AUTO,
             capabilities=PrinterCapabilities(
@@ -221,6 +227,7 @@ class DeviceRecord:
             id=self.id,
             kind=self.kind,
             driver_key=self.driver_key,
+            identity=self.identity,
             name=self.name,
             connection_state=connection_state,
             first_seen_at=self.first_seen_at,

@@ -25,7 +25,7 @@ from ..security.certificates.providers import ClientCertificateProvider
 from ..security.certificates.store import CertificateLifecycleService
 from ..security.identity import AgentIdentityService
 from ..security.policies import SecurityPolicyService
-from ..security.secrets import ResilientSecretStore
+from ..security.secrets import ProtectedSecretStore
 from ..security.tls import TlsContextFactory
 
 
@@ -67,7 +67,7 @@ class GatewayProvider(Provider):
         gateway_repository: GatewayRepository,
         security_policy_service: SecurityPolicyService,
         certificate_lifecycle_service: CertificateLifecycleService,
-        secret_store: ResilientSecretStore,
+        secret_store: ProtectedSecretStore,
         tls_context_factory: TlsContextFactory,
         upstream_auth_provider: UpstreamAuthProvider,
         certificate_provider: ClientCertificateProvider,

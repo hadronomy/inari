@@ -21,6 +21,8 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
 use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
 use tower_http::trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tower_sessions::cookie::SameSite;
+use tower_sessions::{Expiry, SessionManagerLayer};
 use tracing::Level;
 
 use crate::config::CorsConfig;
@@ -48,7 +50,7 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
             inari_web::shell,
             leptos_options.clone(),
         ));
-    let router = Router::new()
+    let mut router = Router::new()
         .merge(routes::system::router())
         .nest("/api", routes::api::router(state))
         .leptos_routes_with_context(state, web_routes, provide_onboarding_context, {
@@ -57,6 +59,25 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
         })
         .fallback_service(site_service)
         .layer(middleware::from_fn(ssr_render::serve));
+
+    if let Some(identity) = state.identity() {
+        let secure_cookie = settings.server.production
+            || settings
+                .server
+                .public_url
+                .as_ref()
+                .is_some_and(|url| url.scheme() == "https");
+        let sessions = SessionManagerLayer::new(identity.sessions().clone())
+            .with_name("inari_session")
+            .with_http_only(true)
+            .with_same_site(SameSite::Lax)
+            .with_secure(secure_cookie)
+            .with_path("/")
+            .with_expiry(Expiry::OnInactivity(time::Duration::hours(8)));
+        router = router
+            .merge(routes::auth::router())
+            .layer(sessions);
+    }
 
     Ok(apply_http_layers(router, state, cors))
 }
@@ -174,8 +195,6 @@ fn build_cors_layer(config: &CorsConfig) -> Result<CorsLayer, ConfigError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use serde_json::Value;
@@ -184,7 +203,6 @@ mod tests {
     use super::router;
     use crate::ConcurrencyLimit;
     use crate::config::{LoadedConfig, ZenohConfig};
-    use crate::protocol::NoopProtocolModule;
     use crate::state::AppState;
     use crate::zenoh::ZenohSupervisor;
 
@@ -199,7 +217,8 @@ mod tests {
 
         loaded
             .settings
-            .protocol
+            .http
+            .inari_api
             .max_concurrent_requests = limit(8);
         loaded
             .settings
@@ -209,7 +228,7 @@ mod tests {
 
         let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
 
-        let state = AppState::new(loaded, zenoh, Arc::new(NoopProtocolModule));
+        let state = AppState::new(loaded, zenoh);
 
         router(&state)
             .expect("test router should build")
@@ -247,7 +266,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn protocol_stub_returns_problem_details() {
+    async fn removed_protocol_route_returns_problem_details() {
         let response = test_app()
             .oneshot(
                 Request::builder()
@@ -259,7 +278,7 @@ mod tests {
             .await
             .expect("router should respond");
 
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
@@ -267,10 +286,10 @@ mod tests {
 
         let payload: Value = serde_json::from_slice(&body).expect("response body should be JSON");
 
-        assert_eq!(payload["type"], "urn:inari:problem:not_implemented");
-        assert_eq!(payload["title"], "Not Implemented");
-        assert_eq!(payload["status"], 501);
-        assert_eq!(payload["code"], "not_implemented");
+        assert_eq!(payload["type"], "urn:inari:problem:not_found");
+        assert_eq!(payload["title"], "Not Found");
+        assert_eq!(payload["status"], 404);
+        assert_eq!(payload["code"], "not_found");
     }
 
     #[tokio::test]
@@ -299,5 +318,26 @@ mod tests {
         let payload: Value = serde_json::from_slice(&body).expect("response body should be JSON");
         assert_eq!(payload["code"], "not_found");
         assert_eq!(payload["detail"], "No API resource exists at `/api/does-not-exist`.");
+    }
+
+    #[tokio::test]
+    async fn setup_route_renders_a_typed_disabled_state_without_panicking() {
+        let response = test_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/setup/ABCDEFGH2345")
+                    .body(Body::empty())
+                    .expect("request should be valid"),
+            )
+            .await
+            .expect("router should respond");
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let html = String::from_utf8(body.to_vec()).expect("response body should be UTF-8");
+        assert!(html.contains("This connection cannot be started."));
+        assert!(html.contains("Managed onboarding is not enabled"));
     }
 }

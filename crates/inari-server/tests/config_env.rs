@@ -8,6 +8,7 @@ use inari_server::{LoadedConfig, LogFormat, ZenohMode};
 fn environment_overrides_cover_every_nested_field() {
     let loaded = LoadedConfig::load_from_environment_map(HashMap::from([
         ("INARI_SERVER_SERVER__BIND".into(), "127.0.0.1:9000".into()),
+        ("INARI_SERVER_SERVER__PUBLIC_URL".into(), "http://127.0.0.1:9000".into()),
         ("INARI_SERVER_SERVER__REQUEST_TIMEOUT".into(), "45s".into()),
         ("INARI_SERVER_SERVER__SHUTDOWN_GRACE_PERIOD".into(), "1min".into()),
         ("INARI_SERVER_SERVER__MAX_BODY_SIZE_BYTES".into(), "4096".into()),
@@ -38,9 +39,15 @@ fn environment_overrides_cover_every_nested_field() {
         ("INARI_SERVER_HTTP__ZENOH_REST__QUERY_TIMEOUT".into(), "11s".into()),
         ("INARI_SERVER_HTTP__ZENOH_REST__SSE_KEEP_ALIVE".into(), "20s".into()),
         ("INARI_SERVER_HTTP__ZENOH_REST__SSE_BUFFER".into(), "128".into()),
+        ("INARI_SERVER_IDENTITY__OIDC__ENABLED".into(), "true".into()),
+        ("INARI_SERVER_IDENTITY__OIDC__ISSUER_URL".into(), "http://identity.test".into()),
+        ("INARI_SERVER_IDENTITY__OIDC__CLIENT_ID".into(), "test-controller".into()),
+        ("INARI_SERVER_IDENTITY__OIDC__ROLE_CLAIM".into(), "roles".into()),
+        ("INARI_SERVER_IDENTITY__OIDC__ROLE_MAPPING__ADMIN".into(), "administrator".into()),
+        ("INARI_SERVER_MANAGED_GATEWAY__ENABLED".into(), "true".into()),
         (
-            "INARI_SERVER_MANAGED_GATEWAY__API__READ_TOKEN_HASHES".into(),
-            "52f5356b451cde75f687831123aa0d4be18e9fd77cab01f541539d3956c45dae".into(),
+            "INARI_SERVER_MANAGED_GATEWAY__DATA_PLANE__CONNECT_ENDPOINTS".into(),
+            "tls/controller.test:7447".into(),
         ),
         ("INARI_SERVER_ZENOH__ENABLED".into(), "true".into()),
         ("INARI_SERVER_ZENOH__MODE".into(), "router".into()),
@@ -55,8 +62,7 @@ fn environment_overrides_cover_every_nested_field() {
         ("INARI_SERVER_ZENOH__OPEN_RETRY_INTERVAL".into(), "7s".into()),
         ("INARI_SERVER_ZENOH__COMMAND_BUFFER".into(), "512".into()),
         ("INARI_SERVER_ZENOH__EVENT_BUFFER".into(), "256".into()),
-        ("INARI_SERVER_PROTOCOL__NAMESPACE".into(), "inari/test".into()),
-        ("INARI_SERVER_PROTOCOL__MAX_CONCURRENT_REQUESTS".into(), "2048".into()),
+        ("INARI_SERVER_HTTP__INARI_API__MAX_CONCURRENT_REQUESTS".into(), "2048".into()),
     ]))
     .expect("environment overrides should deserialize");
 
@@ -191,15 +197,6 @@ fn environment_overrides_cover_every_nested_field() {
         ),
         128
     );
-    assert_eq!(
-        loaded
-            .settings
-            .managed_gateway
-            .api
-            .read_token_hashes[0]
-            .to_string(),
-        "52f5356b451cde75f687831123aa0d4be18e9fd77cab01f541539d3956c45dae",
-    );
     assert!(loaded.settings.zenoh.enabled);
     assert_eq!(loaded.settings.zenoh.mode, ZenohMode::Router);
     assert!(
@@ -225,12 +222,12 @@ fn environment_overrides_cover_every_nested_field() {
     );
     assert_eq!(usize::from(loaded.settings.zenoh.command_buffer), 512);
     assert_eq!(usize::from(loaded.settings.zenoh.event_buffer), 256);
-    assert_eq!(loaded.settings.protocol.namespace, "inari/test");
     assert_eq!(
         usize::from(
             loaded
                 .settings
-                .protocol
+                .http
+                .inari_api
                 .max_concurrent_requests
         ),
         2048

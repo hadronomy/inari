@@ -12,6 +12,7 @@ from .protocol import (
     GatewayDeviceInventory,
     GatewayDeviceInventoryItem,
     GatewayDeviceSummary,
+    JSON_OBJECT_ADAPTER,
     GatewayProtocolDescriptor,
     GatewayQueueSummary,
     GatewayRuntimeSummary,
@@ -162,7 +163,9 @@ class GatewaySnapshotBuilder:
                                 for key, enabled in device.capabilities.items()
                                 if enabled
                             ),
-                            metadata=_redact_device_metadata(dict(device.metadata)),
+                            metadata=JSON_OBJECT_ADAPTER.validate_python(
+                                _redact_device_metadata(dict(device.metadata))
+                            ),
                         )
                         for device in devices
                     )

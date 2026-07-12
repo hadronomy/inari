@@ -1,13 +1,13 @@
 use super::{BudgetKind, BudgetPermit, sealed};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ProtocolExecution {}
+pub enum InariApiRequest {}
 
-impl sealed::Sealed for ProtocolExecution {}
+impl sealed::Sealed for InariApiRequest {}
 
-impl BudgetKind for ProtocolExecution {
-    const EXHAUSTED_MESSAGE: &'static str = "The protocol execution budget is exhausted.";
-    const CLOSED_MESSAGE: &'static str = "The protocol execution budget is no longer available.";
+impl BudgetKind for InariApiRequest {
+    const EXHAUSTED_MESSAGE: &'static str = "Too many Inari API requests are already running.";
+    const CLOSED_MESSAGE: &'static str = "The Inari API request budget is no longer available.";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,5 +22,5 @@ impl BudgetKind for ZenohRestRequest {
     const CLOSED_MESSAGE: &'static str = "The Zenoh REST query budget is no longer available.";
 }
 
-pub type ProtocolPermit = BudgetPermit<ProtocolExecution>;
+pub type InariApiPermit = BudgetPermit<InariApiRequest>;
 pub type ZenohRestQueryPermit = BudgetPermit<ZenohRestRequest>;

@@ -3,8 +3,41 @@
 # Keep secrets out of this file. Enrollment tokens are configured by SHA-256
 # digest so the server never needs to persist bootstrap token plaintext.
 
+config_version = 1
+
 [server]
 bind = "127.0.0.1:8080"
+public_url = "https://controller.example.com"
+production = true
+
+[database]
+# Mounted from an existing Kubernetes Secret. The URL itself never belongs in
+# this file or in Helm values.
+url_file = "/var/run/secrets/inari/database-url"
+# Set false when a Kubernetes migration Job owns schema changes before rollout.
+migrate_on_startup = false
+min_connections = 2
+max_connections = 32
+
+[organization]
+id = "org_example"
+name = "Example organization"
+default_site_id = "site_headquarters"
+default_site_name = "Headquarters"
+
+[identity.oidc]
+enabled = true
+issuer_url = "https://identity.example.com"
+client_id = "inari-controller"
+client_secret_file = "/var/run/secrets/inari/oidc-client-secret"
+scopes = ["openid", "profile", "email", "urn:zitadel:iam:org:project:roles"]
+role_claim = "urn:zitadel:iam:org:project:roles"
+
+[identity.oidc.role_mapping]
+"inari.viewer" = "viewer"
+"inari.operator" = "operator"
+"inari.enrollment-admin" = "enrollment_admin"
+"inari.administrator" = "administrator"
 
 [http.zenoh_rest]
 # The REST bridge is for operator diagnostics and local tests. Keep it disabled
@@ -13,13 +46,11 @@ enabled = false
 allow_admin_space = false
 
 [managed_gateway]
-# Enable only after enrollment token hashes, public Zenoh endpoints, and TLS
-# material are configured.
+# Enable only after OIDC, public Zenoh endpoints, and TLS material are configured.
 enabled = false
-database_path = "data/inari-server/managed-gateway.sqlite3"
 controller_name = "Inari Controller"
 controller_instance_id = "controller-prod-1"
-supported_protocol_versions = ["2026-07-11"]
+supported_protocol_versions = ["2026-07-12"]
 controller_actions = [
   "system:read",
   "devices:read",
@@ -28,24 +59,11 @@ controller_actions = [
   "jobs:cancel",
   "commands:execute",
 ]
-# SHA-256 digests of short-lived bootstrap credentials. The all-zero digest is
-# an inert placeholder and must be replaced before accepting enrollments.
-enrollment_token_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
-
-[managed_gateway.api]
-# Protects typed operational reads such as
-# `GET /api/inari/v1/agents/{agent_id}/status`. These credentials are separate
-# from invitation-administration tokens.
-read_token_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
-
 [managed_gateway.onboarding]
 # The operator interface remains available while onboarding is disabled, but
 # invitation actions return a typed 503 response.
 enabled = false
 public_base_url = "https://controller.example.com"
-# SHA-256 digests of high-entropy operator tokens. The all-zero digest is an
-# inert placeholder and must be replaced before enabling onboarding.
-operator_token_hashes = ["0000000000000000000000000000000000000000000000000000000000000000"]
 invite_ttl = "10m"
 failed_attempt_window = "1m"
 max_failed_attempts = 5
@@ -58,16 +76,22 @@ namespace_prefix = "iot/v1/agents"
 close_link_on_expiration = true
 
 [managed_gateway.certificate]
-# `step_ca` returns step-ca enrollment material to the agent. Leave the OTT
-# unset unless a deployment workflow injects a short-lived one at startup.
+# `step_ca` mints a fresh CSR-bound token only after controller enrollment has
+# authenticated the agent. Mount the provisioner signing key from a Secret.
 mode = "step_ca"
 step_ca_base_url = "https://step-ca.example.com"
 step_ca_root_fingerprint = "replace-with-root-sha256-fingerprint"
+step_ca_provisioner = "inari-agents"
+step_ca_key_id = "replace-with-provisioner-jwk-kid"
+step_ca_signing_key_file = "/var/run/secrets/inari/step-ca-provisioner-key.pem"
+step_ca_signing_algorithm = "ed_dsa"
+step_ca_token_ttl = "5m"
 requires_mutual_tls_after_issuance = true
 
 [zenoh]
 enabled = true
-listen_endpoints = ["tls/0.0.0.0:7447"]
+mode = "client"
+connect_endpoints = ["tls/inari-zenoh:7447"]
 
 [zenoh.admin_space]
 enabled = false
@@ -76,8 +100,8 @@ write = false
 
 [zenoh.tls]
 root_ca_certificate = "/etc/inari/pki/root-ca.pem"
-listen_certificate = "/etc/inari/pki/router.pem"
-listen_private_key = "/etc/inari/pki/router-key.pem"
+connect_certificate = "/etc/inari/pki/controller.pem"
+connect_private_key = "/etc/inari/pki/controller-key.pem"
 enable_mtls = true
 close_link_on_expiration = true
 

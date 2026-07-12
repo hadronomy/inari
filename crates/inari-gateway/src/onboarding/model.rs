@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::InvitationId;
+use crate::protocol::{GatewaySnapshot, SiteId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,6 +57,7 @@ pub struct IssuedInvitation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationStatus {
     pub invitation_id: InvitationId,
+    pub site_id: SiteId,
     pub label: Option<String>,
     pub state: InvitationState,
     pub created_at: DateTime<Utc>,
@@ -68,12 +70,13 @@ pub struct InvitationStatus {
     pub last_error: Option<String>,
     pub agent_id: Option<String>,
     pub key_id: Option<String>,
-    pub latest_snapshot: Option<serde_json::Value>,
+    pub latest_snapshot: Option<GatewaySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationPreview {
     pub invitation_id: InvitationId,
+    pub site_id: SiteId,
     pub expires_at: DateTime<Utc>,
     pub state: InvitationState,
     pub controller_name: Option<String>,

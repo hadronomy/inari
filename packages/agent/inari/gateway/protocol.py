@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
 from ..gateway.models import (
     ControllerAction,
@@ -23,6 +23,10 @@ from ..core.version import GATEWAY_PROTOCOL_VERSION, SUPPORTED_GATEWAY_PROTOCOL_
 
 class GatewayProtocolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+type JsonObject = dict[str, JsonValue]
+JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 
 
 class GatewayMessageType(StrEnum):
@@ -61,6 +65,13 @@ class GatewaySecurityDescriptor(GatewayProtocolModel):
     certificate_expires_at: datetime | None = None
 
 
+class GatewayServiceDescriptor(GatewayProtocolModel):
+    name: str | None = None
+    version: str | None = None
+    agent_id: str | None = None
+    key_id: str | None = None
+
+
 class GatewayDeviceSummary(GatewayProtocolModel):
     count: int
     online_count: int
@@ -79,7 +90,7 @@ class GatewayDeviceInventoryItem(GatewayProtocolModel):
     driver_key: str
     connection_state: str
     capabilities: tuple[str, ...] = ()
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class GatewayDeviceInventory(GatewayProtocolModel):
@@ -109,7 +120,7 @@ class GatewayRuntimeEventPayload(GatewayProtocolModel):
     resource_id: str
     event_type: str
     occurred_at: datetime
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: JsonObject = Field(default_factory=dict)
 
 
 class GatewayControllerInfo(GatewayProtocolModel):
@@ -120,11 +131,20 @@ class GatewayControllerInfo(GatewayProtocolModel):
 class GatewaySnapshotPayload(GatewayProtocolModel):
     generated_at: datetime
     protocol: GatewayProtocolDescriptor
-    service: dict[str, Any]
+    service: GatewayServiceDescriptor
     security: GatewaySecurityDescriptor
     runtime: GatewayRuntimeSummary
     capabilities: GatewayCapabilityDescriptor
-    observability: dict[str, Any] = Field(default_factory=dict)
+    observability: JsonObject = Field(default_factory=dict)
+
+
+class Ed25519PublicJwk(GatewayProtocolModel):
+    kty: Literal["OKP"] = "OKP"
+    crv: Literal["Ed25519"] = "Ed25519"
+    x: str
+    kid: str
+    alg: Literal["EdDSA"] = "EdDSA"
+    use: Literal["sig"] = "sig"
 
 
 class CertificateTrustPayload(GatewayProtocolModel):
@@ -195,7 +215,7 @@ class EnrollmentRequestPayload(GatewayProtocolModel):
     )
     agent_id: str
     key_id: str
-    public_jwk: dict[str, Any]
+    public_jwk: Ed25519PublicJwk
     certificate_pem: str | None = None
     csr_pem: str
     snapshot: GatewaySnapshotPayload
@@ -229,7 +249,7 @@ class GatewayBinaryContentPayload(GatewayProtocolModel):
 
 class GatewayStructuredReceiptContentPayload(GatewayProtocolModel):
     kind: Literal["structured_receipt"] = "structured_receipt"
-    data: dict[str, Any]
+    data: JsonObject
     document_name: str = "Receipt"
 
 
@@ -283,7 +303,7 @@ class ControllerSubmitPrintJobPayload(GatewayProtocolModel):
     options: GatewayPrintOptionsPayload = Field(
         default_factory=GatewayPrintOptionsPayload
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class GatewayOpenCashDrawerCommandPayload(GatewayProtocolModel):
@@ -325,7 +345,7 @@ class ControllerExecuteDeviceCommandPayload(GatewayProtocolModel):
         default_factory=GatewayCommandTargetPayload
     )
     command: GatewayDeviceCommandPayload
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class ControllerSubmitPrintJobMessage(GatewayProtocolModel):
@@ -384,7 +404,7 @@ class AgentCommandAcceptedMessage(GatewayProtocolModel):
     message_id: str
     command_id: str
     accepted_at: datetime
-    job: dict[str, Any] | None = None
+    job: JsonObject | None = None
     detail: str
 
 

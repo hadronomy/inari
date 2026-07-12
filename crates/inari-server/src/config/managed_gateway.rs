@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use inari_gateway::credentials::TokenDigest;
 use inari_gateway::protocol::ProtocolVersion;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -13,13 +12,10 @@ use crate::error::ConfigError;
 #[serde(default)]
 pub struct ManagedGatewayConfig {
     pub enabled: bool,
-    pub database_path: PathBuf,
     pub controller_name: Option<String>,
     pub controller_instance_id: String,
-    pub enrollment_token_hashes: Vec<TokenDigest>,
     pub supported_protocol_versions: Vec<ProtocolVersion>,
     pub controller_actions: Vec<String>,
-    pub api: ManagedGatewayApiConfig,
     pub onboarding: ManagedGatewayOnboardingConfig,
     pub data_plane: ManagedGatewayDataPlaneConfig,
     pub certificate: ManagedGatewayCertificateConfig,
@@ -29,10 +25,8 @@ impl Default for ManagedGatewayConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            database_path: PathBuf::from("data/inari-server/managed-gateway.sqlite3"),
             controller_name: Some("Inari Controller".into()),
             controller_instance_id: "inari-server".into(),
-            enrollment_token_hashes: Vec::new(),
             supported_protocol_versions: vec![ProtocolVersion::current()],
             controller_actions: [
                 "system:read",
@@ -44,7 +38,6 @@ impl Default for ManagedGatewayConfig {
             ]
             .map(String::from)
             .to_vec(),
-            api: ManagedGatewayApiConfig::default(),
             onboarding: ManagedGatewayOnboardingConfig::default(),
             data_plane: ManagedGatewayDataPlaneConfig::default(),
             certificate: ManagedGatewayCertificateConfig::default(),
@@ -56,13 +49,6 @@ impl ManagedGatewayConfig {
     pub(super) fn validate(&self) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
-        }
-        if self
-            .database_path
-            .as_os_str()
-            .is_empty()
-        {
-            return Err(ConfigError::invalid("managed_gateway.database_path must not be empty."));
         }
         if self
             .supported_protocol_versions
@@ -92,15 +78,6 @@ impl ManagedGatewayConfig {
             ))
         })?;
         if self.onboarding.enabled {
-            if self
-                .onboarding
-                .operator_token_hashes
-                .is_empty()
-            {
-                return Err(ConfigError::invalid(
-                    "managed_gateway.onboarding.operator_token_hashes must not be empty when onboarding is enabled.",
-                ));
-            }
             let public_base_url = self
                 .onboarding
                 .public_base_url
@@ -134,14 +111,40 @@ impl ManagedGatewayConfig {
                 ));
             }
         }
+        if self.certificate.mode == ManagedGatewayCertificateMode::StepCa {
+            if self
+                .certificate
+                .step_ca_base_url
+                .is_none()
+                || self
+                    .certificate
+                    .step_ca_provisioner
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+                || self
+                    .certificate
+                    .step_ca_key_id
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+                || self
+                    .certificate
+                    .step_ca_signing_key_file
+                    .is_none()
+            {
+                return Err(ConfigError::invalid(
+                    "step-ca mode requires base_url, provisioner, key_id, and signing_key_file.",
+                ));
+            }
+            if !(Duration::from_secs(10)..=Duration::from_secs(60 * 60))
+                .contains(&self.certificate.step_ca_token_ttl)
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.certificate.step_ca_token_ttl must be between 10 seconds and 1 hour.",
+                ));
+            }
+        }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ManagedGatewayApiConfig {
-    pub read_token_hashes: Vec<TokenDigest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,7 +152,6 @@ pub struct ManagedGatewayApiConfig {
 pub struct ManagedGatewayOnboardingConfig {
     pub enabled: bool,
     pub public_base_url: Option<String>,
-    pub operator_token_hashes: Vec<TokenDigest>,
     #[serde(with = "humantime_serde")]
     pub invite_ttl: Duration,
     #[serde(with = "humantime_serde")]
@@ -162,7 +164,6 @@ impl Default for ManagedGatewayOnboardingConfig {
         Self {
             enabled: false,
             public_base_url: None,
-            operator_token_hashes: Vec::new(),
             invite_ttl: Duration::from_secs(10 * 60),
             failed_attempt_window: Duration::from_secs(60),
             max_failed_attempts: 5,
@@ -192,10 +193,14 @@ impl Default for ManagedGatewayDataPlaneConfig {
 #[serde(default)]
 pub struct ManagedGatewayCertificateConfig {
     pub mode: ManagedGatewayCertificateMode,
-    pub step_ca_base_url: Option<String>,
+    pub step_ca_base_url: Option<Url>,
     pub step_ca_root_fingerprint: Option<String>,
-    pub step_ca_bootstrap_ott: Option<String>,
-    pub step_ca_bootstrap_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub step_ca_provisioner: Option<String>,
+    pub step_ca_key_id: Option<String>,
+    pub step_ca_signing_key_file: Option<PathBuf>,
+    pub step_ca_signing_algorithm: StepCaSigningAlgorithm,
+    #[serde(with = "humantime_serde")]
+    pub step_ca_token_ttl: Duration,
     pub step_ca_authorized_sans: Vec<String>,
     pub requires_mutual_tls_after_issuance: bool,
 }
@@ -206,8 +211,11 @@ impl Default for ManagedGatewayCertificateConfig {
             mode: ManagedGatewayCertificateMode::None,
             step_ca_base_url: None,
             step_ca_root_fingerprint: None,
-            step_ca_bootstrap_ott: None,
-            step_ca_bootstrap_expires_at: None,
+            step_ca_provisioner: None,
+            step_ca_key_id: None,
+            step_ca_signing_key_file: None,
+            step_ca_signing_algorithm: StepCaSigningAlgorithm::EdDsa,
+            step_ca_token_ttl: Duration::from_secs(5 * 60),
             step_ca_authorized_sans: Vec::new(),
             requires_mutual_tls_after_issuance: true,
         }
@@ -220,4 +228,12 @@ pub enum ManagedGatewayCertificateMode {
     #[default]
     None,
     StepCa,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepCaSigningAlgorithm {
+    #[default]
+    EdDsa,
+    Es256,
 }

@@ -15,7 +15,7 @@ from ..protocols.types import (
     PrinterTransport,
     RenderedDocument,
 )
-from ...drivers.base import DeviceKind, DriverMetadata
+from ...drivers.base import DeviceIdentity, DeviceKind, DeviceTransport, DriverMetadata
 from .base import PrinterDriver
 from .common import RECEIPT_RAW_NAME_HINTS, guess_preferred_transport
 
@@ -340,6 +340,10 @@ class WindowsPrinterDriver(PrinterDriver):
         return PrinterDevice(
             name=printer_name,
             driver_key=self.metadata.key,
+            identity=DeviceIdentity(
+                transport=DeviceTransport.SPOOLER,
+                os_instance_id=f"windows-queue:{printer_name}",
+            ),
             is_default=is_default,
             preferred_transport=preferred_transport,
             capabilities=PrinterCapabilities(

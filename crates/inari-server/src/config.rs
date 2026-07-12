@@ -12,14 +12,19 @@ use serde::{Deserialize, Serialize};
 use crate::coordination::{ChannelCapacity, ConcurrencyLimit};
 use crate::error::ConfigError;
 
+mod identity;
 mod managed_gateway;
+mod platform;
 
+pub use self::identity::{IdentityConfig, OidcConfig};
 pub use self::managed_gateway::{
-    ManagedGatewayApiConfig, ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode,
-    ManagedGatewayConfig, ManagedGatewayDataPlaneConfig, ManagedGatewayOnboardingConfig,
+    ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode, ManagedGatewayConfig,
+    ManagedGatewayDataPlaneConfig, ManagedGatewayOnboardingConfig, StepCaSigningAlgorithm,
 };
+pub use self::platform::{DatabaseConfig, OrganizationConfig};
 
 const CONFIG_PATH_ENV: &str = "INARI_SERVER_CONFIG";
+pub const CONFIG_VERSION: u32 = 1;
 const ENV_PREFIX: &str = "INARI_SERVER";
 const ENV_SEPARATOR: &str = "__";
 const DEFAULT_CONFIG_CANDIDATES: &[&str] = &["inari-server.toml", "config/inari-server.toml"];
@@ -28,10 +33,8 @@ const ENV_LIST_KEYS: &[&str] = &[
     "http.cors.allow_methods",
     "http.cors.allow_headers",
     "http.cors.expose_headers",
+    "identity.oidc.scopes",
     "managed_gateway.controller_actions",
-    "managed_gateway.enrollment_token_hashes",
-    "managed_gateway.api.read_token_hashes",
-    "managed_gateway.onboarding.operator_token_hashes",
     "managed_gateway.supported_protocol_versions",
     "managed_gateway.data_plane.connect_endpoints",
     "managed_gateway.certificate.step_ca_authorized_sans",
@@ -50,7 +53,7 @@ const DEFAULT_ZENOH_REST_SSE_BUFFER: usize = 64;
 const DEFAULT_ZENOH_COMMAND_BUFFER: usize = 256;
 const DEFAULT_ZENOH_EVENT_BUFFER: usize = 128;
 const DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES: usize = 64;
-const DEFAULT_PROTOCOL_MAX_CONCURRENT_REQUESTS: usize = 1024;
+const DEFAULT_INARI_API_MAX_CONCURRENT_REQUESTS: usize = 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadedConfig {
@@ -124,21 +127,76 @@ impl std::fmt::Display for ConfigOrigin {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
+    pub config_version: u32,
     pub server: ServerConfig,
+    pub database: DatabaseConfig,
+    pub organization: OrganizationConfig,
     pub runtime: RuntimeConfig,
     pub observability: ObservabilityConfig,
+    pub identity: IdentityConfig,
     pub http: HttpConfig,
     pub managed_gateway: ManagedGatewayConfig,
     pub zenoh: ZenohConfig,
-    pub protocol: ProtocolConfig,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            config_version: CONFIG_VERSION,
+            server: ServerConfig::default(),
+            database: DatabaseConfig::default(),
+            organization: OrganizationConfig::default(),
+            runtime: RuntimeConfig::default(),
+            observability: ObservabilityConfig::default(),
+            identity: IdentityConfig::default(),
+            http: HttpConfig::default(),
+            managed_gateway: ManagedGatewayConfig::default(),
+            zenoh: ZenohConfig::default(),
+        }
+    }
 }
 
 impl AppConfig {
     fn validate(self) -> Result<Self, ConfigError> {
+        if self.config_version != CONFIG_VERSION {
+            return Err(ConfigError::invalid(format!(
+                "Unsupported config_version {}; expected {CONFIG_VERSION}.",
+                self.config_version
+            )));
+        }
         self.managed_gateway.validate()?;
+        self.identity.validate(&self.server)?;
+        self.database
+            .validate(self.managed_gateway.enabled || self.identity.oidc.enabled)?;
+        self.organization.validate()?;
+        if self.identity.oidc.enabled && !self.managed_gateway.enabled {
+            return Err(ConfigError::invalid(
+                "managed_gateway.enabled must be true when OIDC is enabled because sessions require the controller database.",
+            ));
+        }
+        if self.server.production && self.managed_gateway.enabled && !self.identity.oidc.enabled {
+            return Err(ConfigError::invalid(
+                "identity.oidc.enabled must be true for a production managed controller.",
+            ));
+        }
+        if self.managed_gateway.enabled && !self.zenoh.enabled {
+            return Err(ConfigError::invalid(
+                "zenoh.enabled must be true when the managed gateway is enabled.",
+            ));
+        }
+        if self.http.zenoh_rest.enabled && !self.identity.oidc.enabled {
+            return Err(ConfigError::invalid(
+                "identity.oidc.enabled must be true when the direct Zenoh HTTP surface is enabled.",
+            ));
+        }
+        if self.server.production && self.zenoh.mode != ZenohMode::Client {
+            return Err(ConfigError::invalid(
+                "production controllers must connect to a separate Zenoh router in client mode.",
+            ));
+        }
         Ok(self)
     }
 }
@@ -147,6 +205,8 @@ impl AppConfig {
 #[serde(default)]
 pub struct ServerConfig {
     pub bind: SocketAddr,
+    pub public_url: Option<url::Url>,
+    pub production: bool,
     #[serde(with = "humantime_serde")]
     pub request_timeout: Duration,
     #[serde(with = "humantime_serde")]
@@ -158,6 +218,8 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: (Ipv4Addr::LOCALHOST, 8080).into(),
+            public_url: None,
+            production: false,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             shutdown_grace_period: DEFAULT_SHUTDOWN_GRACE_PERIOD,
             max_body_size_bytes: 1024 * 1024,
@@ -240,7 +302,20 @@ pub enum LogFormat {
 #[serde(default)]
 pub struct HttpConfig {
     pub cors: CorsConfig,
+    pub inari_api: InariApiConfig,
     pub zenoh_rest: ZenohRestConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InariApiConfig {
+    pub max_concurrent_requests: ConcurrencyLimit,
+}
+
+impl Default for InariApiConfig {
+    fn default() -> Self {
+        Self { max_concurrent_requests: default_inari_api_max_concurrent_requests() }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -322,7 +397,7 @@ impl Default for ZenohConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            mode: ZenohMode::Router,
+            mode: ZenohMode::Client,
             admin_space: ZenohAdminSpaceConfig::default(),
             connect_endpoints: Vec::new(),
             listen_endpoints: Vec::new(),
@@ -353,6 +428,7 @@ impl Default for ZenohAdminSpaceConfig {
 #[serde(rename_all = "snake_case")]
 pub enum ZenohMode {
     #[default]
+    Client,
     Router,
 }
 
@@ -362,6 +438,8 @@ pub struct ZenohTlsConfig {
     pub root_ca_certificate: Option<PathBuf>,
     pub listen_certificate: Option<PathBuf>,
     pub listen_private_key: Option<PathBuf>,
+    pub connect_certificate: Option<PathBuf>,
+    pub connect_private_key: Option<PathBuf>,
     pub enable_mtls: bool,
     pub close_link_on_expiration: bool,
 }
@@ -394,22 +472,6 @@ pub enum ZenohAclPermission {
     Deny,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ProtocolConfig {
-    pub namespace: String,
-    pub max_concurrent_requests: ConcurrencyLimit,
-}
-
-impl Default for ProtocolConfig {
-    fn default() -> Self {
-        Self {
-            namespace: "inari".into(),
-            max_concurrent_requests: default_protocol_max_concurrent_requests(),
-        }
-    }
-}
-
 fn default_zenoh_rest_max_concurrent_requests() -> ConcurrencyLimit {
     DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES
         .try_into()
@@ -434,8 +496,8 @@ fn default_zenoh_event_buffer() -> ChannelCapacity {
         .expect("default Zenoh event buffer must be valid")
 }
 
-fn default_protocol_max_concurrent_requests() -> ConcurrencyLimit {
-    DEFAULT_PROTOCOL_MAX_CONCURRENT_REQUESTS
+fn default_inari_api_max_concurrent_requests() -> ConcurrencyLimit {
+    DEFAULT_INARI_API_MAX_CONCURRENT_REQUESTS
         .try_into()
         .expect("default protocol concurrency limit must be valid")
 }
@@ -553,7 +615,7 @@ mod tests {
     fn config_rejects_zero_concurrency_limits() {
         let result = toml::from_str::<AppConfig>(
             r#"
-                [protocol]
+                [http.inari_api]
                 max_concurrent_requests = 0
             "#,
         );
@@ -565,7 +627,7 @@ mod tests {
     fn config_rejects_concurrency_limits_above_the_semaphore_maximum() {
         let result = toml::from_str::<AppConfig>(&format!(
             r#"
-                [protocol]
+                [http.inari_api]
                 max_concurrent_requests = {}
             "#,
             ConcurrencyLimit::MAX + 1

@@ -8,18 +8,24 @@ use super::{
     CertificateMode, CreateInvitation, InvitationCode, InvitationId, InvitationPreview,
     InvitationState, InvitationStatus, IssuedInvitation,
 };
-use crate::credentials::{TokenDigest, TokenVerifier};
-use crate::protocol::ProtocolVersion;
+use crate::audit::AuditContext;
+use crate::protocol::{OrganizationId, ProtocolVersion, SiteId};
 use crate::{GatewayError, GatewayRepository, GatewayResult};
 
 #[derive(Debug, Clone)]
 pub struct OnboardingConfig {
-    pub database_path: std::path::PathBuf,
+    pub database_url: SecretString,
+    pub database_min_connections: u32,
+    pub database_max_connections: u32,
+    pub migrate_database: bool,
+    pub organization_id: OrganizationId,
+    pub organization_name: String,
+    pub default_site_id: SiteId,
+    pub default_site_name: String,
     pub enabled: bool,
     pub public_base_url: Option<Url>,
     pub controller_name: Option<String>,
     pub controller_instance_id: String,
-    pub operator_token_hashes: Vec<TokenDigest>,
     pub invitation_ttl: Duration,
     pub supported_protocol_versions: Vec<ProtocolVersion>,
     pub certificate_mode: CertificateMode,
@@ -33,7 +39,8 @@ pub struct OnboardingService {
     public_base_url: Option<Url>,
     controller_name: Option<String>,
     controller_instance_id: String,
-    operator_tokens: TokenVerifier,
+    organization_id: OrganizationId,
+    default_site_id: SiteId,
     invitation_ttl: Duration,
     supported_protocol_versions: Vec<ProtocolVersion>,
     certificate_mode: CertificateMode,
@@ -42,7 +49,23 @@ pub struct OnboardingService {
 
 impl OnboardingService {
     pub async fn initialize(config: OnboardingConfig) -> GatewayResult<Self> {
-        let repository = GatewayRepository::connect(&config.database_path).await?;
+        if config.migrate_database {
+            GatewayRepository::migrate(&config.database_url).await?;
+        }
+        let repository = GatewayRepository::connect(
+            &config.database_url,
+            config.database_min_connections,
+            config.database_max_connections,
+        )
+        .await?;
+        repository
+            .ensure_organization(
+                &config.organization_id,
+                &config.organization_name,
+                &config.default_site_id,
+                &config.default_site_name,
+            )
+            .await?;
         Ok(Self {
             repository,
             enabled: config.enabled,
@@ -51,7 +74,8 @@ impl OnboardingService {
                 .map(normalize_base_url),
             controller_name: config.controller_name,
             controller_instance_id: config.controller_instance_id,
-            operator_tokens: TokenVerifier::new(config.operator_token_hashes),
+            organization_id: config.organization_id,
+            default_site_id: config.default_site_id,
             invitation_ttl: config.invitation_ttl,
             supported_protocol_versions: if config
                 .supported_protocol_versions
@@ -71,23 +95,17 @@ impl OnboardingService {
         &self.repository
     }
 
-    pub fn authenticate_operator(&self, token: &SecretString) -> GatewayResult<()> {
-        self.ensure_onboarding_enabled()?;
-        if self.operator_tokens.accepts(token) {
-            Ok(())
-        } else {
-            Err(GatewayError::Forbidden(
-                "onboarding administration requires operator authentication".into(),
-            ))
-        }
+    #[must_use]
+    pub fn organization_id(&self) -> &OrganizationId {
+        &self.organization_id
     }
 
     pub async fn create_invitation(
         &self,
-        operator_token: SecretString,
         request: CreateInvitation,
+        audit: &AuditContext,
     ) -> GatewayResult<IssuedInvitation> {
-        self.authenticate_operator(&operator_token)?;
+        self.ensure_onboarding_enabled()?;
         let label = request
             .label
             .map(|value| value.trim().to_owned())
@@ -106,7 +124,14 @@ impl OnboardingService {
             + chrono::Duration::from_std(self.invitation_ttl)
                 .map_err(|_| GatewayError::InvalidInput("invitation TTL is out of range".into()))?;
         self.repository
-            .create_invitation(&code, label.as_deref(), created_at, expires_at)
+            .create_invitation(
+                &code,
+                &self.organization_id,
+                &self.default_site_id,
+                label.as_deref(),
+                created_at..expires_at,
+                audit,
+            )
             .await?;
         let mut invitation_url = self
             .public_base_url
@@ -130,11 +155,8 @@ impl OnboardingService {
         })
     }
 
-    pub async fn invitations(
-        &self,
-        operator_token: SecretString,
-    ) -> GatewayResult<Vec<InvitationStatus>> {
-        self.authenticate_operator(&operator_token)?;
+    pub async fn invitations(&self) -> GatewayResult<Vec<InvitationStatus>> {
+        self.ensure_onboarding_enabled()?;
         self.repository
             .invitations(Utc::now())
             .await
@@ -142,12 +164,12 @@ impl OnboardingService {
 
     pub async fn revoke_invitation(
         &self,
-        operator_token: SecretString,
         invitation_id: &InvitationId,
+        audit: &AuditContext,
     ) -> GatewayResult<InvitationStatus> {
-        self.authenticate_operator(&operator_token)?;
+        self.ensure_onboarding_enabled()?;
         self.repository
-            .revoke_invitation(invitation_id.as_str(), Utc::now())
+            .revoke_invitation(invitation_id.as_str(), Utc::now(), &self.organization_id, audit)
             .await
     }
 
@@ -162,6 +184,7 @@ impl OnboardingService {
             .await?;
         Ok(InvitationPreview {
             invitation_id: invitation.invitation_id,
+            site_id: invitation.site_id,
             expires_at: invitation.expires_at,
             state: invitation.state,
             controller_name: self.controller_name.clone(),

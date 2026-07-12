@@ -7,7 +7,7 @@ Inari is an IoT agent and managed gateway. The Python agent runs beside local ha
 - `packages/agent`: local agent, hardware integrations, managed enrollment client, and service runtime
 - `packages/agent_tray`: user-session setup and status companion
 - `crates/inari-server`: Axum composition root and concrete Zenoh adapter
-- `crates/inari-gateway`: managed-gateway protocol, security, services, and SQLite repository
+- `crates/inari-gateway`: managed-gateway protocol, security, services, and PostgreSQL repository
 - `crates/inari-web`: shared Leptos application and server functions
 - `crates/inari-web-frontend`: minimal browser WASM hydration entrypoint
 - `docs`: protocol and deployment documentation
@@ -42,13 +42,14 @@ when `target/site` does not yet contain the generated browser assets.
 
 Managed onboarding is disabled by default. Start from
 [`crates/inari-server/config.example.toml`](crates/inari-server/config.example.toml)
-to configure the public controller URL and SHA-256 digests of the accepted
-operator tokens before enabling invitation issuance.
+to configure the public controller URL, OIDC, PostgreSQL, step-ca, and Zenoh
+before enabling invitation issuance. Human
+operators authenticate through OIDC; static operator tokens are not supported.
 
 The public HTTP namespaces are deliberately separate:
 
 - `/api/inari/v1` exposes stable, typed Inari resources. Operational reads use
-  the distinct bearer credentials configured under `managed_gateway.api`.
+  the authenticated organization session and typed role permissions.
 - `/api/zenoh/v1/{selector}` is the optional Axum-native Zenoh REST
   compatibility surface. The path after `/api/zenoh/v1/` is passed directly to
   Zenoh as the selector or key expression.
@@ -61,6 +62,8 @@ The UI is written in Rust and hydrated as WebAssembly. There is no authored appl
 cargo leptos build --release
 ```
 
-Deploy the release binary together with `target/site`. Set `LEPTOS_SITE_ROOT` to that deployed site directory and configure the server through environment variables or a configuration file. The default managed-gateway database is `data/inari-server/managed-gateway.sqlite3`; migrations run before the HTTP server becomes ready.
+Deploy the release binary together with `target/site`. Set `LEPTOS_SITE_ROOT` to that deployed site directory and configure the server through environment variables or a configuration file. Production controller state lives in externally managed PostgreSQL. Run `inari-server database migrate` before rolling controller replicas, or retain `database.migrate_on_startup = true` for a single-process development environment.
+
+The production Helm chart lives at [`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller separately from the Zenoh router StatefulSet and references existing Kubernetes Secrets rather than embedding credentials in values.
 
 The public protocol is documented in [docs/gateway_protocol.md](docs/gateway_protocol.md). The generated operator site must be served by the Rust binary so its CSP nonce, hydration scripts, static-asset handling, and Leptos routes remain consistent.

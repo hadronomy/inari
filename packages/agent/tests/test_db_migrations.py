@@ -45,6 +45,12 @@ def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(
             "SELECT version_num FROM alembic_version"
         ).fetchone()
         device_count = connection.execute("SELECT COUNT(*) FROM devices").fetchone()
+        migrated_device = connection.execute(
+            """
+            SELECT id, identity_transport, identity_os_instance_id
+            FROM devices
+            """
+        ).fetchone()
         outbox_state = connection.execute(
             "SELECT state FROM gateway_outbox WHERE message_id = ?",
             ("msg_legacy_ack",),
@@ -54,6 +60,10 @@ def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(
         }
     assert revision == (expected_revision,)
     assert device_count == (1,)
+    assert migrated_device is not None
+    assert migrated_device[0].startswith("dev_")
+    assert len(migrated_device[0]) == 36
+    assert migrated_device[1:] == ("spooler", "legacy:legacy.driver:Legacy Printer")
     assert outbox_state == ("sent",)
     assert "acknowledged_at" not in columns
 

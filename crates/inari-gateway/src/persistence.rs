@@ -1,42 +1,42 @@
+mod audit;
+mod fleet;
 mod gateway_data;
 
-use std::path::Path;
-#[cfg(test)]
 use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use serde_json::Value;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Row, SqlitePool};
+use jsonwebtoken::jwk::Jwk;
+use secrecy::{ExposeSecret, SecretString};
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgRow};
+use sqlx::{PgPool, Row};
 use subtle::ConstantTimeEq;
 
+use crate::audit::{AuditAction, AuditContext, AuditEventDraft, AuditOutcome, AuditResource};
 use crate::onboarding::{InvitationCode, InvitationId, InvitationState, InvitationStatus};
-use crate::protocol::{AgentPublication, GatewaySnapshot, ProtocolVersion};
+use crate::protocol::{
+    AgentPublication, ControllerCommand, GatewaySnapshot, OrganizationId, ProtocolVersion, SiteId,
+};
 use crate::{GatewayError, GatewayResult};
 
 #[derive(Clone, Debug)]
 pub struct GatewayRepository {
-    pool: SqlitePool,
+    pub(super) pool: PgPool,
 }
 
 #[derive(Debug, Clone)]
 pub struct AgentEnrollmentRecord {
     pub agent_id: String,
+    pub organization_id: OrganizationId,
+    pub site_id: SiteId,
     pub key_id: String,
     pub jwk_thumbprint: String,
-    pub public_jwk: Value,
+    pub public_jwk: Jwk,
     pub certificate_pem: Option<String>,
     pub namespace: String,
     pub protocol_version: ProtocolVersion,
     pub controller_actions: Vec<String>,
     pub enrolled_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone)]
-pub enum EnrollmentCredential {
-    ConfiguredToken { digest: [u8; 32] },
-    Invitation { invitation_id: String },
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ pub struct PersistedCommand {
     pub message_id: String,
     pub sequence: u64,
     pub state: String,
-    pub command: Value,
+    pub command: ControllerCommand,
     pub issued_at: DateTime<Utc>,
     pub published_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
@@ -68,77 +68,124 @@ pub struct PersistedAgentStatus {
 }
 
 impl GatewayRepository {
+    /// A lazy repository for application states that have the managed gateway disabled.
+    /// Any attempted query fails instead of silently persisting to a local fallback.
     #[must_use]
     pub fn disconnected() -> Self {
-        let options = SqliteConnectOptions::new().filename(":memory:");
-        let pool = SqlitePoolOptions::new()
+        let options = PgConnectOptions::new()
+            .host("127.0.0.1")
+            .database("inari_gateway_disabled");
+        let pool = PgPoolOptions::new()
             .max_connections(1)
             .connect_lazy_with(options);
         Self { pool }
     }
 
-    pub async fn connect(path: impl AsRef<Path>) -> GatewayResult<Self> {
-        let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .foreign_keys(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(Duration::from_secs(5));
-        let pool = SqlitePoolOptions::new()
-            .max_connections(8)
+    pub async fn connect(
+        database_url: &SecretString,
+        min_connections: u32,
+        max_connections: u32,
+    ) -> GatewayResult<Self> {
+        let options = PgConnectOptions::from_str(database_url.expose_secret())?;
+        let pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .min_connections(min_connections)
             .connect_with(options)
             .await?;
-        sqlx::migrate!().run(&pool).await?;
-        set_owner_only_permissions(path).await?;
         Ok(Self { pool })
     }
 
-    #[cfg(test)]
-    pub async fn in_memory() -> GatewayResult<Self> {
-        let options = SqliteConnectOptions::from_str("sqlite::memory:")?
-            .foreign_keys(true)
-            .journal_mode(SqliteJournalMode::Memory);
-        let pool = SqlitePoolOptions::new()
+    pub async fn migrate(database_url: &SecretString) -> GatewayResult<()> {
+        let options = PgConnectOptions::from_str(database_url.expose_secret())?;
+        let pool = PgPoolOptions::new()
             .max_connections(1)
             .connect_with(options)
             .await?;
         sqlx::migrate!().run(&pool).await?;
-        Ok(Self { pool })
+        pool.close().await;
+        Ok(())
     }
 
     #[must_use]
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    pub async fn ensure_organization(
+        &self,
+        organization_id: &OrganizationId,
+        organization_name: &str,
+        site_id: &SiteId,
+        site_name: &str,
+    ) -> GatewayResult<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO organizations (organization_id, name)
+             VALUES ($1, $2)
+             ON CONFLICT (organization_id) DO UPDATE
+             SET name = EXCLUDED.name, updated_at = NOW()",
+        )
+        .bind(organization_id.as_str())
+        .bind(organization_name)
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO sites (site_id, organization_id, name)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (site_id) DO UPDATE
+             SET name = EXCLUDED.name, updated_at = NOW()",
+        )
+        .bind(site_id.as_str())
+        .bind(organization_id.as_str())
+        .bind(site_name)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn create_invitation(
         &self,
         code: &InvitationCode,
+        organization_id: &OrganizationId,
+        site_id: &SiteId,
         label: Option<&str>,
-        created_at: DateTime<Utc>,
-        expires_at: DateTime<Utc>,
+        validity: std::ops::Range<DateTime<Utc>>,
+        audit: &AuditContext,
     ) -> GatewayResult<()> {
+        let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO invitations (
-                invitation_id, label, secret_digest, state, created_at, expires_at
-             ) VALUES (?, ?, ?, 'created', ?, ?)",
+                invitation_id, organization_id, site_id, label, secret_digest,
+                state, created_at, expires_at
+             ) VALUES ($1, $2, $3, $4, $5, 'created', $6, $7)",
         )
         .bind(code.id().as_str())
+        .bind(organization_id.as_str())
+        .bind(site_id.as_str())
         .bind(
             label
                 .map(str::trim)
                 .filter(|value| !value.is_empty()),
         )
         .bind(code.secret_digest().as_slice())
-        .bind(created_at)
-        .bind(expires_at)
-        .execute(&self.pool)
+        .bind(validity.start)
+        .bind(validity.end)
+        .execute(&mut *transaction)
         .await?;
+        audit::insert_audit_event(
+            &mut transaction,
+            &AuditEventDraft {
+                organization_id: organization_id.clone(),
+                actor_id: audit.actor_id.clone(),
+                action: AuditAction::InvitationCreated,
+                resource: AuditResource::Invitation { invitation_id: code.id().clone() },
+                outcome: AuditOutcome::Succeeded,
+                request_id: audit.request_id.clone(),
+            },
+        )
+        .await?;
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -150,10 +197,10 @@ impl GatewayRepository {
         self.expire_invitation(invitation_id, now)
             .await?;
         let row = sqlx::query(
-            "SELECT invitation_id, label, state, created_at, expires_at, claimed_at,
+            "SELECT invitation_id, site_id, label, state, created_at, expires_at, claimed_at,
                     enrolled_at, online_at, revoked_at, failed_at, last_error,
-                    bound_agent_id, bound_key_id, latest_snapshot_json
-             FROM invitations WHERE invitation_id = ?",
+                    bound_agent_id, bound_key_id, latest_snapshot
+             FROM invitations WHERE invitation_id = $1",
         )
         .bind(invitation_id)
         .fetch_optional(&self.pool)
@@ -165,15 +212,15 @@ impl GatewayRepository {
     pub async fn invitations(&self, now: DateTime<Utc>) -> GatewayResult<Vec<InvitationStatus>> {
         sqlx::query(
             "UPDATE invitations SET state = 'expired'
-             WHERE expires_at < ? AND state IN ('created', 'claimed', 'failed')",
+             WHERE expires_at < $1 AND state IN ('created', 'claimed', 'failed')",
         )
         .bind(now)
         .execute(&self.pool)
         .await?;
         let rows = sqlx::query(
-            "SELECT invitation_id, label, state, created_at, expires_at, claimed_at,
+            "SELECT invitation_id, site_id, label, state, created_at, expires_at, claimed_at,
                     enrolled_at, online_at, revoked_at, failed_at, last_error,
-                    bound_agent_id, bound_key_id, latest_snapshot_json
+                    bound_agent_id, bound_key_id, latest_snapshot
              FROM invitations ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
@@ -187,16 +234,20 @@ impl GatewayRepository {
         &self,
         invitation_id: &str,
         now: DateTime<Utc>,
+        organization_id: &OrganizationId,
+        audit: &AuditContext,
     ) -> GatewayResult<InvitationStatus> {
+        let mut transaction = self.pool.begin().await?;
         let result = sqlx::query(
-            "UPDATE invitations SET state = 'revoked', revoked_at = ?
-             WHERE invitation_id = ? AND state NOT IN ('online', 'revoked')",
+            "UPDATE invitations SET state = 'revoked', revoked_at = $1
+             WHERE invitation_id = $2 AND state NOT IN ('online', 'revoked')",
         )
         .bind(now)
         .bind(invitation_id)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
         if result.rows_affected() == 0 {
+            transaction.rollback().await?;
             let current = self
                 .invitation(invitation_id, now)
                 .await?;
@@ -208,7 +259,21 @@ impl GatewayRepository {
                 _ => Err(GatewayError::Conflict("invitation could not be revoked".into())),
             };
         }
-        self.invitation(invitation_id, now)
+        let invitation_id: InvitationId = invitation_id.parse()?;
+        audit::insert_audit_event(
+            &mut transaction,
+            &AuditEventDraft {
+                organization_id: organization_id.clone(),
+                actor_id: audit.actor_id.clone(),
+                action: AuditAction::InvitationRevoked,
+                resource: AuditResource::Invitation { invitation_id: invitation_id.clone() },
+                outcome: AuditOutcome::Succeeded,
+                request_id: audit.request_id.clone(),
+            },
+        )
+        .await?;
+        transaction.commit().await?;
+        self.invitation(invitation_id.as_str(), now)
             .await
     }
 
@@ -223,7 +288,8 @@ impl GatewayRepository {
     ) -> GatewayResult<()> {
         let mut transaction = self.pool.begin().await?;
         let row = sqlx::query(
-            "SELECT secret_digest, state, expires_at FROM invitations WHERE invitation_id = ?",
+            "SELECT secret_digest, state, expires_at
+             FROM invitations WHERE invitation_id = $1 FOR UPDATE",
         )
         .bind(code.id().as_str())
         .fetch_optional(&mut *transaction)
@@ -239,13 +305,16 @@ impl GatewayRepository {
             - chrono::Duration::from_std(failed_attempt_window).map_err(|_| {
                 GatewayError::InvalidInput("failed-attempt window is out of range".into())
             })?;
-        sqlx::query("DELETE FROM invitation_attempts WHERE invitation_id = ? AND attempted_at < ?")
-            .bind(code.id().as_str())
-            .bind(cutoff)
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            "DELETE FROM invitation_attempts
+             WHERE invitation_id = $1 AND attempted_at < $2",
+        )
+        .bind(code.id().as_str())
+        .bind(cutoff)
+        .execute(&mut *transaction)
+        .await?;
         let failures: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM invitation_attempts WHERE invitation_id = ?")
+            sqlx::query_scalar("SELECT COUNT(*) FROM invitation_attempts WHERE invitation_id = $1")
                 .bind(code.id().as_str())
                 .fetch_one(&mut *transaction)
                 .await?;
@@ -261,7 +330,7 @@ impl GatewayRepository {
             )
         {
             sqlx::query(
-                "INSERT INTO invitation_attempts (invitation_id, attempted_at) VALUES (?, ?)",
+                "INSERT INTO invitation_attempts (invitation_id, attempted_at) VALUES ($1, $2)",
             )
             .bind(code.id().as_str())
             .bind(now)
@@ -272,8 +341,8 @@ impl GatewayRepository {
         }
         let result = sqlx::query(
             "UPDATE invitations
-             SET state = 'claimed', claimed_at = ?, bound_agent_id = ?, bound_key_id = ?
-             WHERE invitation_id = ? AND state = 'created'",
+             SET state = 'claimed', claimed_at = $1, bound_agent_id = $2, bound_key_id = $3
+             WHERE invitation_id = $4 AND state = 'created'",
         )
         .bind(now)
         .bind(agent_id)
@@ -286,7 +355,7 @@ impl GatewayRepository {
                 "enrollment invitation was consumed concurrently".into(),
             ));
         }
-        sqlx::query("DELETE FROM invitation_attempts WHERE invitation_id = ?")
+        sqlx::query("DELETE FROM invitation_attempts WHERE invitation_id = $1")
             .bind(code.id().as_str())
             .execute(&mut *transaction)
             .await?;
@@ -301,7 +370,8 @@ impl GatewayRepository {
     ) -> GatewayResult<()> {
         sqlx::query(
             "UPDATE invitations SET state = 'expired'
-             WHERE invitation_id = ? AND expires_at < ? AND state IN ('created', 'claimed', 'failed')",
+             WHERE invitation_id = $1 AND expires_at < $2
+               AND state IN ('created', 'claimed', 'failed')",
         )
         .bind(invitation_id)
         .bind(now)
@@ -311,7 +381,7 @@ impl GatewayRepository {
     }
 }
 
-fn invitation_from_row(row: &sqlx::sqlite::SqliteRow) -> GatewayResult<InvitationStatus> {
+fn invitation_from_row(row: &PgRow) -> GatewayResult<InvitationStatus> {
     let invitation_id = row
         .try_get::<String, _>("invitation_id")?
         .parse::<InvitationId>()
@@ -335,9 +405,11 @@ fn invitation_from_row(row: &sqlx::sqlite::SqliteRow) -> GatewayResult<Invitatio
             ))));
         },
     };
-    let snapshot: Option<String> = row.try_get("latest_snapshot_json")?;
     Ok(InvitationStatus {
         invitation_id,
+        site_id: row
+            .try_get::<String, _>("site_id")?
+            .parse::<SiteId>()?,
         label: row.try_get("label")?,
         state,
         created_at: row.try_get("created_at")?,
@@ -350,27 +422,11 @@ fn invitation_from_row(row: &sqlx::sqlite::SqliteRow) -> GatewayResult<Invitatio
         last_error: row.try_get("last_error")?,
         agent_id: row.try_get("bound_agent_id")?,
         key_id: row.try_get("bound_key_id")?,
-        latest_snapshot: snapshot
-            .map(|value| serde_json::from_str(&value))
+        latest_snapshot: row
+            .try_get::<Option<serde_json::Value>, _>("latest_snapshot")?
+            .map(serde_json::from_value)
             .transpose()?,
     })
-}
-
-#[cfg(unix)]
-async fn set_owner_only_permissions(path: &Path) -> GatewayResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = tokio::fs::metadata(path)
-        .await?
-        .permissions();
-    permissions.set_mode(0o600);
-    tokio::fs::set_permissions(path, permissions).await?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn set_owner_only_permissions(_path: &Path) -> GatewayResult<()> {
-    Ok(())
 }
 
 #[cfg(test)]
@@ -378,19 +434,43 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
+    use secrecy::SecretString;
 
     use super::GatewayRepository;
+    use crate::audit::AuditContext;
+    use crate::identity::ActorId;
     use crate::onboarding::{InvitationCode, InvitationState};
 
     #[tokio::test]
+    #[ignore = "requires INARI_TEST_DATABASE_URL"]
     async fn invitation_claim_is_transactional_and_one_use() {
-        let repository = GatewayRepository::in_memory()
+        let database_url = std::env::var("INARI_TEST_DATABASE_URL")
+            .expect("INARI_TEST_DATABASE_URL must be set for PostgreSQL integration tests");
+        let repository = GatewayRepository::connect(&SecretString::from(database_url), 1, 4)
             .await
             .expect("repository should initialize");
         let code = InvitationCode::generate().expect("code should generate");
-        let now = Utc::now();
+        let organization_id = "org_test"
+            .parse()
+            .expect("organization ID should parse");
+        let site_id = "site_test"
+            .parse()
+            .expect("site ID should parse");
         repository
-            .create_invitation(&code, Some("Front desk"), now, now + chrono::Duration::minutes(10))
+            .ensure_organization(&organization_id, "Test organization", &site_id, "Test site")
+            .await
+            .expect("organization should persist");
+        let now = Utc::now();
+        let audit = AuditContext::new(ActorId::from_oidc_subject("test-operator"), None);
+        repository
+            .create_invitation(
+                &code,
+                &organization_id,
+                &site_id,
+                Some("Front desk"),
+                now..now + chrono::Duration::minutes(10),
+                &audit,
+            )
             .await
             .expect("invitation should persist");
         repository
@@ -399,7 +479,7 @@ mod tests {
             .expect("first claim should succeed");
         assert!(
             repository
-                .claim_invitation(&code, "agt_other", "kid_other", now, Duration::from_secs(60), 5,)
+                .claim_invitation(&code, "agt_other", "kid_other", now, Duration::from_secs(60), 5)
                 .await
                 .is_err()
         );

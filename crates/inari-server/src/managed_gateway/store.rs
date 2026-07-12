@@ -1,14 +1,12 @@
 use chrono::Utc;
-use inari_gateway::protocol::{AgentId, AgentStatus};
-use inari_gateway::{
-    AgentEnrollmentRecord, EnrollmentCredential as PersistedEnrollmentCredential, GatewayError,
-    GatewayRepository,
-};
-use serde_json::Value;
+use inari_gateway::protocol::{AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord, JobState};
+use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
+use inari_gateway::{AgentEnrollmentRecord, GatewayError, GatewayRepository};
+use sha2::{Digest, Sha256};
 
 use super::models::{
-    AgentPublicationList, CommandHistoryResponse, EnrollmentCredential, StoredAgentEnrollment,
-    StoredControllerCommand, SubmitControllerCommandRequest,
+    AgentPublicationList, CommandHistory, JobList, JobRequest, StoredAgentEnrollment,
+    StoredControllerCommand,
 };
 use crate::error::{AppError, AppResult};
 
@@ -21,32 +19,46 @@ impl ManagedGatewayStore {
         Self { repository }
     }
 
+    pub(super) async fn sites(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> AppResult<Vec<SiteSummary>> {
+        self.repository
+            .sites(organization_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn agents(
+        &self,
+        organization_id: &OrganizationId,
+        site_id: Option<&SiteId>,
+    ) -> AppResult<Vec<AgentSummary>> {
+        self.repository
+            .agents(organization_id, site_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn devices(&self, agent_id: &AgentId) -> AppResult<Vec<DeviceSummary>> {
+        self.repository
+            .devices(agent_id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(super) async fn enroll(
         &self,
         enrollment: StoredAgentEnrollment,
-        credential: EnrollmentCredential,
-        snapshot: Value,
+        invitation_id: String,
+        snapshot: GatewaySnapshot,
     ) -> AppResult<()> {
-        let credential = match credential {
-            EnrollmentCredential::ConfiguredToken { token_hash } => {
-                let mut digest = [0_u8; 32];
-                hex::decode_to_slice(token_hash, &mut digest).map_err(|source| {
-                    AppError::internal(
-                        "enrollment_token_hash_invalid",
-                        "Configured enrollment token hash is invalid.",
-                    )
-                    .with_source(source)
-                })?;
-                PersistedEnrollmentCredential::ConfiguredToken { digest }
-            },
-            EnrollmentCredential::Invite { invite_id } => {
-                PersistedEnrollmentCredential::Invitation { invitation_id: invite_id }
-            },
-        };
         self.repository
             .enroll_agent(
                 AgentEnrollmentRecord {
                     agent_id: enrollment.agent_id,
+                    organization_id: enrollment.organization_id,
+                    site_id: enrollment.site_id,
                     key_id: enrollment.key_id,
                     jwk_thumbprint: enrollment.public_jwk_fingerprint,
                     public_jwk: enrollment.public_jwk,
@@ -56,7 +68,7 @@ impl ManagedGatewayStore {
                     controller_actions: enrollment.controller_actions,
                     enrolled_at: enrollment.enrolled_at,
                 },
-                credential,
+                &invitation_id,
                 &snapshot,
             )
             .await
@@ -65,7 +77,9 @@ impl ManagedGatewayStore {
 
     pub(super) async fn enqueue_command(
         &self,
-        request: SubmitControllerCommandRequest,
+        agent_id: &AgentId,
+        job_id: &inari_gateway::protocol::JobId,
+        request: JobRequest,
         controller_actions: &[String],
     ) -> AppResult<StoredControllerCommand> {
         if !controller_actions
@@ -76,14 +90,14 @@ impl ManagedGatewayStore {
                 "Controller command is not allowed by managed gateway permissions.",
             ));
         }
-        let agent_id = request.agent_id;
-        let command_id = request.command_id;
+        let request_fingerprint: [u8; 32] = Sha256::digest(serde_json::to_vec(&request)?).into();
         let command = request.command;
         let persisted = self
             .repository
             .enqueue_command(
-                &agent_id,
-                command_id.as_deref(),
+                agent_id.as_str(),
+                Some(job_id.as_str()),
+                &request_fingerprint,
                 move |sequence, command_id, message_id, issued_at| {
                     let command = command.into_message(
                         message_id.into(),
@@ -91,7 +105,7 @@ impl ManagedGatewayStore {
                         sequence,
                         issued_at,
                     );
-                    serde_json::to_value(command).map_err(GatewayError::from)
+                    Ok(command)
                 },
             )
             .await?;
@@ -99,7 +113,7 @@ impl ManagedGatewayStore {
             agent_id: persisted.agent_id,
             namespace: persisted.namespace,
             command_id: persisted.command_id,
-            command: serde_json::from_value(persisted.command)?,
+            command: persisted.command,
         })
     }
 
@@ -118,16 +132,31 @@ impl ManagedGatewayStore {
         &self,
         agent_id: &str,
         from_sequence: u64,
-    ) -> AppResult<CommandHistoryResponse> {
+    ) -> AppResult<CommandHistory> {
         let (selected_protocol_version, commands) = self
             .repository
             .command_history(agent_id, from_sequence)
             .await?;
-        let commands = commands
+        Ok(CommandHistory { selected_protocol_version, commands })
+    }
+
+    pub(super) async fn job(&self, job_id: &JobId) -> AppResult<JobRecord> {
+        self.repository
+            .job(job_id)
+            .await
+            .and_then(job_record)
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn jobs(&self, agent_id: &AgentId) -> AppResult<JobList> {
+        let jobs = self
+            .repository
+            .jobs(agent_id.as_str())
+            .await?
             .into_iter()
-            .map(serde_json::from_value)
+            .map(job_record)
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(CommandHistoryResponse { selected_protocol_version, commands })
+        Ok(JobList { jobs })
     }
 
     pub(super) async fn record_publication(
@@ -174,4 +203,28 @@ impl ManagedGatewayStore {
             })
             .map_err(AppError::from)
     }
+}
+
+fn job_record(job: inari_gateway::PersistedCommand) -> inari_gateway::GatewayResult<JobRecord> {
+    let state = match job.state.as_str() {
+        "queued" => JobState::Queued,
+        "published" => JobState::Published,
+        "accepted" => JobState::Accepted,
+        "rejected" => JobState::Rejected,
+        "completed" => JobState::Completed,
+        "failed" => JobState::Failed,
+        "superseded" => JobState::Superseded,
+        state => {
+            return Err(GatewayError::CorruptState(format!(
+                "stored job state {state:?} is invalid"
+            )));
+        },
+    };
+    Ok(JobRecord {
+        job_id: job.command_id.parse()?,
+        agent_id: job.agent_id.parse()?,
+        state,
+        issued_at: job.issued_at,
+        updated_at: job.updated_at,
+    })
 }
