@@ -43,8 +43,11 @@ fingerprints prepared for an unreleased hierarchy.
 
 ## GitHub environment
 
-Create a protected environment named `windows-release`. Require maintainer
-approval and restrict it to the `main` branch. Store:
+Create a protected environment named `windows-release` and restrict it to the
+`main` branch. When the repository plan supports required reviewers for private
+repositories, require maintainer approval and disable self-review. GitHub does
+not expose that protection rule on every plan, so the branch restriction remains
+mandatory even when the review gate is unavailable. Store:
 
 - base64 of the publisher PFX as `WINDOWS_SIGNING_PFX_BASE64`;
 - the PFX export password as `WINDOWS_SIGNING_PFX_PASSWORD`;
