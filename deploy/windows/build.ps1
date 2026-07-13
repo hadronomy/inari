@@ -191,16 +191,17 @@ try {
     $ReleaseDirectory = Join-Path $WindowsTarget $Metadata.version
     New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
 
-    $ExpectedPublisherName = [Security.Cryptography.X509Certificates.X500DistinguishedName]::new(
-        [string]$Metadata.publisher
+    $ActualPublisherName = $PublisherCertificate.Subject.Normalize(
+        [Text.NormalizationForm]::FormC
     )
-    $ActualPublisherIdentity = [Convert]::ToHexString(
-        $PublisherCertificate.SubjectName.RawData
+    $ExpectedPublisherName = ([string]$Metadata.publisher).Normalize(
+        [Text.NormalizationForm]::FormC
     )
-    $ExpectedPublisherIdentity = [Convert]::ToHexString(
-        $ExpectedPublisherName.RawData
-    )
-    if ($ActualPublisherIdentity -cne $ExpectedPublisherIdentity) {
+    if (-not [string]::Equals(
+        $ActualPublisherName,
+        $ExpectedPublisherName,
+        [StringComparison]::Ordinal
+    )) {
         throw (
             "Publisher certificate subject '$($PublisherCertificate.Subject)' " +
             "does not match package publisher '$($Metadata.publisher)'."
