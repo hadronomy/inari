@@ -14,7 +14,7 @@ test("updates only the chart version while preserving comments and order", async
   const manifest = path.join(chartDir, "Chart.yaml");
   await writeFile(
     manifest,
-    "# kept\napiVersion: v2\nname: inari\ndescription: Private device operations\nversion: 0.2.0\n",
+    "# kept\napiVersion: v2\nname: inari\ndescription: Production deployment for the Inari private device controller and Zenoh data plane\nversion: 0.2.0\n",
   );
 
   const chart = await HelmChart.load(absolutePath(manifest));
@@ -22,6 +22,6 @@ test("updates only the chart version while preserving comments and order", async
   await chart.write();
 
   expect(await readFile(manifest, "utf8")).toBe(
-    "# kept\napiVersion: v2\nname: inari\ndescription: Private device operations\nversion: 0.3.0\n",
+    "# kept\napiVersion: v2\nname: inari\ndescription: Production deployment for the Inari private device controller and Zenoh data plane\nversion: 0.3.0\n",
   );
 });

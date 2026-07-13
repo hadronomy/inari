@@ -8,6 +8,7 @@ import { bundledPython } from "./private-python.ts";
 
 export const release = tegami<"edge" | "controller-chart">({
   conventionalCommits: true,
+  ignore: [/^npm:/],
   groups: {
     edge: { prerelease: "alpha", syncBump: true, syncGitTag: true },
     "controller-chart": { syncGitTag: true },

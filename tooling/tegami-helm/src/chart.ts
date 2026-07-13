@@ -51,7 +51,7 @@ export class HelmChart extends WorkspacePackage {
   }
 
   async write(): Promise<void> {
-    await writeFile(this.manifestPath, this.document.toString(), "utf8");
+    await writeFile(this.manifestPath, this.document.toString({ lineWidth: 0 }), "utf8");
   }
 
   static async load(manifestPath: AbsolutePath): Promise<HelmChart> {
