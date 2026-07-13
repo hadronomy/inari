@@ -9,6 +9,7 @@ $WindowsTarget = Join-Path $WorkspaceRoot "target\release\windows"
 $PyInstallerTarget = Join-Path $WorkspaceRoot "target\pyinstaller"
 $PackageRoot = Join-Path $WindowsTarget "package"
 $ExecutableIcon = Join-Path $WindowsTarget "assets\InariDeviceCenter.ico"
+$BundleSpec = Join-Path $PSScriptRoot "inari.spec"
 
 function Require-Command([string]$Name) {
     $Command = Get-Command $Name -ErrorAction SilentlyContinue
@@ -60,6 +61,12 @@ function Require-Environment([string]$Name) {
     return $Value
 }
 
+function Assert-NativeCommandSucceeded([int]$ExitCode, [string]$Operation) {
+    if ($ExitCode -ne 0) {
+        throw "$Operation failed with exit code $ExitCode."
+    }
+}
+
 function Get-BasicConstraints(
     [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
 ) {
@@ -79,6 +86,7 @@ function Get-EnhancedKeyUsage(
 $MakeAppx = Require-WindowsSdkCommand "makeappx.exe"
 $SignTool = Require-WindowsSdkCommand "signtool.exe"
 $Syft = Require-Command "syft"
+$Uv = Require-Command "uv"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
 $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
 $RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
@@ -164,17 +172,21 @@ $Chain.Dispose()
 
 Push-Location $WorkspaceRoot
 try {
-    uv sync --all-packages --frozen --group windows-build
-    uv run --no-sync python deploy/windows/build.py icon --output $ExecutableIcon
-    uv run --no-sync pyinstaller `
+    & $Uv sync --all-packages --frozen --group windows-build
+    Assert-NativeCommandSucceeded $LASTEXITCODE "Python dependency synchronization"
+    & $Uv run --no-sync python deploy/windows/build.py icon --output $ExecutableIcon
+    Assert-NativeCommandSucceeded $LASTEXITCODE "Windows icon generation"
+    & $Uv run --no-sync pyinstaller `
         --noconfirm `
         --clean `
         --workpath (Join-Path $PyInstallerTarget "work") `
         --distpath (Join-Path $PyInstallerTarget "dist") `
-        deploy/windows/inari.spec
+        $BundleSpec
+    Assert-NativeCommandSucceeded $LASTEXITCODE "PyInstaller bundle creation"
 
     $Payload = Join-Path $PyInstallerTarget "dist\InariDeviceCenter"
-    $MetadataJson = uv run --no-sync python deploy/windows/build.py package --payload $Payload --output $PackageRoot
+    $MetadataJson = & $Uv run --no-sync python deploy/windows/build.py package --payload $Payload --output $PackageRoot
+    Assert-NativeCommandSucceeded $LASTEXITCODE "MSIX package preparation"
     $Metadata = $MetadataJson | ConvertFrom-Json
     $ReleaseDirectory = Join-Path $WindowsTarget $Metadata.version
     New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
