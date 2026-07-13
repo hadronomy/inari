@@ -1,6 +1,7 @@
 name: Kubernetes distribution
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - .github/workflows/kubernetes.yaml

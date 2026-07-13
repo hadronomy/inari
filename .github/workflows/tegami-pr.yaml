@@ -1,6 +1,12 @@
 name: Tegami PR
 
 on:
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request to preview
+        required: true
+        type: number
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -32,7 +38,10 @@ jobs:
         run: bun run build:release
 
       - name: Create release preview
-        run: node tooling/release/dist/cli.mjs pr preview --artifact tegami-pr-preview.md
+        run: >-
+          node tooling/release/dist/cli.mjs pr preview
+          --artifact tegami-pr-preview.md
+          --number "${{ github.event.pull_request.number || inputs.pull_request }}"
 
       - name: Upload preview
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

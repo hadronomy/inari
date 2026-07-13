@@ -58,7 +58,9 @@ two-stage lifecycle:
 Pull requests run Tegami's unprivileged preview workflow. A separate
 `workflow_run` job downloads only the generated Markdown artifact and posts the
 comment with trusted repository code. Pull-request code never receives a token
-with write access.
+with write access. GitHub suppresses ordinary pull-request events created by
+its workflow token, so the version job explicitly dispatches the same read-only
+preview and Kubernetes checks against the generated branch.
 
 ## Local maintainer commands
 

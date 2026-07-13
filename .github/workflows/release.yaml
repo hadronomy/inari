@@ -106,6 +106,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
@@ -127,6 +128,28 @@ jobs:
         run: bun run release -- ci
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Validate the generated version pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pull_request="$(
+            gh pr list \
+              --head tegami/version-packages \
+              --state open \
+              --json number \
+              --jq '.[0].number'
+          )"
+          if [[ -z "${pull_request}" ]]; then
+            printf 'Tegami did not leave an open Version Packages pull request.\n' >&2
+            exit 1
+          fi
+          gh workflow run tegami-pr.yaml \
+            --ref tegami/version-packages \
+            --field "pull_request=${pull_request}"
+          gh workflow run kubernetes.yaml --ref tegami/version-packages
 
   windows:
     name: Build signed Device Center
