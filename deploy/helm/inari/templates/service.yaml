@@ -4,11 +4,20 @@ metadata:
   name: {{ include "inari.fullname" . }}
   labels:
     {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (dict) .Values.commonAnnotations .Values.service.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  type: {{ .Values.service.type }}
   selector:
-    {{- include "inari.selectorLabels" . | nindent 4 }}
+    {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 4 }}
   ports:
     - name: http
-      port: 80
+      port: {{ .Values.service.port }}
       targetPort: http
       protocol: TCP

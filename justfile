@@ -31,9 +31,18 @@ typecheck:
 build-web:
     cargo leptos build --release
 
+# Lint, render, schema-check, and package the Kubernetes distribution.
+check-kubernetes:
+    scripts/validate-kubernetes.sh
+
+# Validate rendered manifests through a real Kubernetes API server in kind.
+check-kubernetes-server:
+    scripts/validate-kubernetes-server.sh
+
 # Run the repository verification suite.
 check: lint lint-wasm typecheck
     cargo fmt --check
     cargo test --workspace
     uv run --directory packages/agent --group dev pytest tests -q
     uv run --directory packages/agent_tray --group dev pytest tests -q
+    just check-kubernetes

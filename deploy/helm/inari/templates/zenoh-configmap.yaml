@@ -1,0 +1,96 @@
+{{- if and .Values.zenoh.enabled (not .Values.zenoh.config.existingConfigMap) }}
+{{- $routerEndpoints := list }}
+{{- range $ordinal := until (int .Values.zenoh.replicas) }}
+{{- $endpoint := printf "tls/%s-zenoh-%d.%s-zenoh-headless.%s.svc.cluster.local:%d" (include "inari.fullname" $) $ordinal (include "inari.fullname" $) $.Release.Namespace (int $.Values.zenoh.service.port) }}
+{{- $routerEndpoints = append $routerEndpoints $endpoint }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "inari.zenohConfigMapName" . }}
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zenoh
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  {{ .Values.zenoh.config.key }}: |
+    {
+      "mode": "router",
+      "listen": {
+        "endpoints": ["tls/[::]:{{ .Values.zenoh.service.port }}"]
+      },
+      "connect": {
+        "endpoints": {{ $routerEndpoints | toJson }},
+        "exit_on_failure": false
+      },
+      "scouting": {
+        "multicast": {
+          "enabled": false
+        }
+      },
+      "adminspace": {
+        "enabled": {{ .Values.zenoh.config.adminSpace.enabled }},
+        "permissions": {
+          "read": {{ .Values.zenoh.config.adminSpace.read }},
+          "write": {{ .Values.zenoh.config.adminSpace.write }}
+        }
+      },
+      "timestamping": {
+        "enabled": true,
+        "drop_future_timestamp": false
+      },
+      "transport": {
+        "link": {
+          "tls": {
+            "root_ca_certificate": "/etc/zenoh/tls/ca.crt",
+            "listen_private_key": "/etc/zenoh/tls/tls.key",
+            "listen_certificate": "/etc/zenoh/tls/tls.crt",
+            "connect_private_key": "/etc/zenoh/tls/tls.key",
+            "connect_certificate": "/etc/zenoh/tls/tls.crt",
+            "enable_mtls": true,
+            "verify_name_on_connect": true,
+            "close_link_on_expiration": true
+          }
+        }
+      },
+      "access_control": {
+        "enabled": {{ .Values.zenoh.config.accessControl.enabled }},
+        "default_permission": {{ .Values.zenoh.config.accessControl.defaultPermission | quote }},
+        "rules": [
+          {
+            "id": "managed-keyspace",
+            "messages": [
+              "put",
+              "delete",
+              "declare_subscriber",
+              "query",
+              "reply",
+              "declare_queryable",
+              "liveliness_token",
+              "liveliness_query",
+              "declare_liveliness_subscriber"
+            ],
+            "flows": ["ingress", "egress"],
+            "permission": "allow",
+            "key_exprs": [{{ printf "%s/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
+          }
+        ],
+        "subjects": [
+          {
+            "id": "mutually-authenticated-tls",
+            "link_protocols": ["tls"]
+          }
+        ],
+        "policies": [
+          {
+            "id": "managed-keyspace-over-mtls",
+            "rules": ["managed-keyspace"],
+            "subjects": ["mutually-authenticated-tls"]
+          }
+        ]
+      }
+    }
+{{- end }}

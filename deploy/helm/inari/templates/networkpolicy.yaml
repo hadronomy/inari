@@ -5,20 +5,25 @@ metadata:
   name: {{ include "inari.fullname" . }}-controller
   labels:
     {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
 spec:
   podSelector:
     matchLabels:
-      {{- include "inari.selectorLabels" . | nindent 6 }}
-  policyTypes: ["Ingress", "Egress"]
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
   ingress:
     - from:
         - namespaceSelector:
-            {{- toYaml .Values.networkPolicy.ingressNamespaceSelector | nindent 12 }}
-          podSelector:
-            {{- toYaml .Values.networkPolicy.ingressPodSelector | nindent 12 }}
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
       ports:
         - port: 8080
           protocol: TCP
+    {{- with .Values.networkPolicy.controller.additionalIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
     - ports:
         - port: 53
@@ -28,10 +33,22 @@ spec:
     - ports:
         - port: 443
           protocol: TCP
+    - ports:
         - port: 5432
           protocol: TCP
+    {{- if .Values.zenoh.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 14 }}
+      ports:
         - port: {{ .Values.zenoh.service.port }}
           protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.controller.additionalEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- if .Values.zenoh.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -39,23 +56,67 @@ metadata:
   name: {{ include "inari.fullname" . }}-zenoh
   labels:
     {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zenoh
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: {{ include "inari.name" . }}
-      app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/component: zenoh
-  policyTypes: ["Ingress", "Egress"]
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
   ingress:
-    - ports:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+      ports:
         - port: {{ .Values.zenoh.service.port }}
           protocol: TCP
+    {{- with .Values.networkPolicy.zenoh.additionalIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   egress:
     - ports:
         - port: 53
           protocol: UDP
         - port: 53
           protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 14 }}
+      ports:
         - port: {{ .Values.zenoh.service.port }}
           protocol: TCP
+    {{- with .Values.networkPolicy.zenoh.additionalEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- if .Values.migrations.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "inari.fullname" . }}-migration
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "migration") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}
 {{- end }}

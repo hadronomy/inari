@@ -1,9 +1,15 @@
+{{- include "inari.validateValues" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "inari.fullname" . }}
   labels:
     {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 data:
   inari-server.toml: |
     config_version = 1
@@ -12,12 +18,15 @@ data:
     bind = "0.0.0.0:8080"
     public_url = {{ .Values.server.publicUrl | quote }}
     production = true
+    request_timeout = {{ .Values.server.requestTimeout | quote }}
+    shutdown_grace_period = {{ .Values.server.shutdownGracePeriod | quote }}
+    max_body_size_bytes = {{ int .Values.server.maxBodySizeBytes }}
 
     [database]
     url_file = "/var/run/secrets/inari/database/url"
     migrate_on_startup = false
-    min_connections = 2
-    max_connections = 32
+    min_connections = {{ .Values.database.minConnections }}
+    max_connections = {{ .Values.database.maxConnections }}
 
     [organization]
     id = {{ .Values.organization.id | quote }}
@@ -25,50 +34,77 @@ data:
     default_site_id = {{ .Values.organization.defaultSiteId | quote }}
     default_site_name = {{ .Values.organization.defaultSiteName | quote }}
 
+    [observability]
+    format = {{ .Values.observability.format | quote }}
+    filter = {{ .Values.observability.filter | quote }}
+    include_targets = {{ .Values.observability.includeTargets }}
+    include_thread_ids = {{ .Values.observability.includeThreadIds }}
+    include_thread_names = {{ .Values.observability.includeThreadNames }}
+
     [identity.oidc]
     enabled = true
-    issuer_url = {{ .Values.identity.issuerUrl | quote }}
-    client_id = {{ .Values.identity.clientId | quote }}
+    issuer_url = {{ .Values.identity.oidc.issuerUrl | quote }}
+    client_id = {{ .Values.identity.oidc.clientId | quote }}
     client_secret_file = "/var/run/secrets/inari/oidc/client-secret"
-    scopes = ["openid", "profile", "email", "urn:zitadel:iam:org:project:roles"]
-    role_claim = {{ .Values.identity.roleClaim | quote }}
+    scopes = {{ .Values.identity.oidc.scopes | toJson }}
+    role_claim = {{ .Values.identity.oidc.roleClaim | quote }}
 
     [identity.oidc.role_mapping]
-    {{- range $claim, $role := .Values.identity.roleMapping }}
+    {{- range $claim, $role := .Values.identity.oidc.roleMapping }}
     {{ $claim | quote }} = {{ $role | quote }}
     {{- end }}
 
+    [http.zenoh_rest]
+    enabled = {{ .Values.http.zenohRest.enabled }}
+    allow_admin_space = {{ .Values.http.zenohRest.allowAdminSpace }}
+    query_timeout = {{ .Values.http.zenohRest.queryTimeout | quote }}
+    sse_keep_alive = {{ .Values.http.zenohRest.sseKeepAlive | quote }}
+    sse_buffer = {{ .Values.http.zenohRest.sseBuffer }}
+    max_concurrent_requests = {{ .Values.http.zenohRest.maxConcurrentRequests }}
+
     [managed_gateway]
-    enabled = true
+    enabled = {{ .Values.managedGateway.enabled }}
     controller_name = {{ .Values.managedGateway.controllerName | quote }}
     controller_instance_id = {{ .Values.managedGateway.controllerInstanceId | quote }}
-    supported_protocol_versions = ["2026-07-12"]
-    controller_actions = ["system:read", "devices:read", "events:read", "jobs:create", "jobs:cancel", "commands:execute"]
+    supported_protocol_versions = {{ .Values.managedGateway.supportedProtocolVersions | toJson }}
+    controller_actions = {{ .Values.managedGateway.controllerActions | toJson }}
 
     [managed_gateway.onboarding]
-    enabled = true
+    enabled = {{ .Values.managedGateway.onboarding.enabled }}
     public_base_url = {{ .Values.server.publicUrl | quote }}
-    invite_ttl = {{ .Values.managedGateway.invitationTtl | quote }}
+    invite_ttl = {{ .Values.managedGateway.onboarding.invitationTtl | quote }}
+    failed_attempt_window = {{ .Values.managedGateway.onboarding.failedAttemptWindow | quote }}
+    max_failed_attempts = {{ .Values.managedGateway.onboarding.maxFailedAttempts }}
 
     [managed_gateway.data_plane]
-    connect_endpoints = {{ .Values.managedGateway.zenohPublicEndpoints | toJson }}
-    namespace_prefix = "iot/v1/agents"
-    close_link_on_expiration = true
+    connect_endpoints = {{ .Values.managedGateway.dataPlane.publicEndpoints | toJson }}
+    namespace_prefix = {{ .Values.managedGateway.dataPlane.namespacePrefix | quote }}
+    close_link_on_expiration = {{ .Values.managedGateway.dataPlane.closeLinkOnExpiration }}
 
     [managed_gateway.certificate]
-    mode = "step_ca"
-    step_ca_base_url = {{ .Values.managedGateway.stepCa.baseUrl | quote }}
-    step_ca_root_fingerprint = {{ .Values.managedGateway.stepCa.rootFingerprint | quote }}
-    step_ca_provisioner = {{ .Values.managedGateway.stepCa.provisioner | quote }}
-    step_ca_key_id = {{ .Values.managedGateway.stepCa.keyId | quote }}
+    mode = {{ .Values.managedGateway.certificate.mode | quote }}
+    {{- if eq .Values.managedGateway.certificate.mode "step_ca" }}
+    step_ca_base_url = {{ .Values.managedGateway.certificate.stepCa.baseUrl | quote }}
+    step_ca_root_fingerprint = {{ .Values.managedGateway.certificate.stepCa.rootFingerprint | quote }}
+    step_ca_provisioner = {{ .Values.managedGateway.certificate.stepCa.provisioner | quote }}
+    step_ca_key_id = {{ .Values.managedGateway.certificate.stepCa.keyId | quote }}
     step_ca_signing_key_file = "/var/run/secrets/inari/step-ca/provisioner-key.pem"
-    step_ca_signing_algorithm = {{ .Values.managedGateway.stepCa.signingAlgorithm | quote }}
-    requires_mutual_tls_after_issuance = true
+    step_ca_signing_algorithm = {{ .Values.managedGateway.certificate.stepCa.signingAlgorithm | quote }}
+    step_ca_token_ttl = {{ .Values.managedGateway.certificate.stepCa.tokenTtl | quote }}
+    step_ca_authorized_sans = {{ .Values.managedGateway.certificate.stepCa.authorizedSans | toJson }}
+    {{- end }}
+    requires_mutual_tls_after_issuance = {{ .Values.managedGateway.certificate.requiresMutualTlsAfterIssuance }}
 
     [zenoh]
-    enabled = true
+    enabled = {{ and .Values.managedGateway.enabled .Values.zenoh.enabled }}
     mode = "client"
+    {{- if and .Values.managedGateway.enabled .Values.zenoh.enabled }}
     connect_endpoints = ["tls/{{ include "inari.fullname" . }}-zenoh:{{ .Values.zenoh.service.port }}"]
+
+    [zenoh.admin_space]
+    enabled = false
+    read = true
+    write = false
 
     [zenoh.tls]
     root_ca_certificate = "/var/run/secrets/inari/zenoh/ca.crt"
@@ -80,4 +116,5 @@ data:
     [zenoh.access_control]
     enabled = true
     default_permission = "deny"
-    managed_gateway_namespace_prefix = "iot/v1/agents"
+    managed_gateway_namespace_prefix = {{ .Values.managedGateway.dataPlane.namespacePrefix | quote }}
+    {{- end }}

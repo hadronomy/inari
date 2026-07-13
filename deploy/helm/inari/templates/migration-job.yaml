@@ -1,40 +1,54 @@
+{{- if .Values.migrations.enabled }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "inari.fullname" . }}-migrate-{{ .Release.Revision }}
+  name: {{ include "inari.migrationJobName" . }}
   labels:
     {{- include "inari.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
   annotations:
+    {{- if .Values.migrations.helmHook }}
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    {{- end }}
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  backoffLimit: 3
-  ttlSecondsAfterFinished: 300
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
-        {{- include "inari.labels" . | nindent 8 }}
-        app.kubernetes.io/component: migration
+        {{- include "inari.componentSelectorLabels" (dict "root" . "component" "migration") | nindent 8 }}
+        {{- with .Values.migrations.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.migrations.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       serviceAccountName: {{ include "inari.serviceAccountName" . }}
       automountServiceAccountToken: false
       securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: migrate
-          image: {{ include "inari.image" . | quote }}
+          image: {{ include "inari.controllerImage" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["database", "migrate"]
+          args:
+            - database
+            - migrate
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            readOnlyRootFilesystem: true
+            {{- toYaml .Values.controller.containerSecurityContext | nindent 12 }}
           env:
             - name: INARI_SERVER_DATABASE__URL_FILE
               value: /var/run/secrets/inari/database/url
@@ -44,12 +58,16 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
       volumes:
         - name: database
           secret:
-            secretName: {{ .Values.secrets.database.name }}
+            secretName: {{ .Values.database.secret.name }}
             items:
-              - key: {{ .Values.secrets.database.key }}
+              - key: {{ .Values.database.secret.key }}
                 path: url
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.controller.tmpSizeLimit }}
+{{- end }}

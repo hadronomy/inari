@@ -1,5 +1,18 @@
 [tools]
 just = "latest"
+actionlint = "1.7.12"
+helm = ["4.2.3", "3.21.3"]
+kustomize = "5.8.1"
+kubeconform = "0.8.0"
+kube-linter = "0.8.3"
+kubectl = "1.36.2"
+cosign = "3.1.1"
+shellcheck = "0.11.0"
+yamllint = "1.38.0"
+yq = "4.53.3"
+"aqua:helm/chart-testing" = "3.14.0"
+"aqua:kubernetes-sigs/kind" = "0.32.0"
+"pipx:yamale" = "6.1.0"
 "pipx:marimo" = { version = "latest", recomended = "" }
 typst = "0.14.2"
 tinymist = "0.14.2"

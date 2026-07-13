@@ -4,43 +4,61 @@ metadata:
   name: {{ include "inari.fullname" . }}
   labels:
     {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  {{- with (mergeOverwrite (dict) .Values.commonAnnotations .Values.controller.deploymentAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  {{- if not .Values.controller.autoscaling.enabled }}
+  replicas: {{ .Values.controller.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.controller.revisionHistoryLimit }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
-      {{- include "inari.selectorLabels" . | nindent 6 }}
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 6 }}
   template:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- with .Values.podAnnotations }}
+        {{- with .Values.controller.rolloutNonce }}
+        inari.dev/rollout-nonce: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.controller.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "inari.selectorLabels" . | nindent 8 }}
-        {{- with .Values.podLabels }}
+        {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 8 }}
+        {{- with .Values.controller.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "inari.serviceAccountName" . }}
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds }}
       securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
+        {{- toYaml .Values.controller.podSecurityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.controller.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.controller.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
       containers:
         - name: controller
-          image: {{ include "inari.image" . | quote }}
+          image: {{ include "inari.controllerImage" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-            readOnlyRootFilesystem: true
+            {{- toYaml .Values.controller.containerSecurityContext | nindent 12 }}
           env:
             - name: INARI_SERVER_CONFIG
               value: /etc/inari/inari-server.toml
@@ -54,18 +72,17 @@ spec:
             httpGet:
               path: /healthz
               port: http
-            failureThreshold: 30
-            periodSeconds: 2
+            {{- toYaml .Values.controller.startupProbe | nindent 12 }}
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
-            periodSeconds: 5
+            {{- toYaml .Values.controller.readinessProbe | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
-            periodSeconds: 10
+            {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/inari
@@ -76,52 +93,90 @@ spec:
             - name: oidc
               mountPath: /var/run/secrets/inari/oidc
               readOnly: true
+            {{- if eq .Values.managedGateway.certificate.mode "step_ca" }}
             - name: step-ca
               mountPath: /var/run/secrets/inari/step-ca
               readOnly: true
+            {{- end }}
+            {{- if and .Values.managedGateway.enabled .Values.zenoh.enabled }}
             - name: zenoh-tls
               mountPath: /var/run/secrets/inari/zenoh
               readOnly: true
+            {{- end }}
             - name: tmp
               mountPath: /tmp
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml .Values.controller.resources | nindent 12 }}
       volumes:
         - name: config
           configMap:
             name: {{ include "inari.fullname" . }}
         - name: database
           secret:
-            secretName: {{ .Values.secrets.database.name }}
+            secretName: {{ .Values.database.secret.name }}
             items:
-              - key: {{ .Values.secrets.database.key }}
+              - key: {{ .Values.database.secret.key }}
                 path: url
         - name: oidc
           secret:
-            secretName: {{ .Values.secrets.oidc.name }}
+            secretName: {{ .Values.identity.oidc.clientSecret.name }}
             items:
-              - key: {{ .Values.secrets.oidc.key }}
+              - key: {{ .Values.identity.oidc.clientSecret.key }}
                 path: client-secret
+        {{- if eq .Values.managedGateway.certificate.mode "step_ca" }}
         - name: step-ca
           secret:
-            secretName: {{ .Values.secrets.stepCa.name }}
+            secretName: {{ .Values.managedGateway.certificate.stepCa.signingKey.name }}
             items:
-              - key: {{ .Values.secrets.stepCa.key }}
+              - key: {{ .Values.managedGateway.certificate.stepCa.signingKey.key }}
                 path: provisioner-key.pem
+        {{- end }}
+        {{- if and .Values.managedGateway.enabled .Values.zenoh.enabled }}
         - name: zenoh-tls
           secret:
-            secretName: {{ .Values.secrets.zenohTls.name }}
+            secretName: {{ .Values.zenoh.tls.controllerSecret.name }}
+            items:
+              - key: {{ .Values.zenoh.tls.controllerSecret.caKey }}
+                path: ca.crt
+              - key: {{ .Values.zenoh.tls.controllerSecret.certificateKey }}
+                path: tls.crt
+              - key: {{ .Values.zenoh.tls.controllerSecret.privateKeyKey }}
+                path: tls.key
+        {{- end }}
         - name: tmp
-          emptyDir: {}
-      {{- with .Values.nodeSelector }}
+          emptyDir:
+            sizeLimit: {{ .Values.controller.tmpSizeLimit }}
+      {{- with .Values.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- if .Values.controller.affinity }}
       affinity:
+        {{- toYaml .Values.controller.affinity | nindent 8 }}
+      {{- else if ne .Values.controller.podAntiAffinity "none" }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.controller.podAntiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+          {{- end }}
+      {{- end }}
+      {{- with .Values.controller.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with .Values.controller.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

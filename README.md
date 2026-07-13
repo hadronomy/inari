@@ -65,8 +65,8 @@ cargo leptos build --release
 
 Deploy the release binary together with `target/site`. Set `LEPTOS_SITE_ROOT` to that deployed site directory and configure the server through environment variables or a configuration file. Production controller state lives in externally managed PostgreSQL. Run `inari-server database migrate` before rolling controller replicas and use `inari-server database status` to verify that the schema is current. Retain `database.migrate_on_startup = true` only for a single-process development environment.
 
-The production Helm chart lives at [`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller separately from the Zenoh router StatefulSet and references existing Kubernetes Secrets rather than embedding credentials in values.
+The production Helm chart lives at [`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller separately from the Zenoh router StatefulSet and references existing Kubernetes Secrets rather than embedding credentials in values. A Kustomize-owned installation is available at [`deploy/kustomize/inari`](deploy/kustomize/inari); Helm and Kustomize are alternative lifecycle owners, not overlapping reconcilers.
 
-Controller migration ownership and recovery policy are documented in [docs/controller_database.md](docs/controller_database.md).
+The complete deployment, upgrade, certificate, network-policy, validation, and recovery procedure is documented in [docs/kubernetes.md](docs/kubernetes.md). Controller migration ownership and recovery policy are documented in [docs/controller_database.md](docs/controller_database.md).
 
 The public protocol is documented in [docs/gateway_protocol.md](docs/gateway_protocol.md). The generated operator site must be served by the Rust binary so its CSP nonce, hydration scripts, static-asset handling, and Leptos routes remain consistent.

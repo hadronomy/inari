@@ -1,7 +1,41 @@
 apiVersion: v2
 name: inari
-description: Private device controller and managed Zenoh data plane
+description: Production deployment for the Inari private device controller and Zenoh data plane
 type: application
-version: 0.1.0
-appVersion: 0.1.0-alpha.1
+version: 0.2.0
+appVersion: "0.1.0-alpha.1"
 kubeVersion: ">=1.29.0-0"
+home: https://github.com/hadronomy/odoo-iot-agent
+sources:
+  - https://github.com/hadronomy/odoo-iot-agent
+maintainers:
+  - name: hadronomy
+    url: https://github.com/hadronomy
+keywords:
+  - device-management
+  - iot
+  - odoo
+  - zenoh
+annotations:
+  artifacthub.io/category: integration-delivery
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "true"
+  artifacthub.io/links: |
+    - name: Source
+      url: https://github.com/hadronomy/odoo-iot-agent
+    - name: Support
+      url: https://github.com/hadronomy/odoo-iot-agent/issues
+    - name: Kubernetes operations guide
+      url: https://github.com/hadronomy/odoo-iot-agent/blob/main/docs/kubernetes.md
+  artifacthub.io/images: |
+    - name: inari-server
+      image: ghcr.io/hadronomy/inari-server:0.1.0-alpha.1
+    - name: zenoh
+      image: eclipse/zenoh:1.9.0
+    - name: release-test
+      image: busybox:1.37.0
+  artifacthub.io/changes: |
+    - kind: changed
+      description: Introduced the production PostgreSQL, OIDC, migration, and standalone Zenoh topology.
+    - kind: added
+      description: Added strict values validation, restricted workload defaults, and Kustomize support.

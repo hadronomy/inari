@@ -1,0 +1,16 @@
+zenoh:
+  config:
+    existingConfigMap: organization-zenoh-router
+
+controller:
+  autoscaling:
+    enabled: true
+    targetMemoryUtilizationPercentage: 75
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    - secretName: inari-http-tls
+      hosts:
+        - inari.example.com

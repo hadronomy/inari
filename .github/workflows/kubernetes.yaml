@@ -1,0 +1,88 @@
+name: Kubernetes distribution
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/kubernetes.yaml
+      - deploy/**
+      - docs/kubernetes.md
+      - justfile
+      - mise.toml
+      - scripts/validate-kubernetes*.sh
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/kubernetes.yaml
+      - deploy/**
+      - docs/kubernetes.md
+      - justfile
+      - mise.toml
+      - scripts/validate-kubernetes*.sh
+
+permissions: {}
+
+concurrency:
+  group: kubernetes-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint, render, and validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          install_args: >-
+            just
+            actionlint
+            helm@4.2.3
+            helm@3.21.3
+            kustomize
+            kubeconform
+            kube-linter
+            shellcheck
+            yamllint
+            yq
+            aqua:helm/chart-testing
+            pipx:yamale
+          cache: true
+
+      - name: Validate Kubernetes distribution
+        run: just check-kubernetes
+
+  api-server:
+    name: Kubernetes API server
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned tools
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          install_args: >-
+            just
+            helm
+            kustomize
+            kubectl
+            aqua:kubernetes-sigs/kind
+          cache: true
+
+      - name: Validate against Kubernetes
+        run: just check-kubernetes-server

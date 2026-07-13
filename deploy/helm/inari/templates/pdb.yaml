@@ -1,11 +1,41 @@
+{{- if .Values.controller.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "inari.fullname" . }}
   labels:
     {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
 spec:
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  unhealthyPodEvictionPolicy: {{ .Values.controller.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  {{- with .Values.controller.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.controller.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
   selector:
     matchLabels:
-      {{- include "inari.selectorLabels" . | nindent 6 }}
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 6 }}
+{{- end }}
+{{- if and .Values.zenoh.enabled .Values.zenoh.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "inari.fullname" . }}-zenoh
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zenoh
+spec:
+  unhealthyPodEvictionPolicy: {{ .Values.zenoh.podDisruptionBudget.unhealthyPodEvictionPolicy }}
+  {{- with .Values.zenoh.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.zenoh.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 6 }}
+{{- end }}

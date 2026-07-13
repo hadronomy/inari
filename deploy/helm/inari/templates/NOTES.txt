@@ -1,0 +1,18 @@
+Inari {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Check the rollout:
+  kubectl --namespace {{ .Release.Namespace }} rollout status deployment/{{ include "inari.fullname" . }}
+  kubectl --namespace {{ .Release.Namespace }} rollout status statefulset/{{ include "inari.fullname" . }}-zenoh
+
+Check service readiness:
+  kubectl --namespace {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward service/{{ include "inari.fullname" . }} 8080:{{ .Values.service.port }}
+
+Then open http://127.0.0.1:8080/healthz and http://127.0.0.1:8080/readyz.
+
+Run the release test after every install or upgrade:
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }} --logs
+
+The controller does not create credentials. Verify the referenced PostgreSQL,
+OIDC, step-ca, and Zenoh TLS Secrets before expecting readiness. Production
+operations and certificate requirements are documented in docs/kubernetes.md.

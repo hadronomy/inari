@@ -535,11 +535,16 @@ fn config_files(explicit_path: Option<PathBuf>) -> Result<Vec<PathBuf>, ConfigEr
 }
 
 fn environment_source() -> Environment {
-    build_environment_source()
+    environment_source_with(env::vars().collect())
 }
 
 fn environment_source_with(source: HashMap<String, String>) -> Environment {
-    build_environment_source().source(Some(source))
+    build_environment_source().source(Some(
+        source
+            .into_iter()
+            .filter(|(key, _)| is_environment_override_key(key))
+            .collect(),
+    ))
 }
 
 fn build_environment_source() -> Environment {
@@ -560,9 +565,10 @@ fn is_environment_override_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
 
-    use super::{AppConfig, LoadedConfig};
+    use super::{AppConfig, CONFIG_PATH_ENV, LoadedConfig};
     use crate::{ChannelCapacity, ConcurrencyLimit};
 
     #[test]
@@ -570,6 +576,17 @@ mod tests {
         let loaded = LoadedConfig::default();
 
         assert_eq!(loaded.origin.to_string(), "defaults");
+        assert_eq!(loaded.settings, AppConfig::default());
+    }
+
+    #[test]
+    fn config_path_selector_is_not_parsed_as_a_configuration_field() {
+        let loaded = LoadedConfig::load_from_environment_map(HashMap::from([(
+            CONFIG_PATH_ENV.to_owned(),
+            "/etc/inari/inari-server.toml".to_owned(),
+        )]))
+        .expect("the config path selector should be excluded from settings overrides");
+
         assert_eq!(loaded.settings, AppConfig::default());
     }
 

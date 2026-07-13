@@ -1,0 +1,7 @@
+chart-dirs:
+  - deploy/helm
+target-branch: main
+check-version-increment: false
+validate-maintainers: false
+lint-conf: deploy/helm/yamllint.yaml
+chart-yaml-schema: deploy/helm/chart_schema.yaml

@@ -1,0 +1,57 @@
+{{- if .Values.zenoh.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "inari.fullname" . }}-zenoh
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zenoh
+    {{- with .Values.zenoh.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (dict) .Values.commonAnnotations .Values.zenoh.service.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.zenoh.service.type }}
+  {{- with .Values.zenoh.service.externalTrafficPolicy }}
+  externalTrafficPolicy: {{ . }}
+  {{- end }}
+  {{- with .Values.zenoh.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 4 }}
+  ports:
+    - name: zenoh-tls
+      port: {{ .Values.zenoh.service.port }}
+      targetPort: zenoh-tls
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "inari.fullname" . }}-zenoh-headless
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zenoh
+    {{- with .Values.zenoh.headlessService.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with (mergeOverwrite (dict) .Values.commonAnnotations .Values.zenoh.headlessService.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 4 }}
+  ports:
+    - name: zenoh-tls
+      port: {{ .Values.zenoh.service.port }}
+      targetPort: zenoh-tls
+      protocol: TCP
+{{- end }}

@@ -1,13 +1,91 @@
-replicaCount: 2
+# Inari intentionally ships no credentials. Every secret reference below must
+# point to a Secret created by your secret controller or deployment system.
 
 image:
   repository: ghcr.io/hadronomy/inari-server
   tag: ""
+  digest: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+commonLabels: {}
+commonAnnotations: {}
+
+controller:
+  replicaCount: 2
+  revisionHistoryLimit: 3
+  rolloutNonce: ""
+  deploymentAnnotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  startupProbe:
+    failureThreshold: 30
+    periodSeconds: 2
+    timeoutSeconds: 2
+  readinessProbe:
+    failureThreshold: 3
+    periodSeconds: 5
+    timeoutSeconds: 2
+  livenessProbe:
+    failureThreshold: 3
+    periodSeconds: 10
+    timeoutSeconds: 2
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: null
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: null
+    unhealthyPodEvictionPolicy: AlwaysAllow
+  terminationGracePeriodSeconds: 30
+  tmpSizeLimit: 64Mi
+  priorityClassName: ""
+  runtimeClassName: ""
+  nodeSelector: {}
+  podAntiAffinity: soft
+  affinity: {}
+  topologySpreadConstraints: []
+  tolerations: []
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+  labels: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  labels: {}
+  hosts:
+    - host: inari.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
 
 organization:
   id: org_example
@@ -17,91 +95,223 @@ organization:
 
 server:
   publicUrl: https://inari.example.com
-  ingress:
-    enabled: false
-    className: ""
-    annotations: {}
-    hosts:
-      - host: inari.example.com
-        paths:
-          - path: /
-            pathType: Prefix
-    tls: []
+  requestTimeout: 30s
+  shutdownGracePeriod: 30s
+  maxBodySizeBytes: 1048576
 
-identity:
-  issuerUrl: https://identity.example.com
-  clientId: inari-controller
-  roleClaim: urn:zitadel:iam:org:project:roles
-  roleMapping:
-    inari.viewer: viewer
-    inari.operator: operator
-    inari.enrollment-admin: enrollment_admin
-    inari.administrator: administrator
-
-secrets:
-  database:
+database:
+  secret:
     name: inari-database
     key: url
+  minConnections: 2
+  maxConnections: 32
+
+identity:
   oidc:
-    name: inari-oidc
-    key: client-secret
-  stepCa:
-    name: inari-step-ca
-    key: provisioner-key.pem
-  zenohTls:
-    name: inari-controller-zenoh-tls
+    issuerUrl: https://identity.example.com
+    clientId: inari-controller
+    clientSecret:
+      name: inari-oidc
+      key: client-secret
+    scopes:
+      - openid
+      - profile
+      - email
+      - urn:zitadel:iam:org:project:roles
+    roleClaim: urn:zitadel:iam:org:project:roles
+    roleMapping:
+      inari.viewer: viewer
+      inari.operator: operator
+      inari.enrollment-admin: enrollment_admin
+      inari.administrator: administrator
+
+http:
+  zenohRest:
+    enabled: false
+    allowAdminSpace: false
+    queryTimeout: 15s
+    sseKeepAlive: 15s
+    sseBuffer: 64
+    maxConcurrentRequests: 64
+
+observability:
+  format: json
+  filter: inari_server=info,tower_http=info,axum=info
+  includeTargets: true
+  includeThreadIds: false
+  includeThreadNames: false
 
 managedGateway:
+  enabled: true
   controllerName: Inari Controller
   controllerInstanceId: controller-production
-  invitationTtl: 10m
-  zenohPublicEndpoints:
-    - tls/inari-zenoh.example.com:7447
-  stepCa:
-    baseUrl: https://step-ca.example.com
-    rootFingerprint: ""
-    provisioner: inari-agents
-    keyId: ""
-    signingAlgorithm: ed_dsa
+  supportedProtocolVersions:
+    - "2026-07-12"
+  controllerActions:
+    - system:read
+    - devices:read
+    - events:read
+    - jobs:create
+    - jobs:cancel
+    - commands:execute
+  onboarding:
+    enabled: true
+    invitationTtl: 10m
+    failedAttemptWindow: 1m
+    maxFailedAttempts: 5
+  dataPlane:
+    publicEndpoints:
+      - tls/inari-zenoh.example.com:7447
+    namespacePrefix: iot/v1/agents
+    closeLinkOnExpiration: true
+  certificate:
+    mode: step_ca
+    stepCa:
+      baseUrl: https://step-ca.example.com
+      rootFingerprint: replace-with-root-sha256-fingerprint
+      provisioner: inari-agents
+      keyId: replace-with-provisioner-jwk-kid
+      signingKey:
+        name: inari-step-ca
+        key: provisioner-key.pem
+      signingAlgorithm: ed_dsa
+      tokenTtl: 5m
+      authorizedSans: []
+    requiresMutualTlsAfterIssuance: true
+
+migrations:
+  enabled: true
+  helmHook: true
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 300
+  podAnnotations: {}
+  podLabels: {}
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
 
 zenoh:
+  enabled: true
   image:
     repository: eclipse/zenoh
     tag: 1.9.0
+    digest: ""
     pullPolicy: IfNotPresent
   replicas: 3
-  existingConfigMap: inari-zenoh-router
-  configKey: config.json5
+  revisionHistoryLimit: 3
+  minReadySeconds: 5
+  podAnnotations: {}
+  podLabels: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+  config:
+    existingConfigMap: ""
+    key: config.json5
+    adminSpace:
+      enabled: false
+      read: true
+      write: false
+    accessControl:
+      enabled: true
+      defaultPermission: deny
+  tls:
+    controllerSecret:
+      name: inari-controller-zenoh-tls
+      caKey: ca.crt
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
+    routerSecret:
+      name: inari-router-zenoh-tls
+      caKey: ca.crt
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
   service:
     type: ClusterIP
     port: 7447
-  storage:
-    size: 1Gi
+    annotations: {}
+    labels: {}
+    externalTrafficPolicy: ""
+    loadBalancerSourceRanges: []
+  headlessService:
+    annotations: {}
+    labels: {}
+  persistence:
+    enabled: false
     storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+    annotations: {}
+    whenDeleted: Retain
+    whenScaled: Retain
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  startupProbe:
+    failureThreshold: 30
+    periodSeconds: 2
+    timeoutSeconds: 2
+  readinessProbe:
+    failureThreshold: 3
+    periodSeconds: 5
+    timeoutSeconds: 2
+  livenessProbe:
+    failureThreshold: 3
+    periodSeconds: 10
+    timeoutSeconds: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+    maxUnavailable: null
+    unhealthyPodEvictionPolicy: AlwaysAllow
+  terminationGracePeriodSeconds: 30
+  tmpSizeLimit: 64Mi
+  priorityClassName: ""
+  runtimeClassName: ""
+  nodeSelector: {}
+  podAntiAffinity: soft
+  affinity: {}
+  topologySpreadConstraints: []
+  tolerations: []
 
 serviceAccount:
   create: true
-  annotations: {}
   name: ""
-
-podAnnotations: {}
-podLabels: {}
-
-resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    memory: 512Mi
-
-podDisruptionBudget:
-  minAvailable: 1
+  annotations: {}
+  labels: {}
 
 networkPolicy:
   enabled: true
-  ingressNamespaceSelector: {}
-  ingressPodSelector: {}
+  controller:
+    additionalIngress: []
+    additionalEgress: []
+  zenoh:
+    additionalIngress: []
+    additionalEgress: []
 
-nodeSelector: {}
-tolerations: []
-affinity: {}
+tests:
+  enabled: true
+  image:
+    repository: busybox
+    tag: 1.37.0
+    digest: ""
+    pullPolicy: IfNotPresent

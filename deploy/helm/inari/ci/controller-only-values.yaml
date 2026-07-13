@@ -1,0 +1,12 @@
+managedGateway:
+  enabled: false
+  onboarding:
+    enabled: false
+  certificate:
+    mode: none
+
+zenoh:
+  enabled: false
+
+tests:
+  enabled: false

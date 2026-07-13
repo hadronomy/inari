@@ -1,0 +1,176 @@
+{{- if .Values.zenoh.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "inari.fullname" . }}-zenoh
+  labels:
+    {{- include "inari.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zenoh
+spec:
+  serviceName: {{ include "inari.fullname" . }}-zenoh-headless
+  replicas: {{ .Values.zenoh.replicas }}
+  revisionHistoryLimit: {{ .Values.zenoh.revisionHistoryLimit }}
+  minReadySeconds: {{ .Values.zenoh.minReadySeconds }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  {{- if .Values.zenoh.persistence.enabled }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: {{ .Values.zenoh.persistence.whenDeleted }}
+    whenScaled: {{ .Values.zenoh.persistence.whenScaled }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if not .Values.zenoh.config.existingConfigMap }}
+        checksum/config: {{ include (print $.Template.BasePath "/zenoh-configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.zenoh.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 8 }}
+        {{- with .Values.zenoh.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "inari.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.zenoh.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.zenoh.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.zenoh.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.zenoh.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
+      containers:
+        - name: zenoh
+          image: {{ include "inari.zenohImage" . | quote }}
+          imagePullPolicy: {{ .Values.zenoh.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/zenoh/{{ .Values.zenoh.config.key }}
+            - --id
+            - {{ printf "%s$(POD_INDEX)" (include "inari.zenohIdPrefix" .) | quote }}
+          env:
+            - name: POD_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+          securityContext:
+            {{- toYaml .Values.zenoh.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: zenoh-tls
+              containerPort: {{ .Values.zenoh.service.port }}
+              protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: zenoh-tls
+            {{- toYaml .Values.zenoh.startupProbe | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: zenoh-tls
+            {{- toYaml .Values.zenoh.readinessProbe | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: zenoh-tls
+            {{- toYaml .Values.zenoh.livenessProbe | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zenoh
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/zenoh
+            - name: tls
+              mountPath: /etc/zenoh/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.zenoh.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "inari.zenohConfigMapName" . }}
+            items:
+              - key: {{ .Values.zenoh.config.key }}
+                path: {{ .Values.zenoh.config.key }}
+        {{- if not .Values.zenoh.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.zenoh.tls.routerSecret.name }}
+            items:
+              - key: {{ .Values.zenoh.tls.routerSecret.caKey }}
+                path: ca.crt
+              - key: {{ .Values.zenoh.tls.routerSecret.certificateKey }}
+                path: tls.crt
+              - key: {{ .Values.zenoh.tls.routerSecret.privateKeyKey }}
+                path: tls.key
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.zenoh.tmpSizeLimit }}
+      {{- with .Values.zenoh.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.zenoh.affinity }}
+      affinity:
+        {{- toYaml .Values.zenoh.affinity | nindent 8 }}
+      {{- else if ne .Values.zenoh.podAntiAffinity "none" }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.zenoh.podAntiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 20 }}
+                topologyKey: kubernetes.io/hostname
+          {{- end }}
+      {{- end }}
+      {{- with .Values.zenoh.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.zenoh.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.zenoh.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        {{- with .Values.zenoh.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.zenoh.persistence.accessModes | nindent 10 }}
+        {{- with .Values.zenoh.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.zenoh.persistence.size }}
+  {{- end }}
+{{- end }}

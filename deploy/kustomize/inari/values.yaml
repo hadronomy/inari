@@ -1,0 +1,31 @@
+# Kustomize owns these rendered objects, so migrations are ordinary,
+# chart-versioned Jobs instead of Helm hooks. Secret values remain external.
+migrations:
+  helmHook: false
+
+tests:
+  enabled: false
+
+server:
+  publicUrl: https://inari.example.com
+
+identity:
+  oidc:
+    issuerUrl: https://identity.example.com
+
+managedGateway:
+  controllerInstanceId: controller-kustomize
+  dataPlane:
+    publicEndpoints:
+      - tls/inari-zenoh.example.com:7447
+
+networkPolicy:
+  controller:
+    additionalIngress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+        ports:
+          - port: 8080
+            protocol: TCP
