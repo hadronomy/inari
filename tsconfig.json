@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "NodeNext",
+    "moduleDetection": "force",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "paths": {
+      "@inari/release-core": ["./tooling/release-core/src/index.ts"],
+      "@inari/release": ["./tooling/release/src/index.ts"],
+      "@inari/tegami-helm": ["./tooling/tegami-helm/src/index.ts"],
+      "@inari/tegami-msix": ["./tooling/tegami-msix/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2024",
+    "types": ["bun", "node"]
+  },
+  "include": ["tegami.config.ts", "tooling/**/*.ts"]
+}

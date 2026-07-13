@@ -134,7 +134,11 @@ def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
             fake_win32serviceutil,
         ),
     )
-    fake_controller = SimpleNamespace(run=mocker.Mock(), request_shutdown=mocker.Mock())
+    fake_controller = SimpleNamespace(
+        run=mocker.Mock(),
+        request_shutdown=mocker.Mock(),
+        container=SimpleNamespace(standalone_trust_service=None),
+    )
     mocker.patch(
         "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
         return_value=fake_controller,
@@ -224,7 +228,11 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
         ),
     )
     mocker.patch("inari.host_service.windows_entrypoint._write_bootstrap_log")
-    fake_controller = SimpleNamespace(run=mocker.Mock(), request_shutdown=mocker.Mock())
+    fake_controller = SimpleNamespace(
+        container=SimpleNamespace(standalone_trust_service=None),
+        run=mocker.Mock(),
+        request_shutdown=mocker.Mock(),
+    )
     controller_factory = mocker.patch(
         "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
         return_value=fake_controller,
@@ -255,8 +263,8 @@ def test_windows_service_entrypoint_requires_windows(monkeypatch) -> None:
         _import_pywin32_service_modules()
 
 
-def test_load_service_settings_falls_back_to_production_defaults_when_config_missing(
-    mocker, tmp_path
+def test_load_service_settings_uses_production_defaults_without_registered_config(
+    mocker,
 ) -> None:
     fake_servicemanager = SimpleNamespace(
         LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock()
@@ -266,7 +274,7 @@ def test_load_service_settings_falls_back_to_production_defaults_when_config_mis
     )
     fake_win32service = SimpleNamespace(SERVICE_STOP_PENDING=3)
     fake_win32serviceutil = SimpleNamespace(
-        GetServiceCustomOption=mocker.Mock(return_value=str(tmp_path / "missing.toml")),
+        GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
         "inari.host_service.windows_entrypoint._import_pywin32_service_modules",

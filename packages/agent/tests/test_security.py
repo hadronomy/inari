@@ -64,6 +64,18 @@ def test_loopback_settings_validate_cleanly() -> None:
     SecurityPolicyService(settings).validate_startup()
 
 
+def test_native_pairing_remains_available_when_http_bootstrap_is_disabled() -> None:
+    service = StandaloneTrustService(
+        settings=AgentSettings(allow_loopback_bootstrap=False),
+        store=LocalTrustStore(MemorySecretStore()),
+    )
+
+    with pytest.raises(AgentError, match="disabled"):
+        service.start_pairing()
+
+    assert service.start_native_pairing().secret
+
+
 def test_lan_settings_require_tls() -> None:
     settings = AgentSettings(host="0.0.0.0", gateway_exposure=GatewayExposure.LAN)
 

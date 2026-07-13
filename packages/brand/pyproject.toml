@@ -1,6 +1,6 @@
 [project]
 name = "inari-brand"
-version = "0.1.0a1"
+version = "1.20.0-alpha.1"
 description = "Canonical identity assets for Inari"
 requires-python = ">=3.12"
 dependencies = []

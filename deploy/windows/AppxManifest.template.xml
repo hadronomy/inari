@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop desktop6 rescap">
+  <Identity Name="Inari.DeviceCenter" Publisher="CN=Inari Device Operations" Version="1.20.0.1001" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Inari Device Center</DisplayName>
+    <PublisherDisplayName>Inari</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="DeviceCenter" Executable="InariDeviceCenter.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        AppListEntry="default"
+        DisplayName="Inari Device Center"
+        Description="Private device operations"
+        BackgroundColor="#F2F2EF"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        Square150x150Logo="Assets\Square150x150Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <desktop:Extension Category="windows.startupTask" Executable="InariDeviceCenter.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="InariDeviceCenterStartup" Enabled="true" DisplayName="Inari Device Center" />
+        </desktop:Extension>
+        <uap:Extension Category="windows.protocol" Executable="InariDeviceCenter.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap:Protocol Name="inari" />
+        </uap:Extension>
+        <desktop6:Extension Category="windows.service" Executable="InariAgentService.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop6:Service Name="InariAgent" StartupType="delayedStart" StartAccount="localService" />
+        </desktop6:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="packagedServices" />
+  </Capabilities>
+</Package>

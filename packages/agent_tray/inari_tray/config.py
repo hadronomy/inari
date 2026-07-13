@@ -6,12 +6,15 @@ from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from inari.host_service.models import DEFAULT_SERVICE_SCOPE, default_service_name
-from pydantic import Field, field_validator
+from inari.windows_identity import current_package_family_name
+from platformdirs import user_log_path
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogLevel = Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 TrayControlMode = Literal["monitor", "spawn", "service"]
 TrayServiceScope = Literal["system", "user"]
+TrayProfile = Literal["auto", "development", "installed"]
 
 
 class TraySettings(BaseSettings):
@@ -21,6 +24,7 @@ class TraySettings(BaseSettings):
         extra="ignore",
     )
 
+    profile: TrayProfile = "auto"
     title: str = "Inari"
     agent_api_base_url: str = "http://127.0.0.1:7310"
     control_mode: TrayControlMode = "spawn"
@@ -39,6 +43,21 @@ class TraySettings(BaseSettings):
     shutdown_started_process_on_exit: bool = True
     device_center_refresh_interval_seconds: float = 60.0
     log_dir: Path = Path("./logs")
+
+    @model_validator(mode="after")
+    def apply_runtime_profile(self) -> TraySettings:
+        profile = self.profile
+        if profile == "auto":
+            profile = "installed" if current_package_family_name() else "development"
+            self.profile = profile
+        if profile == "installed":
+            self.title = "Inari Device Center"
+            self.control_mode = "service"
+            self.auto_start_agent = False
+            self.shutdown_started_process_on_exit = False
+            self.trust_store_path = None
+            self.log_dir = user_log_path("Inari Device Center", "Inari")
+        return self
 
     @field_validator("agent_api_base_url", mode="before")
     @classmethod

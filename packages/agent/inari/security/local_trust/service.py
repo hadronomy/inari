@@ -154,6 +154,15 @@ class StandaloneTrustService:
                 "Local pairing bootstrap is disabled by configuration.",
                 status_code=403,
             )
+        return self._start_pairing(allow_when_paired=allow_when_paired)
+
+    def start_native_pairing(self) -> PairingStartResult:
+        """Issue bootstrap material after a native transport authenticates its peer."""
+
+        self._assert_standalone()
+        return self._start_pairing(allow_when_paired=False)
+
+    def _start_pairing(self, *, allow_when_paired: bool) -> PairingStartResult:
         with self._state_lock:
             if self._current_state_locked().paired and not allow_when_paired:
                 raise AgentError(

@@ -1,6 +1,6 @@
 [project]
 name = "inari"
-version = "1.20.0a1"
+version = "1.20.0-alpha.1"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [

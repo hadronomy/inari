@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["target/**", ".venv/**", "dist/**", "Cargo.lock", "uv.lock"]
+}

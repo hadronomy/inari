@@ -336,3 +336,43 @@ The project should feel:
 - delightful to work in
 
 That is the bar.
+
+# Release workflow
+
+This repository uses [Tegami](https://tegami.fuma-nama.dev) for versioning and publishing.
+
+## Write changelog files
+
+Create pending changelog files under `.tegami/` as `YYYY-MM-DD-{hash}.md`.
+
+See the [changelog format docs](https://tegami.fuma-nama.dev/changelog) for details.
+
+### Example
+
+```md
+---
+packages:
+  "group:edge": patch
+---
+
+### Fix button hover state
+
+The hover color now matches the design system.
+```
+
+### Package references
+
+Use Inari's package ids or release groups in frontmatter:
+
+- `"group:edge"` — the agent, Device Center, brand assets, and MSIX
+- `"group:controller-chart"` — the independently versioned Helm chart
+- `"pip:inari"` — the agent package only
+- `"msix:inari-device-center"` — the Windows package only
+- `"helm:inari"` — the Helm chart only
+
+Rules:
+
+- Include YAML frontmatter with `packages`
+- Include at least one `#`, `##`, or `###` heading in the body
+- Write user-facing release notes under each heading
+- Do not edit the publish lock file (`.tegami/publish-lock.yaml`) or package `CHANGELOG.md` files directly

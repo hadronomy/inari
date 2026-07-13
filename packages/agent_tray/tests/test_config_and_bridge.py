@@ -59,6 +59,22 @@ def test_run_bootstraps_host_and_background_threads() -> None:
         thread.join(timeout=1.0)
 
 
+def test_installed_profile_enforces_service_owned_runtime(mocker) -> None:
+    mocker.patch(
+        "inari_tray.config.current_package_family_name",
+        return_value="Inari.DeviceCenter_example",
+    )
+
+    settings = TraySettings()
+
+    assert settings.profile == "installed"
+    assert settings.title == "Inari Device Center"
+    assert settings.control_mode == "service"
+    assert settings.auto_start_agent is False
+    assert settings.shutdown_started_process_on_exit is False
+    assert settings.trust_store_path is None
+
+
 def test_setup_background_auto_starts_spawn_mode_when_enabled() -> None:
     bridge = FakeControlBridge()
     application = AgentTrayApplication(

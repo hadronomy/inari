@@ -27,6 +27,10 @@ with [the managed gateway specification](../docs/gateway_protocol.md).
 - `crates/inari-web-frontend` is the minimal browser WASM hydration entrypoint.
 - `deploy/helm/inari` and `deploy/kustomize/inari` are alternative Kubernetes
   lifecycle surfaces. Each installation has exactly one lifecycle owner.
+- `deploy/windows` owns the signed Inari Device Center package and Windows
+  release assets.
+- `tooling` contains the Bun-managed Tegami configuration and the focused Helm
+  and MSIX release plugins.
 - `docs` contains protocol, architecture, operations, deployment, and identity
   documentation.
 
@@ -59,3 +63,7 @@ mise exec -- just check
 For focused work, `mise exec -- just format` and `mise exec -- just lint`
 provide faster feedback. The complete verification suite remains the final
 pre-submit gate.
+
+Releasable changes also need a pending Tegami changelog. The workflow, package
+groups, and local preview commands are documented in
+[the release guide](../docs/releases.md).

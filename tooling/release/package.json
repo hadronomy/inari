@@ -1,0 +1,22 @@
+{
+  "name": "@inari/release",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts src/cli.ts --dts --format esm"
+  },
+  "dependencies": {
+    "@inari/tegami-helm": "workspace:*",
+    "@inari/tegami-msix": "workspace:*",
+    "@tegami/pip": "1.2.5",
+    "tegami": "1.2.5",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  }
+}

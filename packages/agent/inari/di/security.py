@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from dishka import Provider, Scope, provide
 
 from ..config import AgentSettings
@@ -21,6 +23,7 @@ from ..security.models import GatewayMode
 from ..security.secrets import FileSecretStore, KeyringSecretStore, ProtectedSecretStore
 from ..security.tls import TlsContextFactory
 from ..security.tokens import TokenService
+from ..security.windows_secrets import WindowsMachineSecretStore
 
 
 class SecurityProvider(Provider):
@@ -54,15 +57,22 @@ class SecurityProvider(Provider):
     @provide
     def secret_store(self, settings: AgentSettings) -> ProtectedSecretStore:
         security_state_dir = settings.resolved_security_state_dir
+        if sys.platform == "win32" and settings.path_profile == "production":
+            primary = WindowsMachineSecretStore(
+                security_state_dir / "service-secrets.dpapi"
+            )
+        else:
+            primary = KeyringSecretStore(
+                service_name=settings.secret_store_service_name,
+            )
         fallback = (
             FileSecretStore(security_state_dir / "secrets.json")
             if settings.gateway_mode is GatewayMode.STANDALONE
+            and settings.path_profile != "production"
             else None
         )
         return ProtectedSecretStore(
-            primary=KeyringSecretStore(
-                service_name=settings.secret_store_service_name,
-            ),
+            primary=primary,
             fallback=fallback,
         )
 

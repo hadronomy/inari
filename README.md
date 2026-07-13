@@ -140,6 +140,10 @@ these deployment surfaces.
   working agreement for maintainers.
 - [Kubernetes deployment](docs/kubernetes.md) covers installation, upgrades,
   certificates, network policy, validation, and recovery.
+- [Windows Device Center](docs/windows.md) covers trust deployment,
+  installation, upgrades, and the service/tray boundary.
+- [Release process](docs/releases.md) documents Tegami, Helm publication, and
+  signed Windows artifacts.
 - [Controller database](docs/controller_database.md) documents migration
   ownership and forward-repair policy.
 - [Managed gateway protocol](docs/gateway_protocol.md) defines the public wire

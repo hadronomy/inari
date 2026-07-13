@@ -33,6 +33,7 @@ from .models import (
     TrayLinks,
     TraySnapshot,
 )
+from .single_instance import ActivationRequest, DeviceCenterInstance
 from .tray_host import TrayHost, TrayMenuEntry, create_tray_host
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class AgentTrayApplication:
         setup_assistant: SetupAssistantPresenter | None = None,
         setup_assistant_factory: Callable[..., SetupAssistantPresenter] | None = None,
         pending_invitation: str | None = None,
+        desktop_instance: DeviceCenterInstance | None = None,
     ) -> None:
         self.settings = settings
         self._pairing_context = TrayPairingContext()
@@ -109,6 +111,9 @@ class AgentTrayApplication:
             setup_assistant_factory or self._default_setup_assistant_factory
         )
         self._pending_invitation = pending_invitation
+        self._desktop_instance = desktop_instance
+        if desktop_instance is not None:
+            desktop_instance.set_activation_handler(self._handle_activation)
         self.links = TrayLinks(
             api_base_url=settings.agent_api_base_url,
             docs_url=settings.agent_docs_url,
@@ -132,8 +137,13 @@ class AgentTrayApplication:
         settings: TraySettings,
         *,
         pending_invitation: str | None = None,
+        desktop_instance: DeviceCenterInstance | None = None,
     ) -> AgentTrayApplication:
-        return cls(settings, pending_invitation=pending_invitation)
+        return cls(
+            settings,
+            pending_invitation=pending_invitation,
+            desktop_instance=desktop_instance,
+        )
 
     @property
     def snapshot(self) -> TraySnapshot:
@@ -414,8 +424,17 @@ class AgentTrayApplication:
                 self._setup_assistant.dismiss()
             self.bridge.shutdown()
         finally:
+            if self._desktop_instance is not None:
+                self._desktop_instance.close()
             if self.host is not None:
                 self.host.stop()
+
+    def _handle_activation(self, request: ActivationRequest) -> None:
+        if request.invitation is not None:
+            self._get_setup_assistant().show_with_invitation(request.invitation)
+            return
+        if request.focus:
+            self._open_device_center()
 
     def _print_test_page_sync(self) -> None:
         try:

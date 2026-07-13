@@ -1,0 +1,179 @@
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WindowsTarget = Join-Path $WorkspaceRoot "target\release\windows"
+$PyInstallerTarget = Join-Path $WorkspaceRoot "target\pyinstaller"
+$PackageRoot = Join-Path $WindowsTarget "package"
+$ExecutableIcon = Join-Path $WindowsTarget "assets\InariDeviceCenter.ico"
+
+function Require-Command([string]$Name) {
+    $Command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($null -eq $Command) {
+        throw "Required command '$Name' is not available. Install the Windows 11 SDK and release tools first."
+    }
+    return $Command.Source
+}
+
+function Require-Environment([string]$Name) {
+    $Value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw "Required environment variable '$Name' is not set."
+    }
+    return $Value
+}
+
+$MakeAppx = Require-Command "makeappx.exe"
+$SignTool = Require-Command "signtool.exe"
+$Syft = Require-Command "syft"
+$SigningPfx = Require-Environment "INARI_SIGNING_PFX"
+$SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
+$RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
+$TimestampUrl = if ($env:INARI_TIMESTAMP_URL) { $env:INARI_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
+$CodeSigningOid = "1.3.6.1.5.5.7.3.3"
+$PublisherCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+    $SigningPfx,
+    $SigningPassword,
+    [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+)
+$RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate2]::new($RootCertificate)
+$TemporaryRootStore = $null
+$TemporaryRootAdded = $false
+
+if (-not $PublisherCertificate.HasPrivateKey) {
+    throw "The publisher certificate does not contain a private key."
+}
+$Now = Get-Date
+if ($Now -lt $PublisherCertificate.NotBefore -or $Now -gt $PublisherCertificate.NotAfter) {
+    throw "The publisher certificate is not currently valid."
+}
+$PublisherEku = $PublisherCertificate.Extensions |
+    Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } |
+    Select-Object -First 1
+if ($null -eq $PublisherEku -or $CodeSigningOid -notin $PublisherEku.EnhancedKeyUsages.Value) {
+    throw "The publisher certificate is not valid for code signing."
+}
+$RootConstraints = $RootCertificateObject.Extensions |
+    Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension] } |
+    Select-Object -First 1
+if ($null -eq $RootConstraints -or -not $RootConstraints.CertificateAuthority) {
+    throw "The supplied code-signing root is not a certificate authority."
+}
+$RootEku = $RootCertificateObject.Extensions |
+    Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } |
+    Select-Object -First 1
+if (
+    $null -eq $RootEku -or
+    $RootEku.EnhancedKeyUsages.Count -ne 1 -or
+    $RootEku.EnhancedKeyUsages[0].Value -ne $CodeSigningOid
+) {
+    throw "The code-signing root must be constrained to the code-signing extended key usage."
+}
+$Chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
+$Chain.ChainPolicy.TrustMode = [Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
+$Chain.ChainPolicy.CustomTrustStore.Add($RootCertificateObject) | Out-Null
+$Chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+$Chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new($CodeSigningOid)) | Out-Null
+if (-not $Chain.Build($PublisherCertificate)) {
+    $Problems = ($Chain.ChainStatus | ForEach-Object { $_.StatusInformation.Trim() }) -join "; "
+    throw "The publisher certificate does not chain to the supplied code-signing root: $Problems"
+}
+$Chain.Dispose()
+
+Push-Location $WorkspaceRoot
+try {
+    uv sync --all-packages --frozen --group windows-build
+    uv run --no-sync python deploy/windows/build.py icon --output $ExecutableIcon
+    uv run --no-sync pyinstaller `
+        --noconfirm `
+        --clean `
+        --workpath (Join-Path $PyInstallerTarget "work") `
+        --distpath (Join-Path $PyInstallerTarget "dist") `
+        deploy/windows/inari.spec
+
+    $Payload = Join-Path $PyInstallerTarget "dist\InariDeviceCenter"
+    $MetadataJson = uv run --no-sync python deploy/windows/build.py package --payload $Payload --output $PackageRoot
+    $Metadata = $MetadataJson | ConvertFrom-Json
+    $ReleaseDirectory = Join-Path $WindowsTarget $Metadata.version
+    New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
+
+    if ($PublisherCertificate.Subject -ne $Metadata.publisher) {
+        throw "The publisher certificate subject does not match package.publisher."
+    }
+
+    $TemporaryRootStore = [Security.Cryptography.X509Certificates.X509Store]::new(
+        [Security.Cryptography.X509Certificates.StoreName]::Root,
+        [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+    )
+    $TemporaryRootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    $TrustedRoots = $TemporaryRootStore.Certificates.Find(
+        [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+        $RootCertificateObject.Thumbprint,
+        $false
+    )
+    if ($TrustedRoots.Count -eq 0) {
+        if ($env:GITHUB_ACTIONS -ne "true") {
+            throw "The code-signing root is not trusted by this release account. Import it explicitly before a local build."
+        }
+        $TemporaryRootStore.Add($RootCertificateObject)
+        $TemporaryRootAdded = $true
+    }
+
+    Get-ChildItem $PackageRoot -Recurse -File | Sort-Object FullName | Where-Object {
+        $_.Extension -in ".exe", ".dll", ".pyd"
+    } | ForEach-Object {
+        & $SignTool sign /fd SHA256 /td SHA256 /tr $TimestampUrl /f $SigningPfx /p $SigningPassword $_.FullName
+        if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $($_.Name)." }
+        & $SignTool verify /pa /all /v $_.FullName
+        if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($_.Name)." }
+    }
+
+    $ArtifactBase = "Inari-Device-Center_$($Metadata.version)_x64"
+    $MsixPath = Join-Path $ReleaseDirectory "$ArtifactBase.msix"
+    & $MakeAppx pack /d $PackageRoot /p $MsixPath /o
+    if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed." }
+    & $SignTool sign /fd SHA256 /td SHA256 /tr $TimestampUrl /f $SigningPfx /p $SigningPassword $MsixPath
+    if ($LASTEXITCODE -ne 0) { throw "MSIX signing failed." }
+    & $SignTool verify /pa /all /v $MsixPath
+    if ($LASTEXITCODE -ne 0) { throw "MSIX signature verification failed." }
+
+    $SbomPath = Join-Path $ReleaseDirectory "$ArtifactBase.spdx.json"
+    & $Syft "dir:$PackageRoot" -o "spdx-json=$SbomPath"
+    if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
+
+    $PublishedRoot = Join-Path $ReleaseDirectory "inari-code-signing-root.cer"
+    [IO.File]::WriteAllBytes($PublishedRoot, $RootCertificateObject.RawData)
+    $RootFingerprint = $RootCertificateObject.GetCertHashString(
+        [Security.Cryptography.HashAlgorithmName]::SHA256
+    ).ToLowerInvariant()
+    Set-Content `
+        -Path (Join-Path $ReleaseDirectory "inari-code-signing-root-fingerprint.txt") `
+        -Value "SHA256 $RootFingerprint" `
+        -Encoding utf8NoBOM
+
+    $Assets = @(
+        $MsixPath,
+        $SbomPath,
+        $PublishedRoot,
+        (Join-Path $ReleaseDirectory "inari-code-signing-root-fingerprint.txt")
+    )
+    $ChecksumLines = $Assets | ForEach-Object {
+        $Hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$Hash  $([IO.Path]::GetFileName($_))"
+    }
+    Set-Content -Path (Join-Path $ReleaseDirectory "SHA256SUMS") -Value $ChecksumLines -Encoding ascii
+}
+finally {
+    if ($null -ne $TemporaryRootStore) {
+        if ($TemporaryRootAdded) {
+            $TemporaryRootStore.Remove($RootCertificateObject)
+        }
+        $TemporaryRootStore.Close()
+    }
+    $PublisherCertificate.Dispose()
+    $RootCertificateObject.Dispose()
+    Pop-Location
+}

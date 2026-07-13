@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from secrets import token_urlsafe
 from threading import Lock
@@ -16,6 +15,7 @@ from inari.local_api.schemas import (
     TokenResponse,
 )
 from platformdirs import user_data_path
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from inari.security.local_trust.crypto import (
     generate_local_client_key_pair,
@@ -70,12 +70,38 @@ class LocalIdentityStore(Protocol):
     def get_or_create(self) -> TrayLocalIdentity: ...
 
 
+class PairingBootstrap(Protocol):
+    def start(self, client: httpx.Client) -> LocalPairingStartResponse: ...
+
+
+class HttpPairingBootstrap:
+    def start(self, client: httpx.Client) -> LocalPairingStartResponse:
+        response = client.post("/auth/pairing/start")
+        response.raise_for_status()
+        return LocalPairingStartResponse.model_validate(response.json())
+
+
+class NativePairingBootstrap:
+    def start(self, client: httpx.Client) -> LocalPairingStartResponse:
+        del client
+        from .windows_pairing import WindowsPairingBootstrapClient
+
+        response = WindowsPairingBootstrapClient().request()
+        return LocalPairingStartResponse(
+            pairing_secret=response.pairing_secret,
+            expires_at=response.expires_at,
+        )
+
+
 class TrayIdentityStore:
     def __init__(self, settings: TraySettings) -> None:
         self.settings = settings
         self.service_name = settings.trust_store_service_name
-        self.fallback_path = settings.trust_store_path or (
-            user_data_path("inari-tray", "Inari") / "local-trust.json"
+        self.fallback_path = (
+            None
+            if settings.profile == "installed"
+            else settings.trust_store_path
+            or (user_data_path("inari-tray", "Inari") / "local-trust.json")
         )
 
     def get_or_create(self) -> TrayLocalIdentity:
@@ -93,56 +119,84 @@ class TrayIdentityStore:
         return identity
 
     def _load(self) -> TrayLocalIdentity | None:
-        payload = self._load_payload()
-        if payload is None:
+        encoded = self._load_encoded()
+        if encoded is None:
             return None
         try:
+            payload = StoredTrayIdentity.model_validate_json(encoded)
             return TrayLocalIdentity(
-                client_id=str(payload["client_id"]),
-                client_name=str(
-                    payload.get("client_name") or self.settings.auth_client_name
-                ),
-                private_key_pem=str(payload["private_key_pem"]),
-                public_key_pem=str(payload["public_key_pem"]),
+                client_id=payload.client_id,
+                client_name=payload.client_name,
+                private_key_pem=payload.private_key_pem,
+                public_key_pem=payload.public_key_pem,
             )
-        except KeyError:
+        except ValidationError:
             return None
 
     def _save(self, identity: TrayLocalIdentity) -> None:
-        payload = {
-            "client_id": identity.client_id,
-            "client_name": identity.client_name,
-            "private_key_pem": identity.private_key_pem,
-            "public_key_pem": identity.public_key_pem,
-        }
-        encoded = json.dumps(payload, indent=2, sort_keys=True)
-        self._save_fallback(encoded)
+        encoded = StoredTrayIdentity(
+            client_id=identity.client_id,
+            client_name=identity.client_name,
+            private_key_pem=identity.private_key_pem,
+            public_key_pem=identity.public_key_pem,
+        ).model_dump_json(indent=2)
         try:
             keyring.set_password(self.service_name, TRAY_PRIVATE_KEY_NAME, encoded)
-        except (KeyringError, NoKeyringError):
+        except (KeyringError, NoKeyringError) as exc:
+            if self.fallback_path is None:
+                raise TrayCredentialStoreUnavailable(
+                    "The Windows credential store is unavailable."
+                ) from exc
+            self._save_fallback(encoded)
             return
+        if self.fallback_path is not None:
+            self.fallback_path.unlink(missing_ok=True)
 
-    def _load_payload(self) -> dict[str, object] | None:
+    def _load_encoded(self) -> str | None:
         try:
             value = keyring.get_password(self.service_name, TRAY_PRIVATE_KEY_NAME)
+        except (KeyringError, NoKeyringError) as exc:
+            if self.fallback_path is None:
+                raise TrayCredentialStoreUnavailable(
+                    "The Windows credential store is unavailable."
+                ) from exc
+            return self._load_fallback()
+        if value is not None or self.fallback_path is None:
+            return value
+        legacy = self._load_fallback()
+        if legacy is None:
+            return None
+        try:
+            keyring.set_password(self.service_name, TRAY_PRIVATE_KEY_NAME, legacy)
         except (KeyringError, NoKeyringError):
-            value = None
-        if value is None:
-            value = self._load_fallback()
-        if value is None:
-            return None
-        payload = json.loads(value)
-        if not isinstance(payload, dict):
-            return None
-        return payload
+            return legacy
+        self.fallback_path.unlink(missing_ok=True)
+        return legacy
 
     def _load_fallback(self) -> str | None:
-        if not self.fallback_path.exists():
+        if self.fallback_path is None or not self.fallback_path.exists():
             return None
         return self.fallback_path.read_text(encoding="utf-8")
 
     def _save_fallback(self, value: str) -> None:
+        if self.fallback_path is None:
+            raise TrayCredentialStoreUnavailable(
+                "Plaintext credential fallback is disabled for installed Device Center."
+            )
         write_text_owner_only(self.fallback_path, value, encoding="utf-8")
+
+
+class TrayCredentialStoreUnavailable(RuntimeError):
+    """Raised when installed Device Center cannot use protected credentials."""
+
+
+class StoredTrayIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_id: str
+    client_name: str
+    private_key_pem: str
+    public_key_pem: str
 
 
 class TrayLocalTrustClient:
@@ -152,10 +206,16 @@ class TrayLocalTrustClient:
         *,
         identity_store: LocalIdentityStore | None = None,
         pairing_context: TrayPairingContext | None = None,
+        pairing_bootstrap: PairingBootstrap | None = None,
     ) -> None:
         self.settings = settings
         self._identity_store = identity_store or TrayIdentityStore(settings)
         self._pairing_context = pairing_context or TrayPairingContext()
+        self._pairing_bootstrap = pairing_bootstrap or (
+            NativePairingBootstrap()
+            if settings.profile == "installed"
+            else HttpPairingBootstrap()
+        )
 
     def request_token(self, client: httpx.Client) -> TokenResponse:
         identity = self._identity_store.get_or_create()
@@ -265,9 +325,7 @@ class TrayLocalTrustClient:
         return LocalChallengeResponse.model_validate(response.json())
 
     def _start_pairing(self, client: httpx.Client) -> LocalPairingStartResponse:
-        response = client.post("/auth/pairing/start")
-        response.raise_for_status()
-        return LocalPairingStartResponse.model_validate(response.json())
+        return self._pairing_bootstrap.start(client)
 
 
 def _is_pairing_required_error(response: httpx.Response) -> bool:

@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Callable
 from typing import Any
 
-from ..config import AgentSettings, load_settings
+from ..config import AgentSettings
 from ..core.config_paths import resolve_default_path_bundle
 from ..local_api.server import AgentServerController
+from ..windows_identity import current_package_family_name
+from .manager import load_service_settings
 from .models import DEFAULT_SERVICE_IDENTITY
 
 WINDOWS_SERVICE_NAME = DEFAULT_SERVICE_IDENTITY.windows_name
@@ -53,12 +55,17 @@ def create_windows_service_class(
         _svc_display_name_ = WINDOWS_SERVICE_DISPLAY_NAME
         _svc_description_ = WINDOWS_SERVICE_DESCRIPTION
         _exe_name_ = sys.executable
-        _exe_args_ = "-m inari.host_service.windows_entrypoint"
+        _exe_args_ = (
+            ""
+            if getattr(sys, "frozen", False)
+            else "-m inari.host_service.windows_entrypoint"
+        )
 
         def __init__(self, args: list[str]) -> None:
             super().__init__(args)
             self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
             self._controller: AgentServerController | None = None
+            self._pairing_bootstrap = None
 
         def SvcStop(self) -> None:
             self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
@@ -81,6 +88,15 @@ def create_windows_service_class(
                 )
                 _write_bootstrap_log("Building server controller.")
                 self._controller = AgentServerController.from_settings(settings)
+                trust_service = self._controller.container.standalone_trust_service
+                if trust_service is not None:
+                    from .windows_pairing import WindowsPairingBootstrapServer
+
+                    self._pairing_bootstrap = (
+                        WindowsPairingBootstrapServer.for_current_package(trust_service)
+                    )
+                    if self._pairing_bootstrap is not None:
+                        self._pairing_bootstrap.start()
                 self.ReportServiceStatus(win32service.SERVICE_RUNNING)
                 _write_bootstrap_log("Service host is running.")
                 self._controller.run()
@@ -99,6 +115,8 @@ def create_windows_service_class(
                 )
                 raise
             finally:
+                if self._pairing_bootstrap is not None:
+                    self._pairing_bootstrap.stop()
                 _write_bootstrap_log("Service host has stopped.")
                 servicemanager.LogInfoMsg(
                     f"{WINDOWS_SERVICE_DISPLAY_NAME} has stopped."
@@ -156,14 +174,11 @@ def set_windows_service_config_path(config_path: Path | str) -> None:
 
 
 def _load_service_settings(config_path: Path | str | None = None) -> AgentSettings:
-    resolved_config_path = (
-        Path(config_path).expanduser().resolve() if config_path is not None else None
-    )
-    if resolved_config_path is None:
-        resolved_config_path = get_windows_service_config_path()
-    if resolved_config_path is not None and not resolved_config_path.exists():
-        return AgentSettings.model_validate({"path_profile": "production"})
-    return load_settings(config_path=resolved_config_path)
+    resolved_config_path = config_path or get_windows_service_config_path()
+    settings, _ = load_service_settings(resolved_config_path)
+    if current_package_family_name() is not None:
+        settings = settings.model_copy(update={"allow_loopback_bootstrap": False})
+    return settings
 
 
 def _bootstrap_log_path() -> Path:

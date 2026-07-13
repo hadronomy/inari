@@ -24,7 +24,7 @@ for tool in actionlint ct helm jq kubeconform kube-linter kustomize shellcheck y
 done
 
 shellcheck "${ROOT}/scripts/validate-kubernetes.sh" "${ROOT}/scripts/validate-kubernetes-server.sh"
-actionlint "${ROOT}/.github/workflows/kubernetes.yaml" "${ROOT}/.github/workflows/helm-release.yaml"
+actionlint "${ROOT}"/.github/workflows/*.yaml
 yamllint --config-file "${ROOT}/deploy/helm/yamllint.yaml" \
   "${CHART}/Chart.yaml" \
   "${CHART}/values.yaml" \

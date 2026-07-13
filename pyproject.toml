@@ -1,14 +1,8 @@
-[project]
-name = "albatross"
-version = "0.1.0"
-requires-python = ">=3.12"
-dependencies = []
-
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.ty.environment]
-root = ["./packages/agent", "./packages/agent_tray", "./packages/brand"]
+root = [".", "./packages/agent", "./packages/agent_tray", "./packages/brand"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"
@@ -21,4 +15,7 @@ filterwarnings = [
 [dependency-groups]
 dev = [
     "ruff>=0.15.11",
+]
+windows-build = [
+    "pyinstaller==6.21.0",
 ]

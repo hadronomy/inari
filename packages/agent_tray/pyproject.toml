@@ -1,7 +1,7 @@
 [project]
 name = "inari-tray"
-version = "0.3.1a1"
-description = "Cross-platform tray companion for the Inari"
+version = "1.20.0-alpha.1"
+description = "Cross-platform Inari Device Center and tray companion"
 requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28.1",

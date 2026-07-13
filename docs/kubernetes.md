@@ -373,17 +373,19 @@ example.
 
 ## Publishing the chart
 
-Chart releases use tags of the form `helm-v<chart-version>`. The release
-workflow verifies the tag against `Chart.yaml`, packages the chart, pushes it
-to `ghcr.io/<owner>/charts/inari`, and signs the OCI digest with keyless Cosign
-using GitHub's OIDC identity.
+The `controller-chart` Tegami group versions the chart independently from the
+edge release. After the Version Packages pull request is merged, the release
+workflow packages the chart, pushes it to `ghcr.io/hadronomy/charts/inari`, and
+signs the immutable OCI digest with keyless Cosign using GitHub's OIDC identity.
+The complete maintainer flow is documented in
+[the release guide](releases.md).
 
 Consumers can verify a release with the repository identity used by the
 workflow:
 
 ```sh
 cosign verify \
---certificate-identity-regexp 'https://github.com/hadronomy/inari/.github/workflows/helm-release.yaml@refs/.*' \
+  --certificate-identity-regexp 'https://github.com/hadronomy/inari/.github/workflows/release\.yaml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/hadronomy/charts/inari@sha256:<digest>
 ```
