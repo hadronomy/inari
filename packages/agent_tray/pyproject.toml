@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
   "httpx>=0.28.1",
   "inari",
+  "inari-brand",
   "keyring>=25.7.0",
   "pillow>=12.2.0",
   "platformdirs>=4.4.0",
@@ -42,3 +43,4 @@ exclude = ["tests*"]
 
 [tool.uv.sources]
 inari = { workspace = true }
+inari-brand = { workspace = true }

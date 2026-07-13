@@ -19,11 +19,11 @@ pub mod zenoh;
 
 pub use app::{ServerApplication, ServerBuilder};
 pub use config::{
-    AppConfig, ConfigOrigin, CorsConfig, HttpConfig, InariApiConfig, LoadedConfig, LogFormat,
-    ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode, ManagedGatewayConfig,
-    ManagedGatewayDataPlaneConfig, ObservabilityConfig, RuntimeConfig, ServerConfig,
-    StepCaSigningAlgorithm, ZenohAccessControlConfig, ZenohAclPermission, ZenohAdminSpaceConfig,
-    ZenohConfig, ZenohMode, ZenohRestConfig, ZenohTlsConfig,
+    AppConfig, ConfigOrigin, CorsConfig, DeploymentEnvironment, HttpConfig, InariApiConfig,
+    LoadedConfig, LogFormat, ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode,
+    ManagedGatewayConfig, ManagedGatewayDataPlaneConfig, ObservabilityConfig, RuntimeConfig,
+    ServerConfig, StepCaSigningAlgorithm, ZenohAccessControlConfig, ZenohAclPermission,
+    ZenohAdminSpaceConfig, ZenohConfig, ZenohMode, ZenohRestConfig, ZenohTlsConfig,
 };
 pub use coordination::{
     ChannelCapacity, ConcurrencyLimit, InariApiPermit, InariApiRequest, InvalidChannelCapacity,

@@ -6,19 +6,178 @@ use server_fn::error::{FromServerFnError, ServerFnErrorErr};
 use url::Url;
 
 #[cfg(feature = "ssr")]
-#[derive(Clone, Debug)]
-pub struct OnboardingContext(Option<inari_gateway::onboarding::OnboardingService>);
+mod context {
+    use std::fmt;
+    use std::sync::Arc;
 
-#[cfg(feature = "ssr")]
-impl From<Option<inari_gateway::onboarding::OnboardingService>> for OnboardingContext {
-    fn from(service: Option<inari_gateway::onboarding::OnboardingService>) -> Self {
-        Self(service)
+    use inari_gateway::onboarding::OnboardingService;
+
+    use super::{ControllerSnapshot, DeploymentEnvironment};
+
+    #[derive(Clone, Debug)]
+    pub struct OnboardingContext(Option<OnboardingService>);
+
+    impl OnboardingContext {
+        pub(super) fn service(&self) -> Option<OnboardingService> {
+            self.0.clone()
+        }
+    }
+
+    impl From<Option<OnboardingService>> for OnboardingContext {
+        fn from(service: Option<OnboardingService>) -> Self {
+            Self(service)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct ControllerContext {
+        environment: DeploymentEnvironment,
+        snapshot: Arc<dyn Fn() -> ControllerSnapshot + Send + Sync>,
+    }
+
+    impl ControllerContext {
+        pub fn new(
+            environment: DeploymentEnvironment,
+            snapshot: impl Fn() -> ControllerSnapshot + Send + Sync + 'static,
+        ) -> Self {
+            Self { environment, snapshot: Arc::new(snapshot) }
+        }
+
+        pub(crate) const fn environment(&self) -> DeploymentEnvironment {
+            self.environment
+        }
+
+        pub(super) fn snapshot(&self) -> ControllerSnapshot {
+            (self.snapshot)()
+        }
+    }
+
+    impl fmt::Debug for ControllerContext {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter
+                .debug_struct("ControllerContext")
+                .finish_non_exhaustive()
+        }
     }
 }
+
+#[cfg(feature = "ssr")]
+pub use context::{ControllerContext, OnboardingContext};
 
 #[cfg(not(feature = "ssr"))]
 #[derive(Clone, Debug)]
 pub struct OnboardingContext;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentEnvironment {
+    Development,
+    Preview,
+    Production,
+}
+
+impl DeploymentEnvironment {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Development => "Development",
+            Self::Preview => "Preview",
+            Self::Production => "Production",
+        }
+    }
+
+    #[cfg(feature = "ssr")]
+    pub(crate) const fn favicon_href(self) -> &'static str {
+        match self {
+            Self::Development => "/favicon-development.svg",
+            Self::Preview => "/favicon-preview.svg",
+            Self::Production => "/favicon.svg",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerComponentKind {
+    Http,
+    Database,
+    Identity,
+    Certificate,
+    Enrollment,
+    Zenoh,
+}
+
+impl ControllerComponentKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Http => "Controller",
+            Self::Database => "Database",
+            Self::Identity => "Identity",
+            Self::Certificate => "Certificates",
+            Self::Enrollment => "Enrollment",
+            Self::Zenoh => "Zenoh",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerComponentState {
+    Ready,
+    Starting,
+    Degraded,
+    Disabled,
+}
+
+impl ControllerComponentState {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready",
+            Self::Starting => "Starting",
+            Self::Degraded => "Degraded",
+            Self::Disabled => "Disabled",
+        }
+    }
+
+    pub const fn class(self) -> &'static str {
+        match self {
+            Self::Ready => "component-state component-state-ready",
+            Self::Starting => "component-state component-state-starting",
+            Self::Degraded => "component-state component-state-degraded",
+            Self::Disabled => "component-state component-state-disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerComponent {
+    pub kind: ControllerComponentKind,
+    pub state: ControllerComponentState,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerSnapshot {
+    pub environment: DeploymentEnvironment,
+    pub ready: bool,
+    pub components: Vec<ControllerComponent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ControllerError {
+    #[error("Controller status is unavailable.")]
+    Unavailable,
+    #[error("The controller request failed.")]
+    Transport,
+}
+
+impl FromServerFnError for ControllerError {
+    type Encoder = JsonEncoding;
+
+    fn from_server_fn_error(_error: ServerFnErrorErr) -> Self {
+        Self::Transport
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
@@ -91,6 +250,13 @@ pub struct FleetOverview {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "availability", content = "overview", rename_all = "snake_case")]
+pub enum FleetAvailability {
+    Available(FleetOverview),
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SiteOverview {
     pub site_id: String,
     pub name: String,
@@ -131,6 +297,10 @@ impl InvitationState {
             Self::Failed => "badge badge-negative",
         }
     }
+
+    pub const fn is_revocable(self) -> bool {
+        matches!(self, Self::Created | Self::Claimed)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,10 +322,20 @@ impl CertificateMode {
 }
 
 #[server(prefix = "/_server/inari")]
-pub async fn load_fleet_overview() -> Result<FleetOverview, OnboardingError> {
+pub async fn load_controller_snapshot() -> Result<ControllerSnapshot, ControllerError> {
+    let context = use_context::<ControllerContext>().ok_or(ControllerError::Unavailable)?;
+    Ok(context.snapshot())
+}
+
+#[server(prefix = "/_server/inari")]
+pub async fn load_fleet_overview() -> Result<FleetAvailability, OnboardingError> {
     use self::ssr::*;
 
-    let service = onboarding()?;
+    let context = use_context::<OnboardingContext>()
+        .ok_or_else(|| internal_error("Leptos onboarding context was not provided"))?;
+    let Some(service) = context.service() else {
+        return Ok(FleetAvailability::Disabled);
+    };
     let _identity = require_permission(Permission::FleetRead).await?;
     let repository = service.repository();
     let sites = repository
@@ -174,7 +354,7 @@ pub async fn load_fleet_overview() -> Result<FleetOverview, OnboardingError> {
         .iter()
         .map(|site| site.device_count)
         .sum();
-    Ok(FleetOverview {
+    Ok(FleetAvailability::Available(FleetOverview {
         site_count: sites.len(),
         agent_count: agents.len(),
         online_agent_count,
@@ -188,7 +368,7 @@ pub async fn load_fleet_overview() -> Result<FleetOverview, OnboardingError> {
                 device_count: site.device_count,
             })
             .collect(),
-    })
+    }))
 }
 
 #[server(prefix = "/_server/inari")]

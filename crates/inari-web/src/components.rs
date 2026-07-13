@@ -6,8 +6,8 @@ use crate::server_fns::InvitationState;
 pub fn Brand() -> impl IntoView {
     view! {
         <a class="brand" href="/" aria-label="Inari home">
-            <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
-            <span>"Inari"</span>
+            <img class="brand-symbol" src="/inari-mark.svg" alt="" aria-hidden="true"/>
+            <span class="brand-wordmark">"inari"</span>
         </a>
     }
 }
@@ -22,7 +22,7 @@ pub fn AppFrame(children: Children) -> impl IntoView {
             </header>
             {children()}
             <footer class="app-footer">
-                <span>"Inari managed gateway"</span>
+                <span>"Private device operations"</span>
                 <span>"Protocol 2026-07-12"</span>
             </footer>
         </div>

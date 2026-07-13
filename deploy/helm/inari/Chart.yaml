@@ -5,9 +5,10 @@ type: application
 version: 0.2.0
 appVersion: "0.1.0-alpha.1"
 kubeVersion: ">=1.29.0-0"
-home: https://github.com/hadronomy/odoo-iot-agent
+home: https://github.com/hadronomy/inari
+icon: https://raw.githubusercontent.com/hadronomy/inari/main/packages/brand/inari_brand/assets/inari-app-icon.svg
 sources:
-  - https://github.com/hadronomy/odoo-iot-agent
+  - https://github.com/hadronomy/inari
 maintainers:
   - name: hadronomy
     url: https://github.com/hadronomy
@@ -22,11 +23,11 @@ annotations:
   artifacthub.io/prerelease: "true"
   artifacthub.io/links: |
     - name: Source
-      url: https://github.com/hadronomy/odoo-iot-agent
+      url: https://github.com/hadronomy/inari
     - name: Support
-      url: https://github.com/hadronomy/odoo-iot-agent/issues
+      url: https://github.com/hadronomy/inari/issues
     - name: Kubernetes operations guide
-      url: https://github.com/hadronomy/odoo-iot-agent/blob/main/docs/kubernetes.md
+      url: https://github.com/hadronomy/inari/blob/main/docs/kubernetes.md
   artifacthub.io/images: |
     - name: inari-server
       image: ghcr.io/hadronomy/inari-server:0.1.0-alpha.1
@@ -35,6 +36,8 @@ annotations:
     - name: release-test
       image: busybox:1.37.0
   artifacthub.io/changes: |
+    - kind: added
+      description: Applied the unified Inari identity across controller, tray, documentation, and packaging surfaces.
     - kind: changed
       description: Introduced the production PostgreSQL, OIDC, migration, and standalone Zenoh topology.
     - kind: added

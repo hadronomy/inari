@@ -17,7 +17,7 @@ data:
     [server]
     bind = "0.0.0.0:8080"
     public_url = {{ .Values.server.publicUrl | quote }}
-    production = true
+    environment = {{ .Values.server.environment | quote }}
     request_timeout = {{ .Values.server.requestTimeout | quote }}
     shutdown_grace_period = {{ .Values.server.shutdownGracePeriod | quote }}
     max_body_size_bytes = {{ int .Values.server.maxBodySizeBytes }}

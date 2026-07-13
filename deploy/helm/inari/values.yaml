@@ -94,6 +94,7 @@ organization:
   defaultSiteName: Headquarters
 
 server:
+  environment: production
   publicUrl: https://inari.example.com
   requestTimeout: 30s
   shutdownGracePeriod: 30s

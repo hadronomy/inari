@@ -8,7 +8,9 @@ config_version = 1
 [server]
 bind = "127.0.0.1:8080"
 public_url = "https://controller.example.com"
-production = true
+# `preview` and `production` use distinct browser favicons and enforce the same
+# deployed security posture. Local defaults use `development`.
+environment = "production"
 
 [database]
 # Mounted from an existing Kubernetes Secret. The URL itself never belongs in
@@ -61,7 +63,7 @@ controller_actions = [
 ]
 [managed_gateway.onboarding]
 # The operator interface remains available while onboarding is disabled, but
-# invitation actions return a typed 503 response.
+# invitation actions render a typed unavailable state.
 enabled = false
 public_base_url = "https://controller.example.com"
 invite_ttl = "10m"

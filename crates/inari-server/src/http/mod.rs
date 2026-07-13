@@ -27,7 +27,10 @@ use tracing::Level;
 
 use crate::config::CorsConfig;
 use crate::error::{AppError, AppResult, ConfigError};
-use crate::state::AppState;
+use crate::state::{
+    AppState, Certificate, Component, ComponentReadiness, Database, Enrollment, Http, Identity,
+    ReadinessLevel, Zenoh,
+};
 
 pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
     let settings = &state.loaded_config().settings;
@@ -39,21 +42,23 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
         .transpose()?;
 
     let onboarding = inari_web::OnboardingContext::from(state.onboarding().cloned());
+    let controller = controller_context(state);
     let leptos_options = state.leptos_options().clone();
     let web_routes = discover_web_routes();
-    let provide_onboarding_context = move || {
+    let provide_web_context = move || {
         provide_context(onboarding.clone());
+        provide_context(controller.clone());
     };
     let site_service =
         site_pkg_dir_service(&leptos_options).fallback(ErrorHandler::new_with_context(
-            provide_onboarding_context.clone(),
+            provide_web_context.clone(),
             inari_web::shell,
             leptos_options.clone(),
         ));
     let mut router = Router::new()
         .merge(routes::system::router())
         .nest("/api", routes::api::router(state))
-        .leptos_routes_with_context(state, web_routes, provide_onboarding_context, {
+        .leptos_routes_with_context(state, web_routes, provide_web_context, {
             let leptos_options = leptos_options.clone();
             move || inari_web::shell(leptos_options.clone())
         })
@@ -61,7 +66,10 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
         .layer(middleware::from_fn(ssr_render::serve));
 
     if let Some(identity) = state.identity() {
-        let secure_cookie = settings.server.production
+        let secure_cookie = settings
+            .server
+            .environment
+            .is_deployed()
             || settings
                 .server
                 .public_url
@@ -80,6 +88,75 @@ pub fn router(state: &AppState) -> AppResult<Router<AppState>> {
     }
 
     Ok(apply_http_layers(router, state, cors))
+}
+
+fn controller_context(state: &AppState) -> inari_web::ControllerContext {
+    let state = state.clone();
+    let environment = match state
+        .loaded_config()
+        .settings
+        .server
+        .environment
+    {
+        crate::config::DeploymentEnvironment::Development => {
+            inari_web::DeploymentEnvironment::Development
+        },
+        crate::config::DeploymentEnvironment::Preview => inari_web::DeploymentEnvironment::Preview,
+        crate::config::DeploymentEnvironment::Production => {
+            inari_web::DeploymentEnvironment::Production
+        },
+    };
+
+    inari_web::ControllerContext::new(environment, move || {
+        let snapshot = state.readiness_snapshot();
+        let components = snapshot.components();
+        inari_web::ControllerSnapshot {
+            environment,
+            ready: snapshot.is_ready(),
+            components: vec![
+                controller_component(
+                    inari_web::ControllerComponentKind::Http,
+                    components.component::<Http>(),
+                ),
+                controller_component(
+                    inari_web::ControllerComponentKind::Database,
+                    components.component::<Database>(),
+                ),
+                controller_component(
+                    inari_web::ControllerComponentKind::Identity,
+                    components.component::<Identity>(),
+                ),
+                controller_component(
+                    inari_web::ControllerComponentKind::Certificate,
+                    components.component::<Certificate>(),
+                ),
+                controller_component(
+                    inari_web::ControllerComponentKind::Enrollment,
+                    components.component::<Enrollment>(),
+                ),
+                controller_component(
+                    inari_web::ControllerComponentKind::Zenoh,
+                    components.component::<Zenoh>(),
+                ),
+            ],
+        }
+    })
+}
+
+fn controller_component<C: Component>(
+    kind: inari_web::ControllerComponentKind,
+    readiness: &ComponentReadiness<C>,
+) -> inari_web::ControllerComponent {
+    inari_web::ControllerComponent {
+        kind,
+        state: match readiness.level() {
+            ReadinessLevel::Ready => inari_web::ControllerComponentState::Ready,
+            ReadinessLevel::Starting => inari_web::ControllerComponentState::Starting,
+            ReadinessLevel::Degraded => inari_web::ControllerComponentState::Degraded,
+            ReadinessLevel::Disabled => inari_web::ControllerComponentState::Disabled,
+        },
+        summary: readiness.summary().to_owned(),
+    }
 }
 
 fn discover_web_routes() -> Vec<AxumRouteListing> {
@@ -202,7 +279,7 @@ mod tests {
 
     use super::router;
     use crate::ConcurrencyLimit;
-    use crate::config::{LoadedConfig, ZenohConfig};
+    use crate::config::{DeploymentEnvironment, LoadedConfig, ZenohConfig};
     use crate::state::AppState;
     use crate::zenoh::ZenohSupervisor;
 
@@ -213,7 +290,12 @@ mod tests {
     }
 
     fn test_app() -> axum::Router {
+        test_app_for(DeploymentEnvironment::Development)
+    }
+
+    fn test_app_for(environment: DeploymentEnvironment) -> axum::Router {
         let mut loaded = LoadedConfig::default();
+        loaded.settings.server.environment = environment;
 
         loaded
             .settings
@@ -332,12 +414,38 @@ mod tests {
             .await
             .expect("router should respond");
 
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("response body should be readable");
         let html = String::from_utf8(body.to_vec()).expect("response body should be UTF-8");
         assert!(html.contains("This connection cannot be started."));
         assert!(html.contains("Managed onboarding is not enabled"));
+    }
+
+    #[tokio::test]
+    async fn document_favicon_identifies_the_deployment_environment() {
+        for (environment, favicon) in [
+            (DeploymentEnvironment::Development, "/favicon-development.svg"),
+            (DeploymentEnvironment::Preview, "/favicon-preview.svg"),
+            (DeploymentEnvironment::Production, "/favicon.svg"),
+        ] {
+            let response = test_app_for(environment)
+                .oneshot(
+                    Request::builder()
+                        .uri("/")
+                        .body(Body::empty())
+                        .expect("request should be valid"),
+                )
+                .await
+                .expect("router should respond");
+
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("response body should be readable");
+            let html = String::from_utf8(body.to_vec()).expect("response body should be UTF-8");
+            assert!(html.contains(&format!("href=\"{favicon}\"")));
+        }
     }
 }

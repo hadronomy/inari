@@ -1,21 +1,55 @@
-# Inari
+<div align="center">
+  <img src="packages/brand/inari_brand/assets/readme-header.webp" alt="Inari — the trusted threshold between physical devices and software" width="100%" />
+  <p></p>
+  <a href="https://github.com/hadronomy/inari/blob/main/LICENSE">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/license/hadronomy/inari.svg?mode=dark" />
+      <img alt="MIT License" src="https://shieldcn.dev/github/license/hadronomy/inari.svg?mode=light" />
+    </picture>
+  </a>
+  <a href="https://github.com/hadronomy/inari/stargazers">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/stars/hadronomy/inari.svg?mode=dark" />
+      <img alt="GitHub stars" src="https://shieldcn.dev/github/stars/hadronomy/inari.svg?mode=light" />
+    </picture>
+  </a>
+  <p></p>
+  <p align="center">
+    <strong>A private control plane for the devices your software still has to touch.</strong><br />
+    <sub>Printers, scales, scanners, and edge hardware—local-first, secure, and observable.</sub>
+  </p>
+  <p></p>
+  <a href="#overview">Overview</a> •
+  <a href="#getting-started">Getting Started</a> •
+  <a href=".github/CONTRIBUTING.md">Contributing</a> •
+  <a href="#production-deployment">Deployment</a> •
+  <a href="#license">License</a>
+  <hr />
+</div>
 
-Inari is an IoT agent and managed gateway. The Python agent runs beside local hardware; the Rust server provides the controller-facing HTTPS enrollment surface, a hydrated Leptos operator interface, and the Zenoh data plane.
+> [!CAUTION]
+> Inari is alpha software. Protocol, configuration, and storage contracts may change before the first stable release.
 
-## Repository layout
+## Overview
 
-- `packages/agent`: local agent, hardware integrations, managed enrollment client, and service runtime
-- `packages/agent_tray`: user-session setup and status companion
-- `crates/inari-server`: Axum composition root and concrete Zenoh adapter
-- `crates/inari-gateway`: managed-gateway protocol, security, services, and PostgreSQL repository
-- `crates/inari-migration`: embedded, forward-only SeaORM controller migrations
-- `crates/inari-web`: shared Leptos application and server functions
-- `crates/inari-web-frontend`: minimal browser WASM hydration entrypoint
-- `docs`: protocol and deployment documentation
+Inari brings printers, scales, scanners, and other peripherals into private
+infrastructure without pretending they were designed as IoT devices. Business
+systems such as Odoo can work with a stable device API instead of taking on
+vendor drivers, USB quirks, and local failure modes themselves.
 
-## Development
+The Python agent runs beside the hardware. It owns discovery, drivers, local
+durability, and offline operation. The tray is a user-session companion for
+setup and status; it is not the service daemon. In a managed installation, the
+Rust controller handles enrollment, operator workflows, policy, and fleet
+coordination. Enrollment uses HTTPS, while steady-state traffic runs over
+Zenoh.
 
-Install stable Rust, the browser target, cargo-leptos, Python 3.13, `uv`, and `just`:
+## Getting started
+
+Inari is a mixed Rust and Python workspace. A development machine needs stable
+Rust, Python 3.13, [`uv`](https://docs.astral.sh/uv/),
+[`just`](https://just.systems/), and `cargo-leptos`. Once those are available,
+install the browser target and synchronize the workspace:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -23,50 +57,95 @@ cargo install cargo-leptos --locked
 just sync
 ```
 
-Run the complete verification suite with:
+`just check` is the canonical pre-submit gate. It runs the Rust, Python, web,
+and deployment checks that apply to the whole repository:
 
 ```sh
 just check
 ```
 
-Rust compile validation always runs through Clippy; the repository does not use `cargo check` as a validation gate.
+Rust compile validation always runs through Clippy. Do not replace it with
+`cargo check` when validating a change.
 
-For the hydrated server during development:
+## Running the controller locally
+
+The normal development loop for the controller and hydrated web interface is:
 
 ```sh
 cargo leptos watch
 ```
 
-Plain `cargo run` is also supported from the workspace root. It reads the same
-Leptos application metadata from `Cargo.toml`; run `cargo leptos build` first
-when `target/site` does not yet contain the generated browser assets.
+Plain `cargo run` also works from the workspace root. It uses the Leptos
+metadata in `Cargo.toml`, but it does not build browser assets for you. Run
+`cargo leptos build` first if `target/site` is empty or stale.
 
-Managed onboarding is disabled by default. Start from
+The edge agent and tray have their own focused setup notes in
+[`packages/agent/README.md`](packages/agent/README.md) and
+[`packages/agent_tray/README.md`](packages/agent_tray/README.md).
+
+## Enabling managed operation
+
+Managed onboarding stays off in a fresh checkout. That is deliberate:
+invitation issuance should not appear usable until the controller has a public
+URL, PostgreSQL, OIDC, step-ca, and Zenoh configured.
+
+Use
 [`crates/inari-server/config.example.toml`](crates/inari-server/config.example.toml)
-to configure the public controller URL, OIDC, PostgreSQL, step-ca, and Zenoh
-before enabling invitation issuance. Human
-operators authenticate through OIDC; static operator tokens are not supported.
+as the starting point and configure those dependencies before exposing the
+invitation flow. Human operators sign in through OIDC; there is no static
+operator-token compatibility path.
 
-The public HTTP namespaces are deliberately separate:
+## Public interfaces
 
-- `/api/inari/v1` exposes stable, typed Inari resources. Operational reads use
-  the authenticated organization session and typed role permissions.
-- `/api/zenoh/v1/{selector}` is the optional Axum-native Zenoh REST
-  compatibility surface. The path after `/api/zenoh/v1/` is passed directly to
-  Zenoh as the selector or key expression.
+Axum owns every API route before the Leptos fallback. The two public namespaces
+have different responsibilities and should remain separate:
 
-The UI is written in Rust and hydrated as WebAssembly. There is no authored application JavaScript; JavaScript emitted by wasm-bindgen is generated build output.
+- `/api/inari/v1` is the typed JSON API for Inari resources and operations.
+- `/api/zenoh/v1/{selector}` is the optional Zenoh HTTP compatibility surface.
+  The selector after the prefix is passed to Zenoh without being remodeled as
+  an Inari REST resource.
 
-## Production build
+Requests beneath `/api` never fall through to an HTML response. The operator UI
+is written in Rust with Leptos and hydrated as WebAssembly; the only JavaScript
+served by the application is generated build output from `wasm-bindgen`.
+
+## Production deployment
+
+The server binary and generated site directory are one release unit:
 
 ```sh
 cargo leptos build --release
 ```
 
-Deploy the release binary together with `target/site`. Set `LEPTOS_SITE_ROOT` to that deployed site directory and configure the server through environment variables or a configuration file. Production controller state lives in externally managed PostgreSQL. Run `inari-server database migrate` before rolling controller replicas and use `inari-server database status` to verify that the schema is current. Retain `database.migrate_on_startup = true` only for a single-process development environment.
+Ship `target/site` with the binary and point `LEPTOS_SITE_ROOT` at its deployed
+location. Production controller state belongs in externally managed PostgreSQL.
+Run `inari-server database migrate` before rolling controller replicas, then
+use `inari-server database status` to confirm that the schema is current.
+Automatic startup migration is reserved for single-process development.
 
-The production Helm chart lives at [`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller separately from the Zenoh router StatefulSet and references existing Kubernetes Secrets rather than embedding credentials in values. A Kustomize-owned installation is available at [`deploy/kustomize/inari`](deploy/kustomize/inari); Helm and Kustomize are alternative lifecycle owners, not overlapping reconcilers.
+For Kubernetes, the maintained Helm chart lives in
+[`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller and
+Zenoh router as separate workloads and consumes existing Kubernetes Secrets.
+[`deploy/kustomize/inari`](deploy/kustomize/inari) provides a Kustomize-owned
+alternative. Choose one lifecycle owner for an installation; do not apply both.
 
-The complete deployment, upgrade, certificate, network-policy, validation, and recovery procedure is documented in [docs/kubernetes.md](docs/kubernetes.md). Controller migration ownership and recovery policy are documented in [docs/controller_database.md](docs/controller_database.md).
+## Further reading
 
-The public protocol is documented in [docs/gateway_protocol.md](docs/gateway_protocol.md). The generated operator site must be served by the Rust binary so its CSP nonce, hydration scripts, static-asset handling, and Leptos routes remain consistent.
+- [Architecture](ARCHITECTURE.md) explains the agent, tray, controller, and
+  Zenoh boundaries.
+- [Contributing](.github/CONTRIBUTING.md) contains the repository map and the
+  working agreement for maintainers.
+- [Kubernetes deployment](docs/kubernetes.md) covers installation, upgrades,
+  certificates, network policy, validation, and recovery.
+- [Controller database](docs/controller_database.md) documents migration
+  ownership and forward-repair policy.
+- [Managed gateway protocol](docs/gateway_protocol.md) defines the public wire
+  contract.
+- [Zenoh HTTP compatibility](docs/zenoh_rest_axum.md) describes the Axum-owned
+  compatibility surface.
+- [Brand and identity](docs/brand.md) documents the canonical assets, usage
+  rules, accessibility guidance, and cultural rationale.
+
+## License
+
+Inari is available under the [MIT License](LICENSE).

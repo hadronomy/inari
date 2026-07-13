@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from .icons import build_tray_icon
+from .icons import build_packaged_app_icon, build_tray_icon
 from .models import TraySnapshot
 from .tray_host import TrayHost, TrayMenuEntry
 
@@ -42,6 +42,7 @@ class QtTrayHost(TrayHost):
         if not isinstance(application, QApplication):
             application = QApplication([self._title])
         application.setQuitOnLastWindowClosed(False)
+        application.setWindowIcon(_image_to_qicon(build_packaged_app_icon(size=256)))
         if not QSystemTrayIcon.isSystemTrayAvailable():
             raise RuntimeError("No system tray is available in this desktop session.")
 

@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use inari_server::{LoadedConfig, LogFormat, ZenohMode};
+use inari_server::{DeploymentEnvironment, LoadedConfig, LogFormat, ZenohMode};
 
 #[test]
 fn environment_overrides_cover_every_nested_field() {
     let loaded = LoadedConfig::load_from_environment_map(HashMap::from([
         ("INARI_SERVER_SERVER__BIND".into(), "127.0.0.1:9000".into()),
         ("INARI_SERVER_SERVER__PUBLIC_URL".into(), "http://127.0.0.1:9000".into()),
+        ("INARI_SERVER_SERVER__ENVIRONMENT".into(), "development".into()),
         ("INARI_SERVER_SERVER__REQUEST_TIMEOUT".into(), "45s".into()),
         ("INARI_SERVER_SERVER__SHUTDOWN_GRACE_PERIOD".into(), "1min".into()),
         ("INARI_SERVER_SERVER__MAX_BODY_SIZE_BYTES".into(), "4096".into()),
@@ -68,6 +69,7 @@ fn environment_overrides_cover_every_nested_field() {
 
     assert!(loaded.origin.includes_environment);
     assert_eq!(loaded.settings.server.bind, "127.0.0.1:9000".parse().unwrap());
+    assert_eq!(loaded.settings.server.environment, DeploymentEnvironment::Development);
     assert_eq!(loaded.settings.server.request_timeout, Duration::from_secs(45));
     assert_eq!(
         loaded

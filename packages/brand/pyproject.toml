@@ -1,0 +1,17 @@
+[project]
+name = "inari-brand"
+version = "0.1.0a1"
+description = "Canonical identity assets for Inari"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["inari_brand*"]
+
+[tool.setuptools.package-data]
+inari_brand = ["assets/*", "assets/fonts/*"]

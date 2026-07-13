@@ -1,0 +1,12 @@
+{
+  "name": "Inari",
+  "short_name": "Inari",
+  "description": "Private device operations.",
+  "icons": [
+    { "src": "/inari-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/inari-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#FFFFFF",
+  "background_color": "#F2F2EF",
+  "display": "standalone"
+}

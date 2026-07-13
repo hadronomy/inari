@@ -206,8 +206,9 @@
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["publicUrl", "requestTimeout", "shutdownGracePeriod", "maxBodySizeBytes"],
+      "required": ["environment", "publicUrl", "requestTimeout", "shutdownGracePeriod", "maxBodySizeBytes"],
       "properties": {
+        "environment": { "enum": ["development", "preview", "production"] },
         "publicUrl": { "$ref": "#/definitions/httpsUrl" },
         "requestTimeout": { "$ref": "#/definitions/duration" },
         "shutdownGracePeriod": { "$ref": "#/definitions/duration" },

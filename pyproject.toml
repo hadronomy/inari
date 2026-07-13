@@ -8,7 +8,7 @@ dependencies = []
 members = ["packages/*"]
 
 [tool.ty.environment]
-root = ["./packages/agent", "./packages/agent_tray"]
+root = ["./packages/agent", "./packages/agent_tray", "./packages/brand"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"

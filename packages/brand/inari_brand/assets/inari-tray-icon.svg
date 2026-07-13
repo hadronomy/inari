@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Inari</title>
+  <rect x="4" y="4" width="56" height="56" rx="15" fill="#0F1110"/>
+  <path fill="#FFFFFF" d="M12 17H19L24 11L28 17H36L40 11L45 17H52V23H12V17ZM16 26H48V31H16V26ZM19 31H26L24 51H16L19 31ZM38 31H45L48 51H40L38 31Z"/>
+</svg>

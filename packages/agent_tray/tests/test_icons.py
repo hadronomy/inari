@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from inari_tray.icons import ICON_SIZE, build_tray_icon
+from inari_tray.icons import ICON_SIZE, build_packaged_app_icon, build_tray_icon
 from inari_tray.models import (
     ControlMode,
     ControlSnapshot,
@@ -52,5 +52,14 @@ def test_build_tray_icon_places_colored_status_dot() -> None:
         tuple[int, int, int, int],
         image.getpixel((ICON_SIZE - 8, ICON_SIZE - 8)),
     )
-    assert dot_pixel[:3] == (240, 87, 113)
+    assert dot_pixel[:3] == (103, 107, 105)
     assert dot_pixel[3] == 255
+
+
+def test_packaged_app_icon_uses_canonical_vermilion_tile() -> None:
+    image = build_packaged_app_icon().convert("RGBA")
+
+    crossbar = cast(tuple[int, int, int, int], image.getpixel((ICON_SIZE // 2, 28)))
+    background = cast(tuple[int, int, int, int], image.getpixel((10, ICON_SIZE // 2)))
+    assert crossbar[:3] == (255, 255, 255)
+    assert background[:3] == (226, 61, 40)

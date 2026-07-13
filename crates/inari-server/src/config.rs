@@ -172,9 +172,12 @@ impl AppConfig {
         self.database
             .validate(self.managed_gateway.enabled || self.identity.oidc.enabled)?;
         self.organization.validate()?;
-        if self.server.production && self.managed_gateway.enabled && !self.identity.oidc.enabled {
+        if self.server.environment.is_deployed()
+            && self.managed_gateway.enabled
+            && !self.identity.oidc.enabled
+        {
             return Err(ConfigError::invalid(
-                "identity.oidc.enabled must be true for a production managed controller.",
+                "identity.oidc.enabled must be true for a deployed managed controller.",
             ));
         }
         if self.managed_gateway.enabled && !self.zenoh.enabled {
@@ -187,9 +190,9 @@ impl AppConfig {
                 "identity.oidc.enabled must be true when the direct Zenoh HTTP surface is enabled.",
             ));
         }
-        if self.server.production && self.zenoh.mode != ZenohMode::Client {
+        if self.server.environment.is_deployed() && self.zenoh.mode != ZenohMode::Client {
             return Err(ConfigError::invalid(
-                "production controllers must connect to a separate Zenoh router in client mode.",
+                "preview and production controllers must connect to a separate Zenoh router in client mode.",
             ));
         }
         Ok(self)
@@ -201,7 +204,7 @@ impl AppConfig {
 pub struct ServerConfig {
     pub bind: SocketAddr,
     pub public_url: Option<url::Url>,
-    pub production: bool,
+    pub environment: DeploymentEnvironment,
     #[serde(with = "humantime_serde")]
     pub request_timeout: Duration,
     #[serde(with = "humantime_serde")]
@@ -214,11 +217,26 @@ impl Default for ServerConfig {
         Self {
             bind: (Ipv4Addr::LOCALHOST, 8080).into(),
             public_url: None,
-            production: false,
+            environment: DeploymentEnvironment::Development,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             shutdown_grace_period: DEFAULT_SHUTDOWN_GRACE_PERIOD,
             max_body_size_bytes: 1024 * 1024,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeploymentEnvironment {
+    #[default]
+    Development,
+    Preview,
+    Production,
+}
+
+impl DeploymentEnvironment {
+    pub const fn is_deployed(self) -> bool {
+        matches!(self, Self::Preview | Self::Production)
     }
 }
 

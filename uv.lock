@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 members = [
     "albatross",
     "inari",
+    "inari-brand",
     "inari-tray",
 ]
 
@@ -572,12 +573,18 @@ dev = [
 ]
 
 [[package]]
+name = "inari-brand"
+version = "0.1.0a1"
+source = { editable = "packages/brand" }
+
+[[package]]
 name = "inari-tray"
 version = "0.3.1a1"
 source = { editable = "packages/agent_tray" }
 dependencies = [
     { name = "httpx" },
     { name = "inari" },
+    { name = "inari-brand" },
     { name = "keyring" },
     { name = "pillow" },
     { name = "platformdirs" },
@@ -604,6 +611,7 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "inari", editable = "packages/agent" },
+    { name = "inari-brand", editable = "packages/brand" },
     { name = "keyring", specifier = ">=25.7.0" },
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "platformdirs", specifier = ">=4.4.0" },

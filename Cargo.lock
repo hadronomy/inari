@@ -2606,6 +2606,8 @@ dependencies = [
  "tower-sessions",
  "tracing",
  "url",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

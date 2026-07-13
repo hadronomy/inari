@@ -26,10 +26,12 @@ thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 tower-sessions = { workspace = true, optional = true }
 url.workspace = true
+wasm-bindgen-futures = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true }
 
 [features]
 default = []
-hydrate = ["leptos/hydrate"]
+hydrate = ["dep:wasm-bindgen-futures", "dep:web-sys", "leptos/hydrate"]
 ssr = [
   "dep:inari-gateway",
   "dep:leptos_axum",

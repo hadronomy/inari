@@ -10,7 +10,7 @@ lib-package          = "inari-web-frontend"
 site-root            = "target/site"
 site-pkg-dir         = "pkg"
 style-file           = "crates/inari-web/style/main.css"
-assets-dir           = "crates/inari-web/public"
+assets-dir           = "packages/brand/inari_brand/assets"
 site-addr            = "127.0.0.1:3000"
 reload-port          = 3001
 browserquery         = "defaults"
@@ -103,6 +103,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 url = { version = "2", features = ["serde"] }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Clipboard", "Navigator", "Window"] }
 x509-parser = { version = "0.18", features = ["verify"] }
 zenoh = "1"
 

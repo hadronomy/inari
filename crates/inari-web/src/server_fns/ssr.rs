@@ -2,12 +2,10 @@ pub(super) use base64::Engine;
 pub(super) use leptos::prelude::*;
 pub(super) use qrcode::{QrCode, render::svg};
 
-use http::StatusCode;
 pub(super) use inari_gateway::identity::Permission;
 use inari_gateway::identity::SessionIdentity;
 use inari_gateway::onboarding::OnboardingService;
 pub(super) use inari_gateway::protocol::AgentHealthState;
-use leptos_axum::ResponseOptions;
 use tower_sessions::Session;
 
 use super::{
@@ -20,8 +18,8 @@ pub(super) fn onboarding() -> Result<OnboardingService, OnboardingError> {
         return Err(internal_error("Leptos onboarding context was not provided"));
     };
     context
-        .0
-        .ok_or_else(|| error_response(OnboardingError::Disabled, StatusCode::SERVICE_UNAVAILABLE))
+        .service()
+        .ok_or(OnboardingError::Disabled)
 }
 
 pub(super) async fn require_permission(
@@ -34,19 +32,15 @@ pub(super) async fn require_permission(
         .get::<SessionIdentity>("identity")
         .await
         .map_err(internal_error)?
-        .ok_or_else(|| error_response(OnboardingError::Forbidden, StatusCode::UNAUTHORIZED))?;
+        .ok_or(OnboardingError::Forbidden)?;
     if identity.expires_at <= chrono::Utc::now() {
         session
             .flush()
             .await
             .map_err(internal_error)?;
-        return Err(error_response(OnboardingError::Forbidden, StatusCode::UNAUTHORIZED));
+        return Err(OnboardingError::Forbidden);
     }
-    if identity.grants(permission) {
-        Ok(identity)
-    } else {
-        Err(error_response(OnboardingError::Forbidden, StatusCode::FORBIDDEN))
-    }
+    if identity.grants(permission) { Ok(identity) } else { Err(OnboardingError::Forbidden) }
 }
 
 pub(super) fn audit_context(identity: &SessionIdentity) -> inari_gateway::audit::AuditContext {
@@ -57,35 +51,18 @@ pub(super) fn onboarding_error(error: inari_gateway::GatewayError) -> Onboarding
     use inari_gateway::GatewayError;
 
     match error {
-        GatewayError::InvalidInput(detail) => {
-            error_response(OnboardingError::InvalidRequest(detail), StatusCode::BAD_REQUEST)
-        },
-        GatewayError::Forbidden(_) => {
-            error_response(OnboardingError::Forbidden, StatusCode::FORBIDDEN)
-        },
-        GatewayError::NotFound(_) => {
-            error_response(OnboardingError::NotFound, StatusCode::NOT_FOUND)
-        },
-        GatewayError::Conflict(detail) => {
-            error_response(OnboardingError::Conflict(detail), StatusCode::CONFLICT)
-        },
-        GatewayError::Unavailable(_) => {
-            error_response(OnboardingError::Unavailable, StatusCode::SERVICE_UNAVAILABLE)
-        },
+        GatewayError::InvalidInput(detail) => OnboardingError::InvalidRequest(detail),
+        GatewayError::Forbidden(_) => OnboardingError::Forbidden,
+        GatewayError::NotFound(_) => OnboardingError::NotFound,
+        GatewayError::Conflict(detail) => OnboardingError::Conflict(detail),
+        GatewayError::Unavailable(_) => OnboardingError::Unavailable,
         error => internal_error(error),
     }
 }
 
 pub(super) fn internal_error(error: impl std::fmt::Display) -> OnboardingError {
     tracing::error!(error = %error, "managed onboarding request failed");
-    error_response(OnboardingError::Internal, StatusCode::INTERNAL_SERVER_ERROR)
-}
-
-fn error_response(error: OnboardingError, status: StatusCode) -> OnboardingError {
-    if let Some(response) = use_context::<ResponseOptions>() {
-        response.set_status(status);
-    }
-    error
+    OnboardingError::Internal
 }
 
 pub(super) fn qr_data_uri(value: &str) -> Result<String, String> {

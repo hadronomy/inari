@@ -57,9 +57,9 @@ impl OidcConfig {
             .ok_or_else(|| {
                 ConfigError::invalid("identity.oidc.issuer_url is required when OIDC is enabled.")
             })?;
-        if issuer.scheme() != "https" && server.production {
+        if issuer.scheme() != "https" && server.environment.is_deployed() {
             return Err(ConfigError::invalid(
-                "identity.oidc.issuer_url must use HTTPS in production.",
+                "identity.oidc.issuer_url must use HTTPS outside development.",
             ));
         }
         if self.client_id.trim().is_empty() {
@@ -85,8 +85,10 @@ impl OidcConfig {
             .ok_or_else(|| {
                 ConfigError::invalid("server.public_url is required when OIDC is enabled.")
             })?;
-        if server.production && public_url.scheme() != "https" {
-            return Err(ConfigError::invalid("server.public_url must use HTTPS in production."));
+        if server.environment.is_deployed() && public_url.scheme() != "https" {
+            return Err(ConfigError::invalid(
+                "server.public_url must use HTTPS outside development.",
+            ));
         }
         Ok(())
     }

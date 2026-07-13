@@ -107,6 +107,7 @@ helm show values oci://ghcr.io/hadronomy/charts/inari --version 0.2.0 > inari-va
 At minimum, replace:
 
 - `organization.*`;
+- `server.environment` (`preview` for staging-like deployments and `production` for live controllers);
 - `server.publicUrl`;
 - `identity.oidc.*`;
 - every existing Secret name and key;
@@ -382,7 +383,7 @@ workflow:
 
 ```sh
 cosign verify \
-  --certificate-identity-regexp 'https://github.com/hadronomy/odoo-iot-agent/.github/workflows/helm-release.yaml@refs/.*' \
+--certificate-identity-regexp 'https://github.com/hadronomy/inari/.github/workflows/helm-release.yaml@refs/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/hadronomy/charts/inari@sha256:<digest>
 ```
