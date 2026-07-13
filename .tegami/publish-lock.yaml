@@ -1,0 +1,35 @@
+core:changelogs:
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Introduce Inari Device Center for Windows\n\nThe first Windows distribution packages Device Center as the user-session tray application and the Inari agent as its own delayed-start service. The signed MSIX includes protocol activation, protected local pairing, native credential storage, canonical brand assets, checksums, an SBOM, and installation guidance for managed environments.\n\n### Add recoverable Windows publication\n\nTegami now versions the complete edge distribution as one synchronized release. Signed Windows artifacts attach to the corresponding GitHub release with checksums and provenance, and interrupted uploads can safely resume from verified remote state.\n\n### Refresh the security baseline\n\nThe edge distribution now ships with patched releases of its authentication, cryptography, HTTP, configuration, and internationalized-domain dependencies. The release test toolchain also uses the corrected temporary-directory handling in Pytest 9.\n"
+    filename: 2026-07-13-7f4b21c8.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Establish the Windows publisher identity\n\nInari Device Center packages now carry Pablo Hernández Jiménez as their\npublisher identity. A publisher-owned code-signing root delegates to a\nproject-scoped Inari issuing authority, giving managed Windows deployments a\nclear and truthful trust boundary without coupling the root identity to one\napplication.\n"
+    filename: 2026-07-13-c91e6b42.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Publish the controller chart through Tegami\n\nThe Inari Helm chart now publishes to GHCR under its own version lifecycle. Each immutable OCI artifact is signed with keyless Cosign, verified before completion, and safe to resume after an interrupted release.\n"
+    filename: 2026-07-13-a12d9e6f.md
+    v: 0.0.0
+core:packages:
+  - changelogIds:
+      - 2026-07-13-7f4b21c8.md
+      - 2026-07-13-c91e6b42.md
+    id: pip:inari
+    updated: true
+  - changelogIds:
+      - 2026-07-13-7f4b21c8.md
+      - 2026-07-13-c91e6b42.md
+    id: pip:inari-brand
+    updated: true
+  - changelogIds:
+      - 2026-07-13-7f4b21c8.md
+      - 2026-07-13-c91e6b42.md
+    id: pip:inari-tray
+    updated: true
+  - changelogIds:
+      - 2026-07-13-a12d9e6f.md
+    id: helm:inari
+    updated: true
+  - changelogIds:
+      - 2026-07-13-7f4b21c8.md
+      - 2026-07-13-c91e6b42.md
+    id: msix:inari-device-center
+    updated: true

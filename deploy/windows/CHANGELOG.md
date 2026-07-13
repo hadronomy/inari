@@ -1,12 +1,4 @@
----
-packages:
-  group:edge:
-    replay:
-      - exit-prerelease(pip:inari)
-      - exit-prerelease(pip:inari-brand)
-      - exit-prerelease(pip:inari-tray)
-      - exit-prerelease(msix:inari-device-center)
----
+## inari-device-center@1.20.0-alpha.2
 
 ### Introduce Inari Device Center for Windows
 
@@ -19,3 +11,11 @@ Tegami now versions the complete edge distribution as one synchronized release. 
 ### Refresh the security baseline
 
 The edge distribution now ships with patched releases of its authentication, cryptography, HTTP, configuration, and internationalized-domain dependencies. The release test toolchain also uses the corrected temporary-directory handling in Pytest 9.
+
+### Establish the Windows publisher identity
+
+Inari Device Center packages now carry Pablo Hernández Jiménez as their
+publisher identity. A publisher-owned code-signing root delegates to a
+project-scoped Inari issuing authority, giving managed Windows deployments a
+clear and truthful trust boundary without coupling the root identity to one
+application.
