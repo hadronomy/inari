@@ -33,39 +33,44 @@
 ## Overview
 
 Inari brings printers, scales, scanners, and other peripherals into private
-infrastructure without pretending they were designed as IoT devices. Business
-systems such as Odoo can work with a stable device API instead of taking on
-vendor drivers, USB quirks, and local failure modes themselves.
+infrastructure through a local-first device platform. Business systems such as
+Odoo work with a stable device API while the agent handles vendor drivers, USB
+protocols, and local failure recovery.
 
 The Python agent runs beside the hardware. It owns discovery, drivers, local
-durability, and offline operation. The tray is a user-session companion for
-setup and status; it is not the service daemon. In a managed installation, the
-Rust controller handles enrollment, operator workflows, policy, and fleet
-coordination. Enrollment uses HTTPS, while steady-state traffic runs over
-Zenoh.
+durability, and offline operation. The tray provides user-session setup and
+status, while the agent remains the long-running service. In a managed
+installation, the Rust controller handles enrollment, operator workflows,
+policy, and fleet coordination. Enrollment uses HTTPS, while steady-state
+traffic runs over Zenoh.
 
 ## Getting started
 
 Inari is a mixed Rust and Python workspace. A development machine needs stable
 Rust, Python 3.13, [`uv`](https://docs.astral.sh/uv/),
-[`just`](https://just.systems/), and `cargo-leptos`. Once those are available,
-install the browser target and synchronize the workspace:
+[`Mise`](https://mise.jdx.dev/), and `cargo-leptos`. Mise installs the
+repository tools declared in [`mise.toml`](mise.toml), including `just` and the
+Kubernetes validation toolchain.
+
+Install those tools, add the Rust browser target, and synchronize the workspace:
 
 ```sh
+mise install
 rustup target add wasm32-unknown-unknown
 cargo install cargo-leptos --locked
-just sync
+mise exec -- just sync
 ```
 
-`just check` is the canonical pre-submit gate. It runs the Rust, Python, web,
-and deployment checks that apply to the whole repository:
+The canonical pre-submit gate runs through the same Mise-managed environment:
 
 ```sh
-just check
+mise exec -- just check
 ```
 
-Rust compile validation always runs through Clippy. Do not replace it with
-`cargo check` when validating a change.
+It covers the Rust, Python, web, and deployment checks that apply to the whole
+repository.
+
+Clippy is the required Rust compile-validation path for every change.
 
 ## Running the controller locally
 
@@ -75,9 +80,9 @@ The normal development loop for the controller and hydrated web interface is:
 cargo leptos watch
 ```
 
-Plain `cargo run` also works from the workspace root. It uses the Leptos
-metadata in `Cargo.toml`, but it does not build browser assets for you. Run
-`cargo leptos build` first if `target/site` is empty or stale.
+Plain `cargo run` also works from the workspace root and uses the Leptos
+metadata in `Cargo.toml`. Run `cargo leptos build` first to populate
+`target/site` with the browser assets.
 
 The edge agent and tray have their own focused setup notes in
 [`packages/agent/README.md`](packages/agent/README.md) and
@@ -85,15 +90,11 @@ The edge agent and tray have their own focused setup notes in
 
 ## Enabling managed operation
 
-Managed onboarding stays off in a fresh checkout. That is deliberate:
-invitation issuance should not appear usable until the controller has a public
-URL, PostgreSQL, OIDC, step-ca, and Zenoh configured.
-
-Use
+Managed operation requires a public controller URL, PostgreSQL, OIDC, step-ca,
+and Zenoh. Use
 [`crates/inari-server/config.example.toml`](crates/inari-server/config.example.toml)
-as the starting point and configure those dependencies before exposing the
-invitation flow. Human operators sign in through OIDC; there is no static
-operator-token compatibility path.
+as the starting point. Once configured, the controller exposes the invitation
+workflow and operators sign in through OIDC.
 
 ## Public interfaces
 
@@ -102,12 +103,13 @@ have different responsibilities and should remain separate:
 
 - `/api/inari/v1` is the typed JSON API for Inari resources and operations.
 - `/api/zenoh/v1/{selector}` is the optional Zenoh HTTP compatibility surface.
-  The selector after the prefix is passed to Zenoh without being remodeled as
-  an Inari REST resource.
+  The selector after the prefix is forwarded directly to Zenoh with its HTTP
+  semantics intact.
 
-Requests beneath `/api` never fall through to an HTML response. The operator UI
-is written in Rust with Leptos and hydrated as WebAssembly; the only JavaScript
-served by the application is generated build output from `wasm-bindgen`.
+Axum returns JSON or Zenoh-compatible responses beneath `/api`, while Leptos
+owns browser pages outside that namespace. The operator UI is written in Rust
+and hydrated as WebAssembly, with `wasm-bindgen` supplying the generated browser
+glue.
 
 ## Production deployment
 
@@ -127,7 +129,8 @@ For Kubernetes, the maintained Helm chart lives in
 [`deploy/helm/inari`](deploy/helm/inari). It deploys the stateless controller and
 Zenoh router as separate workloads and consumes existing Kubernetes Secrets.
 [`deploy/kustomize/inari`](deploy/kustomize/inari) provides a Kustomize-owned
-alternative. Choose one lifecycle owner for an installation; do not apply both.
+alternative. Each installation assigns lifecycle ownership to exactly one of
+these deployment surfaces.
 
 ## Further reading
 

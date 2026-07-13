@@ -14,7 +14,7 @@ with [the managed gateway specification](../docs/gateway_protocol.md).
 - `packages/agent` contains the local agent, hardware integrations, managed
   enrollment client, and service runtime.
 - `packages/agent_tray` contains the user-session setup and status companion. It
-  controls and observes the agent; it is not the service daemon.
+  controls and observes the agent, while the agent owns the service lifecycle.
 - `packages/brand` contains the canonical identity assets shared by web, tray,
   packaging, and documentation surfaces.
 - `crates/inari-server` is the Axum composition root and concrete Zenoh adapter.
@@ -26,7 +26,7 @@ with [the managed gateway specification](../docs/gateway_protocol.md).
   functions.
 - `crates/inari-web-frontend` is the minimal browser WASM hydration entrypoint.
 - `deploy/helm/inari` and `deploy/kustomize/inari` are alternative Kubernetes
-  lifecycle surfaces; they must not manage the same installation concurrently.
+  lifecycle surfaces. Each installation has exactly one lifecycle owner.
 - `docs` contains protocol, architecture, operations, deployment, and identity
   documentation.
 
@@ -35,26 +35,27 @@ with [the managed gateway specification](../docs/gateway_protocol.md).
 - Keep dependency injection and infrastructure assembly at composition roots.
 - Preserve typed protocol boundaries and update implementations, fixtures,
   tests, and documentation together.
-- Remove superseded code during migrations instead of leaving parallel legacy
-  paths.
+- Complete migrations across code, tests, documentation, and schemas so each
+  boundary has one current path.
 - Use canonical brand assets rather than redrawing the mark in individual
   product surfaces.
-- Use `cargo clippy` for Rust compile validation; do not substitute
-  `cargo check`.
+- Use `cargo clippy` for every Rust compile-validation pass.
 
 ## Verification
 
-Install the repository toolchain and dependencies with:
+Install the declared repository toolchain and synchronize the workspace with:
 
 ```sh
-just sync
+mise install
+mise exec -- just sync
 ```
 
 Run the complete repository gate before submitting a change:
 
 ```sh
-just check
+mise exec -- just check
 ```
 
-For focused work, `just format` and `just lint` provide faster feedback, but
-they do not replace the complete verification suite.
+For focused work, `mise exec -- just format` and `mise exec -- just lint`
+provide faster feedback. The complete verification suite remains the final
+pre-submit gate.
