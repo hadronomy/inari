@@ -18,6 +18,40 @@ function Require-Command([string]$Name) {
     return $Command.Source
 }
 
+function Require-WindowsSdkCommand([string]$Name) {
+    $Command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($null -ne $Command) {
+        return $Command.Source
+    }
+
+    $InstalledRoots = "HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots"
+    $KitsRoot = Get-ItemPropertyValue `
+        -Path $InstalledRoots `
+        -Name "KitsRoot10" `
+        -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($KitsRoot)) {
+        throw "Required Windows SDK command '$Name' is unavailable and KitsRoot10 is not registered."
+    }
+
+    $VersionedTools = Get-ChildItem -Path (Join-Path $KitsRoot "bin") -Directory |
+        ForEach-Object {
+            $Version = $null
+            if ([Version]::TryParse($_.Name, [ref]$Version)) {
+                [PSCustomObject]@{
+                    Path = Join-Path $_.FullName "x64\$Name"
+                    Version = $Version
+                }
+            }
+        } |
+        Where-Object { Test-Path -LiteralPath $_.Path -PathType Leaf } |
+        Sort-Object -Property Version -Descending
+    $Tool = $VersionedTools | Select-Object -First 1
+    if ($null -eq $Tool) {
+        throw "Required Windows SDK command '$Name' was not found beneath '$KitsRoot'."
+    }
+    return $Tool.Path
+}
+
 function Require-Environment([string]$Name) {
     $Value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -42,8 +76,8 @@ function Get-EnhancedKeyUsage(
         Select-Object -First 1
 }
 
-$MakeAppx = Require-Command "makeappx.exe"
-$SignTool = Require-Command "signtool.exe"
+$MakeAppx = Require-WindowsSdkCommand "makeappx.exe"
+$SignTool = Require-WindowsSdkCommand "signtool.exe"
 $Syft = Require-Command "syft"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
 $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
