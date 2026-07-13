@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Install release runtime
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
           install_args: node bun
           cache: true
@@ -71,7 +71,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned tools
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
           install_args: >-
             node
@@ -114,7 +114,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install release runtime
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
           install_args: node bun uv
           cache: true
@@ -147,7 +147,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned build tools
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
           install_args: python uv aqua:anchore/syft
           cache: true
@@ -222,7 +222,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install release tools
-        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
           install_args: node bun uv helm@4.2.3 cosign
           cache: true
