@@ -1,7 +1,4 @@
----
-packages:
-  "group:controller-chart": patch
----
+## inari@0.2.1
 
 ### Publish the controller chart through Tegami
 
