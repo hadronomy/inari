@@ -183,7 +183,7 @@ jobs:
           ROOT_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CODE_SIGNING_ROOT_CERT_BASE64 }}
         run: |
           $Pfx = Join-Path $env:RUNNER_TEMP "inari-publisher.pfx"
-          $Root = Join-Path $env:RUNNER_TEMP "inari-code-signing-root.cer"
+          $Root = Join-Path $env:RUNNER_TEMP "hadronomy-code-signing-root.cer"
           [IO.File]::WriteAllBytes($Pfx, [Convert]::FromBase64String($env:SIGNING_PFX_BASE64))
           [IO.File]::WriteAllBytes($Root, [Convert]::FromBase64String($env:ROOT_CERTIFICATE_BASE64))
           "INARI_SIGNING_PFX=$Pfx" >> $env:GITHUB_ENV

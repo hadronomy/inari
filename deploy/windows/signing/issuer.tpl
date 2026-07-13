@@ -1,10 +1,9 @@
 {
   "subject": {{ toJson .Subject }},
-  "issuer": {{ toJson .Subject }},
   "keyUsage": ["certSign", "crlSign"],
   "extKeyUsage": ["codeSigning"],
   "basicConstraints": {
     "isCA": true,
-    "maxPathLen": 1
+    "maxPathLen": 0
   }
 }

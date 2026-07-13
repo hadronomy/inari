@@ -1,7 +1,5 @@
 {
-  "subject": {
-    "commonName": "Inari Device Operations"
-  },
+  "subject": {{ toJson .Subject }},
   "keyUsage": ["digitalSignature"],
   "extKeyUsage": ["codeSigning"]
 }

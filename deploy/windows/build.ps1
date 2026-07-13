@@ -26,6 +26,22 @@ function Require-Environment([string]$Name) {
     return $Value
 }
 
+function Get-BasicConstraints(
+    [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+) {
+    return $Certificate.Extensions |
+        Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension] } |
+        Select-Object -First 1
+}
+
+function Get-EnhancedKeyUsage(
+    [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+) {
+    return $Certificate.Extensions |
+        Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } |
+        Select-Object -First 1
+}
+
 $MakeAppx = Require-Command "makeappx.exe"
 $SignTool = Require-Command "signtool.exe"
 $Syft = Require-Command "syft"
@@ -34,7 +50,8 @@ $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
 $RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
 $TimestampUrl = if ($env:INARI_TIMESTAMP_URL) { $env:INARI_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
 $CodeSigningOid = "1.3.6.1.5.5.7.3.3"
-$PublisherCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+$SigningCertificates = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+$SigningCertificates.Import(
     $SigningPfx,
     $SigningPassword,
     [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
@@ -43,28 +60,55 @@ $RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate
 $TemporaryRootStore = $null
 $TemporaryRootAdded = $false
 
-if (-not $PublisherCertificate.HasPrivateKey) {
-    throw "The publisher certificate does not contain a private key."
+$PublisherCertificates = @($SigningCertificates | Where-Object { $_.HasPrivateKey })
+if ($PublisherCertificates.Count -ne 1) {
+    throw "The signing PFX must contain exactly one publisher certificate with a private key."
 }
+$PublisherCertificate = $PublisherCertificates[0]
+$IssuerCertificates = @($SigningCertificates | Where-Object {
+    $Constraints = Get-BasicConstraints $_
+    $null -ne $Constraints -and $Constraints.CertificateAuthority
+})
+if ($IssuerCertificates.Count -ne 1) {
+    throw "The signing PFX must contain exactly one issuing CA certificate."
+}
+$IssuerCertificate = $IssuerCertificates[0]
+
 $Now = Get-Date
 if ($Now -lt $PublisherCertificate.NotBefore -or $Now -gt $PublisherCertificate.NotAfter) {
     throw "The publisher certificate is not currently valid."
 }
-$PublisherEku = $PublisherCertificate.Extensions |
-    Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } |
-    Select-Object -First 1
+$PublisherEku = Get-EnhancedKeyUsage $PublisherCertificate
 if ($null -eq $PublisherEku -or $CodeSigningOid -notin $PublisherEku.EnhancedKeyUsages.Value) {
     throw "The publisher certificate is not valid for code signing."
 }
-$RootConstraints = $RootCertificateObject.Extensions |
-    Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509BasicConstraintsExtension] } |
-    Select-Object -First 1
-if ($null -eq $RootConstraints -or -not $RootConstraints.CertificateAuthority) {
-    throw "The supplied code-signing root is not a certificate authority."
+$IssuerConstraints = Get-BasicConstraints $IssuerCertificate
+if (
+    $null -eq $IssuerConstraints -or
+    -not $IssuerConstraints.CertificateAuthority -or
+    -not $IssuerConstraints.HasPathLengthConstraint -or
+    $IssuerConstraints.PathLengthConstraint -ne 0
+) {
+    throw "The signing PFX issuer must be a path-length-zero certificate authority."
 }
-$RootEku = $RootCertificateObject.Extensions |
-    Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } |
-    Select-Object -First 1
+$IssuerEku = Get-EnhancedKeyUsage $IssuerCertificate
+if (
+    $null -eq $IssuerEku -or
+    $IssuerEku.EnhancedKeyUsages.Count -ne 1 -or
+    $IssuerEku.EnhancedKeyUsages[0].Value -ne $CodeSigningOid
+) {
+    throw "The issuing CA must be constrained to the code-signing extended key usage."
+}
+$RootConstraints = Get-BasicConstraints $RootCertificateObject
+if (
+    $null -eq $RootConstraints -or
+    -not $RootConstraints.CertificateAuthority -or
+    -not $RootConstraints.HasPathLengthConstraint -or
+    $RootConstraints.PathLengthConstraint -ne 1
+) {
+    throw "The supplied code-signing root must be a path-length-one certificate authority."
+}
+$RootEku = Get-EnhancedKeyUsage $RootCertificateObject
 if (
     $null -eq $RootEku -or
     $RootEku.EnhancedKeyUsages.Count -ne 1 -or
@@ -75,6 +119,7 @@ if (
 $Chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
 $Chain.ChainPolicy.TrustMode = [Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
 $Chain.ChainPolicy.CustomTrustStore.Add($RootCertificateObject) | Out-Null
+$Chain.ChainPolicy.ExtraStore.Add($IssuerCertificate) | Out-Null
 $Chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
 $Chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new($CodeSigningOid)) | Out-Null
 if (-not $Chain.Build($PublisherCertificate)) {
@@ -144,21 +189,32 @@ try {
     & $Syft "dir:$PackageRoot" -o "spdx-json=$SbomPath"
     if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
 
-    $PublishedRoot = Join-Path $ReleaseDirectory "inari-code-signing-root.cer"
+    $PublishedRoot = Join-Path $ReleaseDirectory "hadronomy-code-signing-root.cer"
     [IO.File]::WriteAllBytes($PublishedRoot, $RootCertificateObject.RawData)
+    $PublishedIssuer = Join-Path $ReleaseDirectory "inari-code-signing-issuer.cer"
+    [IO.File]::WriteAllBytes($PublishedIssuer, $IssuerCertificate.RawData)
     $RootFingerprint = $RootCertificateObject.GetCertHashString(
         [Security.Cryptography.HashAlgorithmName]::SHA256
     ).ToLowerInvariant()
     Set-Content `
-        -Path (Join-Path $ReleaseDirectory "inari-code-signing-root-fingerprint.txt") `
+        -Path (Join-Path $ReleaseDirectory "hadronomy-code-signing-root-fingerprint.txt") `
         -Value "SHA256 $RootFingerprint" `
+        -Encoding utf8NoBOM
+    $IssuerFingerprint = $IssuerCertificate.GetCertHashString(
+        [Security.Cryptography.HashAlgorithmName]::SHA256
+    ).ToLowerInvariant()
+    Set-Content `
+        -Path (Join-Path $ReleaseDirectory "inari-code-signing-issuer-fingerprint.txt") `
+        -Value "SHA256 $IssuerFingerprint" `
         -Encoding utf8NoBOM
 
     $Assets = @(
         $MsixPath,
         $SbomPath,
         $PublishedRoot,
-        (Join-Path $ReleaseDirectory "inari-code-signing-root-fingerprint.txt")
+        (Join-Path $ReleaseDirectory "hadronomy-code-signing-root-fingerprint.txt"),
+        $PublishedIssuer,
+        (Join-Path $ReleaseDirectory "inari-code-signing-issuer-fingerprint.txt")
     )
     $ChecksumLines = $Assets | ForEach-Object {
         $Hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -173,7 +229,9 @@ finally {
         }
         $TemporaryRootStore.Close()
     }
-    $PublisherCertificate.Dispose()
+    foreach ($Certificate in $SigningCertificates) {
+        $Certificate.Dispose()
+    }
     $RootCertificateObject.Dispose()
     Pop-Location
 }
