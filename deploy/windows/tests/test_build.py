@@ -10,6 +10,7 @@ from deploy.windows.build import (
     FOUNDATION,
     UAP,
     WINDOWS_ICON_SIZES,
+    encode_package_metadata,
     prepare_package,
     write_executable_icon,
 )
@@ -76,3 +77,14 @@ def test_executable_icon_contains_each_required_windows_size(tmp_path) -> None:
     with Image.open(icon_path) as icon:
         assert isinstance(icon, IcoImageFile)
         assert icon.ico.sizes() == {(size, size) for size in WINDOWS_ICON_SIZES}
+
+
+def test_package_metadata_is_safe_across_windows_console_encodings(tmp_path) -> None:
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    metadata = prepare_package(payload=payload, output=tmp_path / "package")
+
+    encoded = encode_package_metadata(metadata)
+
+    assert encoded.isascii()
+    assert '"publisher":"CN=Pablo Hern\\u00e1ndez Jim\\u00e9nez"' in encoded

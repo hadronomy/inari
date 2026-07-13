@@ -56,7 +56,11 @@ def main() -> None:
         write_executable_icon(args.output)
         return
     metadata = prepare_package(payload=args.payload, output=args.output)
-    print(metadata.model_dump_json())
+    print(encode_package_metadata(metadata))
+
+
+def encode_package_metadata(metadata: PackageMetadata) -> str:
+    return metadata.model_dump_json(ensure_ascii=True)
 
 
 def prepare_package(*, payload: Path, output: Path) -> PackageMetadata:
