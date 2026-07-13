@@ -33,6 +33,11 @@ def test_package_tree_uses_metadata_and_canonical_assets(tmp_path) -> None:
         "Version": metadata.msix_version,
         "ProcessorArchitecture": "x64",
     }
+    properties = manifest.find(f"{{{FOUNDATION}}}Properties")
+    assert properties is not None
+    publisher_name = properties.find(f"{{{FOUNDATION}}}PublisherDisplayName")
+    assert publisher_name is not None
+    assert publisher_name.text == "Pablo Hernández Jiménez · Inari"
     application = manifest.find(
         f"{{{FOUNDATION}}}Applications/{{{FOUNDATION}}}Application"
     )

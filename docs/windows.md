@@ -25,7 +25,7 @@ Verify the certificate fingerprint in PowerShell:
 
 ```powershell
 $Certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-    (Resolve-Path .\inari-code-signing-root.cer)
+    (Resolve-Path .\hadronomy-code-signing-root.cer)
 )
 $Certificate.GetCertHashString(
     [Security.Cryptography.HashAlgorithmName]::SHA256
@@ -46,7 +46,7 @@ An administrator can add the approved root to the local-machine trust store:
 
 ```powershell
 Import-Certificate `
-    -FilePath .\inari-code-signing-root.cer `
+    -FilePath .\hadronomy-code-signing-root.cer `
     -CertStoreLocation Cert:\LocalMachine\Root
 ```
 
@@ -72,7 +72,7 @@ policies so each can be audited and rolled back independently.
   app assignment for the MSIX.
 - In Group Policy, distribute the root through Public Key Policies and deploy
   the package with the organization's normal software-delivery system.
-- Verify the package publisher remains `CN=Inari Device Operations` before each
+- Verify the package publisher remains `CN=Pablo Hernández Jiménez` before each
   rollout.
 
 Inari does not import its root certificate during application installation.

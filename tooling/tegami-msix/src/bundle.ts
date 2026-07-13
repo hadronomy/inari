@@ -15,13 +15,15 @@ export interface ReleaseBundle {
   checksumManifest: ReleaseAsset;
 }
 
-export function artifactNames(pkg: MsixPackage): string[] {
+export function artifactNames(pkg: Pick<MsixPackage, "version">): string[] {
   const base = `Inari-Device-Center_${pkg.version}_x64`;
   return [
     `${base}.msix`,
     `${base}.spdx.json`,
-    "inari-code-signing-root.cer",
-    "inari-code-signing-root-fingerprint.txt",
+    "hadronomy-code-signing-root.cer",
+    "hadronomy-code-signing-root-fingerprint.txt",
+    "inari-code-signing-issuer.cer",
+    "inari-code-signing-issuer-fingerprint.txt",
   ];
 }
 
