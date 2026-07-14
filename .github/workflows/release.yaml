@@ -261,10 +261,14 @@ jobs:
           name: inari-windows-release
           path: target/release/windows
 
-      - name: Authenticate Helm to GHCR
+      - name: Authenticate release tools to GHCR
         if: needs.plan.outputs.controller_chart == 'true'
         shell: bash
-        run: printf '%s' "${{ github.token }}" | helm registry login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+        env:
+          REGISTRY_PASSWORD: ${{ github.token }}
+        run: |
+          printf '%s' "${REGISTRY_PASSWORD}" | helm registry login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          printf '%s' "${REGISTRY_PASSWORD}" | cosign login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
       - name: Publish packages and release assets
         run: bun run release -- ci
