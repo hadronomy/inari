@@ -209,12 +209,21 @@ $Chain.ChainPolicy.TrustMode = [Security.Cryptography.X509Certificates.X509Chain
 $Chain.ChainPolicy.CustomTrustStore.Add($RootCertificateObject) | Out-Null
 $Chain.ChainPolicy.ExtraStore.Add($IssuerCertificate) | Out-Null
 $Chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+$Chain.ChainPolicy.DisableCertificateDownloads = $true
+$Chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromMilliseconds(100)
+$Chain.ChainPolicy.VerificationFlags = [Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
 $Chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new($CodeSigningOid)) | Out-Null
-if (-not $Chain.Build($PublisherCertificate)) {
-    $Problems = ($Chain.ChainStatus | ForEach-Object { $_.StatusInformation.Trim() }) -join "; "
-    throw "The publisher certificate does not chain to the supplied code-signing root: $Problems"
+Write-Host "Validating the publisher certificate against the bundled issuer and root."
+try {
+    if (-not $Chain.Build($PublisherCertificate)) {
+        $Problems = ($Chain.ChainStatus | ForEach-Object { $_.StatusInformation.Trim() }) -join "; "
+        throw "The publisher certificate does not chain to the supplied code-signing root: $Problems"
+    }
+    Write-Host "Publisher certificate chain validated without network retrieval."
 }
-$Chain.Dispose()
+finally {
+    $Chain.Dispose()
+}
 
 Push-Location $WorkspaceRoot
 try {
@@ -266,6 +275,7 @@ try {
         Write-Host "Installing temporary root trust for signature verification."
         $TrustArguments = @(
             "-user",
+            "-silent",
             "-addstore",
             "-f",
             "Root",
@@ -358,6 +368,7 @@ finally {
         Write-Host "Removing temporary root trust from the release runner."
         $RemoveTrustArguments = @(
             "-user",
+            "-silent",
             "-delstore",
             "Root",
             $RootCertificateObject.Thumbprint
