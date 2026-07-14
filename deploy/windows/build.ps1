@@ -158,12 +158,6 @@ $SigningCertificates.Import(
     [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 )
 $RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate2]::new($RootCertificate)
-$VerificationRoot = Join-Path $WindowsTarget "code-signing-root.pem"
-[IO.File]::WriteAllText(
-    $VerificationRoot,
-    $RootCertificateObject.ExportCertificatePem(),
-    [Text.UTF8Encoding]::new($false)
-)
 
 $PublisherCertificates = @($SigningCertificates | Where-Object { $_.HasPrivateKey })
 if ($PublisherCertificates.Count -ne 1) {
@@ -245,8 +239,17 @@ finally {
     $Chain.Dispose()
 }
 
-Push-Location $WorkspaceRoot
+$VerificationRootName = "inari-code-signing-root-$([Guid]::NewGuid().ToString('N')).pem"
+$VerificationRoot = Join-Path ([IO.Path]::GetTempPath()) $VerificationRootName
+[IO.File]::WriteAllText(
+    $VerificationRoot,
+    $RootCertificateObject.ExportCertificatePem(),
+    [Text.UTF8Encoding]::new($false)
+)
+$LocationPushed = $false
 try {
+    Push-Location $WorkspaceRoot
+    $LocationPushed = $true
     Write-Host "Synchronizing frozen application dependencies."
     & $Uv sync --all-packages --frozen --group windows-build
     Assert-NativeCommandSucceeded $LASTEXITCODE "Python dependency synchronization"
@@ -362,9 +365,12 @@ try {
     Write-Host "Windows release bundle ready at $ReleaseDirectory."
 }
 finally {
+    Remove-Item $VerificationRoot -Force -ErrorAction SilentlyContinue
     foreach ($Certificate in $SigningCertificates) {
         $Certificate.Dispose()
     }
     $RootCertificateObject.Dispose()
-    Pop-Location
+    if ($LocationPushed) {
+        Pop-Location
+    }
 }
