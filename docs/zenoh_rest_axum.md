@@ -1,189 +1,41 @@
----
-title: Axum-Native Zenoh REST Design
-summary: Concrete design for exposing the documented Zenoh REST surface from crates/inari-server without embedding zenoh-plugin-rest.
-status: implemented
----
+# Zenoh HTTP compatibility
 
-# Axum-Native Zenoh REST Design
+The controller can expose its active Zenoh session through an Axum-owned HTTP
+surface. This is useful for diagnostics and integrations that understand Zenoh
+selectors but cannot open a native Zenoh session.
 
-This document defines a concrete design for exposing the documented Zenoh REST API from `crates/inari-server` using Axum and the public `zenoh` crate.
+The route is a compatibility boundary, not another resource API. Everything
+after `/api/zenoh/v1/` is the Zenoh selector or key expression itself:
 
-This REST surface is an operator/debug interface; the managed gateway protocol uses HTTPS enrollment plus native Zenoh keys and should not route steady-state agent traffic through this REST bridge.
-
-It intentionally does not embed `zenoh-plugin-rest`:
-
-- the plugin crate is explicitly internal-only and unstable
-- it starts its own Tide listener instead of exposing a Tower service
-- it lives on `http-types` and Tide, while our server is already standardized on Axum, Tower, Tokio, and `http` 1.x
-
-The goal is to provide the same useful HTTP surface inside the existing server, with clean ownership boundaries and a small, durable implementation.
-
-## 1. Goals
-
-The module should:
-
-- mount naturally inside the existing versioned Axum API tree
-- use the existing `ZenohSupervisor` lifecycle instead of creating a second Zenoh runtime
-- expose the documented Zenoh REST operations:
-  - query via HTTP `GET` and `POST`
-  - long-lived subscription via `GET` + `Accept: text/event-stream`
-  - `PUT` and `PATCH`
-  - `DELETE`
-  - `_raw` query responses
-  - HTML query responses via `Accept: text/html`
-- preserve the existing uniform error envelope from [`crates/inari-server/src/error.rs`](../crates/inari-server/src/error.rs)
-- remain disabled by default until an explicit operator decision enables it
-
-The module should not:
-
-- depend on `zenoh-plugin-rest`
-- introduce Tide or `http-types` into `inari-server`
-- silently expose Zenoh admin space without an explicit configuration opt-in
-- attempt transparent subscription migration across Zenoh reconnects in the first iteration
-
-## 2. Public HTTP Contract
-
-The Axum-native surface has its own family-first API namespace. Everything after
-`/api/zenoh/v1/` is the Zenoh selector or key expression itself; the HTTP layer
-does not add another keyspace wrapper:
-
-- `GET /api/zenoh/v1`
-- `GET /api/zenoh/v1/*selector`
-- `POST /api/zenoh/v1/*selector`
-- `PUT /api/zenoh/v1/*keyexpr`
-- `PATCH /api/zenoh/v1/*keyexpr`
-- `DELETE /api/zenoh/v1/*keyexpr`
-
-This keeps the current API composition clean and avoids conflicting with the root application router.
-
-The mounted surface intentionally keeps one app-specific addition beyond upstream parity:
-
-- `GET /api/zenoh/v1` returns module metadata for the host server
-
-All selector-bearing routes beneath `/api/zenoh/v1/*selector` preserve the
-upstream REST plugin behavior. For example, the HTTP path
-`/api/zenoh/v1/iot/v1/agents/agt_123/status/latest` maps directly to the Zenoh
-key expression `iot/v1/agents/agt_123/status/latest`.
-
-### 2.1 Root Endpoint
-
-`GET /api/zenoh/v1`
-
-Returns module metadata and live connection state, for example:
-
-```json
-{
-  "service": "zenoh_rest",
-  "enabled": true,
-  "admin_space": {
-    "route_enabled": true,
-    "router_enabled": true,
-    "read": true,
-    "write": false
-  },
-  "state": {
-    "state": "connected",
-    "attempt": 1,
-    "message": "Zenoh session established.",
-    "observed_at": "2026-04-23T16:00:00Z"
-  }
-}
+```text
+GET    /api/zenoh/v1/{selector}
+POST   /api/zenoh/v1/{selector}
+PUT    /api/zenoh/v1/{key-expression}
+PATCH  /api/zenoh/v1/{key-expression}
+DELETE /api/zenoh/v1/{key-expression}
 ```
 
-This is intentionally separate from `GET /api/v1`, which should stay small and high-level.
+For example:
 
-### 2.2 Query Endpoint
-
-`GET /api/zenoh/v1/*selector`
-
-This maps to `session.get(...)` over Zenoh and returns:
-
-```json
-[
-  {
-    "key": "demo/example/test",
-    "value": "Hello World!",
-    "encoding": "text/plain",
-    "timestamp": "2026-04-23T16:00:00Z/ABC..."
-  }
-]
+```http
+GET /api/zenoh/v1/iot/v1/agents/agt_123/status/latest
 ```
 
-Response shape:
+queries `iot/v1/agents/agt_123/status/latest`. Inari does not add another
+keyspace prefix or translate the reply into an agent REST resource.
 
-- `key`: resolved Zenoh key
-- `value`: JSON value, string, or base64 string depending on encoding
-- `encoding`: Zenoh encoding string
-- `timestamp`: optional timestamp string
+## Ownership and security
 
-The current implementation now covers the upstream plugin surface for mounted selectors:
+Axum mounts this router before the Leptos fallback, so Zenoh requests can never
+return an application page. It shares the server’s request IDs, tracing,
+limits, timeouts, panic handling, and RFC 9457 errors.
 
-- `GET` query
-- `POST` query with optional request payload
-- SSE `GET`
-- `PUT`
-- `PATCH`
-- `DELETE`
-- HTML negotiation
-- `_raw` first-reply mode
-
-### 2.2.1 Additive Liveliness Extension
-
-The Axum-native surface now also exposes Zenoh liveliness as an explicit extension without changing the default meaning of existing routes.
-
-Reserved selector parameters:
-
-- `_liveliness`: switch the request from normal query/subscription semantics into Zenoh liveliness semantics
-- `_history`: only meaningful with `_liveliness` + SSE; requests the currently live tokens when the stream is opened
-- `_raw`: preserved for parity with the normal query path and returns the first liveliness reply as a raw HTTP response
-
-Examples:
-
-- `GET /api/zenoh/v1/iot/v1/agents/**/presence?_liveliness`
-- `GET /api/zenoh/v1/iot/v1/agents/**/presence?_liveliness&_history` with `Accept: text/event-stream`
-
-This is intentionally additive:
-
-- requests without `_liveliness` keep the same behavior as the native Zenoh REST plugin
-- normal SSE remains a plain Zenoh subscriber and does not become a presence stream implicitly
-- liveliness token declaration remains a native Zenoh client responsibility rather than an HTTP write operation
-
-### 2.3 SSE Endpoint
-
-`GET /api/zenoh/v1/*selector` with `Accept: text/event-stream`
-
-This declares a Zenoh subscriber and streams events with Axum SSE:
-
-- SSE event name: Zenoh sample kind, usually `put` or `delete`
-- SSE data: the same JSON sample envelope used by the query response
-
-If the underlying Zenoh session drops, the SSE stream should close cleanly. The client is expected to reconnect. We should not hide reconnect gaps or risk duplicate replay in the first version.
-
-### 2.4 Write Endpoints
-
-`PUT /api/zenoh/v1/*keyexpr`
-
-- request body: raw bytes
-- `Content-Type`: mapped to Zenoh `Encoding`
-- response: `200 OK`
-
-`PATCH /api/zenoh/v1/*keyexpr`
-
-- same behavior as `PUT`
-- response: `200 OK`
-
-`DELETE /api/zenoh/v1/*keyexpr`
-
-- no body
-- response: `200 OK`
-
-## 3. Configuration
-
-Add a new config section under `http`, because this is an HTTP exposure decision:
+The surface is disabled by default. Enable it only behind the controller’s
+authentication and authorization policy:
 
 ```toml
 [http.zenoh_rest]
-enabled = false
+enabled = true
 allow_admin_space = false
 query_timeout = "15s"
 sse_keep_alive = "15s"
@@ -195,327 +47,112 @@ read = true
 write = false
 ```
 
-Proposed shape:
+`http.zenoh_rest.allow_admin_space` permits `@/...` routes at the HTTP
+boundary. `zenoh.admin_space.enabled` controls whether the router serves that
+space. Both must allow an operation before it can succeed. Keep write and
+administration scopes distinct from read access.
 
-```rust
-pub struct ZenohRestConfig {
-    pub enabled: bool,
-    pub allow_admin_space: bool,
-    #[serde(with = "humantime_serde")]
-    pub query_timeout: Duration,
-    #[serde(with = "humantime_serde")]
-    pub sse_keep_alive: Duration,
-    pub sse_buffer: usize,
-}
+The managed gateway continues to use native Zenoh for steady-state agent
+traffic. Do not route agent commands through this HTTP bridge.
 
-pub struct ZenohAdminSpaceConfig {
-    pub enabled: bool,
-    pub read: bool,
-    pub write: bool,
-}
+## Queries
+
+A normal `GET` runs a Zenoh query and returns all replies as a JSON array:
+
+```json
+[
+  {
+    "key": "iot/v1/agents/agt_123/status/latest",
+    "value": { "state": "online" },
+    "encoding": "application/json",
+    "timestamp": "2026-07-15T10:00:00Z/..."
+  }
+]
 ```
 
-Defaults:
+JSON encodings are decoded as JSON, text encodings as UTF-8, and other bytes as
+base64. Invalid JSON or UTF-8 falls back to base64 rather than corrupting the
+payload.
 
-- `enabled = false`
-- `allow_admin_space = false`
-- `query_timeout = "15s"`
-- `sse_keep_alive = "15s"`
-- `sse_buffer = 64`
+`POST` performs the same query with a request body. `Content-Type` maps to the
+Zenoh encoding. The `_raw` selector parameter returns the first reply directly,
+which preserves its status, content type, and body for clients that do not want
+the JSON envelope.
 
-These defaults are intentionally conservative because the current scaffold does not yet have authentication or authorization.
+The `@/local` alias resolves to the connected session’s Zenoh ID. Admin-space
+configuration still applies after resolution.
 
-`http.zenoh_rest.allow_admin_space` and `zenoh.admin_space.enabled` are intentionally separate:
+## Subscriptions
 
-- the HTTP flag controls whether this surface is willing to expose `@/...`
-- the Zenoh flag controls whether the embedded router actually serves admin space
+Send `Accept: text/event-stream` with `GET` to declare a Zenoh subscriber:
 
-If the route-level flag is enabled while the router-level flag is disabled, the HTTP API now returns a clear `503` instead of a confusing empty result set.
-
-## 4. Module Layout
-
-The implementation should separate HTTP adaptation from Zenoh operations.
-
-### 4.1 HTTP Layer
-
-The HTTP facade lives at:
-
-- [`crates/inari-server/src/http/routes/api/zenoh.rs`](../crates/inari-server/src/http/routes/api/zenoh.rs)
-
-Responsibilities:
-
-- register routes
-- parse selector tails and request headers
-- map request bodies into Zenoh operation inputs
-- map Zenoh replies into JSON and SSE responses
-- keep error handling in terms of `AppError`
-
-`api/mod.rs` mounts that facade without changing selector semantics:
-
-```rust
-.nest("/zenoh/v1", zenoh::router(state))
+```sh
+curl -N \
+  -H 'accept: text/event-stream' \
+  http://127.0.0.1:8080/api/zenoh/v1/iot/v1/agents/agt_123/events/**
 ```
 
-### 4.2 Zenoh Service Layer
+Each SSE event uses the Zenoh sample kind (`put` or `delete`) and the same
+sample object as a query reply. Streams use a bounded buffer. A slow consumer
+is disconnected rather than being allowed to grow server memory without bound.
 
-Extend the existing Zenoh subsystem instead of putting session logic in handlers.
+The stream closes when its HTTP request ends, the server shuts down, or the
+underlying Zenoh generation is lost. Clients reconnect explicitly; the server
+does not pretend that a reconnect had no delivery gap.
 
-Prefer adding:
+## Liveliness
 
-- `crates/inari-server/src/zenoh/access.rs`
-- `crates/inari-server/src/zenoh/reply.rs`
+`_liveliness` changes a query or subscription from ordinary samples to Zenoh
+liveliness tokens. `_history` asks a liveliness SSE subscription to emit the
+tokens already present when it opens.
 
-Responsibilities:
-
-- obtain an active session handle
-- resolve `@/local` aliases using the active session ZID
-- execute query, publish, delete, and subscribe operations
-- normalize failures into `AppError`
-
-### 4.3 Optional Small HTTP Helpers
-
-If the route module gets crowded, add:
-
-- `crates/inari-server/src/http/zenoh_rest/model.rs`
-- `crates/inari-server/src/http/zenoh_rest/encoding.rs`
-
-This should stay small. We do not want to build a second framework inside the crate.
-
-## 5. Required Evolution Of The Current Zenoh Boundary
-
-The current [`ZenohHandle`](../crates/inari-server/src/zenoh/handle.rs) is publish-oriented and command-channeled. That is not the right shape for request/response queries and per-request subscribers.
-
-The clean design is:
-
-### 5.1 Supervisor Still Owns Lifecycle
-
-[`ZenohSupervisor`](../crates/inari-server/src/zenoh/supervisor.rs) remains responsible for:
-
-- connect
-- reconnect
-- shutdown
-- status updates
-- event emission
-
-### 5.2 Request-Path Operations Use Cloned Session Handles
-
-Instead of routing every operation through `mpsc + oneshot`, the supervisor should publish the active session through a watch channel:
-
-```rust
-pub struct SessionLease {
-    pub zid: Option<String>,
-    pub session: Option<Arc<zenoh::Session>>,
-    pub generation: u64,
-}
+```sh
+curl -N -g \
+  -H 'accept: text/event-stream' \
+  'http://127.0.0.1:8080/api/zenoh/v1/iot/v1/agents/**/presence/agent?_liveliness&_history'
 ```
 
-`ZenohHandle` then becomes able to do:
+HTTP clients may observe liveliness, but they cannot declare or drop tokens on
+behalf of an agent. Token ownership stays with the native Zenoh client.
 
-- `session_snapshot() -> Option<Arc<Session>>`
-- `query(...)`
-- `publish_bytes(...)`
-- `delete(...)`
-- `declare_subscriber(...)`
+## Writes
 
-This matches Zenoh’s cloneable session model and removes unnecessary actor round-trips from the hot path.
+`PUT` and `PATCH` publish the raw request body at the selected key expression.
+An absent `Content-Type` becomes `application/octet-stream`. `DELETE` issues a
+Zenoh delete operation.
 
-### 5.3 Keep A Small Fault Signal Path
+Write routes should normally be disabled for human read-only roles. Enabling
+the bridge does not grant an HTTP caller authority outside the controller’s
+typed scopes or the router ACL.
 
-Direct session operations still need a way to inform the supervisor when the session appears broken.
+## Failure behavior
 
-Add a small internal signal channel such as:
+| Condition | HTTP response |
+| --- | --- |
+| Zenoh is unavailable | `503 Service Unavailable` |
+| Selector or key expression is invalid | `400 Bad Request` |
+| Admin space is blocked | `403 Forbidden` |
+| Query exceeds its deadline | `408 Request Timeout` |
+| Request body is invalid for its encoding | `400 Bad Request` |
 
-```rust
-enum SupervisorSignal {
-    SessionFault { message: String },
-}
+Unknown paths beneath `/api` use the same `application/problem+json` format.
+Leptos never handles them.
+
+## Implementation map
+
+- `crates/inari-server/src/http/routes/api/zenoh.rs` adapts HTTP requests;
+- `crates/inari-server/src/zenoh/rest` implements selector, encoding, query,
+  write, subscription, and liveliness behavior;
+- `ZenohSupervisor` owns connection, reconnect, cancellation, and shutdown;
+- request handlers borrow the current session generation rather than creating a
+  second Zenoh runtime.
+
+The `fake_device` example provides a local smoke test:
+
+```sh
+cargo run -p inari-server --example fake_device -- \
+  --namespace iot/v1/agents/agt_123
 ```
 
-When a direct query, publish, delete, or subscribe setup fails against an active session, `ZenohHandle` should `try_send` a fault signal. The supervisor can then:
-
-- move status to reconnecting/degraded
-- close the current session
-- resume normal retry behavior
-
-This keeps lifecycle centralized without forcing every data-plane operation through a bespoke actor API.
-
-## 6. Selector Resolution
-
-We should explicitly define how HTTP path tails map to Zenoh selectors.
-
-Rules:
-
-1. The Axum route uses a wildcard tail.
-2. The tail is percent-decoded once.
-3. Empty tails are only valid for the mounted metadata route `GET /api/zenoh/v1`.
-4. Admin-space access is rejected unless `allow_admin_space = true`.
-5. `@/local` and `@/local/...` are rewritten to `@/{zid}` and `@/{zid}/...` using the connected session ZID.
-
-The rewrite is important because the official plugin supports `@/local`, and it is genuinely useful for operator workflows.
-
-## 7. Response Encoding Rules
-
-The JSON payload mapping should be deterministic and documented.
-
-### 7.1 Query And SSE Sample Envelope
-
-Use:
-
-```rust
-pub struct ZenohRestSample {
-    pub key: String,
-    pub value: serde_json::Value,
-    pub encoding: String,
-    pub timestamp: Option<String>,
-}
-```
-
-### 7.2 Value Mapping
-
-- JSON encodings:
-  - deserialize as JSON
-  - if parsing fails, fall back to base64 string
-- text encodings:
-  - decode as UTF-8 string
-  - if decoding fails, fall back to base64 string
-- all other encodings:
-  - return base64 string
-
-This matches the practical behavior operators expect from the existing plugin without importing its whole implementation.
-
-### 7.3 Write Encoding
-
-`Content-Type` maps directly to Zenoh `Encoding`.
-
-If `Content-Type` is absent:
-
-- default to `application/octet-stream`
-
-## 8. Timeouts, Backpressure, And Cancellation
-
-### 8.1 Query Collection
-
-Queries should be bounded by `http.zenoh_rest.query_timeout`.
-
-Implementation shape:
-
-- create query
-- collect replies until completion or timeout
-- on timeout, return `408 Request Timeout`
-
-### 8.2 SSE Delivery
-
-Per-client SSE should use a bounded Tokio `mpsc` channel with `sse_buffer` capacity.
-
-Behavior:
-
-- Zenoh subscriber task forwards samples into the channel
-- Axum SSE response streams the receiver
-- if the channel is full, close the SSE stream rather than growing memory unbounded
-
-### 8.3 Shutdown
-
-When the HTTP connection closes or the response stream is dropped:
-
-- stop forwarding events
-- undeclare the subscriber if possible
-
-If graceful shutdown begins while SSE streams are active, they should be allowed to terminate naturally inside the normal server shutdown window. We do not need a second shutdown system just for this module.
-
-## 9. Error Semantics
-
-All failures stay inside the existing error envelope from [`error.rs`](../crates/inari-server/src/error.rs).
-
-Mapping:
-
-- Zenoh not connected: `503 service_unavailable`
-- admin space blocked by config: `403` once we introduce a dedicated forbidden error, or `400` in the current scaffold
-- invalid selector/key expression: `400 bad_request`
-- query timeout: `408 request_timeout`
-- malformed JSON payload for JSON content-type: `400 bad_request`
-- internal session/runtime failure: `500 internal`
-
-One change worth making before implementation is adding:
-
-```rust
-AppError::forbidden(...)
-```
-
-That lets `allow_admin_space = false` fail honestly.
-
-## 10. Integration Into Current Router
-
-The current router stack in [`crates/inari-server/src/http/mod.rs`](../crates/inari-server/src/http/mod.rs) already gives us:
-
-- request IDs
-- tracing
-- timeout handling
-- compression
-- panic capture
-- uniform error serialization
-
-The Zenoh REST module should mount inside that stack rather than bypass it.
-
-That means:
-
-- no second HTTP listener
-- no separate CORS logic
-- no separate tracing subscriber
-
-## 11. Testing Plan
-
-Add tests at three layers.
-
-### 11.1 Route Tests
-
-In the HTTP route module:
-
-- `GET /api/zenoh/v1` returns module metadata
-- disconnected Zenoh returns `503`
-- invalid selector returns `400`
-- disabled admin space rejects `@/...`
-
-### 11.2 Encoding Tests
-
-Small unit tests for:
-
-- JSON payload decoding
-- UTF-8 text decoding
-- binary payload base64 fallback
-- `Content-Type` to `Encoding` mapping
-
-### 11.3 Integration Tests
-
-With an in-process Zenoh session:
-
-- `PUT` then `GET` round-trip
-- `DELETE` removes a value
-- SSE receives a published sample
-- liveliness `GET` returns currently live tokens
-- liveliness SSE with `_history` emits initial `PUT` and drop `DELETE`
-- reconnect closes active SSE stream cleanly
-
-For manual smoke tests, the repository now also includes
-[`crates/inari-server/examples/fake_device.rs`](../crates/inari-server/examples/fake_device.rs),
-which acts as a small Zenoh client publishing JSON telemetry and status while maintaining a
-liveliness token at `{namespace}/presence`.
-
-## 12. Recommended Implementation Order
-
-1. Add `ZenohRestConfig` and route registration with `enabled = false`.
-2. Evolve `ZenohHandle` to expose direct session-backed operations plus a small fault signal path.
-3. Implement `GET` query support.
-4. Implement `PUT` and `DELETE`.
-5. Implement SSE.
-6. Add `@/local` alias support.
-7. Add tests.
-
-## 13. Remaining Non-Goals
-
-The current implementation still intentionally does not try to solve:
-
-- transparent SSE resubscription across reconnects
-- built-in authz policy beyond `enabled`, `allow_admin_space`, and router-level admin-space permissions
-- HTTP operations that declare or drop liveliness tokens on behalf of devices
-
-Those can be added later, but they should not distort the current architecture.
+Run Rust validation with Clippy and the workspace tests; do not replace the
+native Zenoh tests with mocked HTTP-only behavior.

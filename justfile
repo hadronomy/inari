@@ -39,6 +39,10 @@ check-release:
     bun test
     bun run build:release
 
+# Lint the maintained Markdown documentation.
+check-docs:
+    bun run docs:check
+
 # Show the release changes Tegami would version without writing them.
 release-preview:
     bun run release:preview
@@ -60,7 +64,7 @@ check-kubernetes-server:
     scripts/validate-kubernetes-server.sh
 
 # Run the repository verification suite.
-check: lint lint-wasm typecheck check-release
+check: lint lint-wasm typecheck check-release check-docs
     cargo fmt --check
     cargo test --workspace
     uv run --no-sync --group dev python -m pytest deploy/windows/tests -q
