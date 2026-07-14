@@ -173,7 +173,7 @@ jobs:
       - name: Install pinned build tools
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
-          install_args: python uv aqua:anchore/syft
+          install_args: python uv aqua:anchore/syft github:mtrojnar/osslsigncode
           cache: true
 
       - name: Materialize protected signing inputs
