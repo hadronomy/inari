@@ -111,27 +111,19 @@ function Invoke-AuthenticodeSign([string]$Path, [string]$Description) {
 function Assert-AuthenticodeSignature(
     [string]$Path,
     [string]$Description,
-    [Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedSigner
+    [string]$TrustedRoot,
+    [string]$ExpectedSignerHash
 ) {
-    $Signature = Get-AuthenticodeSignature -LiteralPath $Path
-    $AcceptedStatuses = @(
-        [System.Management.Automation.SignatureStatus]::Valid,
-        [System.Management.Automation.SignatureStatus]::NotTrusted
+    $Arguments = @(
+        "verify",
+        "-CAfile", $TrustedRoot,
+        "-ignore-timestamp",
+        "-ignore-cdp",
+        "-ignore-crl",
+        "-require-leaf-hash", "sha256:$ExpectedSignerHash",
+        "-in", $Path
     )
-    if ($Signature.Status -notin $AcceptedStatuses) {
-        throw "$Description signature validation failed: $($Signature.StatusMessage)"
-    }
-    if ($null -eq $Signature.SignerCertificate) {
-        throw "$Description does not expose an Authenticode signer certificate."
-    }
-    if (-not [string]::Equals(
-        $Signature.SignerCertificate.Thumbprint,
-        $ExpectedSigner.Thumbprint,
-        [StringComparison]::OrdinalIgnoreCase
-    )) {
-        throw "$Description was not signed by the expected publisher certificate."
-    }
-    Write-Host "$Description — signature integrity and signer identity verified"
+    Invoke-BoundedProcess $OsslSignCode $Arguments 60 "$Description verification"
 }
 
 function Get-BasicConstraints(
@@ -152,6 +144,7 @@ function Get-EnhancedKeyUsage(
 
 $MakeAppx = Require-WindowsSdkCommand "makeappx.exe"
 $SignTool = Require-WindowsSdkCommand "signtool.exe"
+$OsslSignCode = Require-Command "osslsigncode"
 $Syft = Require-Command "syft"
 $Uv = Require-Command "uv"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
@@ -165,12 +158,21 @@ $SigningCertificates.Import(
     [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 )
 $RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate2]::new($RootCertificate)
+$VerificationRoot = Join-Path $WindowsTarget "code-signing-root.pem"
+[IO.File]::WriteAllText(
+    $VerificationRoot,
+    $RootCertificateObject.ExportCertificatePem(),
+    [Text.UTF8Encoding]::new($false)
+)
 
 $PublisherCertificates = @($SigningCertificates | Where-Object { $_.HasPrivateKey })
 if ($PublisherCertificates.Count -ne 1) {
     throw "The signing PFX must contain exactly one publisher certificate with a private key."
 }
 $PublisherCertificate = $PublisherCertificates[0]
+$PublisherCertificateHash = $PublisherCertificate.GetCertHashString(
+    [Security.Cryptography.HashAlgorithmName]::SHA256
+).ToLowerInvariant()
 $IssuerCertificates = @($SigningCertificates | Where-Object {
     $Constraints = Get-BasicConstraints $_
     $null -ne $Constraints -and $Constraints.CertificateAuthority
@@ -300,7 +302,11 @@ try {
         $File = $OwnedExecutables[$Index]
         $Description = "Inari executable $($Index + 1)/$($OwnedExecutables.Count): $($File.Name)"
         Invoke-AuthenticodeSign $File.FullName $Description
-        Assert-AuthenticodeSignature $File.FullName $Description $PublisherCertificate
+        Assert-AuthenticodeSignature `
+            $File.FullName `
+            $Description `
+            $VerificationRoot `
+            $PublisherCertificateHash
     }
 
     $ArtifactBase = "Inari-Device-Center_$($Metadata.version)_x64"
@@ -309,7 +315,11 @@ try {
     $MakeAppxArguments = @("pack", "/d", $PackageRoot, "/p", $MsixPath, "/o")
     Invoke-BoundedProcess $MakeAppx $MakeAppxArguments 180 "MSIX packaging"
     Invoke-AuthenticodeSign $MsixPath "MSIX package"
-    Assert-AuthenticodeSignature $MsixPath "MSIX package" $PublisherCertificate
+    Assert-AuthenticodeSignature `
+        $MsixPath `
+        "MSIX package" `
+        $VerificationRoot `
+        $PublisherCertificateHash
 
     $SbomPath = Join-Path $ReleaseDirectory "$ArtifactBase.spdx.json"
     Write-Host "Generating the SPDX software bill of materials."
