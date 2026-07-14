@@ -217,10 +217,15 @@ $Chain.Dispose()
 
 Push-Location $WorkspaceRoot
 try {
+    Write-Host "Synchronizing frozen application dependencies."
     & $Uv sync --all-packages --frozen --group windows-build
     Assert-NativeCommandSucceeded $LASTEXITCODE "Python dependency synchronization"
+
+    Write-Host "Rendering the Windows executable icon."
     & $Uv run --no-sync python deploy/windows/build.py icon --output $ExecutableIcon
     Assert-NativeCommandSucceeded $LASTEXITCODE "Windows icon generation"
+
+    Write-Host "Building the Device Center and agent service executables."
     & $Uv run --no-sync pyinstaller `
         --noconfirm `
         --clean `
@@ -230,12 +235,15 @@ try {
     Assert-NativeCommandSucceeded $LASTEXITCODE "PyInstaller bundle creation"
 
     $Payload = Join-Path $PyInstallerTarget "dist\InariDeviceCenter"
+    Write-Host "Moving the frozen bundle into the MSIX package tree."
     $MetadataJson = & $Uv run --no-sync python deploy/windows/build.py package --payload $Payload --output $PackageRoot
     Assert-NativeCommandSucceeded $LASTEXITCODE "MSIX package preparation"
     $Metadata = $MetadataJson | ConvertFrom-Json
     $ReleaseDirectory = Join-Path $WindowsTarget $Metadata.version
     New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
+    Write-Host "MSIX package tree ready for version $($Metadata.version)."
 
+    Write-Host "Validating the publisher certificate and signing hierarchy."
     $ActualPublisherName = $PublisherCertificate.Subject.Normalize(
         [Text.NormalizationForm]::FormC
     )
@@ -287,15 +295,18 @@ try {
 
     $ArtifactBase = "Inari-Device-Center_$($Metadata.version)_x64"
     $MsixPath = Join-Path $ReleaseDirectory "$ArtifactBase.msix"
-    & $MakeAppx pack /d $PackageRoot /p $MsixPath /o
-    if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed." }
+    Write-Host "Packing the signed payload into $ArtifactBase.msix."
+    $MakeAppxArguments = @("pack", "/d", $PackageRoot, "/p", $MsixPath, "/o")
+    Invoke-BoundedProcess $MakeAppx $MakeAppxArguments 180 "MSIX packaging"
     Invoke-AuthenticodeSign $MsixPath "MSIX package"
     Assert-AuthenticodeSignature $MsixPath "MSIX package"
 
     $SbomPath = Join-Path $ReleaseDirectory "$ArtifactBase.spdx.json"
-    & $Syft "dir:$PackageRoot" -o "spdx-json=$SbomPath"
-    if ($LASTEXITCODE -ne 0) { throw "SBOM generation failed." }
+    Write-Host "Generating the SPDX software bill of materials."
+    $SyftArguments = @("dir:$PackageRoot", "-o", "spdx-json=$SbomPath")
+    Invoke-BoundedProcess $Syft $SyftArguments 180 "SBOM generation"
 
+    Write-Host "Publishing the signing trust chain and checksums."
     $PublishedRoot = Join-Path $ReleaseDirectory "hadronomy-code-signing-root.cer"
     [IO.File]::WriteAllBytes($PublishedRoot, $RootCertificateObject.RawData)
     $PublishedIssuer = Join-Path $ReleaseDirectory "inari-code-signing-issuer.cer"
@@ -328,6 +339,7 @@ try {
         "$Hash  $([IO.Path]::GetFileName($_))"
     }
     Set-Content -Path (Join-Path $ReleaseDirectory "SHA256SUMS") -Value $ChecksumLines -Encoding ascii
+    Write-Host "Windows release bundle ready at $ReleaseDirectory."
 }
 finally {
     if ($null -ne $TemporaryRootStore) {
