@@ -5,6 +5,7 @@ import { tegami } from "tegami";
 import { github } from "tegami/plugins/github";
 
 import { bundledPython } from "./private-python.ts";
+import { requireSuccessfulPublish } from "./publish-integrity.ts";
 
 export const release = tegami<"edge" | "controller-chart">({
   conventionalCommits: true,
@@ -30,6 +31,7 @@ export const release = tegami<"edge" | "controller-chart">({
         "^https://github.com/hadronomy/inari/.github/workflows/release\\.yaml@refs/heads/main$",
       certificateIssuer: "https://token.actions.githubusercontent.com",
     }),
+    requireSuccessfulPublish(),
     github({ repo: "hadronomy/inari" }),
     msix({ repository: { owner: "hadronomy", repo: "inari" } }),
   ],
