@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 
 import { childPath, type AbsolutePath } from "@inari/release-core";
 import { type HelmChart } from "./chart.ts";
+import { chartContentDigest } from "./chart-content.ts";
 import { run, succeeds } from "./process.ts";
 import { type OciArtifact, type OciReference, resolveOciArtifact } from "./registry.ts";
 
@@ -15,7 +15,7 @@ export interface HelmPublisherOptions {
 
 interface PackagedChart {
   archive: AbsolutePath;
-  digest: string;
+  contentDigest: string;
 }
 
 export class HelmPublisher {
@@ -58,7 +58,7 @@ export class HelmPublisher {
       }
     }
 
-    this.assertExpectedLayer(chart, artifact, packaged);
+    await this.assertExpectedChart(chart, packaged);
     const immutable = this.immutableReference(chart, artifact);
     if (!(await succeeds("cosign", this.verifyArgs(immutable), this.workspaceRoot))) {
       await run("cosign", ["sign", "--yes", immutable], this.workspaceRoot);
@@ -78,6 +78,7 @@ export class HelmPublisher {
       "release",
       "helm",
       `${chart.name}-${chart.version}`,
+      "local",
     );
     await rm(staging, { recursive: true, force: true });
     await mkdir(staging, { recursive: true });
@@ -87,20 +88,34 @@ export class HelmPublisher {
       this.workspaceRoot,
     );
     const archivePath = childPath(staging, `${chart.name}-${chart.version}.tgz`);
-    const digest = `sha256:${createHash("sha256")
-      .update(await readFile(archivePath))
-      .digest("hex")}`;
-    return { archive: archivePath, digest };
+    const contentDigest = await chartContentDigest(archivePath, childPath(staging, "content"));
+    return { archive: archivePath, contentDigest };
   }
 
-  private assertExpectedLayer(
-    chart: HelmChart,
-    artifact: OciArtifact,
-    packaged: PackagedChart,
-  ): void {
-    if (artifact.chartLayerDigest !== packaged.digest) {
+  private async assertExpectedChart(chart: HelmChart, packaged: PackagedChart): Promise<void> {
+    const remote = childPath(
+      this.workspaceRoot,
+      "target",
+      "release",
+      "helm",
+      `${chart.name}-${chart.version}`,
+      "remote",
+    );
+    await rm(remote, { recursive: true, force: true });
+    await mkdir(remote, { recursive: true });
+    await run(
+      "helm",
+      ["pull", this.ociUrl(chart), "--version", chart.version, "--destination", remote],
+      this.workspaceRoot,
+    );
+    const remoteDigest = await chartContentDigest(
+      childPath(remote, `${chart.name}-${chart.version}.tgz`),
+      childPath(remote, "content"),
+    );
+
+    if (remoteDigest !== packaged.contentDigest) {
       throw new Error(
-        `OCI tag ${chart.version} already points to chart content that does not match this release.`,
+        `OCI tag ${chart.version} contains chart files that do not match this release.`,
       );
     }
   }
