@@ -37,7 +37,7 @@
           <uap:Protocol Name="inari" />
         </uap:Extension>
         <desktop6:Extension Category="windows.service" Executable="InariAgentService.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop6:Service Name="InariAgent" StartupType="delayedStart" StartAccount="localService" />
+          <desktop6:Service Name="InariAgent" StartupType="auto" StartAccount="localService" />
         </desktop6:Extension>
       </Extensions>
     </Application>
