@@ -373,7 +373,9 @@ try {
         $Hash = (Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()
         "$Hash  $([IO.Path]::GetFileName($_))"
     }
-    Set-Content -Path (Join-Path $ReleaseDirectory "SHA256SUMS") -Value $ChecksumLines -Encoding ascii
+    $ChecksumManifest = Join-Path $ReleaseDirectory "SHA256SUMS"
+    $ChecksumContent = ($ChecksumLines -join "`n") + "`n"
+    [IO.File]::WriteAllText($ChecksumManifest, $ChecksumContent, [Text.Encoding]::ASCII)
     Write-Host "Windows release bundle ready at $ReleaseDirectory."
 }
 finally {
