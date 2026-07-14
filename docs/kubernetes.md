@@ -1,61 +1,45 @@
-# Running Inari on Kubernetes
+# Run Inari on Kubernetes
 
-This guide describes the supported production deployment for an Inari
-controller. It is written for the engineers who own the cluster, database,
-identity provider, certificate authority, and private network—not only for the
-person running `helm upgrade`.
+This guide is for the team that owns the cluster and the services around it.
+An Inari production deployment assumes that PostgreSQL, OIDC, step-ca, ingress,
+and secret delivery already have clear operators.
 
-The deployment has two independent workloads:
+The chart installs two workloads:
 
-- `inari-server` is a stateless HTTP application. It serves the operator
-  console, the typed Inari API, enrollment, and the Axum-native Zenoh HTTP
-  compatibility surface. PostgreSQL holds controller state and OIDC sessions.
-- `zenohd` is the managed data-plane router. It accepts mutually authenticated
-  agent and controller connections and routes the Inari keyspace. It is not an
-  HTTP sidecar and it does not share the controller process lifecycle.
+- `inari-server`, a stateless Axum/Leptos controller;
+- `zenohd`, a StatefulSet of routers with stable mesh identities.
 
-PostgreSQL, the OpenID Connect provider, step-ca, and the external secret
-controller remain organization-owned services. The chart does not install or
-silently configure them.
+They have separate Services, certificates, probes, rollout policies, and
+NetworkPolicies. The controller connects to Zenoh as a client.
 
-## Supported installation models
+## Choose one deployment owner
 
-Helm is the primary distribution and lifecycle owner. Use it unless your
-deployment platform specifically requires Kustomize.
+Helm is the normal installation path. The repository also includes a Kustomize
+overlay for GitOps systems that own plain rendered objects.
 
-The repository also contains a Kustomize overlay at
-[`deploy/kustomize/inari`](../deploy/kustomize/inari). It inflates the same
-local chart and changes database migrations from Helm hooks into ordinary,
-chart-versioned Jobs. This is necessary because `kubectl apply` does not
-implement Helm hook ordering or deletion policies.
+Do not point Helm and Kustomize at the same release. Helm hooks and declarative
+apply have different migration lifecycles, and two owners will eventually fight
+over Jobs, Deployments, and ConfigMaps.
 
-Do not point Helm and Kustomize at the same release. Two reconcilers owning the
-same Deployments, Services, Jobs, and ConfigMaps will produce ambiguous
-rollouts and unreliable migrations.
+## Prerequisites
 
-## Before the first install
+Prepare these services and credentials before installing the chart:
 
-Prepare these dependencies before creating the release:
-
-1. A PostgreSQL database reachable from the target namespace. Backups,
-   point-in-time recovery, maintenance windows, and connection limits belong
-   to the database operator.
+1. A PostgreSQL database with backups, restore testing, TLS, and connection
+   limits appropriate for the controller replica count.
 2. An OIDC confidential client. Register
-   `https://<controller-host>/auth/callback` as an exact redirect URI and map
-   provider claims to the Inari roles in the values file.
-3. A step-ca JWK provisioner whose encrypted signing key is available through
-   a Kubernetes Secret. The controller uses it only to mint short-lived,
-   CSR-bound agent certificate tokens.
-4. A TLS certificate for the controller's Zenoh client identity.
-5. A separate TLS certificate for the Zenoh routers. It must be valid for the
-   internal Service, the StatefulSet pod DNS names, and any external name used
-   by agents.
-6. A CNI that enforces `NetworkPolicy` when network isolation is enabled.
-7. An ingress or private load balancer capable of carrying the required
-   protocols. HTTP ingress and Zenoh TLS are separate endpoints.
+   `https://<controller-host>/auth/callback` exactly and map provider roles to
+   Inari roles.
+3. A step-ca JWK provisioner and its encrypted signing key. The controller uses
+   it only to mint short-lived, CSR-bound agent tokens.
+4. A controller client certificate for Zenoh.
+5. A separate router certificate that covers the client Service, every
+   StatefulSet pod DNS name, and any external name used by agents.
+6. An HTTP ingress and a separate TCP path for Zenoh TLS.
+7. A CNI that enforces NetworkPolicy if policy is enabled.
 
-For a release named `inari` in namespace `inari`, a three-router certificate
-normally includes these DNS names:
+For a three-router release named `inari` in namespace `inari`, the router
+certificate normally covers:
 
 ```text
 inari-zenoh
@@ -67,79 +51,79 @@ inari-zenoh-2.inari-zenoh-headless.inari.svc.cluster.local
 inari-zenoh.example.com
 ```
 
-Adjust the list for the release name, namespace, cluster domain, replica count,
-and external endpoint. Zenoh verifies peer names during router-mesh
-connections; an incomplete SAN set prevents readiness instead of weakening
-hostname verification.
+Adjust the names for your release, namespace, cluster domain, replica count,
+and external endpoint. A missing SAN should fail readiness rather than be
+worked around by disabling hostname verification.
 
-## Secret contract
+## Create the Secrets
 
-The chart consumes existing Secrets. It never renders secret values into a
-ConfigMap, Helm release record, Pod environment variable, log, or note.
+The chart references existing Secrets and mounts their values as files. It does
+not copy credentials into values, ConfigMaps, release notes, or environment
+variables.
 
-| Secret reference | Required keys | Purpose |
-|---|---|---|
-| `database.secret` | `url` by default | PostgreSQL URL, including credentials and TLS parameters |
-| `identity.oidc.clientSecret` | `client-secret` by default | OIDC confidential-client secret |
-| `managedGateway.certificate.stepCa.signingKey` | `provisioner-key.pem` by default | Encrypted step-ca JWK provisioner key |
-| `zenoh.tls.controllerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Controller client identity and trust root |
-| `zenoh.tls.routerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Router server/mesh identity and trust root |
+| Values reference | Default keys | Contents |
+| --- | --- | --- |
+| `database.secret` | `url` | Complete PostgreSQL URL with TLS options |
+| `identity.oidc.clientSecret` | `client-secret` | OIDC confidential-client secret |
+| `managedGateway.certificate.stepCa.signingKey` | `provisioner-key.pem` | Encrypted step-ca provisioner key |
+| `zenoh.tls.controllerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Controller Zenoh client identity |
+| `zenoh.tls.routerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Router server and mesh identity |
 
-Use the organization's existing secret delivery system. External Secrets
-Operator, SOPS, Sealed Secrets, and CSI secret providers are all reasonable,
-provided the final files appear under the keys above. Do not pass secret values
-with `--set`; Helm stores release values in the cluster.
+Create them with the organization’s secret controller—External Secrets,
+SOPS, Sealed Secrets, or a CSI provider are all reasonable. Never put secret
+values in `--set`; Helm persists release values in the cluster.
 
-Keep the controller and router private keys separate. They represent different
-security principals even when the certificates chain to the same private CA.
-Rotate a mounted Secret by updating it through its owner and changing
-`controller.rolloutNonce` or the relevant pod annotation to make the new
-identity take effect immediately.
+The controller and router are different principals and must not share a private
+key.
 
-## Preparing values
+## Prepare values
 
-Start from the packaged defaults:
+Choose the chart version from the
+[controller-chart releases](https://github.com/hadronomy/inari/releases), then
+copy its defaults:
 
 ```sh
-helm show values oci://ghcr.io/hadronomy/charts/inari --version 0.2.0 > inari-values.yaml
+export INARI_CHART_VERSION=<version>
+helm show values oci://ghcr.io/hadronomy/charts/inari \
+  --version "$INARI_CHART_VERSION" > inari-values.yaml
 ```
 
-At minimum, replace:
+At minimum, review:
 
-- `organization.*`;
-- `server.environment` (`preview` for staging-like deployments and `production` for live controllers);
-- `server.publicUrl`;
-- `identity.oidc.*`;
+- `organization`;
+- `server.environment` and `server.publicUrl`;
+- `identity.oidc` and its role mapping;
 - every existing Secret name and key;
 - `managedGateway.controllerInstanceId`;
 - `managedGateway.dataPlane.publicEndpoints`;
-- all `managedGateway.certificate.stepCa.*` identity fields;
-- ingress and Zenoh Service configuration;
-- NetworkPolicy ingress and egress rules for the cluster topology;
-- image digests for environments that require immutable artifacts.
+- step-ca identity and certificate settings;
+- ingress, Zenoh Service exposure, and NetworkPolicy rules;
+- immutable image digests required by your release policy.
 
-Run the repository validator before installation:
+The public Zenoh endpoint is returned to agents during enrollment. It must
+match the actual TCP route and the router certificate; Kubernetes cannot infer
+it from a cloud load balancer.
+
+Validate changes from the repository before installing:
 
 ```sh
 mise install
-just check-kubernetes
+mise exec -- just check-kubernetes
 ```
 
-This gate performs strict chart linting, chart-testing lint, values-schema
-negative testing, rendering against the oldest and current supported
-Kubernetes versions, strict Kubeconform validation, KubeLinter policy checks,
-Kustomize inflation, shell linting, workflow linting, YAML linting, and a
-package round trip.
+That gate runs Helm and chart-testing lint, JSON Schema negative cases, renders
+against supported Kubernetes versions, validates with Kubeconform and
+KubeLinter, inflates the Kustomize overlay, and checks the packaged chart.
 
-`just check-kubernetes-server` adds server-side dry-run validation against a
-pinned Kubernetes node image in kind. It requires a working Docker daemon. The
-API server catches admission and structural rules that JSON Schema validation
-cannot model.
+When Docker is available, add the API-server exercise:
 
-## Installing with Helm
+```sh
+mise exec -- just check-kubernetes-server
+```
 
-Create and label the namespace before installing. Pod Security Admission is a
-namespace concern and is intentionally not hidden inside the chart:
+## Install with Helm
+
+Create the namespace and opt it into the Restricted Pod Security Standard:
 
 ```sh
 kubectl create namespace inari
@@ -152,159 +136,136 @@ kubectl label namespace inari \
   pod-security.kubernetes.io/warn-version=latest
 ```
 
-Install or upgrade atomically:
+Install atomically:
 
 ```sh
 helm upgrade --install inari oci://ghcr.io/hadronomy/charts/inari \
-  --version 0.2.0 \
+  --version "$INARI_CHART_VERSION" \
   --namespace inari \
   --values inari-values.yaml \
   --atomic \
   --timeout 10m
 ```
 
-Helm runs the fixed-name migration hook first. The Job takes a PostgreSQL
-advisory lock, applies embedded forward migrations, and exits. Only after it
-succeeds does Helm roll the controller. Application pods keep
-`database.migrate_on_startup=false` and refuse readiness when schema history is
-behind the binary.
+The migration hook runs first. It takes a PostgreSQL advisory lock, applies the
+embedded SeaORM migrations, and exits before controller pods roll. Production
+pods set `database.migrate_on_startup=false` and refuse readiness if the schema
+is behind.
 
-Do not use `--no-hooks`. That bypasses the production database owner and can
-roll an application that its database is not ready to serve.
+Do not use `--no-hooks`; it removes the ordering guarantee between database and
+application.
 
-## Installing with Kustomize
+Verify the release:
 
-Edit [`deploy/kustomize/inari/values.yaml`](../deploy/kustomize/inari/values.yaml)
-or copy the overlay into the environment repository, then render it explicitly
-with Helm support enabled:
+```sh
+kubectl --namespace inari get pods,svc,pdb,networkpolicy
+kubectl --namespace inari rollout status deployment/inari
+kubectl --namespace inari rollout status statefulset/inari-zenoh
+helm test inari --namespace inari --logs
+```
+
+Finish with an OIDC sign-in, one invitation enrollment, and a Zenoh reconnect
+smoke test.
+
+## Install with Kustomize
+
+Copy [`deploy/kustomize/inari`](../deploy/kustomize/inari) into the environment
+repository or edit its values for local validation. Render and inspect the
+result before applying it:
 
 ```sh
 kustomize build --enable-helm deploy/kustomize/inari > inari-rendered.yaml
-kubeconform -strict -summary -kubernetes-version 1.36.2 inari-rendered.yaml
+kubeconform -strict -summary inari-rendered.yaml
 kubectl diff --filename inari-rendered.yaml
 kubectl apply --server-side --filename inari-rendered.yaml
 ```
 
-The overlay sets `migrations.helmHook=false` and disables Helm tests. Each chart
-version therefore renders a new migration Job. The operation remains safe when
-multiple reconcilers race because the embedded migrator serializes with a
-PostgreSQL advisory lock.
+The overlay sets `migrations.helmHook=false`, so each chart version creates an
+ordinary versioned migration Job. Concurrent Jobs remain safe because the
+embedded migrator uses the same PostgreSQL advisory lock.
 
-The overlay is a clean ownership alternative, not a post-render patch for an
-existing Helm release. A GitOps controller that natively supports Helm should
-prefer its Helm release abstraction and use Kustomize only as that controller's
-supported post-render mechanism.
+If your GitOps controller already has a Helm release abstraction, prefer that
+over manually inflating the chart.
 
-## Router topology and exposure
+## Zenoh routing
 
-The generated Zenoh configuration gives every StatefulSet pod a deterministic
-ID derived from the Helm release and pod ordinal. Routers connect to all stable
-pod DNS names, providing an explicit mesh without multicast discovery.
+The generated router configuration gives every StatefulSet pod a deterministic
+ID and connects it to the stable pod DNS names. Multicast discovery is disabled.
 
-Two Services are rendered:
+`<release>-zenoh` serves controller and agent clients.
+`<release>-zenoh-headless` exists only for router identity and mesh traffic.
 
-- `<release>-zenoh` is the client-facing Service used by the controller and,
-  when exposed, by agents.
-- `<release>-zenoh-headless` publishes StatefulSet identities used only by the
-  router mesh.
+`ClusterIP` is the safe default. Agents outside the cluster need a private
+`LoadBalancer`, TCP proxy, or routed endpoint. Add source ranges and matching
+NetworkPolicy rules before exposing the Service.
 
-`zenoh.service.type=ClusterIP` is the safe default. Private agents outside the
-cluster usually require an internal `LoadBalancer`, private TCP proxy, or
-equivalent routed endpoint. Configure `loadBalancerSourceRanges` and the
-matching NetworkPolicy ingress rules before changing the Service type.
-
-The endpoint sent to enrolled agents comes from
-`managedGateway.dataPlane.publicEndpoints`; Kubernetes cannot infer it from a
-provider-specific load balancer. Keep that value aligned with the TLS
-certificate and actual network path.
-
-Set `zenoh.config.existingConfigMap` to delegate router configuration to the
-organization. The ConfigMap must contain `zenoh.config.key`. The chart then
-stops rendering and checksumming router configuration; the external owner must
-trigger rollouts when its content changes.
+Set `zenoh.config.existingConfigMap` when another system owns the router JSON5.
+The named ConfigMap must contain `zenoh.config.key`. Because the chart cannot
+checksum external content, that owner must also trigger router rollouts.
 
 ## Network policy
 
-The default policies allow:
+Default policy allows same-namespace access to the controller and router,
+controller egress to DNS, HTTPS, PostgreSQL, and Zenoh, router mesh traffic,
+and migration egress to DNS and PostgreSQL.
 
-- same-namespace HTTP access to the controller;
-- controller access to DNS, HTTPS, PostgreSQL, and the Zenoh pods;
-- same-namespace TLS access to Zenoh;
-- router-to-router mesh traffic and DNS;
-- migration egress to DNS and PostgreSQL, with no ingress.
-
-They do not guess which namespace contains an ingress controller or which CIDR
-contains edge agents. Add those paths using:
+It cannot guess the ingress-controller namespace, edge-agent CIDRs, or an
+organization’s egress gateway. Add those paths through:
 
 - `networkPolicy.controller.additionalIngress`;
 - `networkPolicy.controller.additionalEgress`;
 - `networkPolicy.zenoh.additionalIngress`;
 - `networkPolicy.zenoh.additionalEgress`.
 
-The values accept native `NetworkPolicyIngressRule` and
-`NetworkPolicyEgressRule` objects. Treat each addition as a security change and
-review the rendered manifest. Port-only egress rules for HTTPS and PostgreSQL
-are intentionally coarse because portable Kubernetes policy cannot select an
-external service by DNS name. Organizations with egress gateways should narrow
-them to the gateway namespace or CIDR.
+These values accept native Kubernetes policy rules. Review the rendered policy
+as a security change. Portable NetworkPolicy cannot select an external service
+by DNS name, so port-only egress is necessarily broad unless your cluster routes
+it through a selectable gateway.
 
-The pre-install migration hook can begin before ordinary release resources,
-including its NetworkPolicy, exist on a first installation. The Job has no
-service-account token, receives only the database Secret, and exits after the
-migration. Clusters that require network isolation from the first packet should
-pre-create an equivalent namespace policy or use the declarative Kustomize
-mode.
+On a first Helm install, the pre-install migration Job can run before normal
+release policies exist. Clusters that require isolation from the first packet
+should pre-create a namespace policy or use the declarative Kustomize lifecycle.
 
 ## Health and rollout behavior
 
-The controller probes have deliberately different meanings:
+- `/healthz` answers whether the controller process and runtime are responsive.
+- `/readyz` includes required PostgreSQL, identity, application-service, and
+  Zenoh state.
 
-- `/healthz` is the startup and liveness signal. It answers whether the process
-  and runtime are responsive.
-- `/readyz` is the readiness signal. It includes required PostgreSQL,
-  application-service, identity, and Zenoh state.
+A dependency outage removes a pod from Service endpoints without causing a
+liveness restart loop. Disabled optional systems report `disabled`, not
+`healthy`.
 
-A dependency outage removes a controller pod from Service endpoints without
-causing a liveness restart loop. Optional disabled subsystems report disabled,
-not healthy.
+Zenoh probes its mutually authenticated TCP listener. Controller readiness and
+release smoke tests provide the end-to-end session signal.
 
-Zenoh uses TCP startup, readiness, and liveness probes on its mutually
-authenticated listener. The probe establishes a socket but does not perform a
-Zenoh session; release tests and controller readiness provide the end-to-end
-signal.
+The controller uses surge-first rolling updates and a disruption budget. Zenoh
+uses a StatefulSet, stable names, rolling updates, and its own disruption
+budget. Revisit the PDB before reducing replicas; an impossible budget should
+block voluntary disruption.
 
-The controller Deployment uses surge-first rolling updates and a disruption
-budget. Zenoh uses a StatefulSet, stable pod names, a disruption budget, and
-rolling updates. Review PDB values when reducing replicas: an impossible
-budget correctly prevents voluntary disruption.
+## Upgrade and recover
 
-## Upgrades, rollback, and recovery
-
-Read the release notes and chart changes before every upgrade. Render the old
-and new values locally and inspect the diff:
+Read the release notes, render the new chart, and inspect the diff before every
+upgrade:
 
 ```sh
 helm template inari oci://ghcr.io/hadronomy/charts/inari \
-  --version 0.2.0 \
+  --version "$INARI_CHART_VERSION" \
   --namespace inari \
   --values inari-values.yaml > next.yaml
 kubectl diff --namespace inari --filename next.yaml
 ```
 
-Database changes are forward-only and use expand-and-contract discipline. A
-Helm rollback changes Kubernetes objects; it does not reverse schema history.
-Only roll back to a binary that is compatible with the already-applied schema.
+Before a migration-bearing release, confirm a recent PostgreSQL backup and
+restore exercise, migration network access, enough healthy replicas for the
+roll, and an observed maintenance window.
 
-Before a migration-bearing release:
+Schema history is forward-only. Helm rollback changes Kubernetes objects; it
+does not reverse database migrations. Roll back only to a binary compatible
+with the schema already applied.
 
-1. Confirm a recent PostgreSQL backup and restore procedure.
-2. Confirm the migration Job can reach the database.
-3. Confirm disruption budgets leave enough healthy replicas.
-4. Apply the release during an observed window.
-5. Wait for both controller and router rollouts.
-6. Run `helm test` and perform an enrollment/data-plane smoke test.
-
-Inspect a failed migration before retrying:
+Inspect a failed migration with:
 
 ```sh
 kubectl --namespace inari get jobs -l app.kubernetes.io/component=migration
@@ -312,76 +273,42 @@ kubectl --namespace inari logs job/inari-migrate
 kubectl --namespace inari describe job/inari-migrate
 ```
 
-The next Helm attempt removes the previous fixed-name hook before creating a
-new one. Do not manually edit SeaORM's migration history.
-
-## Routine operations
-
-Useful checks:
-
-```sh
-kubectl --namespace inari get deploy,statefulset,pods,svc,pdb,networkpolicy
-kubectl --namespace inari rollout status deployment/inari
-kubectl --namespace inari rollout status statefulset/inari-zenoh
-kubectl --namespace inari logs deployment/inari --all-pods=true
-helm test inari --namespace inari --logs
-```
-
-Run `inari-server database status` from an image matching the deployed release
-when diagnosing schema readiness. Never use `config print-effective
---no-redact` in a support bundle or shared terminal transcript.
-
-For certificate rotation, update the relevant Secret, force a controlled
-rollout, and confirm that old sessions close at certificate expiry. For OIDC
-rotation, update only the OIDC Secret and roll the controller. For PostgreSQL
-credential rotation, coordinate the database and Secret updates so at least
-one accepted credential remains valid throughout the rollout.
+Do not edit SeaORM’s migration table. Repair logic with a new migration or
+restore PostgreSQL for physical recovery.
 
 ## Troubleshooting
 
-### The migration Job cannot connect
+### Migration cannot reach PostgreSQL
 
-Check the Secret key name, database TLS parameters, DNS, and egress policy.
-The chart expects a complete PostgreSQL URL in the mounted file. The URL is
-never printed by the application.
+Check the Secret key, URL TLS parameters, DNS, database allowlists, and migration
+egress. The application never prints the URL.
 
-### Controller pods are healthy but not ready
+### Controller is healthy but not ready
 
-Read `/readyz` and structured logs. The most common causes are pending database
-migrations, invalid OIDC discovery, or unavailable Zenoh connectivity. Do not
-weaken liveness probes to hide dependency failures; readiness is already the
-correct control plane.
+Read `/readyz` and structured logs. Pending migrations, OIDC discovery, and
+required Zenoh connectivity are the usual dependencies. Readiness is already
+the correct place for them; do not weaken liveness.
 
-### Zenoh pods never become ready
+### Routers do not become ready
 
-Verify the router Secret keys, certificate SANs, CA chain, ConfigMap key, and
-NetworkPolicy mesh egress. With generated configuration, inspect the rendered
-ConfigMap and confirm every StatefulSet ordinal appears in `connect.endpoints`.
+Check Secret keys, certificate SANs, the CA chain, mesh DNS, ConfigMap key, and
+NetworkPolicy. With generated configuration, confirm every StatefulSet ordinal
+appears in the rendered connect endpoints.
 
-### The HTTP UI works but agents cannot connect
+### The UI works but agents cannot connect
 
-The HTTP ingress does not expose Zenoh. Check the TCP Service or private load
-balancer, `managedGateway.dataPlane.publicEndpoints`, router certificate SANs,
-source ranges, and Zenoh NetworkPolicy ingress.
+HTTP ingress does not carry Zenoh. Check the TCP Service, public data-plane
+endpoints, certificate names, load-balancer source ranges, and router policy.
 
-### An ingress controller receives connection timeouts
+### An ingress controller times out
 
-The default policy permits same-namespace callers only. Add the ingress
-controller namespace selector to
-`networkPolicy.controller.additionalIngress`, as shown in the Kustomize
-example.
+Default policy permits same-namespace callers. Add the ingress controller’s
+namespace selector to `networkPolicy.controller.additionalIngress`.
 
-## Publishing the chart
+## Verify published charts
 
-The `controller-chart` Tegami group versions the chart independently from the
-edge release. After the Version Packages pull request is merged, the release
-workflow packages the chart, pushes it to `ghcr.io/hadronomy/charts/inari`, and
-signs the immutable OCI digest with keyless Cosign using GitHub's OIDC identity.
-The complete maintainer flow is documented in
-[the release guide](releases.md).
-
-Consumers can verify a release with the repository identity used by the
-workflow:
+Tegami publishes the chart to GHCR and Cosign signs its immutable digest with
+the GitHub release workflow’s OIDC identity:
 
 ```sh
 cosign verify \
@@ -390,18 +317,5 @@ cosign verify \
   ghcr.io/hadronomy/charts/inari@sha256:<digest>
 ```
 
-OCI tags must remain immutable. Publish corrections under a new chart version.
-After registering the OCI chart in Artifact Hub, publish its repository
-metadata artifact to obtain verified-publisher status; do not invent a
-`repositoryID` before Artifact Hub assigns one.
-
-## Maintainer references
-
-The distribution follows the upstream guidance for [Helm chart
-structure](https://helm.sh/docs/topics/charts/), [chart
-tests](https://helm.sh/docs/topics/chart_tests/), [OCI
-registries](https://helm.sh/docs/topics/registries/), [Kustomize composition](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/),
-and the Kubernetes [Restricted Pod Security
-Standard](https://kubernetes.io/docs/concepts/security/pod-security-standards/).
-Static manifest validation uses Kubeconform in strict mode; it is supplemented
-by kind because JSON Schema cannot reproduce every API-server admission rule.
+Use the digest from the release notes. OCI tags are immutable; corrections ship
+under a new chart version.

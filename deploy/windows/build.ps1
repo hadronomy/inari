@@ -98,15 +98,13 @@ function Invoke-BoundedProcess(
 
 function Invoke-AuthenticodeSign(
     [string]$Path,
-    [string]$Description,
-    [string]$AdditionalCertificate
+    [string]$Description
 ) {
     $Arguments = @(
         "sign",
         "/fd", "SHA256",
         "/f", $SigningPfx,
         "/p", $SigningPassword,
-        "/ac", $AdditionalCertificate,
         $Path
     )
     Write-Host "$Description — applying Authenticode signature"
@@ -255,9 +253,6 @@ $VerificationTrustPem = @(
     $VerificationTrustPem,
     [Text.UTF8Encoding]::new($false)
 )
-$VerificationIssuerName = "inari-code-signing-issuer-$([Guid]::NewGuid().ToString('N')).cer"
-$VerificationIssuer = Join-Path ([IO.Path]::GetTempPath()) $VerificationIssuerName
-[IO.File]::WriteAllBytes($VerificationIssuer, $IssuerCertificate.RawData)
 $LocationPushed = $false
 try {
     Push-Location $WorkspaceRoot
@@ -316,7 +311,7 @@ try {
     for ($Index = 0; $Index -lt $OwnedExecutables.Count; $Index += 1) {
         $File = $OwnedExecutables[$Index]
         $Description = "Inari executable $($Index + 1)/$($OwnedExecutables.Count): $($File.Name)"
-        Invoke-AuthenticodeSign $File.FullName $Description $VerificationIssuer
+        Invoke-AuthenticodeSign $File.FullName $Description
         Assert-AuthenticodeSignature `
             $File.FullName `
             $Description `
@@ -329,7 +324,7 @@ try {
     Write-Host "Packing the signed payload into $ArtifactBase.msix."
     $MakeAppxArguments = @("pack", "/d", $PackageRoot, "/p", $MsixPath, "/o")
     Invoke-BoundedProcess $MakeAppx $MakeAppxArguments 180 "MSIX packaging"
-    Invoke-AuthenticodeSign $MsixPath "MSIX package" $VerificationIssuer
+    Invoke-AuthenticodeSign $MsixPath "MSIX package"
     Assert-AuthenticodeSignature `
         $MsixPath `
         "MSIX package" `
@@ -380,7 +375,6 @@ try {
 }
 finally {
     Remove-Item $VerificationTrust -Force -ErrorAction SilentlyContinue
-    Remove-Item $VerificationIssuer -Force -ErrorAction SilentlyContinue
     foreach ($Certificate in $SigningCertificates) {
         $Certificate.Dispose()
     }

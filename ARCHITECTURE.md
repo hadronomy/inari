@@ -1,284 +1,195 @@
-# Inari Architecture
+# Architecture
 
-## Goal
+Inari is a local-first device platform with an optional managed control plane.
+The architecture is built around a simple rule: hardware work belongs close to
+the hardware, while fleet policy and coordination belong in the controller.
 
-`Inari` is a local-first hardware bridge for POS and desktop-adjacent device workflows.
-
-Its job is to keep local device operations reliable, observable, and secure while still allowing an optional managed upstream controller mode for fleets.
-
-The project is intentionally split into two architectural planes:
-
-- the **local runtime plane** for browser, tray, and device workflows on one machine
-- the **managed upstream plane** for enrollment, fleet control, and remote coordination
-
-## Topology
+## System shape
 
 ```text
-Odoo backend / other local business app
-  └─ browser or local desktop client
-       └─ Inari local API on terminal machine (127.0.0.1:7310)
-            ├─ runtime queue + device discovery
-            ├─ printer drivers and future device plugins
-            ├─ authenticated local HTTP API
-            ├─ authenticated local WebSocket event stream
-            ├─ native tray / Device Center
-            └─ optional managed gateway
-                 ├─ HTTPS enrollment
-                 ├─ step-ca certificate lifecycle
-                 └─ Zenoh managed data plane
+Business application or POS
+          │ local HTTP
+          ▼
+┌──────────────── edge host ────────────────┐
+│ Inari Agent                              │
+│  ├─ device discovery and drivers         │
+│  ├─ durable jobs and event history       │
+│  ├─ authenticated local API              │
+│  └─ managed gateway client               │
+│        ▲                                  │
+│        │ local HTTP + events              │
+│ Inari Device Center                      │
+└──────────────────┬────────────────────────┘
+                   │ HTTPS enrollment
+                   │ Zenoh data plane
+                   ▼
+┌──────────── private infrastructure ───────┐
+│ Inari Controller                         │
+│  ├─ Axum JSON API                        │
+│  ├─ Leptos operator console              │
+│  ├─ enrollment, policy, and audit         │
+│  └─ PostgreSQL repositories               │
+│                                           │
+│ Zenoh Router · OIDC · step-ca · Postgres │
+└───────────────────────────────────────────┘
 ```
 
-## Core Principles
+The edge agent opens every managed connection. No controller needs an inbound
+route to a device host.
 
-- The local machine remains the authoritative execution point for hardware work.
-- The browser and the tray talk to devices only through the loopback agent.
-- Managed mode extends the local runtime; it does not replace it.
-- Device integrations stay behind explicit runtime and API boundaries.
-- Upstream transport details must not leak into local device or job models.
-- Reliability and replay safety matter more than transport cleverness.
+## Edge host
 
-## Major Subsystems
+### Agent
 
-### 1. Local API Surface
+`packages/agent` is the long-running Python service. It owns:
 
-The local API is a FastAPI service built in [main.py](./packages/agent/inari/main.py) and exposed through [api.py](./packages/agent/inari/api.py).
+- discovery and stable device identity;
+- transport- and platform-specific drivers;
+- durable jobs, attempts, and local event history;
+- the authenticated loopback API used by local software;
+- managed enrollment and the Zenoh client;
+- agent identity and protected local secrets.
 
-It provides:
+SQLite is the right persistence boundary here: one process owns a local file,
+and queued work must survive controller and network outages.
 
-- local token bootstrap
-- scoped authenticated HTTP endpoints
-- a live local WebSocket stream for runtime events
-- system, device, job, and gateway diagnostics
+The composition root is `packages/agent/inari/container.py`. Dishka provider
+modules live under `packages/agent/inari/di`; domain and runtime code use normal
+constructor injection and do not depend on the container framework.
 
-This is the boundary consumed by:
+### Device Center
 
-- browser-based local clients
-- the native tray app
-- local diagnostics and operator tooling
+`packages/agent_tray` is the user-session desktop application. It observes and
+controls the service through the local API, presents setup and device state, and
+owns the tray icon. It never becomes the hardware service and never connects to
+Zenoh directly.
 
-### 2. Runtime Layer
+Installed Windows systems use service-control mode. Development can use spawn
+mode, where the tray owns a child agent process. Closing the installed tray must
+not stop the Windows service.
 
-The runtime layer is responsible for local work execution and persistence.
+### Drivers and runtime
 
-Main responsibilities:
-
-- background device discovery
-- durable queued jobs
-- per-device worker ordering
-- lease and retry recovery
-- event publication
-- persistent device/job/event history
-
-Key code lives under:
-
-- [runtime/](./packages/agent/inari/runtime)
-- [printer_service.py](./packages/agent/inari/printer_service.py)
-- [print_jobs.py](./packages/agent/inari/print_jobs.py)
-- [device_commands.py](./packages/agent/inari/device_commands.py)
-
-The runtime is local-first and remains fully useful even when managed mode is disabled.
-
-### 3. Driver Layer
-
-Drivers isolate platform and transport specifics from the runtime and API layers.
-
-Current printer backends include:
-
-- Windows spooler
-- CUPS
-- configured raw socket printers
-
-Key code lives under:
-
-- [drivers/](./packages/agent/inari/drivers)
-- [drivers/printers/windows.py](./packages/agent/inari/drivers/printers/windows.py)
-- [drivers/printers/cups.py](./packages/agent/inari/drivers/printers/cups.py)
-- [drivers/printers/socket.py](./packages/agent/inari/drivers/printers/socket.py)
-
-The intended plugin shape remains broader than printers. The architecture deliberately leaves room for scanners, scales, displays, and similar local device integrations.
-
-### 4. Security Layer
-
-The security layer handles:
-
-- loopback-first exposure rules
-- scoped local bearer tokens
-- standalone local pairing with signed client challenges
-- origin-bound token issuance for paired browser-style clients
-- tray-held local identity material for first-party desktop trust
-- optional TLS requirements for non-loopback exposure
-- persistent agent identity material
-- resilient local secret storage
-
-Key code lives under:
-
-- [security/](./packages/agent/inari/security)
-
-Local desktop clients such as the tray pair with the standalone agent, sign local trust challenges from `POST /auth/local-challenge`, obtain short-lived local client tokens from `POST /auth/local-token`, and then use those tokens for protected local API access.
-
-### 5. Managed Gateway Layer
-
-Managed mode adds an upstream controller boundary without changing the local execution model.
-
-The managed gateway stack is responsible for:
-
-- HTTPS enrollment into the controller
-- optional enrollment auth through controller-issued tokens or ZITADEL
-- managed client-certificate enrollment and renewal through step-ca
-- Zenoh-based steady-state status, command, and runtime-event transport
-- replay-safe command persistence and reconnect recovery
-
-Key code lives under:
-
-- [gateway/](./packages/agent/inari/gateway)
-- [gateway/data_plane/](./packages/agent/inari/gateway/data_plane)
-
-Important architectural split:
-
-- local desktop / browser clients use loopback HTTP + local WebSocket
-- managed controller traffic uses HTTPS enrollment + Zenoh data plane
-
-Those are intentionally different systems.
-
-### 6. Native Tray and Device Center
-
-The tray app is a real local operator surface, not just a small menu.
-
-It is responsible for:
-
-- local service lifecycle controls
-- current runtime status
-- live event awareness
-- a native cross-platform Device Center for device inspection and actions
-
-Key code lives under:
-
-- [packages/agent_tray/inari_tray/app.py](./packages/agent_tray/inari_tray/app.py)
-- [packages/agent_tray/inari_tray/device_center/](./packages/agent_tray/inari_tray/device_center)
-
-The tray is intentionally **local API driven**. It does not speak Zenoh directly and should not be treated as part of the managed controller plane.
-
-## Data Flow
-
-### Local Print Flow
+Interfaces discover transport-level descriptors; drivers claim those
+descriptors and expose typed device capabilities. Platform details remain below
+that boundary. Jobs enter a durable queue, are leased to a per-device worker,
+and publish observable state as they progress.
 
 ```text
-Browser / local client
-  -> local authenticated HTTP API
-  -> runtime job queue
-  -> driver resolution
-  -> printer execution
-  -> runtime event publication
-  -> local WebSocket + job history visibility
+request → durable job → device worker → driver → hardware
+               │                         │
+               └──── history/events ◀────┘
 ```
 
-### Tray / Device Center Flow
+User-facing names are presentation. Automation targets stable `DeviceId`
+values derived from hardware identity wherever possible.
+
+## Managed control plane
+
+### Controller
+
+The Rust workspace separates the controller by responsibility:
+
+- `inari-server` assembles configuration, PostgreSQL, Axum, Leptos, OIDC, and
+  the concrete Zenoh adapter;
+- `inari-gateway` owns managed domain types, application services, security,
+  and persistence mappings;
+- `inari-migration` owns the embedded, forward-only PostgreSQL history;
+- `inari-web` owns shared routes, components, and server functions;
+- `inari-web-frontend` is the minimal browser hydration entry point.
+
+Axum registers the API router before the Leptos routes. Everything below `/api`
+is JSON or Zenoh-compatible HTTP. Browser fallbacks cannot handle an API path.
+
+Controller state and sessions live in externally managed PostgreSQL. Production
+pods verify the schema but do not migrate it; a dedicated deployment job runs
+the embedded migrator under an advisory lock.
+
+### Enrollment and data plane
+
+Enrollment uses HTTPS because it begins before an agent certificate exists. The
+controller validates the invitation, protocol version, Ed25519 JWK, CSR
+signature, and CSR/JWK binding before it mints short-lived certificate bootstrap
+material.
+
+After enrollment, steady-state status, commands, results, and liveliness use
+Zenoh over TLS with client certificates. The controller and router are separate
+workloads: the controller owns application policy; Zenoh owns data-plane routing.
+
+The [gateway protocol](docs/gateway_protocol.md) is the canonical wire contract.
+
+## Trust boundaries
+
+- Local browser and desktop clients authenticate to the loopback agent with
+  paired identities and short-lived tokens.
+- The tray is a client of the agent, not a privileged in-process extension.
+- The controller authenticates people with OIDC and authorizes typed roles.
+- Agent enrollment consumes one-use credentials and binds them to cryptographic
+  identity.
+- Zenoh carries managed traffic only after transport and protocol checks.
+- Windows package signing, device identity PKI, and Kubernetes workload PKI are
+  independent trust domains.
+
+Secrets are wrapped or protected at the boundary where they enter the system.
+They do not belong in rendered HTML, URLs, ordinary configuration files, logs,
+or debug representations.
+
+## Main flows
+
+### Local device work
 
 ```text
-Tray / Device Center
-  -> local token bootstrap
-  -> local authenticated HTTP reads
-  -> local WebSocket event stream
-  -> event-led UI refresh with slow fallback reconciliation
+Odoo or local client
+  → authenticated agent API
+  → durable local job
+  → driver execution
+  → job history and live event
 ```
 
-### Managed Controller Flow
+This path remains available when the controller is offline.
+
+### Interactive enrollment
 
 ```text
-Inari
-  -> HTTPS enrollment
-  -> optional step-ca bootstrap and client certificate issue
-  -> Zenoh TLS + mTLS data plane
-  -> controller commands / agent status / runtime events
+Operator signs in to controller
+  → creates one-use invitation
+  → Device Center opens inari:// link
+  → agent submits JWK + CSR over HTTPS
+  → controller verifies identity and returns data-plane contract
+  → agent obtains certificate and connects to Zenoh
 ```
 
-## Persistence
+The invitation secret stays in the URL fragment until the hydrated setup flow
+hands it to Device Center; it is never sent in the setup-page request.
 
-The system persists two distinct classes of state:
+### Managed command
 
-### Runtime Persistence
+```text
+Controller persists command
+  → publishes to the agent Zenoh namespace
+  → agent deduplicates and persists it
+  → local runtime executes the job
+  → result is persisted and published upstream
+```
 
-Stored in the runtime database:
+Sequence numbers and command identifiers make reconnect and replay explicit.
 
-- devices
-- jobs
-- job attempts
-- runtime events
+## Extension rules
 
-### Managed Gateway Persistence
+New device families should join through the interface/driver boundary and the
+existing durable runtime. New controller adapters should call application
+services rather than repositories. Transport DTOs should map into domain types
+at the edge of a crate or package.
 
-Stored in the gateway persistence layer:
+Avoid shared “utilities” that hide domain decisions. Reuse the language and
+ecosystem first; keep custom helpers for Inari-specific validation,
+authorization, and protocol transitions.
 
-- inbound controller commands
-- outbound publications
-- controller replay position
+## Related documentation
 
-This separation is intentional. Local runtime reliability and managed-transport reliability are related, but they are not the same concern.
-
-## Process and Supervision Model
-
-At startup:
-
-1. configuration is loaded and normalized
-2. logging is configured
-3. migrations run
-4. the application supervisor starts the runtime
-5. when enabled, the managed gateway supervisor starts the upstream stack
-
-The composition root is [container.py](./packages/agent/inari/container.py), with provider modules under [di/](./packages/agent/inari/di). The DI framework is intentionally contained at the composition boundary; the domain and runtime code continue to rely on normal constructor injection.
-
-## Deployment Modes
-
-### Standalone Mode
-
-This is the default local deployment:
-
-- loopback-first
-- no controller enrollment
-- local runtime only
-- tray and browser clients talk directly to the local API
-
-### Managed Mode
-
-This adds the upstream controller boundary:
-
-- controller enrollment over HTTPS
-- optional ZITADEL-backed enrollment auth
-- optional step-ca-managed client certificates
-- steady-state Zenoh data plane
-
-Managed mode is additive. The local runtime still remains the execution engine.
-
-## Odoo Boundary
-
-The Odoo side should stay thin.
-
-Odoo responsibilities remain:
-
-- storing terminal-side bridge configuration
-- providing terminal configuration to the POS frontend
-- redirecting local hardware transport toward the loopback agent
-
-Odoo should not become the hardware execution layer. That complexity belongs in Inari.
-
-## Documentation Map
-
-For the managed controller wire contract, see [docs/gateway_protocol.md](./docs/gateway_protocol.md).
-
-For supported managed deployment stacks, see [docs/managed_gateway_stacks.md](./docs/managed_gateway_stacks.md).
-
-## Engineering Discipline
-
-The repo’s quality bar is:
-
-- explicit boundaries
-- durable local behavior
-- strict typed interfaces
-- cross-platform local UX
-- documentation that reflects the code we actually ship
-
-Type checking, linting, and tests are expected parts of the architecture contract, not optional cleanup:
-
-- `ty`
-- `ruff`
-- `pytest`
+- [Agent guide](packages/agent/README.md)
+- [Device Center guide](packages/agent_tray/README.md)
+- [Gateway protocol](docs/gateway_protocol.md)
+- [Managed deployment](docs/managed_gateway_stacks.md)
+- [Controller database](docs/controller_database.md)
+- [Kubernetes operations](docs/kubernetes.md)

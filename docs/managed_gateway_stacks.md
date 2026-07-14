@@ -1,230 +1,144 @@
-# Managed Gateway Deployment Stacks
+# Managed deployment
 
-This guide describes the managed upstream deployment stacks that `Inari` supports today.
+Managed mode connects edge agents to an Inari controller without moving device
+execution out of the local machine. The agent keeps its queue, drivers, and
+local API; the controller adds enrollment, policy, audit, and fleet-wide work.
 
-Use this together with [gateway_protocol.md](./gateway_protocol.md).
-
-## Scope
-
-This document is about the **managed upstream boundary**:
-
-- `Inari` enrollment into a controller over `HTTPS`
-- the steady-state managed data plane over `Zenoh`
-- managed client certificates issued by `step-ca`
-- optional enrollment authorization through `ZITADEL`
-- a Kubernetes ingress in front of the controller's HTTP enrollment surface
-
-It does **not** describe the local desktop or POS-facing boundary. The local tray and local browser clients still talk to the loopback agent over the authenticated local HTTP and WebSocket APIs.
-
-## Design Overview
-
-The recommended production shape is:
+## Topology
 
 ```text
-                                   optional enrollment auth
-Inari  ---- HTTPS enrollment ----> Controller API ----------------------> ZITADEL
-  |                                  |
-  |                                  | issues enrollment decision and, when configured,
-  |                                  | returns certificate enrollment + Zenoh contract
-  |
-  |---- provider-specific certificate enrollment -----------> step-ca
-  |---- client cert issue / renew --------------------------> step-ca
-  |
-  |==== Zenoh TLS + mTLS data plane ========================> Controller / Zenoh Router
+Edge agent
+  ├── HTTPS ───────────────► Inari Controller
+  │     enrollment             │
+  │                            ├── PostgreSQL
+  │                            ├── OIDC
+  │                            └── step-ca provisioner
+  │
+  ├── HTTPS ───────────────► step-ca
+  │     certificate issue
+  │
+  └── Zenoh over TLS/mTLS ─► Zenoh Router
+        status and work          ▲
+                                │ controller client
+                                └── Inari Controller
 ```
 
-Two deployment points are worth making explicit:
+The controller and Zenoh router belong to the same private platform, but they
+are different workloads. The controller is a stateless HTTP application;
+routers keep stable network identities and an explicit mesh. PostgreSQL, OIDC,
+step-ca, ingress, and secret delivery remain organization-owned services.
 
-- The **agent always connects outward**. Managed mode does not require inbound connections opened toward the agent host.
-- The controller service and Zenoh router belong to the same private platform but run as **separate Kubernetes workloads**. The controller is stateless; the router has stable StatefulSet identity and explicit mesh configuration.
+Every edge connection is outbound. A managed installation does not open the
+agent host to inbound controller traffic.
 
-## What Moves Over Which Boundary
+## What each boundary carries
 
-### Enrollment Boundary
+### Local application boundary
 
-Enrollment stays on `HTTPS`.
+Odoo, Device Center, and other software on the edge host use the authenticated
+local HTTP API and live event stream. They do not speak Zenoh and do not need
+controller credentials.
 
-That gives us:
+### Enrollment boundary
 
-- a clean first-contact path before a managed client certificate exists
-- a natural place for controller-issued enrollment tokens
-- a natural place for ZITADEL-backed enrollment authorization
-- a natural place for certificate enrollment delivery
+Enrollment uses HTTPS because it starts before the agent has a managed client
+certificate. A one-use invitation or machine credential authorizes the request.
+The controller verifies the protocol version, Ed25519 JWK, CSR signature, and
+key binding before returning permissions, Zenoh endpoints, namespace, and
+certificate bootstrap material.
 
-### Managed Data Plane
+Human operators authenticate to the controller with OIDC. Unattended agents use
+a signed enrollment bundle or a machine flow approved by the deployment.
 
-Steady-state managed traffic moves over `Zenoh`.
+### Managed data plane
 
-That includes:
+Zenoh carries status, liveliness, commands, results, runtime events, and replay
+queries. Agents connect in client mode. Production transport uses TLS with a
+client certificate issued for that agent.
 
-- status publication
-- controller-to-agent command delivery
-- runtime event publication
-- reconnect recovery and command-history replay
-- liveliness / presence
+The controller’s HTTP compatibility route at `/api/zenoh/v1/{selector}` is an
+operator and integration surface over the same keyspace. It is not the agent’s
+primary transport and does not wrap Zenoh keys into Inari resources.
 
-### Local Desktop Boundary
+## Certificate lifecycle
 
-The local tray is **not** part of the managed data plane.
+The normal production flow uses step-ca:
 
-It continues to use:
+1. The controller authenticates and verifies the enrollment request.
+2. It mints a short-lived, agent-bound step-ca token for the submitted CSR.
+3. The agent verifies the CA root fingerprint and exchanges the token for its
+   first certificate.
+4. The agent opens the Zenoh session with that certificate.
+5. Renewal uses certificate-backed step-ca authentication.
 
-- local loopback `HTTP`
-- local authenticated WebSocket events
+The controller never stores or reuses the one-time CA token. cert-manager may
+manage Kubernetes workload certificates, but enrolled edge identities stay in
+the step-ca device trust domain.
 
-That separation is intentional. The tray is a local desktop client, not a controller-side managed client.
+Bootstrap can begin without mTLS. Once the agent has a certificate, managed
+traffic should require it.
 
-## Supported Stacks
+## Configure the controller
 
-### 1. Controller Enrollment Token + step-ca
+Start from
+[`crates/inari-server/config.example.toml`](../crates/inari-server/config.example.toml).
+A production controller needs:
 
-Use this when the controller owns enrollment policy directly and also wants to require mTLS after certificate issuance.
+- an explicit public URL and organization identity;
+- externally managed PostgreSQL;
+- OIDC discovery, client credentials, and role mapping;
+- onboarding policy and invitation lifetime;
+- public Zenoh endpoints returned to agents;
+- step-ca provisioner identity and mounted signing key;
+- controller Zenoh client certificate and CA bundle.
 
-```env
-INARI_GATEWAY_MODE=managed
-INARI_UPSTREAM_BASE_URL=https://controller.example.com
-INARI_UPSTREAM_AUTH_MODE=controller
-INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
-INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
+Keep secret values in mounted files. Validate the complete configuration before
+starting a rollout:
+
+```sh
+INARI_SERVER_CONFIG=/etc/inari/config.toml \
+  inari-server config validate
+INARI_SERVER_CONFIG=/etc/inari/config.toml \
+  inari-server config print-effective
 ```
 
-In this mode:
+`print-effective` redacts secrets by default. Use `--no-redact` only in a
+private terminal when the disclosure is deliberate.
 
-- enrollment is authorized by the controller-issued `enrollment_token`
-- the controller returns the Zenoh data-plane contract
-- the controller returns `step-ca` enrollment material when managed certificates are enabled
-- the agent issues its first client certificate from `/1.0/sign`
-- the agent later renews through `/1.0/renew`
+## Configure an agent
 
-This is the simplest serious managed production stack.
+Set `agent.mode = "managed"` in the agent TOML and provide the controller URL.
+The interactive invitation flow supplies the one-use enrollment credential;
+unattended installation supplies its signed bundle.
 
-### 2. ZITADEL Enrollment Auth + step-ca
+The controller normally owns the values under `transport.zenoh` and the
+step-ca connection details. Configure local overrides only when the deployment
+has an intentional fallback. The agent’s generated
+[`config.example.toml`](../packages/agent/config.example.toml) documents every
+field and its default.
 
-Use this when enrollment authorization is delegated to `ZITADEL`, but the controller still owns the managed data-plane contract.
+Managed policy and local settings remain separate. Enrollment must not rewrite
+arbitrary operator configuration.
 
-```env
-INARI_GATEWAY_MODE=managed
-INARI_UPSTREAM_BASE_URL=https://controller.example.com
-INARI_UPSTREAM_AUTH_MODE=zitadel_service_account
-INARI_ZITADEL_BASE_URL=https://zitadel.example.com
-INARI_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-INARI_ZITADEL_REQUESTED_SCOPES=openid,events:read,jobs:create,commands:execute
-INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
-```
+## Production checklist
 
-In this mode:
+Before enrolling a real edge host, confirm that:
 
-- the agent signs a private-key JWT assertion with the configured ZITADEL service-account key
-- the agent exchanges that assertion for an OAuth access token
-- the controller accepts that enrollment call and still returns the managed Zenoh + certificate contract
-- step-ca remains the certificate authority for the managed client certificate
+- the controller URL is reachable through HTTPS and has the expected public
+  identity;
+- OIDC sign-in and role mapping work for an enrollment administrator;
+- PostgreSQL migrations are current;
+- the step-ca root fingerprint is approved through an independent channel;
+- Zenoh router certificates cover internal mesh and external client names;
+- the public Zenoh endpoints match those certificate names;
+- NetworkPolicy and firewalls allow the edge network to reach Zenoh TLS;
+- controller readiness reports PostgreSQL, identity, certificates, and required
+  Zenoh connectivity truthfully;
+- an invitation can be created, previewed, consumed once, and rejected on a
+  second attempt;
+- the enrolled agent reconnects and recovers command history after an
+  interruption.
 
-This is the cleanest stack when enrollment auth belongs to a central identity layer rather than the controller itself.
-
-### 3. Controller Enrollment Token + Controller-Installed Certificate
-
-Use this when the controller installs and rotates the managed client certificate directly instead of delegating issuance to `step-ca`.
-
-```env
-INARI_GATEWAY_MODE=managed
-INARI_UPSTREAM_BASE_URL=https://controller.example.com
-INARI_UPSTREAM_AUTH_MODE=controller
-INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
-INARI_UPSTREAM_CERTIFICATE_MODE=controller
-```
-
-In this mode:
-
-- enrollment is still controller-authorized
-- the controller still returns the Zenoh data-plane configuration
-- the controller may install client-certificate material directly in the enrollment response
-
-This is simpler than `step-ca`, but less flexible for large fleets and less elegant for short-lived certificate rotation.
-
-## Caddy and the HTTP Enrollment Edge
-
-`Caddy` is relevant to the **HTTP enrollment surface**, not the steady-state Zenoh data plane.
-
-Example:
-
-```env
-INARI_UPSTREAM_EDGE_PROVIDER=caddy
-INARI_UPSTREAM_MUTUAL_TLS_MODE=optional
-```
-
-Recommended post-issuance posture:
-
-```env
-INARI_UPSTREAM_EDGE_PROVIDER=caddy
-INARI_UPSTREAM_MUTUAL_TLS_MODE=optional
-INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
-```
-
-That means:
-
-- the enrollment HTTP surface remains reachable before the first managed client certificate exists
-- after issuance, the steady-state managed path can tighten to mTLS-required connectivity
-
-## Mutual TLS Posture
-
-The intended production recommendation is:
-
-- first enrollment: mTLS may not exist yet
-- after certificate issuance: the managed data plane should behave as mTLS-required
-
-The current code intentionally supports:
-
-- `disabled`
-- `optional`
-- `required`
-
-But the recommended serious managed posture is:
-
-- `optional` before issuance
-- effectively `required` after a managed certificate has been issued
-
-That keeps bootstrap ergonomic without weakening the steady-state trust model.
-
-## Controller and Router Separation
-
-The production architecture is:
-
-- a stateless controller Deployment for HTTP, Leptos, and application services
-- a Zenoh router StatefulSet with stable identities
-- externally managed PostgreSQL for controller state
-
-They remain one managed platform, but their lifecycle, readiness, scaling, and network policy are independent. The controller connects to Zenoh in client mode and production configuration rejects an embedded router topology.
-
-## Recommended Production Combination
-
-The cleanest production stack is:
-
-```env
-INARI_GATEWAY_MODE=managed
-INARI_UPSTREAM_BASE_URL=https://controller.example.com
-INARI_UPSTREAM_EDGE_PROVIDER=caddy
-INARI_UPSTREAM_MUTUAL_TLS_MODE=optional
-INARI_UPSTREAM_AUTH_MODE=zitadel_service_account
-INARI_ZITADEL_BASE_URL=https://zitadel.example.com
-INARI_ZITADEL_SERVICE_ACCOUNT_KEY_PATH=./secrets/zitadel-service-account.json
-INARI_UPSTREAM_CERTIFICATE_MODE=step_ca
-INARI_UPSTREAM_ENROLLMENT_TOKEN=replace-me
-```
-
-That gives you:
-
-- `HTTPS` enrollment with a clear bootstrap path
-- optional enrollment authorization through `ZITADEL`
-- short-lived managed client certificates through `step-ca`
-- `Zenoh` as the steady-state managed data plane
-- TLS + mTLS on the managed data plane after issuance
-- a local agent that still keeps the tray and POS/browser experience on the loopback boundary
-
-## Operational Notes
-
-- The managed gateway stack is intentionally **separate** from the local desktop UX. The tray should not be reinterpreted as a controller-managed surface.
-- The agent remains useful in standalone mode. Managed mode layers onto the existing local runtime instead of replacing it.
-- The cleanest way to reason about the deployment is:
-  - local plane: loopback API + local WebSocket
-  - managed plane: HTTPS enrollment + Zenoh data plane
-  - certificate plane: step-ca bootstrap / issuance / renewal
+The exact wire contract, keyspace, and replay rules live in
+[the gateway protocol](gateway_protocol.md). Kubernetes rollout and recovery
+procedures live in [the Kubernetes guide](kubernetes.md).

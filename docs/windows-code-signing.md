@@ -1,108 +1,103 @@
-# Windows code-signing operations
+# Windows signing runbook
 
-The Windows package uses a dedicated code-signing hierarchy. It is independent
-from the step-ca instance used for agent identity and from the certificates used
-inside Kubernetes. Reusing either trust domain would turn an application release
-credential into device or workload authority.
+This runbook is for maintainers of the Device Center release pipeline. End-user
+installation is covered in [the Windows guide](windows.md).
 
-## Hierarchy
+Inari uses a private signing hierarchy for alpha releases. It is deliberately
+separate from step-ca agent identities and from Kubernetes workload PKI. A key
+that can publish Windows software must not also authorize devices or workloads.
 
-The hierarchy contains:
+## Certificate hierarchy
 
-- a publisher-owned RSA root named
-  `CN=Pablo Hernández Jiménez Code Signing Root CA`, constrained to code
-  signing and kept offline;
-- a project-scoped issuing CA named `CN=Inari Code Signing Issuing CA`, with a
-  path-length-zero constraint;
-- a rotating publisher leaf with subject `CN=Pablo Hernández Jiménez`;
-- an encrypted PKCS #12 bundle containing the publisher key, leaf, and issuing
-  certificate.
+The hierarchy has three levels:
 
-The root identifies the authority an administrator chooses to trust. It belongs
-to the publisher rather than to one application, so it can remain stable while
-project-specific issuing keys change. The issuing CA confines Inari's
-operational signing material to its own lifecycle. The leaf names Inari's
-current legal publisher and must exactly match the MSIX manifest. The public
-handle `hadronomy` and the Inari brand remain in filenames, package metadata,
-and release presentation rather than being presented as legal subject fields.
+| Certificate | Subject | Lifetime and custody |
+| --- | --- | --- |
+| Publisher root | `CN=Pablo Hernández Jiménez Code Signing Root CA` | Long-lived, offline, publisher-owned |
+| Inari issuer | `CN=Inari Code Signing Issuing CA` | Project-scoped, offline, path length zero |
+| Publisher leaf | `CN=Pablo Hernández Jiménez` | One year, rotated through the release environment |
 
-The MSIX identity and publisher subject are stable. Rotate the leaf before it
-expires without changing either value. Rotate the Inari issuing CA separately
-from the root. Changing the root requires a staged enterprise trust rollout
-before any package signed by the new hierarchy can be installed.
+The leaf subject must exactly match the `Publisher` value in the MSIX manifest.
+The public handle and Inari brand belong in filenames and display metadata, not
+in the legal publisher subject.
 
-## Initial provisioning
+The package signature contains the leaf. Managed Windows devices must also
+receive the Inari issuer in the Local Machine intermediate store and the
+publisher root in the Local Machine root store. SignTool’s `/ac` option is for
+SPC cross-certificates; it is not a way to attach an ordinary private issuing
+CA to an MSIX signature.
 
-Provision on the isolated signing workstation, never on a CI runner or ordinary
-development machine. Install the pinned mise toolchain and choose a new output
-directory outside the repository and synchronized storage:
+## Provision the hierarchy
+
+Run the provisioning script on the signing workstation with the versions pinned
+by Mise. Choose a new directory outside the repository and synchronized storage:
 
 ```sh
 mise install step
 mise exec -- scripts/provision-windows-signing.sh /secure/removable/inari-signing
 ```
 
-The command prompts separately while it creates encrypted private keys and the
-publisher PFX. When it completes:
+The script creates encrypted root and issuer keys, a publisher key and
+certificate, and `publisher.pfx`. Before copying anything elsewhere:
 
-1. verify the root, issuing CA, publisher, and complete chain with
-   `step certificate inspect` and `step certificate verify`;
-2. move `root.key` and `issuer.key` into separate offline, access-controlled
-   storage;
-3. retain offline backups and a documented two-person recovery procedure;
-4. export only `publisher.pfx` and `root.crt` to the protected release setup;
-5. delete transient copies after the GitHub environment has been provisioned.
+1. Inspect all three certificates with `step certificate inspect`.
+2. Verify the leaf through the issuer and root with `openssl verify`.
+3. Move `root.key` and `issuer.key` into separate offline storage.
+4. Keep encrypted backups and a written recovery procedure.
+5. Export only `publisher.pfx` and the public root certificate to the release
+   setup.
 
-Do not commit certificates, keys, PFX files, passwords, base64 encodings, or
-fingerprints prepared for an unreleased hierarchy.
+Never commit private keys, PFX files, passwords, or secret encodings. Public
+certificates and fingerprints become release assets only after the hierarchy is
+in service.
 
-## GitHub environment
+## Configure GitHub Actions
 
-Create a protected environment named `windows-release`, restrict it to the
-`main` branch, and require maintainer approval. Disable self-review once a
-second eligible maintainer can review deployments; a single-maintainer project
-must otherwise retain a documented manual approval step. Store:
+Create a protected environment named `windows-release`. Restrict it to `main`
+and require a maintainer to approve each deployment. Store these secrets:
 
-- base64 of the publisher PFX as `WINDOWS_SIGNING_PFX_BASE64`;
-- the PFX export password as `WINDOWS_SIGNING_PFX_PASSWORD`;
-- base64 of the DER or PEM root certificate as
-  `WINDOWS_CODE_SIGNING_ROOT_CERT_BASE64`.
+- `WINDOWS_SIGNING_PFX_BASE64` — base64-encoded `publisher.pfx`;
+- `WINDOWS_SIGNING_PFX_PASSWORD` — the PFX export password;
+- `WINDOWS_CODE_SIGNING_ROOT_CERT_BASE64` — the public root certificate in DER
+  or PEM form.
 
-The publisher PFX contains the project issuing certificate but never its private
-key. The release job materializes protected values only in the runner's
-temporary directory. The build verifies certificate subjects, validity,
-code-signing EKUs, path-length constraints, and the complete chain before
-signing. GitHub-hosted runners trust the root only for the duration of signature
-verification and remove it in the cleanup path. The produced package never
-installs trust on an operator's machine.
+The PFX contains the leaf, its private key, and the public Inari issuer. It does
+not contain either CA private key.
 
-## Leaf rotation
+The Windows job validates the certificate constraints and chain without network
+retrieval, signs the two Inari executables and the MSIX, and verifies each
+signature against the supplied root and issuer. It then imports the two public
+CA certificates into the same Local Machine stores used by App Installer,
+checks the MSIX with Windows Authenticode, and removes any certificates it added.
+That final test catches the exact trust path users depend on.
 
-Issue a new publisher leaf from the offline Inari issuing CA before the existing
-leaf expires. Preserve the subject, generate a new private key, test-sign a
-package in an isolated environment, and verify an in-place upgrade from the
-latest production package. Update the protected PFX secret only after that
-exercise passes.
+Every release includes the root, issuer, SHA-256 fingerprints, package
+checksums, an SPDX SBOM, and GitHub provenance. These artifacts make a release
+auditable; they do not replace an independently approved root fingerprint.
 
-The self-managed alpha hierarchy does not use an external timestamp authority,
-so its signatures remain valid only while the publisher leaf is valid. Rotate
-the leaf and publish replacement artifacts ahead of expiry. Long-lived
-production signatures require Microsoft Trusted Signing or an independently
-operated RFC 3161 authority with its own trust and key-management boundary.
-Retain retired public leaf certificates and release evidence; destroy
-superseded private key material according to the organization's key-retention
-policy.
+## Rotate the publisher leaf
 
-## Root rotation and incident response
+Issue a new leaf from the offline Inari issuer before the current certificate
+expires. Keep the subject unchanged, generate a new private key, and test an
+upgrade from the latest published MSIX before replacing the GitHub secret.
 
-A root rotation is a trust migration, not a routine release. Distribute the new
-root alongside the old one, confirm fleet trust, publish a package signed by the
-new hierarchy, and remove the old root only after every supported package has
-moved.
+The alpha hierarchy has no external timestamp authority. A signature therefore
+remains useful only while its publisher leaf is valid. Publish replacement
+artifacts before expiry. Long-lived production distribution should move to
+Microsoft Artifact Signing or a separately operated RFC 3161 timestamp service
+with its own trust and key-management boundary.
 
-If publisher key compromise is suspected, stop the release environment, revoke
-maintainer access, preserve audit evidence, rotate the publisher leaf, and block
-the affected certificate through the organization's Windows controls. If the
-Inari issuing key may be compromised, replace that issuing CA and every leaf it
-issued. If the offline root may be compromised, begin the full root-rotation
-process and treat every certificate beneath it as untrusted.
+## Rotate an issuer or root
+
+An issuer rotation requires a new Inari intermediate certificate and a staged
+deployment to the Local Machine intermediate store. Keep the old issuer until
+every supported package has moved.
+
+A root rotation is a fleet trust migration. Deploy the new root alongside the
+old one, confirm both trust paths, publish with the new hierarchy, and retire the
+old root only after every supported package and recovery image has moved.
+
+If a publisher key may be compromised, disable the release environment and
+preserve its audit trail before rotating the leaf. Suspected issuer compromise
+invalidates every leaf beneath it. Suspected root compromise requires a full
+trust migration.

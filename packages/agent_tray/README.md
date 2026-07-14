@@ -1,67 +1,65 @@
-# Inari Tray
+# Inari Device Center
 
-Cross-platform tray companion for the `inari` package.
+Device Center is the desktop companion for the Inari Agent. It owns the tray
+icon, local setup, service controls, device views, and enrollment handoff. It is
+not the agent service and does not talk to hardware or Zenoh directly.
 
-The tray app is intentionally separate from the headless agent service:
+## Run from source
 
-- it runs in the user session, so it can own the desktop notification area icon
-- it talks to the agent over the existing local HTTP and WebSocket API
-- it can either monitor an external agent, manage a local background process, or control a platform service
-- it now uses a Qt-based tray shell through `PySide6`, which gives us a more consistent cross-platform tray experience than the old `pystray` backend
+Start a desktop session with a system tray, then run:
 
-The tray is now WebSocket-first for live state:
-
-- it bootstraps and reconciles with HTTP
-- it keeps queue and device state fresh from the snapshot-backed `WS /events` stream
-- it only falls back to slower HTTP reconciliation instead of polling `/system/status` after every runtime event
-- it obtains and refreshes a short-lived local bearer token automatically before calling protected agent endpoints
-
-## Run
-
-From the repository root:
-
-```powershell
+```sh
+mise exec -- just sync
 uv run --directory packages/agent_tray inari-tray
 ```
 
-The tray expects a desktop session with a visible system tray available to Qt.
+The development default is `spawn` mode: Device Center starts a child agent and
+stops that child when it exits. Installed systems use `service` mode, where the
+operating system owns the agent and quitting the tray leaves it running.
 
-## Environment
+## Control modes
+
+| Mode | Ownership |
+| --- | --- |
+| `spawn` | Device Center owns a development child process |
+| `service` | Windows Service Control Manager, systemd, or launchd owns the agent |
+| `monitor` | Device Center observes an agent managed elsewhere |
+
+The tray connects to the local HTTP API, completes local pairing when needed,
+and obtains short-lived access tokens. It receives state through the
+snapshot-backed WebSocket and uses a slower HTTP reconciliation interval as a
+safety net.
+
+Useful development overrides include:
 
 ```env
 INARI_TRAY_AGENT_API_BASE_URL=http://127.0.0.1:7310
 INARI_TRAY_CONTROL_MODE=spawn
 INARI_TRAY_SERVICE_SCOPE=system
 INARI_TRAY_AUTO_START_AGENT=true
-INARI_TRAY_AUTH_CLIENT_NAME=inari-tray
-INARI_TRAY_STATUS_RECONCILE_INTERVAL_SECONDS=30
-INARI_TRAY_EVENT_RECONNECT_DELAY_SECONDS=3
 INARI_TRAY_LOG_LEVEL=INFO
 INARI_TRAY_LOG_DIR=./logs
 ```
 
-Control modes:
+The default service names are `InariService` on Windows, `inari.service` on
+Linux, and `io.inari.service` on macOS. Early spawn failures are written to
+`logs/agent-launch.log` before the child has configured its own logging.
 
-- `spawn`: the tray starts and stops a local `inari` background process, and auto-starts it on tray launch by default
-- `service`: the tray controls a platform service
-  - Windows: Service Control Manager
-  - Linux: `systemctl`
-  - macOS: `launchctl`
-- `monitor`: the tray only observes an already-running agent
+## Installed Windows behavior
 
-In `service` mode, the tray now defaults to the same platform-native service identifier that the agent CLI installs:
+The signed MSIX installs **Inari Device Center** as the Start Menu and sign-in
+application and **Inari Agent** as a packaged `LocalService`. The package also
+registers `inari://` invitation links. A running instance receives links over
+Qt local IPC instead of opening a second tray.
 
-- Windows: `InariService`
-- Linux: `inari.service`
-- macOS: `io.inari.service`
+Trust deployment and installation are documented in the
+[Windows guide](../../docs/windows.md).
 
-When `spawn` mode cannot boot the local agent, the tray writes the launcher output to `logs/agent-launch.log` so early startup failures are visible even before the agent itself configures logging.
+## Tests
 
-By default, quitting the tray also stops the tray-managed local agent process in `spawn` mode.
+```sh
+uv run --directory packages/agent_tray --group dev pytest tests -q
+```
 
-## Platform Notes
-
-- Windows service mode uses the configured service name directly.
-- Linux service mode expects a `systemd` unit name such as `inari.service`.
-- macOS service mode expects a `launchd` label such as `io.inari.service`.
-- Opening the log directory uses the platform-native opener when available: `start`, `xdg-open`, or `open`.
+Use `mise exec -- just check` before submitting changes that cross package
+boundaries.

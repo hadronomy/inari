@@ -1,47 +1,41 @@
-# Controller database lifecycle
+# Controller database operations
 
-The production controller uses externally managed PostgreSQL. The application
-query layer is SeaORM 2 and the embedded schema history lives in the dedicated
-`inari-migration` crate.
+The controller stores fleet state, enrollment records, audit history, and OIDC
+sessions in externally managed PostgreSQL. SeaORM is the application query
+layer, and `crates/inari-migration` is the only owner of schema history.
 
-## Ownership
+## How migrations run
 
-There is one schema owner:
-
-- `inari-server database migrate` acquires the Inari PostgreSQL advisory lock
-  and applies the embedded SeaORM migrations.
-- The Helm pre-install and pre-upgrade Job invokes that command before
-  controller replicas are rolled.
-- Production pods set `database.migrate_on_startup = false`. They verify that
-  no migration is pending before becoming ready, but never perform DDL.
-- Development may set `database.migrate_on_startup = true` for a single local
-  process.
-
-Tower Sessions remains the session implementation and uses its upstream
-PostgreSQL store. Its `tower_sessions.session` table is created by the same
-embedded migration history; application startup never invokes the store's
-independent migration helper.
-
-## Commands
-
-Apply all pending migrations:
+Production deployments run:
 
 ```sh
 inari-server database migrate
 ```
 
-Verify that a database is current without applying pending migrations:
+before controller replicas are rolled. The command takes an Inari-specific
+PostgreSQL advisory lock, applies the embedded forward migrations, and reports
+what changed. The Helm chart runs it in a pre-install and pre-upgrade Job.
+
+Controller pods use `database.migrate_on_startup = false`. During readiness
+they check that the database matches the binary, but they never perform DDL.
+Single-process development may enable startup migration for convenience.
+
+Check a database without changing it:
 
 ```sh
 inari-server database status
 ```
 
-The status command exits unsuccessfully when migrations are pending, making it
-suitable for deployment validation.
+The command exits unsuccessfully when migrations are pending, which makes it
+suitable for deployment gates and incident diagnosis.
 
-## Adding a migration
+Tower Sessions uses the same PostgreSQL pool. Its `tower_sessions.session`
+table belongs to Inari’s migration history, so session startup never owns a
+second schema path.
 
-Generate migration scaffolding with the exact workspace SeaORM version:
+## Add a migration
+
+Generate the scaffold with the exact SeaORM CLI version used by the workspace:
 
 ```sh
 cargo install sea-orm-cli --version 2.0.0-rc.42 --locked
@@ -50,35 +44,27 @@ sea-orm-cli migrate generate <concise_name> \
   --universal-time
 ```
 
-The generator owns the timestamped filename, module registration, migration
-name, and trait scaffold. The engineer then implements and reviews the schema
-change inside that scaffold; generated DDL is never accepted without curation.
+Keep the generated timestamp, module registration, and migration name. Fill in
+the schema change with SeaQuery builders where they remain clear; use focused
+PostgreSQL only when the schema API cannot express the operation well.
 
-Use SeaQuery schema builders for ordinary tables, indexes, constraints, and
-foreign keys. Use raw PostgreSQL statements only for a capability that the
-schema API does not express clearly. Register migrations in chronological
-order and keep each module focused on one cohesive change.
+Applied migrations are immutable. Never rename, reorder, edit, or remove one.
+Ship corrections as a new forward migration. SeaORM records migration names and
+application times but does not calculate SQLx-style content checksums.
 
-Applied migrations are immutable. Never edit, rename, reorder, or remove one;
-add a new forward migration instead. SeaORM records migration names and
-application timestamps, but it does not provide SQLx-style content checksums.
-Inari does not pretend otherwise or maintain a parallel checksum engine.
+## Plan rolling changes
 
-## Rollout and recovery
+Use expand-and-contract across releases:
 
-Future rolling changes follow expand-and-contract discipline:
+1. Add schema that the old and new applications can both use.
+2. Roll the application and complete any explicit backfill.
+3. Remove obsolete schema in a later release.
 
-1. Add schema that both the old and new binaries can use.
-2. Roll the application and backfill through explicit operational work.
-3. Remove obsolete schema in a later release after no running binary depends
-   on it.
+Transactional migration failures roll back automatically. Helm rollback does
+not reverse schema history, so only roll back to a binary compatible with the
+database already in place. Restore from the PostgreSQL backup for physical
+recovery; deliver logical repair as another forward migration.
 
-Database migrations are forward-only in the production CLI. A failed
-transactional migration rolls back automatically. Recovery from a destructive
-operator or infrastructure failure uses the managed PostgreSQL backup, while
-logical corrections are delivered as a new forward migration. Helm rollback
-does not attempt to reverse database history.
-
-The former `_sqlx_migrations` alpha schema is disposable. The SeaORM runner
-rejects it instead of silently baselining or importing it; recreate those
-development databases before upgrading.
+Before a migration-bearing production release, confirm a recent backup, a
+tested restore path, database connectivity from the migration Job, and enough
+capacity for both the migration and the rolling deployment.
