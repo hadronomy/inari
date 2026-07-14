@@ -100,26 +100,12 @@ function Invoke-AuthenticodeSign([string]$Path, [string]$Description) {
     $Arguments = @(
         "sign",
         "/fd", "SHA256",
-        "/td", "SHA256",
-        "/tr", $TimestampUrl,
         "/f", $SigningPfx,
         "/p", $SigningPassword,
         $Path
     )
-    for ($Attempt = 1; $Attempt -le 3; $Attempt += 1) {
-        Write-Host "$Description — signing attempt $Attempt of 3"
-        try {
-            Invoke-BoundedProcess $SignTool $Arguments 90 "$Description signing"
-            return
-        }
-        catch {
-            if ($Attempt -eq 3) {
-                throw
-            }
-            Write-Warning "$($_.Exception.Message) Retrying the timestamped signature."
-            Start-Sleep -Seconds (5 * $Attempt)
-        }
-    }
+    Write-Host "$Description — applying Authenticode signature"
+    Invoke-BoundedProcess $SignTool $Arguments 60 "$Description signing"
 }
 
 function Assert-AuthenticodeSignature([string]$Path, [string]$Description) {
@@ -150,7 +136,6 @@ $Uv = Require-Command "uv"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
 $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
 $RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
-$TimestampUrl = if ($env:INARI_TIMESTAMP_URL) { $env:INARI_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
 $CodeSigningOid = "1.3.6.1.5.5.7.3.3"
 $SigningCertificates = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
 $SigningCertificates.Import(
