@@ -53,7 +53,7 @@ def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None
     assert service is not None
     assert service.attrib == {
         "Name": "InariAgent",
-        "StartupType": "delayedStart",
+        "StartupType": "auto",
         "StartAccount": "localService",
     }
 
