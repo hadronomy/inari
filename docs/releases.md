@@ -97,9 +97,10 @@ these secrets:
 - `WINDOWS_SIGNING_PFX_PASSWORD`
 - `WINDOWS_CODE_SIGNING_ROOT_CERT_BASE64`
 
-The job deep-signs the frozen executables and native libraries, signs and
-timestamps the MSIX, verifies the resulting signatures, emits an SPDX SBOM,
-and records SHA-256 checksums. GitHub artifact attestations provide build
+The job signs and timestamps Inari's Device Center and service executables,
+then signs the MSIX whose block map protects the complete packaged payload. It
+verifies each resulting signature, emits an SPDX SBOM, and records SHA-256
+checksums. GitHub artifact attestations provide build
 provenance in addition to Authenticode; they do not replace Windows code-signing
 trust.
 

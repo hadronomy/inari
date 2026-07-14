@@ -286,14 +286,16 @@ try {
         $TemporaryRootAdded = $true
     }
 
-    $SignableFiles = @(Get-ChildItem $PackageRoot -Recurse -File | Where-Object {
-        $_.Extension -in ".exe", ".dll", ".pyd"
-    } | Sort-Object FullName)
-    Write-Host "Authenticode signing $($SignableFiles.Count) bundled PE files."
-    for ($Index = 0; $Index -lt $SignableFiles.Count; $Index += 1) {
-        $File = $SignableFiles[$Index]
-        $RelativePath = [IO.Path]::GetRelativePath($PackageRoot, $File.FullName)
-        $Description = "Bundled PE file $($Index + 1)/$($SignableFiles.Count): $RelativePath"
+    # The signed MSIX block map protects every packaged file. Authenticode-sign
+    # only Inari's entry points instead of replacing third-party signatures.
+    $OwnedExecutables = @(
+        Get-Item (Join-Path $PackageRoot "InariDeviceCenter.exe")
+        Get-Item (Join-Path $PackageRoot "InariAgentService.exe")
+    )
+    Write-Host "Authenticode signing $($OwnedExecutables.Count) Inari executables."
+    for ($Index = 0; $Index -lt $OwnedExecutables.Count; $Index += 1) {
+        $File = $OwnedExecutables[$Index]
+        $Description = "Inari executable $($Index + 1)/$($OwnedExecutables.Count): $($File.Name)"
         Invoke-AuthenticodeSign $File.FullName $Description
         Assert-AuthenticodeSignature $File.FullName $Description
     }
