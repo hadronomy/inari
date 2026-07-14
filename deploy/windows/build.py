@@ -64,13 +64,15 @@ def encode_package_metadata(metadata: PackageMetadata) -> str:
 
 
 def prepare_package(*, payload: Path, output: Path) -> PackageMetadata:
+    """Move a frozen application bundle into its final MSIX package tree."""
     source_dir = Path(__file__).resolve().parent
     metadata = _load_metadata(source_dir / "package.toml")
     if not payload.is_dir():
         raise FileNotFoundError(f"PyInstaller payload does not exist: {payload}")
 
     shutil.rmtree(output, ignore_errors=True)
-    shutil.copytree(payload, output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    payload.replace(output)
     _write_manifest(source_dir / "AppxManifest.template.xml", output, metadata)
     _write_app_installer_data(source_dir, output)
     _write_assets(output / "Assets")

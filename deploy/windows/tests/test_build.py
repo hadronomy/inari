@@ -16,7 +16,7 @@ from deploy.windows.build import (
 )
 
 
-def test_package_tree_uses_metadata_and_canonical_assets(tmp_path) -> None:
+def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None:
     payload = tmp_path / "payload"
     payload.mkdir()
     (payload / "InariDeviceCenter.exe").write_bytes(b"device-center")
@@ -25,6 +25,7 @@ def test_package_tree_uses_metadata_and_canonical_assets(tmp_path) -> None:
 
     metadata = prepare_package(payload=payload, output=output)
 
+    assert not payload.exists()
     manifest = ET.parse(output / "AppxManifest.xml").getroot()
     identity = manifest.find(f"{{{FOUNDATION}}}Identity")
     assert identity is not None
