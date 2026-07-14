@@ -56,7 +56,7 @@ export async function loadReleaseBundle(
 
 export function parseChecksums(source: string): Map<string, string> {
   const entries = new Map<string, string>();
-  for (const line of source.split("\n")) {
+  for (const line of source.split(/\r?\n/)) {
     if (!line.trim()) continue;
     const match = /^([a-f0-9]{64})  ([^/]+)$/.exec(line);
     if (!match) throw new Error("SHA256SUMS contains an invalid entry.");
