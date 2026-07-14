@@ -131,7 +131,6 @@ function Get-EnhancedKeyUsage(
 
 $MakeAppx = Require-WindowsSdkCommand "makeappx.exe"
 $SignTool = Require-WindowsSdkCommand "signtool.exe"
-$CertUtil = Require-Command "certutil.exe"
 $Syft = Require-Command "syft"
 $Uv = Require-Command "uv"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
@@ -145,6 +144,7 @@ $SigningCertificates.Import(
     [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 )
 $RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate2]::new($RootCertificate)
+$RunnerTrustStore = $null
 $TrustedRootStore = $null
 $RunnerTrustInstalled = $false
 
@@ -273,15 +273,12 @@ try {
 
     if ($env:GITHUB_ACTIONS -eq "true") {
         Write-Host "Installing temporary root trust for signature verification."
-        $TrustArguments = @(
-            "-user",
-            "-silent",
-            "-addstore",
-            "-f",
-            "Root",
-            $RootCertificate
+        $RunnerTrustStore = [Security.Cryptography.X509Certificates.X509Store]::new(
+            [Security.Cryptography.X509Certificates.StoreName]::Root,
+            [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
         )
-        Invoke-BoundedProcess $CertUtil $TrustArguments 30 "Temporary root installation"
+        $RunnerTrustStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        $RunnerTrustStore.Add($RootCertificateObject)
         $RunnerTrustInstalled = $true
         Write-Host "Temporary root trust installed."
     }
@@ -366,19 +363,15 @@ try {
 finally {
     if ($RunnerTrustInstalled) {
         Write-Host "Removing temporary root trust from the release runner."
-        $RemoveTrustArguments = @(
-            "-user",
-            "-silent",
-            "-delstore",
-            "Root",
-            $RootCertificateObject.Thumbprint
-        )
         try {
-            Invoke-BoundedProcess $CertUtil $RemoveTrustArguments 30 "Temporary root removal"
+            $RunnerTrustStore.Remove($RootCertificateObject)
         }
         catch {
             Write-Warning "Temporary root cleanup failed on the ephemeral release runner: $($_.Exception.Message)"
         }
+    }
+    if ($null -ne $RunnerTrustStore) {
+        $RunnerTrustStore.Close()
     }
     if ($null -ne $TrustedRootStore) {
         $TrustedRootStore.Close()
