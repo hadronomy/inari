@@ -100,30 +100,45 @@ function Invoke-AuthenticodeSign([string]$Path, [string]$Description) {
     $Arguments = @(
         "sign",
         "/fd", "SHA256",
-        "/td", "SHA256",
-        "/tr", $TimestampUrl,
         "/f", $SigningPfx,
         "/p", $SigningPassword,
         $Path
     )
-    for ($Attempt = 1; $Attempt -le 3; $Attempt += 1) {
-        Write-Host "$Description — signing attempt $Attempt of 3"
+    Write-Host "$Description — applying Authenticode signature"
+    Invoke-BoundedProcess $SignTool $Arguments 30 "$Description signing"
+    Invoke-Rfc3161Timestamp $Path $Description
+}
+
+function Invoke-Rfc3161Timestamp([string]$Path, [string]$Description) {
+    foreach ($TimestampUrl in $TimestampUrls) {
+        Write-Host "$Description — requesting RFC 3161 timestamp from $TimestampUrl"
         try {
-            Invoke-BoundedProcess $SignTool $Arguments 90 "$Description signing"
+            $Arguments = @(
+                "timestamp",
+                "/tr", $TimestampUrl,
+                "/td", "SHA256",
+                $Path
+            )
+            Invoke-BoundedProcess $SignTool $Arguments 30 "$Description timestamping"
             return
         }
         catch {
-            if ($Attempt -eq 3) {
-                throw
+            $TimestampFailure = $_.Exception.Message
+            try {
+                Assert-AuthenticodeSignature $Path $Description
+                Write-Host "$Description — timestamp was applied before the client timeout"
+                return
             }
-            Write-Warning "$($_.Exception.Message) Retrying the timestamped signature."
-            Start-Sleep -Seconds (5 * $Attempt)
+            catch {
+                Write-Warning "$TimestampFailure Trying the next timestamp authority."
+            }
         }
     }
+    throw "$Description could not be timestamped by any configured RFC 3161 authority."
 }
 
 function Assert-AuthenticodeSignature([string]$Path, [string]$Description) {
-    $Arguments = @("verify", "/pa", "/all", "/v", $Path)
+    $Arguments = @("verify", "/pa", "/all", "/tw", "/v", $Path)
     Invoke-BoundedProcess $SignTool $Arguments 60 "$Description verification"
 }
 
@@ -150,7 +165,15 @@ $Uv = Require-Command "uv"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
 $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
 $RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
-$TimestampUrl = if ($env:INARI_TIMESTAMP_URL) { $env:INARI_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
+$TimestampUrls = if ($env:INARI_TIMESTAMP_URL) {
+    @($env:INARI_TIMESTAMP_URL)
+}
+else {
+    @(
+        "http://timestamp.digicert.com"
+        "http://timestamp.sectigo.com"
+    )
+}
 $CodeSigningOid = "1.3.6.1.5.5.7.3.3"
 $SigningCertificates = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
 $SigningCertificates.Import(

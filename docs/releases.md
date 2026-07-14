@@ -104,6 +104,10 @@ checksums. GitHub artifact attestations provide build
 provenance in addition to Authenticode; they do not replace Windows code-signing
 trust.
 
+RFC 3161 timestamping runs as a separate, bounded operation. DigiCert is the
+primary timestamp authority and Sectigo is the fallback; verification rejects a
+signature that has no trusted timestamp.
+
 Provisioning and rotation are described in
 [`windows-code-signing.md`](windows-code-signing.md). Installation and
 enterprise trust deployment are described in [`windows.md`](windows.md).
