@@ -67,6 +67,66 @@ function Assert-NativeCommandSucceeded([int]$ExitCode, [string]$Operation) {
     }
 }
 
+function Invoke-BoundedProcess(
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [int]$TimeoutSeconds,
+    [string]$Operation
+) {
+    $StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $StartInfo.FileName = $FilePath
+    $StartInfo.UseShellExecute = $false
+    foreach ($Argument in $Arguments) {
+        $StartInfo.ArgumentList.Add($Argument)
+    }
+
+    $Process = [Diagnostics.Process]::Start($StartInfo)
+    try {
+        if (-not $Process.WaitForExit($TimeoutSeconds * 1000)) {
+            $Process.Kill($true)
+            $Process.WaitForExit()
+            throw "$Operation timed out after $TimeoutSeconds seconds."
+        }
+        if ($Process.ExitCode -ne 0) {
+            throw "$Operation failed with exit code $($Process.ExitCode)."
+        }
+    }
+    finally {
+        $Process.Dispose()
+    }
+}
+
+function Invoke-AuthenticodeSign([string]$Path, [string]$Description) {
+    $Arguments = @(
+        "sign",
+        "/fd", "SHA256",
+        "/td", "SHA256",
+        "/tr", $TimestampUrl,
+        "/f", $SigningPfx,
+        "/p", $SigningPassword,
+        $Path
+    )
+    for ($Attempt = 1; $Attempt -le 3; $Attempt += 1) {
+        Write-Host "$Description — signing attempt $Attempt of 3"
+        try {
+            Invoke-BoundedProcess $SignTool $Arguments 90 "$Description signing"
+            return
+        }
+        catch {
+            if ($Attempt -eq 3) {
+                throw
+            }
+            Write-Warning "$($_.Exception.Message) Retrying the timestamped signature."
+            Start-Sleep -Seconds (5 * $Attempt)
+        }
+    }
+}
+
+function Assert-AuthenticodeSignature([string]$Path, [string]$Description) {
+    $Arguments = @("verify", "/pa", "/all", "/v", $Path)
+    Invoke-BoundedProcess $SignTool $Arguments 60 "$Description verification"
+}
+
 function Get-BasicConstraints(
     [Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
 ) {
@@ -226,23 +286,24 @@ try {
         $TemporaryRootAdded = $true
     }
 
-    Get-ChildItem $PackageRoot -Recurse -File | Sort-Object FullName | Where-Object {
+    $SignableFiles = @(Get-ChildItem $PackageRoot -Recurse -File | Where-Object {
         $_.Extension -in ".exe", ".dll", ".pyd"
-    } | ForEach-Object {
-        & $SignTool sign /fd SHA256 /td SHA256 /tr $TimestampUrl /f $SigningPfx /p $SigningPassword $_.FullName
-        if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $($_.Name)." }
-        & $SignTool verify /pa /all /v $_.FullName
-        if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($_.Name)." }
+    } | Sort-Object FullName)
+    Write-Host "Authenticode signing $($SignableFiles.Count) bundled PE files."
+    for ($Index = 0; $Index -lt $SignableFiles.Count; $Index += 1) {
+        $File = $SignableFiles[$Index]
+        $RelativePath = [IO.Path]::GetRelativePath($PackageRoot, $File.FullName)
+        $Description = "Bundled PE file $($Index + 1)/$($SignableFiles.Count): $RelativePath"
+        Invoke-AuthenticodeSign $File.FullName $Description
+        Assert-AuthenticodeSignature $File.FullName $Description
     }
 
     $ArtifactBase = "Inari-Device-Center_$($Metadata.version)_x64"
     $MsixPath = Join-Path $ReleaseDirectory "$ArtifactBase.msix"
     & $MakeAppx pack /d $PackageRoot /p $MsixPath /o
     if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed." }
-    & $SignTool sign /fd SHA256 /td SHA256 /tr $TimestampUrl /f $SigningPfx /p $SigningPassword $MsixPath
-    if ($LASTEXITCODE -ne 0) { throw "MSIX signing failed." }
-    & $SignTool verify /pa /all /v $MsixPath
-    if ($LASTEXITCODE -ne 0) { throw "MSIX signature verification failed." }
+    Invoke-AuthenticodeSign $MsixPath "MSIX package"
+    Assert-AuthenticodeSignature $MsixPath "MSIX package"
 
     $SbomPath = Join-Path $ReleaseDirectory "$ArtifactBase.spdx.json"
     & $Syft "dir:$PackageRoot" -o "spdx-json=$SbomPath"
