@@ -116,12 +116,12 @@ function Invoke-AuthenticodeSign(
 function Assert-AuthenticodeSignature(
     [string]$Path,
     [string]$Description,
-    [string]$TrustedRoot,
+    [string]$TrustBundle,
     [string]$ExpectedSignerHash
 ) {
     $Arguments = @(
         "verify",
-        "-CAfile", $TrustedRoot,
+        "-CAfile", $TrustBundle,
         "-ignore-timestamp",
         "-ignore-cdp",
         "-ignore-crl",
@@ -244,11 +244,15 @@ finally {
     $Chain.Dispose()
 }
 
-$VerificationRootName = "inari-code-signing-root-$([Guid]::NewGuid().ToString('N')).pem"
-$VerificationRoot = Join-Path ([IO.Path]::GetTempPath()) $VerificationRootName
+$VerificationTrustName = "inari-code-signing-trust-$([Guid]::NewGuid().ToString('N')).pem"
+$VerificationTrust = Join-Path ([IO.Path]::GetTempPath()) $VerificationTrustName
+$VerificationTrustPem = @(
+    $RootCertificateObject.ExportCertificatePem()
+    $IssuerCertificate.ExportCertificatePem()
+) -join [Environment]::NewLine
 [IO.File]::WriteAllText(
-    $VerificationRoot,
-    $RootCertificateObject.ExportCertificatePem(),
+    $VerificationTrust,
+    $VerificationTrustPem,
     [Text.UTF8Encoding]::new($false)
 )
 $VerificationIssuerName = "inari-code-signing-issuer-$([Guid]::NewGuid().ToString('N')).cer"
@@ -316,7 +320,7 @@ try {
         Assert-AuthenticodeSignature `
             $File.FullName `
             $Description `
-            $VerificationRoot `
+            $VerificationTrust `
             $PublisherCertificateHash
     }
 
@@ -329,7 +333,7 @@ try {
     Assert-AuthenticodeSignature `
         $MsixPath `
         "MSIX package" `
-        $VerificationRoot `
+        $VerificationTrust `
         $PublisherCertificateHash
 
     $SbomPath = Join-Path $ReleaseDirectory "$ArtifactBase.spdx.json"
@@ -373,7 +377,7 @@ try {
     Write-Host "Windows release bundle ready at $ReleaseDirectory."
 }
 finally {
-    Remove-Item $VerificationRoot -Force -ErrorAction SilentlyContinue
+    Remove-Item $VerificationTrust -Force -ErrorAction SilentlyContinue
     Remove-Item $VerificationIssuer -Force -ErrorAction SilentlyContinue
     foreach ($Certificate in $SigningCertificates) {
         $Certificate.Dispose()
