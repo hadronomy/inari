@@ -96,12 +96,17 @@ function Invoke-BoundedProcess(
     }
 }
 
-function Invoke-AuthenticodeSign([string]$Path, [string]$Description) {
+function Invoke-AuthenticodeSign(
+    [string]$Path,
+    [string]$Description,
+    [string]$AdditionalCertificate
+) {
     $Arguments = @(
         "sign",
         "/fd", "SHA256",
         "/f", $SigningPfx,
         "/p", $SigningPassword,
+        "/ac", $AdditionalCertificate,
         $Path
     )
     Write-Host "$Description — applying Authenticode signature"
@@ -246,6 +251,9 @@ $VerificationRoot = Join-Path ([IO.Path]::GetTempPath()) $VerificationRootName
     $RootCertificateObject.ExportCertificatePem(),
     [Text.UTF8Encoding]::new($false)
 )
+$VerificationIssuerName = "inari-code-signing-issuer-$([Guid]::NewGuid().ToString('N')).cer"
+$VerificationIssuer = Join-Path ([IO.Path]::GetTempPath()) $VerificationIssuerName
+[IO.File]::WriteAllBytes($VerificationIssuer, $IssuerCertificate.RawData)
 $LocationPushed = $false
 try {
     Push-Location $WorkspaceRoot
@@ -304,7 +312,7 @@ try {
     for ($Index = 0; $Index -lt $OwnedExecutables.Count; $Index += 1) {
         $File = $OwnedExecutables[$Index]
         $Description = "Inari executable $($Index + 1)/$($OwnedExecutables.Count): $($File.Name)"
-        Invoke-AuthenticodeSign $File.FullName $Description
+        Invoke-AuthenticodeSign $File.FullName $Description $VerificationIssuer
         Assert-AuthenticodeSignature `
             $File.FullName `
             $Description `
@@ -317,7 +325,7 @@ try {
     Write-Host "Packing the signed payload into $ArtifactBase.msix."
     $MakeAppxArguments = @("pack", "/d", $PackageRoot, "/p", $MsixPath, "/o")
     Invoke-BoundedProcess $MakeAppx $MakeAppxArguments 180 "MSIX packaging"
-    Invoke-AuthenticodeSign $MsixPath "MSIX package"
+    Invoke-AuthenticodeSign $MsixPath "MSIX package" $VerificationIssuer
     Assert-AuthenticodeSignature `
         $MsixPath `
         "MSIX package" `
@@ -366,6 +374,7 @@ try {
 }
 finally {
     Remove-Item $VerificationRoot -Force -ErrorAction SilentlyContinue
+    Remove-Item $VerificationIssuer -Force -ErrorAction SilentlyContinue
     foreach ($Certificate in $SigningCertificates) {
         $Certificate.Dispose()
     }
