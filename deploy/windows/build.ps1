@@ -131,6 +131,7 @@ function Get-EnhancedKeyUsage(
 
 $MakeAppx = Require-WindowsSdkCommand "makeappx.exe"
 $SignTool = Require-WindowsSdkCommand "signtool.exe"
+$CertUtil = Require-Command "certutil.exe"
 $Syft = Require-Command "syft"
 $Uv = Require-Command "uv"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
@@ -144,8 +145,8 @@ $SigningCertificates.Import(
     [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 )
 $RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate2]::new($RootCertificate)
-$TemporaryRootStore = $null
-$TemporaryRootAdded = $false
+$TrustedRootStore = $null
+$RunnerTrustInstalled = $false
 
 $PublisherCertificates = @($SigningCertificates | Where-Object { $_.HasPrivateKey })
 if ($PublisherCertificates.Count -ne 1) {
@@ -261,22 +262,33 @@ try {
         )
     }
 
-    $TemporaryRootStore = [Security.Cryptography.X509Certificates.X509Store]::new(
-        [Security.Cryptography.X509Certificates.StoreName]::Root,
-        [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-    )
-    $TemporaryRootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $TrustedRoots = $TemporaryRootStore.Certificates.Find(
-        [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-        $RootCertificateObject.Thumbprint,
-        $false
-    )
-    if ($TrustedRoots.Count -eq 0) {
-        if ($env:GITHUB_ACTIONS -ne "true") {
+    if ($env:GITHUB_ACTIONS -eq "true") {
+        Write-Host "Installing temporary root trust for signature verification."
+        $TrustArguments = @(
+            "-user",
+            "-addstore",
+            "-f",
+            "Root",
+            $RootCertificate
+        )
+        Invoke-BoundedProcess $CertUtil $TrustArguments 30 "Temporary root installation"
+        $RunnerTrustInstalled = $true
+        Write-Host "Temporary root trust installed."
+    }
+    else {
+        $TrustedRootStore = [Security.Cryptography.X509Certificates.X509Store]::new(
+            [Security.Cryptography.X509Certificates.StoreName]::Root,
+            [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+        $TrustedRootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
+        $TrustedRoots = $TrustedRootStore.Certificates.Find(
+            [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+            $RootCertificateObject.Thumbprint,
+            $false
+        )
+        if ($TrustedRoots.Count -eq 0) {
             throw "The code-signing root is not trusted by this release account. Import it explicitly before a local build."
         }
-        $TemporaryRootStore.Add($RootCertificateObject)
-        $TemporaryRootAdded = $true
     }
 
     # The signed MSIX block map protects every packaged file. Authenticode-sign
@@ -342,11 +354,23 @@ try {
     Write-Host "Windows release bundle ready at $ReleaseDirectory."
 }
 finally {
-    if ($null -ne $TemporaryRootStore) {
-        if ($TemporaryRootAdded) {
-            $TemporaryRootStore.Remove($RootCertificateObject)
+    if ($RunnerTrustInstalled) {
+        Write-Host "Removing temporary root trust from the release runner."
+        $RemoveTrustArguments = @(
+            "-user",
+            "-delstore",
+            "Root",
+            $RootCertificateObject.Thumbprint
+        )
+        try {
+            Invoke-BoundedProcess $CertUtil $RemoveTrustArguments 30 "Temporary root removal"
         }
-        $TemporaryRootStore.Close()
+        catch {
+            Write-Warning "Temporary root cleanup failed on the ephemeral release runner: $($_.Exception.Message)"
+        }
+    }
+    if ($null -ne $TrustedRootStore) {
+        $TrustedRootStore.Close()
     }
     foreach ($Certificate in $SigningCertificates) {
         $Certificate.Dispose()
