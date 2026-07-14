@@ -97,12 +97,18 @@ these secrets:
 - `WINDOWS_SIGNING_PFX_PASSWORD`
 - `WINDOWS_CODE_SIGNING_ROOT_CERT_BASE64`
 
-The job signs and timestamps Inari's Device Center and service executables,
-then signs the MSIX whose block map protects the complete packaged payload. It
-verifies each resulting signature, emits an SPDX SBOM, and records SHA-256
-checksums. GitHub artifact attestations provide build
+The job signs Inari's Device Center and service executables, then signs the
+MSIX whose block map protects the complete packaged payload. It verifies each
+resulting signature, emits an SPDX SBOM, and records SHA-256 checksums. GitHub
+artifact attestations provide build
 provenance in addition to Authenticode; they do not replace Windows code-signing
 trust.
+
+The self-managed alpha signing hierarchy does not currently depend on an
+external timestamp authority. Consequently, Windows signatures remain valid
+only during the publisher certificate's validity period. Production releases
+must adopt Microsoft Trusted Signing or an independently operated RFC 3161
+authority before relying on signatures beyond that period.
 
 Provisioning and rotation are described in
 [`windows-code-signing.md`](windows-code-signing.md). Installation and

@@ -84,10 +84,14 @@ package in an isolated environment, and verify an in-place upgrade from the
 latest production package. Update the protected PFX secret only after that
 exercise passes.
 
-Timestamping preserves validation of artifacts signed while a leaf was valid,
-but it does not remove the need to rotate ahead of expiry. Retain retired public
-leaf certificates and release evidence; destroy superseded private key material
-according to the organization's key-retention policy.
+The self-managed alpha hierarchy does not use an external timestamp authority,
+so its signatures remain valid only while the publisher leaf is valid. Rotate
+the leaf and publish replacement artifacts ahead of expiry. Long-lived
+production signatures require Microsoft Trusted Signing or an independently
+operated RFC 3161 authority with its own trust and key-management boundary.
+Retain retired public leaf certificates and release evidence; destroy
+superseded private key material according to the organization's key-retention
+policy.
 
 ## Root rotation and incident response
 
