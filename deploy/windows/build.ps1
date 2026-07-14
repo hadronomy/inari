@@ -108,9 +108,30 @@ function Invoke-AuthenticodeSign([string]$Path, [string]$Description) {
     Invoke-BoundedProcess $SignTool $Arguments 60 "$Description signing"
 }
 
-function Assert-AuthenticodeSignature([string]$Path, [string]$Description) {
-    $Arguments = @("verify", "/pa", "/all", "/v", $Path)
-    Invoke-BoundedProcess $SignTool $Arguments 60 "$Description verification"
+function Assert-AuthenticodeSignature(
+    [string]$Path,
+    [string]$Description,
+    [Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedSigner
+) {
+    $Signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $AcceptedStatuses = @(
+        [System.Management.Automation.SignatureStatus]::Valid,
+        [System.Management.Automation.SignatureStatus]::NotTrusted
+    )
+    if ($Signature.Status -notin $AcceptedStatuses) {
+        throw "$Description signature validation failed: $($Signature.StatusMessage)"
+    }
+    if ($null -eq $Signature.SignerCertificate) {
+        throw "$Description does not expose an Authenticode signer certificate."
+    }
+    if (-not [string]::Equals(
+        $Signature.SignerCertificate.Thumbprint,
+        $ExpectedSigner.Thumbprint,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "$Description was not signed by the expected publisher certificate."
+    }
+    Write-Host "$Description — signature integrity and signer identity verified"
 }
 
 function Get-BasicConstraints(
@@ -144,9 +165,6 @@ $SigningCertificates.Import(
     [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
 )
 $RootCertificateObject = [Security.Cryptography.X509Certificates.X509Certificate2]::new($RootCertificate)
-$RunnerTrustStore = $null
-$TrustedRootStore = $null
-$RunnerTrustInstalled = $false
 
 $PublisherCertificates = @($SigningCertificates | Where-Object { $_.HasPrivateKey })
 if ($PublisherCertificates.Count -ne 1) {
@@ -253,7 +271,7 @@ try {
     New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
     Write-Host "MSIX package tree ready for version $($Metadata.version)."
 
-    Write-Host "Validating the publisher certificate and signing hierarchy."
+    Write-Host "Validating the MSIX publisher identity."
     $ActualPublisherName = $PublisherCertificate.Subject.Normalize(
         [Text.NormalizationForm]::FormC
     )
@@ -271,33 +289,6 @@ try {
         )
     }
 
-    if ($env:GITHUB_ACTIONS -eq "true") {
-        Write-Host "Installing temporary root trust for signature verification."
-        $RunnerTrustStore = [Security.Cryptography.X509Certificates.X509Store]::new(
-            [Security.Cryptography.X509Certificates.StoreName]::Root,
-            [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-        )
-        $RunnerTrustStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-        $RunnerTrustStore.Add($RootCertificateObject)
-        $RunnerTrustInstalled = $true
-        Write-Host "Temporary root trust installed."
-    }
-    else {
-        $TrustedRootStore = [Security.Cryptography.X509Certificates.X509Store]::new(
-            [Security.Cryptography.X509Certificates.StoreName]::Root,
-            [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-        )
-        $TrustedRootStore.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadOnly)
-        $TrustedRoots = $TrustedRootStore.Certificates.Find(
-            [Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-            $RootCertificateObject.Thumbprint,
-            $false
-        )
-        if ($TrustedRoots.Count -eq 0) {
-            throw "The code-signing root is not trusted by this release account. Import it explicitly before a local build."
-        }
-    }
-
     # The signed MSIX block map protects every packaged file. Authenticode-sign
     # only Inari's entry points instead of replacing third-party signatures.
     $OwnedExecutables = @(
@@ -309,7 +300,7 @@ try {
         $File = $OwnedExecutables[$Index]
         $Description = "Inari executable $($Index + 1)/$($OwnedExecutables.Count): $($File.Name)"
         Invoke-AuthenticodeSign $File.FullName $Description
-        Assert-AuthenticodeSignature $File.FullName $Description
+        Assert-AuthenticodeSignature $File.FullName $Description $PublisherCertificate
     }
 
     $ArtifactBase = "Inari-Device-Center_$($Metadata.version)_x64"
@@ -318,7 +309,7 @@ try {
     $MakeAppxArguments = @("pack", "/d", $PackageRoot, "/p", $MsixPath, "/o")
     Invoke-BoundedProcess $MakeAppx $MakeAppxArguments 180 "MSIX packaging"
     Invoke-AuthenticodeSign $MsixPath "MSIX package"
-    Assert-AuthenticodeSignature $MsixPath "MSIX package"
+    Assert-AuthenticodeSignature $MsixPath "MSIX package" $PublisherCertificate
 
     $SbomPath = Join-Path $ReleaseDirectory "$ArtifactBase.spdx.json"
     Write-Host "Generating the SPDX software bill of materials."
@@ -361,21 +352,6 @@ try {
     Write-Host "Windows release bundle ready at $ReleaseDirectory."
 }
 finally {
-    if ($RunnerTrustInstalled) {
-        Write-Host "Removing temporary root trust from the release runner."
-        try {
-            $RunnerTrustStore.Remove($RootCertificateObject)
-        }
-        catch {
-            Write-Warning "Temporary root cleanup failed on the ephemeral release runner: $($_.Exception.Message)"
-        }
-    }
-    if ($null -ne $RunnerTrustStore) {
-        $RunnerTrustStore.Close()
-    }
-    if ($null -ne $TrustedRootStore) {
-        $TrustedRootStore.Close()
-    }
     foreach ($Certificate in $SigningCertificates) {
         $Certificate.Dispose()
     }
