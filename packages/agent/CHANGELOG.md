@@ -1,3 +1,9 @@
+## inari@1.20.0-alpha.4
+
+### Fix Windows installation and first launch
+
+App Installer now presents a single, clear installation action. The Windows package also carries the TLS runtime that matches its embedded Python interpreter, preventing Device Center from failing on first launch.
+
 ## inari@1.20.0-alpha.3
 
 ### Keep published artifacts immutable
