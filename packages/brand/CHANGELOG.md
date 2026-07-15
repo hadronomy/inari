@@ -1,3 +1,17 @@
+## inari-brand@1.20.0-alpha.3
+
+### Keep published artifacts immutable
+
+Completed release plans are now retired before another version is prepared, so
+later changes can never rebuild an already published Device Center version.
+
+### Fix Windows publisher trust
+
+Windows installation now deploys the complete Inari signing chain and verifies
+the MSIX through the same machine certificate stores used by App Installer.
+The installation guide includes a direct recovery path when Windows shows an
+unknown publisher.
+
 ## inari-brand@1.20.0-alpha.2
 
 ### Introduce Inari Device Center for Windows
