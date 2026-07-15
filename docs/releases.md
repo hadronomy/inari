@@ -47,7 +47,8 @@ updates versions and changelogs, and records the exact publish plan.
 Merging it starts publication. Tegami reads the lock, verifies remote state,
 and resumes any incomplete work rather than creating duplicate tags or assets.
 Leave the lock in place when a publish fails; fix the cause and rerun the
-workflow.
+workflow. Once every target is present, the next versioning pass retires the
+completed lock before preparing another release.
 
 Useful local commands:
 

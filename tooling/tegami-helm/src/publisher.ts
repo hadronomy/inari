@@ -31,13 +31,6 @@ export class HelmPublisher {
     const artifact = await resolveOciArtifact(this.reference(chart));
     if (!artifact) return "pending";
 
-    const chartExists = await succeeds(
-      "helm",
-      ["show", "chart", this.ociUrl(chart), "--version", chart.version],
-      this.workspaceRoot,
-    );
-    if (!chartExists) return "pending";
-
     const signatureValid = await succeeds(
       "cosign",
       this.verifyArgs(this.immutableReference(chart, artifact)),
@@ -143,6 +136,8 @@ export class HelmPublisher {
   private verifyArgs(reference: string): string[] {
     return [
       "verify",
+      "--timeout",
+      "20s",
       "--certificate-identity-regexp",
       this.options.certificateIdentity,
       "--certificate-oidc-issuer",

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const HELM_CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
 const MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json";
+const REQUEST_TIMEOUT_MS = 15_000;
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 
 const registryTokenSchema = z
@@ -67,7 +68,7 @@ export async function resolveOciArtifact(
 function requestManifest(url: string, token?: string): Promise<Response> {
   const headers = new Headers({ Accept: MANIFEST_MEDIA_TYPE });
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(url, { headers });
+  return fetch(url, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 }
 
 async function exchangeRegistryToken(challenge: string): Promise<string | undefined> {
@@ -85,7 +86,10 @@ async function exchangeRegistryToken(challenge: string): Promise<string | undefi
     headers.set("Authorization", `Basic ${Buffer.from(`${actor}:${token}`).toString("base64")}`);
   }
 
-  const response = await fetch(tokenUrl, { headers });
+  const response = await fetch(tokenUrl, {
+    headers,
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Unable to authenticate to the OCI registry: ${response.status}.`);
   }

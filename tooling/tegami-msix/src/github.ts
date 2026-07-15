@@ -5,6 +5,8 @@ import { Octokit } from "@octokit/rest";
 
 import { parseChecksums, type ReleaseAsset, type ReleaseBundle } from "./bundle.ts";
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
 interface RepositoryCoordinates {
   owner: string;
   repo: string;
@@ -84,7 +86,7 @@ class OctokitReleaseRepository implements ReleaseRepository {
   constructor(coordinates: RepositoryCoordinates, token: string | undefined) {
     this.coordinates = coordinates;
     this.token = token;
-    this.client = new Octokit({ auth: token });
+    this.client = new Octokit({ auth: token, request: { timeout: REQUEST_TIMEOUT_MS } });
   }
 
   async find(tag: string): Promise<PublishedRelease | undefined> {
@@ -124,7 +126,10 @@ class OctokitReleaseRepository implements ReleaseRepository {
   async downloadText(asset: PublishedAsset): Promise<string> {
     const headers = new Headers();
     if (this.token) headers.set("Authorization", `Bearer ${this.token}`);
-    const response = await fetch(asset.downloadUrl, { headers });
+    const response = await fetch(asset.downloadUrl, {
+      headers,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!response.ok) {
       throw new Error(`Unable to download release checksums: ${response.status}.`);
     }
@@ -141,6 +146,7 @@ class OctokitReleaseRepository implements ReleaseRepository {
       method: "POST",
       headers,
       body: new Blob([new Uint8Array(bytes)]),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`Unable to upload ${asset.name}: ${response.status}.`);
   }

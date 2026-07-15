@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: read
     outputs:
       publish: ${{ steps.plan.outputs.publish }}
       edge: ${{ steps.plan.outputs.edge }}
@@ -33,27 +34,32 @@ jobs:
       - name: Install release runtime
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
-          install_args: node bun
+          install_args: node bun cosign
           cache: true
 
       - name: Install release dependencies
         run: bun install --frozen-lockfile
 
+      - name: Authenticate release status to GHCR
+        shell: bash
+        env:
+          REGISTRY_PASSWORD: ${{ github.token }}
+        run: |
+          printf '%s' "${REGISTRY_PASSWORD}" | cosign login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
       - name: Resolve publish targets
         id: plan
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ ! -f .tegami/publish-lock.yaml ]]; then
-            printf 'publish=false\nedge=false\ncontroller_chart=false\n' >>"${GITHUB_OUTPUT}"
-            exit 0
-          fi
           bun run build:release >/dev/null
-          targets="$(node tooling/release/dist/cli.mjs targets)"
+          plan="$(node tooling/release/dist/cli.mjs workflow-plan)"
           {
-            printf 'publish=true\n'
-            printf 'edge=%s\n' "$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.edge))' "${targets}")"
-            printf 'controller_chart=%s\n' "$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.controllerChart))' "${targets}")"
+            printf 'publish=%s\n' "$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.publish))' "${plan}")"
+            printf 'edge=%s\n' "$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.edge))' "${plan}")"
+            printf 'controller_chart=%s\n' "$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.controllerChart))' "${plan}")"
           } >>"${GITHUB_OUTPUT}"
 
   validate:
@@ -125,7 +131,10 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Version packages
-        run: bun run release -- ci
+        run: |
+          bun run build:release
+          node tooling/release/dist/cli.mjs cleanup
+          node tooling/release/dist/cli.mjs ci
         env:
           GITHUB_TOKEN: ${{ github.token }}
 

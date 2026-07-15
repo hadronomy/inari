@@ -18,6 +18,7 @@
     "release:preview": "bun run build:release && node tooling/release/dist/cli.mjs preview",
     "release:status": "bun run build:release && node tooling/release/dist/cli.mjs status",
     "release:dry-run": "bun run build:release && node tooling/release/dist/cli.mjs dry-run",
+    "release:plan": "bun run build:release && node tooling/release/dist/cli.mjs workflow-plan",
     "release:targets": "bun run build:release && node tooling/release/dist/cli.mjs targets"
   },
   "dependencies": {
