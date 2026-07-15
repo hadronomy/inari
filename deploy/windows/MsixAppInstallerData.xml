@@ -13,7 +13,7 @@
     AppNameInTitle="true"
     HyperLinkFontSize="12">
     <Icon HorizontalAlignment="center" Logo="Assets\AppInstallerLogo.png" TopMargin="64" />
-    <Buttons HorizontalAlignment="center" Text="Install Inari Device Center" IsSecondaryButtonAccent="false" />
+    <Buttons HorizontalAlignment="center" Text="Inari Device Center" IsSecondaryButtonAccent="false" />
     <LaunchWhenReady HorizontalAlignment="center" />
     <AppInformation Mode="flyout" />
     <HyperLinks TopMargin="28">

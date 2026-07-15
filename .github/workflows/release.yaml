@@ -190,8 +190,16 @@ jobs:
       - name: Install pinned build tools
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
-          install_args: python uv aqua:anchore/syft github:mtrojnar/osslsigncode
+          install_args: uv aqua:anchore/syft github:mtrojnar/osslsigncode
           cache: true
+
+      # The frozen application must carry CPython's matching OpenSSL runtime.
+      # Avoid resolving a same-named DLL from the runner-wide OpenSSL install.
+      - name: Install the Windows CPython runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+          architecture: x64
 
       - name: Materialize protected signing inputs
         shell: pwsh
