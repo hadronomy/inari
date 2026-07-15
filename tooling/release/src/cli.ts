@@ -22,6 +22,9 @@ switch (command) {
       ),
     );
     break;
+  case "workflow-plan":
+    console.log(JSON.stringify(await resolveWorkflowPlan()));
+    break;
   default:
     await runCli(release);
 }
@@ -49,4 +52,20 @@ async function status(): Promise<void> {
   const result = await release.getPublishStatus();
   console.log(result.reason ? `${result.status}: ${result.reason}` : result.status);
   if (result.status === "pending") process.exitCode = 1;
+}
+
+async function resolveWorkflowPlan(): Promise<{
+  publish: boolean;
+  edge: boolean;
+  controllerChart: boolean;
+}> {
+  const { status: publishStatus } = await release.getPublishStatus();
+  if (publishStatus !== "pending") {
+    return { publish: false, edge: false, controllerChart: false };
+  }
+
+  return {
+    publish: true,
+    ...(await readReleaseTargets(new URL("../../../.tegami/publish-lock.yaml", import.meta.url))),
+  };
 }
