@@ -15,6 +15,8 @@ from deploy.windows.build import (
     write_executable_icon,
 )
 
+APP_INSTALLER_UX = "http://schemas.microsoft.com/msix/appinstallerux"
+
 
 def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None:
     payload = tmp_path / "payload"
@@ -57,7 +59,13 @@ def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None
         "StartAccount": "localService",
     }
 
-    assert (output / "Msix.AppInstaller.Data" / "MSIXAppInstallerData.xml").is_file()
+    app_installer_path = output / "Msix.AppInstaller.Data" / "MSIXAppInstallerData.xml"
+    app_installer = ET.parse(app_installer_path).getroot()
+    buttons = app_installer.find(
+        f"{{{APP_INSTALLER_UX}}}UX/{{{APP_INSTALLER_UX}}}Buttons"
+    )
+    assert buttons is not None
+    assert buttons.attrib["Text"] == "Inari Device Center"
     expected_sizes = {
         "StoreLogo.png": (50, 50),
         "Square44x44Logo.png": (44, 44),

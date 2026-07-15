@@ -96,6 +96,33 @@ function Invoke-BoundedProcess(
     }
 }
 
+function Assert-FrozenRuntime(
+    [string]$Executable,
+    [string]$Description,
+    [string]$Report
+) {
+    Remove-Item $Report -Force -ErrorAction SilentlyContinue
+    Write-Host "$Description — validating frozen imports and TLS runtime"
+    try {
+        Invoke-BoundedProcess `
+            $Executable `
+            @("--verify-runtime", $Report) `
+            30 `
+            "$Description runtime verification"
+    }
+    catch {
+        if (Test-Path -LiteralPath $Report -PathType Leaf) {
+            Write-Host "$Description runtime verification report:"
+            Get-Content -LiteralPath $Report | ForEach-Object { Write-Host $_ }
+        }
+        throw
+    }
+    if (-not (Test-Path -LiteralPath $Report -PathType Leaf)) {
+        throw "$Description did not produce a runtime verification report."
+    }
+    Get-Content -LiteralPath $Report | ForEach-Object { Write-Host "  $_" }
+}
+
 function Invoke-AuthenticodeSign(
     [string]$Path,
     [string]$Description
@@ -275,6 +302,14 @@ try {
     Assert-NativeCommandSucceeded $LASTEXITCODE "PyInstaller bundle creation"
 
     $Payload = Join-Path $PyInstallerTarget "dist\InariDeviceCenter"
+    Assert-FrozenRuntime `
+        (Join-Path $Payload "InariDeviceCenter.exe") `
+        "Device Center" `
+        (Join-Path $PyInstallerTarget "device-center-runtime.txt")
+    Assert-FrozenRuntime `
+        (Join-Path $Payload "InariAgentService.exe") `
+        "Agent service" `
+        (Join-Path $PyInstallerTarget "agent-service-runtime.txt")
     Write-Host "Moving the frozen bundle into the MSIX package tree."
     $MetadataJson = & $Uv run --no-sync python deploy/windows/build.py package --payload $Payload --output $PackageRoot
     Assert-NativeCommandSucceeded $LASTEXITCODE "MSIX package preparation"
