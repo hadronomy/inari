@@ -1,30 +1,23 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep published artifacts immutable\n\nCompleted release plans are now retired before another version is prepared, so\nlater changes can never rebuild an already published Device Center version.\n"
-    filename: 2026-07-15-6d4c91ef.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix Windows publisher trust\n\nWindows installation now deploys the complete Inari signing chain and verifies\nthe MSIX through the same machine certificate stores used by App Installer.\nThe installation guide includes a direct recovery path when Windows shows an\nunknown publisher.\n"
-    filename: 2026-07-15-a42f9e1c.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix Windows installation and first launch\n\nApp Installer now presents a single, clear installation action. The Windows package also carries the TLS runtime that matches its embedded Python interpreter, preventing Device Center from failing on first launch.\n"
+    filename: 2026-07-15-4f92a7cd.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-07-15-6d4c91ef.md
-      - 2026-07-15-a42f9e1c.md
+      - 2026-07-15-4f92a7cd.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-07-15-6d4c91ef.md
-      - 2026-07-15-a42f9e1c.md
+      - 2026-07-15-4f92a7cd.md
     id: pip:inari-tray
     updated: true
   - changelogIds:
-      - 2026-07-15-6d4c91ef.md
-      - 2026-07-15-a42f9e1c.md
+      - 2026-07-15-4f92a7cd.md
     id: pip:inari-brand
     updated: true
   - id: helm:inari
     updated: false
   - changelogIds:
-      - 2026-07-15-6d4c91ef.md
-      - 2026-07-15-a42f9e1c.md
+      - 2026-07-15-4f92a7cd.md
     id: msix:inari-device-center
     updated: true
