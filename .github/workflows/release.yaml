@@ -234,8 +234,9 @@ jobs:
           if ($Msix.Count -ne 1 -or $Sbom.Count -ne 1) {
             throw "Expected exactly one MSIX and one SPDX document."
           }
+          $Assets = "$($Release.FullName.Replace('\', '/'))/*"
           "directory=$($Release.FullName)" >> $env:GITHUB_OUTPUT
-          "checksums=$($Checksums[0].FullName)" >> $env:GITHUB_OUTPUT
+          "assets=$Assets" >> $env:GITHUB_OUTPUT
           "msix=$($Msix[0].FullName)" >> $env:GITHUB_OUTPUT
           "sbom=$($Sbom[0].FullName)" >> $env:GITHUB_OUTPUT
 
@@ -253,7 +254,7 @@ jobs:
       - name: Attest release provenance
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-checksums: ${{ steps.windows-release.outputs.checksums }}
+          subject-path: ${{ steps.windows-release.outputs.assets }}
 
       - name: Attest MSIX software bill of materials
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
