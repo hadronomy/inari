@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import threading
 from collections.abc import Callable
-from typing import Any, Protocol
 
-import httpx
 from inari.local_api.schemas import (
     DeviceResponse,
-    ManagedOnboardingPreviewResponse,
-    ManagedOnboardingStartResponse,
     ManagedOnboardingStatusResponse,
 )
-from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -33,45 +29,9 @@ from PySide6.QtWidgets import (
 
 from ..config import TraySettings
 from ..device_center.theme import resolve_device_center_theme
-from .state import SetupStep, step_for_phase
-
-
-class SetupClient(Protocol):
-    def preview_onboarding(
-        self, invitation: str, *, controller_url: str | None = None
-    ) -> ManagedOnboardingPreviewResponse: ...
-
-    def start_onboarding(
-        self, invitation: str, *, controller_url: str | None = None
-    ) -> ManagedOnboardingStartResponse: ...
-
-    def get_onboarding_status(self) -> ManagedOnboardingStatusResponse: ...
-
-    def confirm_onboarding_devices(
-        self,
-        *,
-        device_ids: tuple[str, ...],
-        labels: dict[str, str],
-        default_printer_device_id: str | None,
-    ) -> ManagedOnboardingStatusResponse: ...
-
-    def cancel_onboarding(self) -> ManagedOnboardingStatusResponse: ...
-
-    def submit_test_page(
-        self,
-        *,
-        device_id: str | None = None,
-        printer_name: str | None = None,
-    ) -> object: ...
-
-
-class SetupBridge(Protocol):
-    def restart(self) -> str: ...
-
-
-class _WorkerSignals(QObject):
-    completed = Signal(str, object)
-    failed = Signal(str, str)
+from .presenter import SetupBridge, SetupClient, SetupPresenter
+from .state import SetupStep
+from .style import setup_style_sheet
 
 
 class SetupAssistantWindow(QMainWindow):
@@ -81,30 +41,37 @@ class SetupAssistantWindow(QMainWindow):
         *,
         client: SetupClient,
         bridge: SetupBridge,
-        on_ready: Callable[[], None] | None = None,
+        on_ready: Callable[[ManagedOnboardingStatusResponse], None] | None = None,
     ) -> None:
         super().__init__()
-        self.settings = settings
-        self.client = client
-        self.bridge = bridge
-        self.on_ready = on_ready
-        self._signals = _WorkerSignals()
-        self._signals.completed.connect(self._worker_completed)
-        self._signals.failed.connect(self._worker_failed)
-        self._poll_in_flight = False
+        self._retry_action: Callable[[], None] | None = None
         self._device_rows: list[
             tuple[DeviceResponse, QCheckBox, QLineEdit, QRadioButton]
         ] = []
         self._default_group = QButtonGroup(self)
         self._default_group.setExclusive(True)
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(1000)
-        self._poll_timer.timeout.connect(self._poll_status)
         self._build_ui()
+        self.presenter = SetupPresenter(
+            client=client,
+            bridge=bridge,
+            view=self,
+            on_complete=on_ready,
+        )
 
     def show_with_invitation(self, invitation: str | None = None) -> None:
-        if invitation:
-            self.invitation_input.setPlainText(invitation)
+        self.presenter.present_invitation(invitation)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def resume(self, status: ManagedOnboardingStatusResponse) -> None:
+        self.presenter.resume(status)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def show_unavailable(self, message: str, retry: Callable[[], None]) -> None:
+        self.presenter.unavailable(message, retry)
         self.show()
         self.raise_()
         self.activateWindow()
@@ -115,7 +82,7 @@ class SetupAssistantWindow(QMainWindow):
         self.resize(820, 580)
         self.setObjectName("setupAssistantWindow")
         theme = resolve_device_center_theme()
-        self.setStyleSheet(_style_sheet(theme))
+        self.setStyleSheet(setup_style_sheet(theme))
 
         root = QWidget()
         root.setObjectName("setupRoot")
@@ -221,7 +188,7 @@ class SetupAssistantWindow(QMainWindow):
         self.connect_button = QPushButton("Connect")
         self.connect_button.setObjectName("setupPrimaryButton")
         self.connect_button.setDefault(True)
-        self.connect_button.clicked.connect(self._begin_setup)
+        self.connect_button.clicked.connect(self._submit_invitation)
         actions.addWidget(self.connect_button)
         layout.addLayout(actions)
         return page
@@ -278,12 +245,12 @@ class SetupAssistantWindow(QMainWindow):
         actions = QHBoxLayout()
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setObjectName("setupSecondaryButton")
-        self.cancel_button.clicked.connect(self._cancel_setup)
+        self.cancel_button.clicked.connect(lambda: self.presenter.cancel())
         actions.addWidget(self.cancel_button)
         actions.addStretch()
         self.retry_button = QPushButton("Try Again")
         self.retry_button.setObjectName("setupPrimaryButton")
-        self.retry_button.clicked.connect(self._begin_setup)
+        self.retry_button.clicked.connect(self._retry)
         self.retry_button.setVisible(False)
         actions.addWidget(self.retry_button)
         layout.addLayout(actions)
@@ -304,15 +271,22 @@ class SetupAssistantWindow(QMainWindow):
         self.device_list_layout.setSpacing(8)
         self.device_scroll.setWidget(self.device_list)
         layout.addWidget(self.device_scroll, 1)
+        self.device_empty = QLabel(
+            "No devices are attached yet. You can finish setup and add them later."
+        )
+        self.device_empty.setObjectName("setupDeviceEmpty")
+        self.device_empty.setWordWrap(True)
+        self.device_empty.setVisible(False)
+        layout.addWidget(self.device_empty)
         actions = QHBoxLayout()
         self.rescan_button = QPushButton("Refresh")
         self.rescan_button.setObjectName("setupSecondaryButton")
-        self.rescan_button.clicked.connect(self._poll_status)
+        self.rescan_button.clicked.connect(lambda: self.presenter.check_status())
         actions.addWidget(self.rescan_button)
         actions.addStretch()
         self.confirm_button = QPushButton("Continue")
         self.confirm_button.setObjectName("setupPrimaryButton")
-        self.confirm_button.clicked.connect(self._confirm_devices)
+        self.confirm_button.clicked.connect(self._submit_devices)
         actions.addWidget(self.confirm_button)
         layout.addLayout(actions)
         return page
@@ -338,71 +312,132 @@ class SetupAssistantWindow(QMainWindow):
         actions.addStretch()
         finish = QPushButton("Open Device Center")
         finish.setObjectName("setupPrimaryButton")
-        finish.clicked.connect(self._finish)
+        finish.clicked.connect(lambda: self.presenter.finish())
         actions.addWidget(finish)
         layout.addLayout(actions)
         return page
 
-    def _begin_setup(self) -> None:
+    def _submit_invitation(self) -> None:
         invitation = self.invitation_input.toPlainText().strip()
         if not invitation:
-            self._show_invitation_error("Enter your invitation link or code.")
+            self.show_invitation_page(error="Enter your invitation link or code.")
             return
-        self._show_invitation_error(None)
+        server = self.server_field.text().strip() or None
+        self.presenter.begin(invitation, server)
+
+    def _submit_devices(self) -> None:
+        selected_devices = [
+            (device, label, default)
+            for device, selected, label, default in self._device_rows
+            if selected.isChecked()
+        ]
+        device_ids = tuple(device.id for device, _, _ in selected_devices)
+        labels = {
+            device.id: label.text().strip()
+            for device, label, _ in selected_devices
+            if label.text().strip()
+        }
+        default_device_id = next(
+            (
+                device.id
+                for device, _, default in selected_devices
+                if default.isChecked()
+            ),
+            None,
+        )
+        self.presenter.confirm_devices(
+            device_ids=device_ids,
+            labels=labels,
+            default_printer_device_id=default_device_id,
+        )
+
+    def _retry(self) -> None:
+        if self._retry_action is not None:
+            self._retry_action()
+
+    def show_invitation_page(
+        self, *, invitation: str | None = None, error: str | None = None
+    ) -> None:
+        self.pages.setCurrentIndex(0)
+        self._set_step(SetupStep.INVITATION)
+        if invitation is not None:
+            self.invitation_input.setPlainText(invitation)
+        self.connect_button.setEnabled(True)
+        self.invitation_error.setText(error or "")
+        self.invitation_error.setVisible(bool(error))
+
+    def show_connection_page(
+        self,
+        *,
+        step: SetupStep,
+        message: str,
+        error: str | None = None,
+        retry: Callable[[], None] | None = None,
+        allow_start_over: bool = False,
+    ) -> None:
         self.pages.setCurrentIndex(1)
-        self._set_step(SetupStep.CHECKING)
-        self.connection_status.setText("Checking this computer")
-        self.connection_error.setVisible(False)
-        self.retry_button.setVisible(False)
-        self.connect_button.setEnabled(False)
-        server = self.server_field.text().strip() or None
-        self._run(
-            "preview",
-            lambda: self.client.preview_onboarding(invitation, controller_url=server),
-        )
-
-    def _start_after_preview(self, preview: ManagedOnboardingPreviewResponse) -> None:
-        self._update_details(preview)
-        invitation = self.invitation_input.toPlainText().strip()
-        server = self.server_field.text().strip() or None
-        self._set_step(SetupStep.SECURING)
-        self.connection_status.setText("Securing the connection")
-        self._run(
-            "start",
-            lambda: self.client.start_onboarding(invitation, controller_url=server),
-        )
-
-    def _start_polling(self) -> None:
-        self._poll_timer.start()
-        self._poll_status()
-
-    def _poll_status(self) -> None:
-        if self._poll_in_flight:
-            return
-        self._poll_in_flight = True
-        self._run("status", self.client.get_onboarding_status)
-
-    def _apply_status(self, status: ManagedOnboardingStatusResponse) -> None:
-        self._update_details(status)
-        step = step_for_phase(status.phase, has_devices=bool(status.devices))
         self._set_step(step)
-        self.connection_status.setText(status.detail)
-        if step is SetupStep.FAILED:
-            self._poll_timer.stop()
-            self._show_connection_error(
-                status.last_error
-                or status.detail
-                or "The connection could not be completed."
-            )
-            return
-        if step is SetupStep.DEVICES and status.devices:
-            self._poll_timer.stop()
-            self._populate_devices(status.devices)
-            self.pages.setCurrentIndex(2)
-            return
-        if step is SetupStep.READY:
-            self._poll_timer.stop()
-            self._show_ready(status)
+        self.connection_status.setText(message)
+        self.connection_error.setText(error or "")
+        self.connection_error.setVisible(bool(error))
+        self.connection_progress.setVisible(error is None)
+        self.cancel_button.setEnabled(True)
+        if allow_start_over:
+            self._retry_action = self.presenter.start_over
+            self.retry_button.setText("Start over")
+        else:
+            self._retry_action = retry
+            self.retry_button.setText("Try again")
+        self.retry_button.setVisible(self._retry_action is not None)
+
+    def show_devices_page(self, devices: list[DeviceResponse]) -> None:
+        self._populate_devices(devices)
+        self.pages.setCurrentIndex(2)
+        self._set_step(SetupStep.DEVICES)
+        self.device_empty.setVisible(not devices)
+        self.confirm_button.setText(
+            "Continue without devices" if not devices else "Continue"
+        )
+        self.confirm_button.setEnabled(True)
+        self.rescan_button.setEnabled(True)
+
+    def show_ready_page(self, status: ManagedOnboardingStatusResponse) -> None:
+        self._set_step(SetupStep.READY)
+        count = len(status.devices)
+        self.ready_summary.setText(
+            f"Connected {count} device{'s' if count != 1 else ''}."
+            if count
+            else "Connected. You can add devices at any time."
+        )
+        self.pages.setCurrentIndex(3)
+
+    def update_details(self, value: object) -> None:
+        controller_url = getattr(value, "controller_url", None)
+        controller_name = getattr(value, "controller_name", None)
+        agent_id = getattr(value, "agent_id", None)
+        protocol = getattr(value, "protocol_version", None)
+        namespace = getattr(value, "zenoh_namespace", None)
+        certificate = getattr(value, "certificate_expires_at", None)
+        self.detail_labels["controller"].setText(
+            f"Server: {controller_name or controller_url or '-'}"
+        )
+        self.detail_labels["agent"].setText(f"Agent: {agent_id or '-'}")
+        self.detail_labels["protocol"].setText(f"Protocol: {protocol or '-'}")
+        self.detail_labels["namespace"].setText(f"Zenoh namespace: {namespace or '-'}")
+        self.detail_labels["certificate"].setText(
+            "Certificate: "
+            + (certificate.isoformat() if certificate is not None else "-")
+        )
+
+    def set_confirm_busy(self, busy: bool) -> None:
+        self.confirm_button.setEnabled(not busy)
+        self.rescan_button.setEnabled(not busy)
+
+    def set_cancel_busy(self, busy: bool) -> None:
+        self.cancel_button.setEnabled(not busy)
+
+    def dismiss_view(self) -> None:
+        self.close()
 
     def _populate_devices(self, devices: list[DeviceResponse]) -> None:
         while self.device_list_layout.count():
@@ -447,8 +482,8 @@ class SetupAssistantWindow(QMainWindow):
                 test_button = QPushButton("Test")
                 test_button.setObjectName("setupTertiaryButton")
                 test_button.clicked.connect(
-                    lambda checked=False, device_id=device.id: self._test_device(
-                        device_id
+                    lambda checked=False, device_id=device.id: (
+                        self.presenter.test_device(device_id)
                     )
                 )
                 printer_row.addWidget(test_button)
@@ -463,111 +498,6 @@ class SetupAssistantWindow(QMainWindow):
         ):
             first_printer_radio.setChecked(True)
         self.device_list_layout.addStretch()
-
-    def _confirm_devices(self) -> None:
-        device_ids = tuple(
-            device.id
-            for device, selected, _, _ in self._device_rows
-            if selected.isChecked()
-        )
-        labels = {
-            device.id: label.text().strip()
-            for device, selected, label, _ in self._device_rows
-            if selected.isChecked() and label.text().strip()
-        }
-        default_device_id = next(
-            (
-                device.id
-                for device, selected, _, default in self._device_rows
-                if selected.isChecked() and default.isChecked()
-            ),
-            None,
-        )
-        self.confirm_button.setEnabled(False)
-        self._run(
-            "confirm",
-            lambda: self.client.confirm_onboarding_devices(
-                device_ids=device_ids,
-                labels=labels,
-                default_printer_device_id=default_device_id,
-            ),
-        )
-
-    def _test_device(self, device_id: str) -> None:
-        self._run(
-            "test",
-            lambda: self.client.submit_test_page(device_id=device_id),
-        )
-
-    def _cancel_setup(self) -> None:
-        self._poll_timer.stop()
-        self.cancel_button.setEnabled(False)
-        self._run("cancel", self.client.cancel_onboarding)
-
-    def _finish(self) -> None:
-        self.close()
-        if self.on_ready is not None:
-            self.on_ready()
-
-    def _worker_completed(self, operation: str, result: object) -> None:
-        if operation == "preview" and isinstance(
-            result, ManagedOnboardingPreviewResponse
-        ):
-            self._start_after_preview(result)
-            return
-        if operation == "start" and isinstance(result, ManagedOnboardingStartResponse):
-            self._update_details(result)
-            if result.restart_required:
-                self.connection_status.setText("Restarting Inari securely")
-                self._run("restart", self.bridge.restart)
-            else:
-                self._start_polling()
-            return
-        if operation == "restart":
-            self._start_polling()
-            return
-        if operation == "status" and isinstance(
-            result, ManagedOnboardingStatusResponse
-        ):
-            self._poll_in_flight = False
-            self._apply_status(result)
-            return
-        if operation == "confirm" and isinstance(
-            result, ManagedOnboardingStatusResponse
-        ):
-            self.confirm_button.setEnabled(True)
-            self._show_ready(result)
-            return
-        if operation == "cancel":
-            self.close()
-
-    def _worker_failed(self, operation: str, message: str) -> None:
-        if operation == "status":
-            self._poll_in_flight = False
-            return
-        if operation == "confirm":
-            self.confirm_button.setEnabled(True)
-            return
-        self.connect_button.setEnabled(True)
-        self.cancel_button.setEnabled(True)
-        self._poll_timer.stop()
-        self._set_step(SetupStep.FAILED)
-        self._show_connection_error(message)
-
-    def _run(self, operation: str, task: Callable[[], object]) -> None:
-        def runner() -> None:
-            try:
-                result = task()
-            except Exception as exc:
-                self._signals.failed.emit(operation, _friendly_error(exc))
-                return
-            self._signals.completed.emit(operation, result)
-
-        threading.Thread(
-            target=runner,
-            name=f"inari-setup-{operation}",
-            daemon=True,
-        ).start()
 
     def _set_step(self, active: SetupStep) -> None:
         ordered = [
@@ -591,45 +521,6 @@ class SetupAssistantWindow(QMainWindow):
             label.style().unpolish(label)
             label.style().polish(label)
 
-    def _update_details(self, value: object) -> None:
-        controller_url = getattr(value, "controller_url", None)
-        controller_name = getattr(value, "controller_name", None)
-        agent_id = getattr(value, "agent_id", None)
-        protocol = getattr(value, "protocol_version", None)
-        namespace = getattr(value, "zenoh_namespace", None)
-        certificate = getattr(value, "certificate_expires_at", None)
-        self.detail_labels["controller"].setText(
-            f"Server: {controller_name or controller_url or '-'}"
-        )
-        self.detail_labels["agent"].setText(f"Agent: {agent_id or '-'}")
-        self.detail_labels["protocol"].setText(f"Protocol: {protocol or '-'}")
-        self.detail_labels["namespace"].setText(f"Zenoh namespace: {namespace or '-'}")
-        self.detail_labels["certificate"].setText(
-            "Certificate: "
-            + (certificate.isoformat() if certificate is not None else "-")
-        )
-
-    def _show_ready(self, status: ManagedOnboardingStatusResponse) -> None:
-        self._set_step(SetupStep.READY)
-        count = len(status.devices)
-        self.ready_summary.setText(
-            f"Connected {count} device{'s' if count != 1 else ''}."
-            if count
-            else "Connected. You can add devices at any time."
-        )
-        self.pages.setCurrentIndex(3)
-
-    def _show_invitation_error(self, message: str | None) -> None:
-        self.invitation_error.setText(message or "")
-        self.invitation_error.setVisible(bool(message))
-
-    def _show_connection_error(self, message: str) -> None:
-        self.pages.setCurrentIndex(1)
-        self.connection_error.setText(message)
-        self.connection_error.setVisible(True)
-        self.connection_progress.setVisible(False)
-        self.retry_button.setVisible(True)
-
     def _toggle_server_field(self, visible: bool) -> None:
         self.server_toggle.setArrowType(
             Qt.ArrowType.DownArrow if visible else Qt.ArrowType.RightArrow
@@ -642,8 +533,13 @@ class SetupAssistantWindow(QMainWindow):
         )
         self.details_panel.setVisible(visible)
 
-    def dismiss(self) -> None:
+    def shutdown(self) -> None:
+        self.presenter.shutdown()
         self.close()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.presenter.suspend()
+        super().closeEvent(event)
 
 
 def create_setup_assistant(
@@ -651,7 +547,7 @@ def create_setup_assistant(
     *,
     client: SetupClient,
     bridge: SetupBridge,
-    on_ready: Callable[[], None] | None = None,
+    on_ready: Callable[[ManagedOnboardingStatusResponse], None] | None = None,
 ) -> SetupAssistantWindow:
     return SetupAssistantWindow(
         settings,
@@ -659,160 +555,3 @@ def create_setup_assistant(
         bridge=bridge,
         on_ready=on_ready,
     )
-
-
-def should_offer_first_run_setup() -> bool:
-    settings = QSettings("Inari", "Inari Tray")
-    return not settings.value("setup_assistant_offered", False, type=bool)
-
-
-def mark_first_run_setup_offered() -> None:
-    settings = QSettings("Inari", "Inari Tray")
-    settings.setValue("setup_assistant_offered", True)
-
-
-def _friendly_error(exc: Exception) -> str:
-    if isinstance(exc, httpx.HTTPStatusError):
-        try:
-            payload = exc.response.json()
-        except ValueError:
-            payload = {}
-        detail = payload.get("detail")
-        if not isinstance(detail, str):
-            detail = (payload.get("error") or {}).get("message")
-        if isinstance(detail, str) and detail:
-            return detail
-    message = str(exc).strip()
-    return message or "Inari could not complete this step."
-
-
-def _style_sheet(theme: Any) -> str:
-    return f"""
-    QMainWindow#setupAssistantWindow, QWidget#setupRoot {{
-        background: {theme.background};
-        color: {theme.text_primary};
-    }}
-    QFrame#setupProgressPanel {{
-        background: {theme.surface_alt};
-        border-right: 1px solid {theme.border};
-    }}
-    QLabel#setupMark {{
-        background: {theme.accent};
-        color: {theme.accent_foreground};
-        border-radius: 8px;
-        font-size: 18px;
-        font-weight: 800;
-    }}
-    QLabel#setupPanelTitle {{ font-size: 15px; font-weight: 700; }}
-    QLabel#setupTitle {{ font-size: 25px; font-weight: 750; }}
-    QLabel#setupBody {{
-        color: {theme.text_secondary};
-        font-size: 14px;
-    }}
-    QLabel#setupFieldLabel {{
-        color: {theme.text_secondary};
-        font-size: 12px;
-        font-weight: 700;
-    }}
-    QLabel#setupPrivacy {{
-        color: {theme.text_muted};
-        font-size: 11px;
-    }}
-    QLabel#setupProgressItem {{
-        color: {theme.text_muted};
-        padding: 7px 0;
-        font-size: 12px;
-    }}
-    QLabel#setupProgressItem[state="active"] {{
-        color: {theme.text_primary};
-        font-weight: 700;
-    }}
-    QLabel#setupProgressItem[state="done"] {{
-        color: {theme.success_foreground};
-        font-weight: 650;
-    }}
-    QLabel#setupStatus {{
-        color: {theme.text_primary};
-        font-size: 14px;
-        font-weight: 650;
-    }}
-    QLabel#setupError {{
-        background: {theme.offline_background};
-        color: {theme.offline_foreground};
-        border: 1px solid {theme.offline_foreground};
-        border-radius: 6px;
-        padding: 10px;
-    }}
-    QLabel#setupDetailLine {{
-        color: {theme.text_secondary};
-        font-family: monospace;
-        font-size: 11px;
-    }}
-    QLabel#setupReadyMark {{
-        background: {theme.success_background};
-        color: {theme.success_foreground};
-        border: 1px solid {theme.success_foreground};
-        border-radius: 8px;
-        font-size: 28px;
-        font-weight: 800;
-    }}
-    QLabel#setupDeviceState {{
-        color: {theme.text_muted};
-        font-size: 11px;
-    }}
-    QPlainTextEdit#setupInvitationInput, QLineEdit#setupServerInput,
-    QFrame#setupDetails, QFrame#setupDeviceRow {{
-        background: {theme.input_background};
-        color: {theme.text_primary};
-        border: 1px solid {theme.border};
-        border-radius: 7px;
-    }}
-    QLineEdit {{
-        min-height: 34px;
-        padding: 0 10px;
-        background: {theme.input_background};
-        color: {theme.text_primary};
-        border: 1px solid {theme.border};
-        border-radius: 6px;
-    }}
-    QLineEdit:focus, QPlainTextEdit:focus {{
-        border-color: {theme.input_focus};
-    }}
-    QToolButton#setupDisclosure {{
-        color: {theme.text_secondary};
-        background: transparent;
-        border: none;
-        padding: 5px 0;
-        font-weight: 600;
-    }}
-    QPushButton {{
-        min-height: 36px;
-        padding: 0 16px;
-        border-radius: 6px;
-        font-weight: 700;
-    }}
-    QPushButton#setupPrimaryButton {{
-        background: {theme.accent};
-        color: {theme.accent_foreground};
-        border: 1px solid {theme.accent};
-    }}
-    QPushButton#setupPrimaryButton:hover {{ background: {theme.accent_hover}; }}
-    QPushButton#setupPrimaryButton:pressed {{ background: {theme.accent_pressed}; }}
-    QPushButton#setupSecondaryButton, QPushButton#setupTertiaryButton {{
-        background: {theme.surface};
-        color: {theme.text_primary};
-        border: 1px solid {theme.border};
-    }}
-    QPushButton#setupTertiaryButton {{ min-height: 30px; padding: 0 12px; }}
-    QPushButton:disabled {{ color: {theme.text_muted}; }}
-    QProgressBar {{
-        background: {theme.border_soft};
-        border: none;
-        border-radius: 3px;
-    }}
-    QProgressBar::chunk {{
-        background: {theme.accent};
-        border-radius: 3px;
-    }}
-    QScrollArea#setupDeviceScroll {{ background: transparent; }}
-    """

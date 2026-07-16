@@ -9,6 +9,7 @@ from inari.local_api.schemas import (
     DeviceDirectoryResponse,
     DeviceEventCollectionResponse,
     JobResourceResponse,
+    ManagedOnboardingStatusResponse,
     RuntimeEventResponse,
     SystemStatusResponse,
 )
@@ -32,6 +33,7 @@ from inari_tray.models import (
     TraySnapshot,
 )
 from inari_tray.qt_host import QtTrayHost
+from inari_tray.single_instance import ActivationRequest
 from inari_tray.tray_host import TrayMenuEntry, create_tray_host
 
 
@@ -180,7 +182,7 @@ def test_open_device_center_uses_native_presenter() -> None:
         device_center=device_center,
     )
 
-    application._open_device_center()
+    application._show_device_center()
 
     assert device_center.show_calls == 1
 
@@ -201,7 +203,7 @@ def test_lazy_device_center_receives_current_snapshot_on_creation() -> None:
         device_center_factory=factory,
     )
 
-    application._open_device_center()
+    application._show_device_center()
 
     assert len(created) == 1
     assert created[0].snapshots[-1] == application.snapshot
@@ -266,6 +268,43 @@ def test_quit_tray_closes_device_center() -> None:
 
     assert device_center.closed is True
     assert host.stopped is True
+
+
+def test_focus_and_invitation_activations_are_routed_through_setup_gate() -> None:
+    gate = FakeSetupGate()
+    application = AgentTrayApplication(
+        TraySettings(profile="installed"),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=FakeTrayHost(),
+        setup_gate=gate,
+    )
+
+    application._handle_activation(ActivationRequest(focus=True))
+    application._handle_activation(
+        ActivationRequest(invitation="inari://enroll#code=secret")
+    )
+
+    assert gate.activations == [None, "inari://enroll#code=secret"]
+
+
+def test_device_center_menu_action_is_routed_through_setup_gate() -> None:
+    gate = FakeSetupGate()
+    application = AgentTrayApplication(
+        TraySettings(profile="installed"),
+        client=FakeTrayClient(),
+        bridge=MonitorAgentBridge(),
+        host=FakeTrayHost(),
+        setup_gate=gate,
+    )
+    entry = next(
+        item for item in application._build_menu() if item.label == "Open Device Center"
+    )
+
+    assert entry.callback is not None
+    entry.callback()
+
+    assert gate.activations == [None]
 
 
 def test_build_menu_does_not_render_error_row() -> None:
@@ -748,6 +787,29 @@ class FakeDeviceCenter:
         self.closed = True
 
 
+class FakeSetupGate:
+    def __init__(self) -> None:
+        self.activations: list[str | None] = []
+        self.background_evaluations = 0
+        self.completions: list[ManagedOnboardingStatusResponse] = []
+        self.shutdown_called = False
+
+    def evaluate_background(self) -> None:
+        self.background_evaluations += 1
+
+    def begin(self, invitation: str | None = None) -> None:
+        self.activations.append(invitation)
+
+    def activate(self, invitation: str | None = None) -> None:
+        self.activations.append(invitation)
+
+    def complete(self, status: ManagedOnboardingStatusResponse) -> None:
+        self.completions.append(status)
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
 class FakeControlBridge:
     mode = ControlMode.SPAWN
 
@@ -819,6 +881,12 @@ class FakeServiceControlBridge:
 
 
 class FakeTrayClient:
+    def get_onboarding_status(self) -> ManagedOnboardingStatusResponse:
+        return ManagedOnboardingStatusResponse(
+            phase="not_started",
+            detail="Setup is required",
+        )
+
     def get_status(self) -> SystemStatusResponse:
         return SystemStatusResponse.model_validate(
             {

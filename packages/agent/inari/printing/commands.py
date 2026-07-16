@@ -15,6 +15,7 @@ class DeviceCommandKind(StrEnum):
     CUT_PAPER = "cut_paper"
 
 
+@dataclass(frozen=True)
 class DeviceCommand:
     kind: ClassVar[DeviceCommandKind]
     _registry: ClassVar[dict[DeviceCommandKind, type[DeviceCommand]]] = {}

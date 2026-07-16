@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import tomllib
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import httpx
 import tomli_w
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..config import AgentSettings, write_default_config_file
 from ..core.config_paths import resolve_default_path_bundle
@@ -22,6 +24,8 @@ from ..security.models import GatewayMode
 from ..security.secrets import SecretStore
 from .enrollment.service import UPSTREAM_ENROLLMENT_TOKEN_KEY
 from .models import UpstreamCertificateMode, UpstreamConnectionState
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..runtime.models import DeviceRecord
@@ -91,7 +95,24 @@ class OnboardingStatus:
     zenoh_namespace: str | None = None
     certificate_expires_at: datetime | None = None
     devices: tuple[DeviceRecord, ...] = ()
+    completed_at: datetime | None = None
     last_error: str | None = None
+
+
+class OnboardingRecord(BaseModel):
+    """Validated setup progress persisted across agent restarts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phase: OnboardingPhase = OnboardingPhase.NOT_STARTED
+    controller_url: str | None = None
+    controller_name: str | None = None
+    invite_id: str | None = None
+    started_at: datetime | None = None
+    previous_overlay: dict[str, Any] = Field(default_factory=dict)
+    overlay_path: Path | None = None
+    confirmed_device_ids: tuple[str, ...] = ()
+    devices_confirmed_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -194,16 +215,16 @@ class ManagedOnboardingService:
         self.secret_store.set_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY, parsed.credential)
         try:
             _write_toml_owner_only(overlay_path, overlay)
-            self._save_state(
-                {
-                    "phase": OnboardingPhase.RESTART_REQUIRED,
-                    "controller_url": parsed.controller_url,
-                    "controller_name": preview.controller_name,
-                    "invite_id": parsed.invite_id,
-                    "started_at": utc_now().isoformat(),
-                    "previous_overlay": previous_overlay,
-                    "overlay_path": str(overlay_path),
-                }
+            self._save_record(
+                OnboardingRecord(
+                    phase=OnboardingPhase.RESTART_REQUIRED,
+                    controller_url=parsed.controller_url,
+                    controller_name=preview.controller_name,
+                    invite_id=parsed.invite_id,
+                    started_at=utc_now(),
+                    previous_overlay=previous_overlay,
+                    overlay_path=overlay_path,
+                )
             )
         except Exception:
             self.secret_store.delete_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
@@ -211,15 +232,13 @@ class ManagedOnboardingService:
         return preview, self.settings.gateway_mode is not GatewayMode.MANAGED
 
     def status(self) -> OnboardingStatus:
-        state = self._load_state()
+        record = self._load_record()
         upstream = self.gateway_service.get_upstream_status()
         identity = self.gateway_service.get_identity()
         devices = tuple(self.device_catalog.list_devices())
         common: dict[str, Any] = {
-            "controller_url": upstream.base_url
-            or _optional_string(state.get("controller_url")),
-            "controller_name": upstream.controller_name
-            or _optional_string(state.get("controller_name")),
+            "controller_url": upstream.base_url or record.controller_url,
+            "controller_name": upstream.controller_name or record.controller_name,
             "agent_id": identity.agent_id,
             "protocol_version": upstream.protocol_version,
             "zenoh_namespace": upstream.data_plane_namespace,
@@ -229,10 +248,11 @@ class ManagedOnboardingService:
                 else None
             ),
             "devices": devices,
+            "completed_at": record.devices_confirmed_at,
             "last_error": upstream.last_error,
         }
         if (
-            state.get("phase") == OnboardingPhase.RESTART_REQUIRED
+            record.phase is OnboardingPhase.RESTART_REQUIRED
             and self.settings.gateway_mode is not GatewayMode.MANAGED
         ):
             return OnboardingStatus(
@@ -341,27 +361,30 @@ class ManagedOnboardingService:
         devices_config = overlay.setdefault("devices", {})
         devices_config["labels"] = normalized_labels
         printing = devices_config.setdefault("printing", {})
-        printing["default_printer"] = default_printer_name
+        if default_printer_name is None:
+            printing.pop("default_printer", None)
+        else:
+            printing["default_printer"] = default_printer_name
         _write_toml_owner_only(overlay_path, overlay)
         self.settings.device_labels = normalized_labels
         self.settings.default_printer_name = default_printer_name
-        state = self._load_state()
-        state["confirmed_device_ids"] = sorted(selected)
-        state["devices_confirmed_at"] = utc_now().isoformat()
-        self._save_state(state)
+        record = self._load_record().model_copy(
+            update={
+                "confirmed_device_ids": tuple(sorted(selected)),
+                "devices_confirmed_at": utc_now(),
+            }
+        )
+        self._save_record(record)
         return self.status()
 
     def cancel(self) -> OnboardingStatus:
         self.secret_store.delete_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
-        state = self._load_state()
-        previous_overlay = state.get("previous_overlay")
-        overlay_path_value = state.get("overlay_path")
-        if isinstance(previous_overlay, dict) and isinstance(overlay_path_value, str):
-            overlay_path = Path(overlay_path_value)
-            if previous_overlay:
-                _write_toml_owner_only(overlay_path, previous_overlay)
-            elif overlay_path.exists():
-                overlay_path.unlink()
+        record = self._load_record()
+        if record.overlay_path is not None:
+            if record.previous_overlay:
+                _write_toml_owner_only(record.overlay_path, record.previous_overlay)
+            elif record.overlay_path.exists():
+                record.overlay_path.unlink()
         if self.status_path.exists():
             self.status_path.unlink()
         return OnboardingStatus(
@@ -427,19 +450,24 @@ class ManagedOnboardingService:
         )
         return config_path, overlay_path
 
-    def _load_state(self) -> dict[str, Any]:
+    def _load_record(self) -> OnboardingRecord:
         if not self.status_path.exists():
-            return {}
+            return OnboardingRecord()
         try:
-            payload = json.loads(self.status_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
+            return OnboardingRecord.model_validate_json(
+                self.status_path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, ValidationError):
+            logger.warning(
+                "Ignoring invalid onboarding progress; setup remains incomplete",
+                extra={"component": "onboarding"},
+            )
+            return OnboardingRecord()
 
-    def _save_state(self, payload: dict[str, Any]) -> None:
+    def _save_record(self, record: OnboardingRecord) -> None:
         write_text_owner_only(
             self.status_path,
-            json.dumps(payload, indent=2, sort_keys=True),
+            json.dumps(record.model_dump(mode="json"), indent=2, sort_keys=True),
             encoding="utf-8",
         )
 
