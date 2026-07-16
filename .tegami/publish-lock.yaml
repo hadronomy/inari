@@ -1,23 +1,23 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix Windows installation and first launch\n\nApp Installer now presents a single, clear installation action. The Windows package also carries the TLS runtime that matches its embedded Python interpreter, preventing Device Center from failing on first launch.\n"
-    filename: 2026-07-15-4f92a7cd.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix the Device Center icon on Windows\n\nDevice Center now keeps its intended transparent icon on the Windows taskbar\nand Start menu instead of appearing inside a pale system-generated square.\n\nWindows releases now publish provenance for every included file and bind the\ninstaller to its SPDX SBOM with a GitHub attestation.\n"
+    filename: 2026-07-16-8c7f2a1.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-07-15-4f92a7cd.md
+      - 2026-07-16-8c7f2a1.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-07-15-4f92a7cd.md
+      - 2026-07-16-8c7f2a1.md
     id: pip:inari-tray
     updated: true
   - changelogIds:
-      - 2026-07-15-4f92a7cd.md
+      - 2026-07-16-8c7f2a1.md
     id: pip:inari-brand
     updated: true
   - id: helm:inari
     updated: false
   - changelogIds:
-      - 2026-07-15-4f92a7cd.md
+      - 2026-07-16-8c7f2a1.md
     id: msix:inari-device-center
     updated: true
