@@ -1,23 +1,23 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix the Device Center icon on Windows\n\nDevice Center now keeps its intended transparent icon on the Windows taskbar\nand Start menu instead of appearing inside a pale system-generated square.\n\nWindows releases now publish provenance for every included file and bind the\ninstaller to its SPDX SBOM with a GitHub attestation.\n"
-    filename: 2026-07-16-8c7f2a1.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Resume setup safely after an interruption\n\nInari Device Center now asks the local agent whether setup actually finished before opening the main window. Closing an invalid, failed, or interrupted invitation no longer skips first-time setup on the next launch. The assistant resumes at the saved step, offers a clean start-over path after a failure, and can finish setup before any devices are attached.\n"
+    filename: 2026-07-16-a6f2c1.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-07-16-8c7f2a1.md
+      - 2026-07-16-a6f2c1.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-07-16-8c7f2a1.md
+      - 2026-07-16-a6f2c1.md
     id: pip:inari-tray
     updated: true
   - changelogIds:
-      - 2026-07-16-8c7f2a1.md
+      - 2026-07-16-a6f2c1.md
     id: pip:inari-brand
     updated: true
   - id: helm:inari
     updated: false
   - changelogIds:
-      - 2026-07-16-8c7f2a1.md
+      - 2026-07-16-a6f2c1.md
     id: msix:inari-device-center
     updated: true

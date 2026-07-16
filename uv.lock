@@ -507,7 +507,7 @@ wheels = [
 
 [[package]]
 name = "inari"
-version = "1.20.0a5"
+version = "1.20.0a6"
 source = { editable = "packages/agent" }
 dependencies = [
     { name = "alembic" },
@@ -591,12 +591,12 @@ dev = [
 
 [[package]]
 name = "inari-brand"
-version = "1.20.0a5"
+version = "1.20.0a6"
 source = { editable = "packages/brand" }
 
 [[package]]
 name = "inari-tray"
-version = "1.20.0a5"
+version = "1.20.0a6"
 source = { editable = "packages/agent_tray" }
 dependencies = [
     { name = "httpx" },

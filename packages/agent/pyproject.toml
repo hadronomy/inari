@@ -1,6 +1,6 @@
 [project]
 name = "inari"
-version = "1.20.0-alpha.5"
+version = "1.20.0-alpha.6"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
@@ -58,6 +58,7 @@ exclude = ["notebooks*", "tests*"]
 
 [tool.setuptools.package-data]
 inari = ["db/alembic/script.py.mako"]
+
 
 
 

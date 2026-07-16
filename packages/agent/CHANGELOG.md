@@ -1,3 +1,9 @@
+## inari@1.20.0-alpha.6
+
+### Resume setup safely after an interruption
+
+Inari Device Center now asks the local agent whether setup actually finished before opening the main window. Closing an invalid, failed, or interrupted invitation no longer skips first-time setup on the next launch. The assistant resumes at the saved step, offers a clean start-over path after a failure, and can finish setup before any devices are attached.
+
 ## inari@1.20.0-alpha.5
 
 ### Fix the Device Center icon on Windows
