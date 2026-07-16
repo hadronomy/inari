@@ -1,3 +1,13 @@
+## inari@1.20.0-alpha.5
+
+### Fix the Device Center icon on Windows
+
+Device Center now keeps its intended transparent icon on the Windows taskbar
+and Start menu instead of appearing inside a pale system-generated square.
+
+Windows releases now publish provenance for every included file and bind the
+installer to its SPDX SBOM with a GitHub attestation.
+
 ## inari@1.20.0-alpha.4
 
 ### Fix Windows installation and first launch

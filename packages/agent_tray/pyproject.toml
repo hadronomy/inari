@@ -1,6 +1,6 @@
 [project]
 name = "inari-tray"
-version = "1.20.0-alpha.4"
+version = "1.20.0-alpha.5"
 description = "Cross-platform Inari Device Center and tray companion"
 requires-python = ">=3.12"
 dependencies = [
@@ -44,6 +44,7 @@ exclude = ["tests*"]
 [tool.uv.sources]
 inari = { workspace = true }
 inari-brand = { workspace = true }
+
 
 
 
