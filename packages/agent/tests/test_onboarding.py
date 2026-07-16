@@ -33,6 +33,7 @@ INVITE_CODE = f"INR-{INVITE_ID}-ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567"
 @dataclass
 class StubGatewayService:
     settings: AgentSettings
+    state: UpstreamConnectionState | None = None
 
     def get_identity(self) -> AgentIdentity:
         return AgentIdentity(
@@ -46,7 +47,8 @@ class StubGatewayService:
     def get_upstream_status(self) -> UpstreamStatus:
         return UpstreamStatus(
             mode=self.settings.gateway_mode,
-            state=(
+            state=self.state
+            or (
                 UpstreamConnectionState.DISCONNECTED
                 if self.settings.gateway_mode is GatewayMode.MANAGED
                 else UpstreamConnectionState.DISABLED
@@ -175,6 +177,7 @@ async def test_start_writes_secure_overlay_and_keeps_invite_only_in_secret_store
     assert overlay["certificates"]["provider"] == "step_ca"
     assert INVITE_CODE not in overlay_text
     assert secret_store.get_secret("upstream_enrollment_token") == INVITE_CODE
+    assert service.status().completed_at is None
     if os.name == "posix":
         assert overlay_path.stat().st_mode & 0o777 == 0o600
 
@@ -198,7 +201,7 @@ def test_device_confirmation_persists_labels_and_default_printer(tmp_path) -> No
     )
     service, settings, _, config_path = onboarding_service(tmp_path, devices=(printer,))
 
-    service.confirm_devices(
+    status = service.confirm_devices(
         device_ids=(printer.id,),
         labels={printer.id: "Front counter"},
         default_printer_device_id=printer.id,
@@ -210,6 +213,154 @@ def test_device_confirmation_persists_labels_and_default_printer(tmp_path) -> No
     assert overlay["devices"]["printing"]["default_printer"] == "System Printer"
     assert settings.device_labels == {printer.id: "Front counter"}
     assert settings.default_printer_name == "System Printer"
+    assert status.completed_at is not None
+
+
+def test_empty_device_confirmation_completes_setup(tmp_path) -> None:
+    service, _, _, _ = onboarding_service(tmp_path)
+
+    status = service.confirm_devices(
+        device_ids=(),
+        labels={},
+        default_printer_device_id=None,
+    )
+
+    assert status.completed_at is not None
+    assert status.devices == ()
+
+
+def test_multiple_device_confirmation_completes_setup(tmp_path) -> None:
+    now = utc_now()
+    devices = tuple(
+        DeviceRecord(
+            id=device_id,
+            kind=kind,
+            driver_key=driver_key,
+            identity=DeviceIdentity(
+                transport=transport,
+                os_instance_id=os_instance_id,
+            ),
+            name=name,
+            connection_state=DeviceConnectionState.ONLINE,
+            first_seen_at=now,
+            last_seen_at=now,
+            updated_at=now,
+            capabilities={},
+        )
+        for device_id, kind, driver_key, transport, os_instance_id, name in (
+            (
+                "dev_printer",
+                DeviceKind.PRINTER,
+                "test.printer",
+                DeviceTransport.SPOOLER,
+                "queue:front-desk",
+                "Front desk printer",
+            ),
+            (
+                "dev_scale",
+                DeviceKind.SCALE,
+                "test.scale",
+                DeviceTransport.USB,
+                "usb:scale-1",
+                "Parcel scale",
+            ),
+        )
+    )
+    service, _, _, _ = onboarding_service(tmp_path, devices=devices)
+
+    status = service.confirm_devices(
+        device_ids=tuple(device.id for device in devices),
+        labels={},
+        default_printer_device_id="dev_printer",
+    )
+
+    assert status.completed_at is not None
+    assert {device.id for device in status.devices} == {
+        "dev_printer",
+        "dev_scale",
+    }
+
+
+def test_cancellation_removes_setup_completion(tmp_path) -> None:
+    service, _, _, _ = onboarding_service(tmp_path)
+    service.confirm_devices(
+        device_ids=(),
+        labels={},
+        default_printer_device_id=None,
+    )
+
+    cancelled = service.cancel()
+
+    assert cancelled.completed_at is None
+    assert not service.status_path.exists()
+
+
+def test_failed_connection_does_not_imply_setup_completion(tmp_path) -> None:
+    service, settings, _, _ = onboarding_service(tmp_path)
+    settings.gateway_mode = GatewayMode.MANAGED
+    service.gateway_service = StubGatewayService(
+        settings,
+        state=UpstreamConnectionState.AUTH_FAILED,
+    )
+
+    status = service.status()
+
+    assert status.phase.value == "failed"
+    assert status.completed_at is None
+
+
+def test_setup_completion_survives_agent_restart_and_controller_outage(
+    tmp_path,
+) -> None:
+    service, settings, secret_store, _ = onboarding_service(tmp_path)
+    completed = service.confirm_devices(
+        device_ids=(),
+        labels={},
+        default_printer_device_id=None,
+    )
+    settings.gateway_mode = GatewayMode.MANAGED
+    restarted_service = ManagedOnboardingService(
+        settings=settings,
+        secret_store=secret_store,
+        gateway_service=StubGatewayService(settings),
+        device_catalog=StubDeviceCatalog(),
+        status_path=service.status_path,
+        http_client_factory=preview_client_factory,
+    )
+
+    restarted = restarted_service.status()
+
+    assert completed.completed_at is not None
+    assert restarted.completed_at == completed.completed_at
+    assert restarted.phase.value == "securing_connection"
+
+
+def test_malformed_onboarding_record_fails_closed_without_secret_in_logs(
+    tmp_path, caplog
+) -> None:
+    service, _, _, _ = onboarding_service(tmp_path)
+    service.status_path.parent.mkdir(parents=True, exist_ok=True)
+    service.status_path.write_text(
+        '{"devices_confirmed_at":"not-a-date","credential":"secret"}',
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING", logger="inari.gateway.onboarding"):
+        status = service.status()
+
+    assert status.completed_at is None
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.anyio
+async def test_invalid_invitation_does_not_create_setup_checkpoint(tmp_path) -> None:
+    service, _, _, _ = onboarding_service(tmp_path)
+
+    with pytest.raises(Exception):
+        await service.preview("not an invitation")
+
+    assert not service.status_path.exists()
+    assert service.status().completed_at is None
 
 
 def test_gateway_snapshot_contains_redacted_full_device_inventory(tmp_path) -> None:

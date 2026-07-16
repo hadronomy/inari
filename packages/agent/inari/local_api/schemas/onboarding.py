@@ -88,6 +88,7 @@ class ManagedOnboardingStatusResponse(APIModel):
     zenoh_namespace: str | None = None
     certificate_expires_at: datetime | None = None
     devices: list[DeviceResponse] = Field(default_factory=list)
+    completed_at: datetime | None = None
     last_error: str | None = None
 
     @classmethod
@@ -108,6 +109,7 @@ class ManagedOnboardingStatusResponse(APIModel):
             zenoh_namespace=status.zenoh_namespace,
             certificate_expires_at=status.certificate_expires_at,
             devices=devices,
+            completed_at=status.completed_at,
             last_error=status.last_error,
         )
 

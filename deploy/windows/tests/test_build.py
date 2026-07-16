@@ -86,7 +86,10 @@ def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None
             with Image.open(output / "Assets" / filename) as asset:
                 assert asset.size == (size, size)
                 assert asset.mode == "RGBA"
-                assert asset.getpixel((0, 0))[3] == 0
+                corner = asset.getpixel((0, 0))
+                assert isinstance(corner, tuple)
+                assert len(corner) == 4
+                assert corner[3] == 0
 
 
 def test_executable_icon_contains_each_required_windows_size(tmp_path) -> None:

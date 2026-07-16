@@ -16,6 +16,7 @@ from inari.local_api.schemas import (
     LiveEventUpdateResponse,
     LiveSnapshotResponse,
     LiveUpdateMessage,
+    ManagedOnboardingStatusResponse,
     RuntimeEventResponse,
     SystemStatusResponse,
 )
@@ -34,6 +35,7 @@ from .models import (
     TraySnapshot,
 )
 from .single_instance import ActivationRequest, DeviceCenterInstance
+from .setup_assistant.gate import SetupGate
 from .tray_host import TrayHost, TrayMenuEntry, create_tray_host
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,8 @@ class TrayApiClient(DeviceCenterClient, Protocol):
         device_id: str | None = None,
         printer_name: str | None = None,
     ) -> JobResourceResponse: ...
+
+    def get_onboarding_status(self) -> ManagedOnboardingStatusResponse: ...
 
 
 class TrayControlBridge(Protocol):
@@ -73,7 +77,23 @@ class TrayControlBridge(Protocol):
 class SetupAssistantPresenter(Protocol):
     def show_with_invitation(self, invitation: str | None = None) -> None: ...
 
-    def dismiss(self) -> None: ...
+    def resume(self, status: ManagedOnboardingStatusResponse) -> None: ...
+
+    def show_unavailable(self, message: str, retry: Callable[[], None]) -> None: ...
+
+    def shutdown(self) -> None: ...
+
+
+class SetupAccessGate(Protocol):
+    def evaluate_background(self) -> None: ...
+
+    def begin(self, invitation: str | None = None) -> None: ...
+
+    def activate(self, invitation: str | None = None) -> None: ...
+
+    def complete(self, status: ManagedOnboardingStatusResponse) -> None: ...
+
+    def shutdown(self) -> None: ...
 
 
 class AgentTrayApplication:
@@ -88,6 +108,7 @@ class AgentTrayApplication:
         device_center_factory: Callable[..., DeviceCenterPresenter] | None = None,
         setup_assistant: SetupAssistantPresenter | None = None,
         setup_assistant_factory: Callable[..., SetupAssistantPresenter] | None = None,
+        setup_gate: SetupAccessGate | None = None,
         pending_invitation: str | None = None,
         desktop_instance: DeviceCenterInstance | None = None,
     ) -> None:
@@ -110,6 +131,7 @@ class AgentTrayApplication:
         self._setup_assistant_factory = (
             setup_assistant_factory or self._default_setup_assistant_factory
         )
+        self._setup_gate = setup_gate
         self._pending_invitation = pending_invitation
         self._desktop_instance = desktop_instance
         if desktop_instance is not None:
@@ -159,7 +181,7 @@ class AgentTrayApplication:
             snapshot=snapshot,
             menu_entries=self._build_menu(snapshot),
             on_ready=self._setup_background,
-            on_activate=self._open_device_center,
+            on_activate=self._request_device_center,
         )
 
     def _setup_background(self) -> None:
@@ -340,7 +362,7 @@ class AgentTrayApplication:
                 TrayMenuEntry("Open API Docs", callback=self._open_docs, default=True),
                 TrayMenuEntry(
                     "Open Device Center",
-                    callback=self._open_device_center,
+                    callback=self._request_device_center,
                 ),
                 TrayMenuEntry(
                     "Connect to Inari Server",
@@ -379,8 +401,11 @@ class AgentTrayApplication:
     def _open_docs(self, *_: object) -> None:
         webbrowser.open(self.links.docs_url)
 
-    def _open_device_center(self, *_: object) -> None:
+    def _show_device_center(self) -> None:
         self._get_device_center().show()
+
+    def _request_device_center(self, *_: object) -> None:
+        self._get_setup_gate().activate()
 
     def _open_jobs(self, *_: object) -> None:
         webbrowser.open(self.links.jobs_url)
@@ -421,7 +446,9 @@ class AgentTrayApplication:
             if self._device_center is not None:
                 self._device_center.close()
             if self._setup_assistant is not None:
-                self._setup_assistant.dismiss()
+                self._setup_assistant.shutdown()
+            if self._setup_gate is not None:
+                self._setup_gate.shutdown()
             self.bridge.shutdown()
         finally:
             if self._desktop_instance is not None:
@@ -430,11 +457,8 @@ class AgentTrayApplication:
                 self.host.stop()
 
     def _handle_activation(self, request: ActivationRequest) -> None:
-        if request.invitation is not None:
-            self._get_setup_assistant().show_with_invitation(request.invitation)
-            return
-        if request.focus:
-            self._open_device_center()
+        if request.invitation is not None or request.focus:
+            self._get_setup_gate().activate(request.invitation)
 
     def _print_test_page_sync(self) -> None:
         try:
@@ -523,24 +547,41 @@ class AgentTrayApplication:
 
     def _open_setup_assistant(self, *_: object) -> None:
         self._ensure_local_agent_started()
-        self._get_setup_assistant().show_with_invitation()
+        self._get_setup_gate().begin()
 
     def _offer_setup_assistant(self) -> None:
         invitation = self._pending_invitation
         self._pending_invitation = None
         if invitation is not None:
-            self._get_setup_assistant().show_with_invitation(invitation)
+            self._get_setup_gate().activate(invitation)
             return
-        from .qt_host import QtTrayHost
-        from .setup_assistant.window import (
-            mark_first_run_setup_offered,
-            should_offer_first_run_setup,
-        )
+        self._get_setup_gate().evaluate_background()
 
-        if not isinstance(self.host, QtTrayHost) or not should_offer_first_run_setup():
-            return
-        mark_first_run_setup_offered()
-        self._get_setup_assistant().show_with_invitation()
+    def _get_setup_gate(self) -> SetupAccessGate:
+        if self._setup_gate is None:
+            self._setup_gate = SetupGate(
+                installed=self.settings.profile == "installed",
+                client=self.client,
+                show_invitation=self._show_setup_invitation,
+                resume_setup=self._resume_setup,
+                show_unavailable=self._show_setup_unavailable,
+                open_device_center=self._show_device_center,
+            )
+        return self._setup_gate
+
+    def _show_setup_invitation(self, invitation: str | None) -> None:
+        self._ensure_local_agent_started()
+        self._get_setup_assistant().show_with_invitation(invitation)
+
+    def _resume_setup(self, status: ManagedOnboardingStatusResponse) -> None:
+        self._ensure_local_agent_started()
+        self._get_setup_assistant().resume(status)
+
+    def _show_setup_unavailable(self, message: str, retry: Callable[[], None]) -> None:
+        self._get_setup_assistant().show_unavailable(message, retry)
+
+    def _setup_completed(self, status: ManagedOnboardingStatusResponse) -> None:
+        self._get_setup_gate().complete(status)
 
     def _get_setup_assistant(self) -> SetupAssistantPresenter:
         if self._setup_assistant is None:
@@ -548,7 +589,7 @@ class AgentTrayApplication:
                 self.settings,
                 client=self.client,
                 bridge=self.bridge,
-                on_ready=self._open_device_center,
+                on_ready=self._setup_completed,
             )
         return self._setup_assistant
 
@@ -572,7 +613,7 @@ class AgentTrayApplication:
         *,
         client: TrayApiClient,
         bridge: TrayControlBridge,
-        on_ready: Callable[[], None] | None = None,
+        on_ready: Callable[[ManagedOnboardingStatusResponse], None] | None = None,
     ) -> SetupAssistantPresenter:
         from .setup_assistant import create_setup_assistant
         from .setup_assistant.window import SetupClient
