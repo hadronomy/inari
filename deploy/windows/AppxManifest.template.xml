@@ -24,7 +24,7 @@
         AppListEntry="default"
         DisplayName="Inari Device Center"
         Description="Private device operations"
-        BackgroundColor="#F2F2EF"
+        BackgroundColor="transparent"
         Square44x44Logo="Assets\Square44x44Logo.png"
         Square150x150Logo="Assets\Square150x150Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />

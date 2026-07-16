@@ -220,19 +220,46 @@ jobs:
           INARI_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
         run: ./deploy/windows/build.ps1
 
+      - name: Locate Windows release bundle
+        id: windows-release
+        shell: pwsh
+        run: |
+          $Checksums = @(Get-ChildItem target/release/windows/*/SHA256SUMS -File)
+          if ($Checksums.Count -ne 1) {
+            throw "Expected exactly one Windows release checksum manifest."
+          }
+          $Release = $Checksums[0].Directory
+          $Msix = @(Get-ChildItem $Release.FullName -Filter *.msix)
+          $Sbom = @(Get-ChildItem $Release.FullName -Filter *.spdx.json)
+          if ($Msix.Count -ne 1 -or $Sbom.Count -ne 1) {
+            throw "Expected exactly one MSIX and one SPDX document."
+          }
+          "directory=$($Release.FullName)" >> $env:GITHUB_OUTPUT
+          "checksums=$($Checksums[0].FullName)" >> $env:GITHUB_OUTPUT
+          "msix=$($Msix[0].FullName)" >> $env:GITHUB_OUTPUT
+          "sbom=$($Sbom[0].FullName)" >> $env:GITHUB_OUTPUT
+
       - name: Verify Windows machine trust
         shell: pwsh
         run: |
-          $Release = Get-ChildItem target/release/windows/* -Directory | Select-Object -First 1
+          $Release = "${{ steps.windows-release.outputs.directory }}"
+          $Root = Join-Path $Release "hadronomy-code-signing-root.cer"
+          $Issuer = Join-Path $Release "inari-code-signing-issuer.cer"
           ./deploy/windows/verify-machine-trust.ps1 `
-            -Package (Get-ChildItem $Release.FullName -Filter *.msix | Select-Object -ExpandProperty FullName) `
-            -RootCertificate (Join-Path $Release.FullName "hadronomy-code-signing-root.cer") `
-            -IssuerCertificate (Join-Path $Release.FullName "inari-code-signing-issuer.cer")
+            -Package "${{ steps.windows-release.outputs.msix }}" `
+            -RootCertificate $Root `
+            -IssuerCertificate $Issuer
 
-      - name: Attest MSIX provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+      - name: Attest release provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
-          subject-path: target/release/windows/*/*.msix
+          subject-checksums: ${{ steps.windows-release.outputs.checksums }}
+
+      - name: Attest MSIX software bill of materials
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: ${{ steps.windows-release.outputs.msix }}
+          sbom-path: ${{ steps.windows-release.outputs.sbom }}
 
       - name: Upload edge release bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

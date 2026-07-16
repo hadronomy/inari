@@ -14,11 +14,47 @@ platform owns upgrades and removal.
 
 ## Download and verify a release
 
+Each edge release has a small, stable set of assets:
+
+| Asset | Purpose |
+| --- | --- |
+| `Inari-Device-Center_<version>_x64.msix` | Signed Windows 11 package |
+| `Inari-Device-Center_<version>_x64.spdx.json` | SPDX software bill of materials for the packaged payload |
+| `SHA256SUMS` | SHA-256 digest of every release-owned asset |
+| `hadronomy-code-signing-root.cer` | Root certificate used to establish publisher trust |
+| `inari-code-signing-issuer.cer` | Inari’s code-signing issuing certificate |
+| `*-fingerprint.txt` | Human-readable SHA-256 fingerprints for the two certificates |
+
+The MSIX and its SBOM share one basename, including version and Windows
+architecture. `SHA256SUMS` is deliberately one aggregate manifest rather than a
+collection of per-file sidecars. GitHub presents release assets as a flat list;
+one manifest keeps that list short and works with standard checksum tools. The
+certificate names stay version-independent because they identify the signing
+hierarchy rather than an application build. Their exact bytes are still pinned
+by the release checksum manifest. Checksums catch corruption and accidental
+mixups; provenance and the Windows publisher signature establish origin.
+
 Download the MSIX, `SHA256SUMS`, both `.cer` files, and both fingerprint files
 from the same [GitHub release](https://github.com/hadronomy/inari/releases).
 Obtain the expected root fingerprint through a channel your organization already
 trusts. A fingerprint downloaded beside the package detects corruption; it does
 not establish trust on its own.
+
+GitHub also records keyless Sigstore provenance for every file listed in
+`SHA256SUMS` and binds the SPDX document to the MSIX. With the GitHub CLI
+installed, verify that the package came from this repository’s release workflow:
+
+```powershell
+$Package = Get-ChildItem .\Inari-Device-Center_*_x64.msix -File |
+    Select-Object -First 1
+gh attestation verify $Package.FullName --repo hadronomy/inari
+```
+
+To inspect the signed SBOM relationship as well, add
+`--predicate-type https://spdx.dev/Document/v2.3` to the same command.
+
+This proves the build origin; it does not replace the Windows publisher
+signature or your organization’s decision to trust the code-signing root.
 
 From PowerShell, compare the root certificate with that approved fingerprint:
 
@@ -36,8 +72,19 @@ Then compare the MSIX hash with the matching line in `SHA256SUMS`:
 ```powershell
 $Package = Get-ChildItem .\Inari-Device-Center_*_x64.msix -File |
     Select-Object -First 1
-Get-FileHash $Package.FullName -Algorithm SHA256
-Get-Content .\SHA256SUMS
+$ChecksumLine = @(
+    Get-Content .\SHA256SUMS |
+        Where-Object { $_ -match "  $([Regex]::Escape($Package.Name))$" }
+)
+if ($ChecksumLine.Count -ne 1) {
+    throw "SHA256SUMS does not contain exactly one entry for $($Package.Name)."
+}
+$ExpectedHash = ($ChecksumLine[0] -split '\s+', 2)[0]
+$ActualHash = (Get-FileHash $Package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($ActualHash -ne $ExpectedHash) {
+    throw "The downloaded MSIX does not match SHA256SUMS."
+}
+"SHA-256 verified for $($Package.Name)."
 ```
 
 Stop if either value differs.

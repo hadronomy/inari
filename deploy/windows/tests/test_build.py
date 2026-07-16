@@ -9,7 +9,9 @@ from deploy.windows.build import (
     DESKTOP6,
     FOUNDATION,
     UAP,
-    WINDOWS_ICON_SIZES,
+    WINDOWS_APP_LIST_ICON_SIZES,
+    WINDOWS_APP_LIST_VARIANTS,
+    WINDOWS_EXECUTABLE_ICON_SIZES,
     encode_package_metadata,
     prepare_package,
     write_executable_icon,
@@ -49,6 +51,7 @@ def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None
     visual = application.find(f"{{{UAP}}}VisualElements")
     assert visual is not None
     assert visual.attrib["DisplayName"] == "Inari Device Center"
+    assert visual.attrib["BackgroundColor"] == "transparent"
     service = application.find(
         f"{{{FOUNDATION}}}Extensions/{{{DESKTOP6}}}Extension/{{{DESKTOP6}}}Service"
     )
@@ -77,6 +80,14 @@ def test_package_tree_claims_payload_and_uses_canonical_assets(tmp_path) -> None
         with Image.open(output / "Assets" / filename) as asset:
             assert asset.size == size
 
+    for size in WINDOWS_APP_LIST_ICON_SIZES:
+        for variant in WINDOWS_APP_LIST_VARIANTS:
+            filename = f"Square44x44Logo.targetsize-{size}{variant}.png"
+            with Image.open(output / "Assets" / filename) as asset:
+                assert asset.size == (size, size)
+                assert asset.mode == "RGBA"
+                assert asset.getpixel((0, 0))[3] == 0
+
 
 def test_executable_icon_contains_each_required_windows_size(tmp_path) -> None:
     icon_path = tmp_path / "InariDeviceCenter.ico"
@@ -85,7 +96,9 @@ def test_executable_icon_contains_each_required_windows_size(tmp_path) -> None:
 
     with Image.open(icon_path) as icon:
         assert isinstance(icon, IcoImageFile)
-        assert icon.ico.sizes() == {(size, size) for size in WINDOWS_ICON_SIZES}
+        assert icon.ico.sizes() == {
+            (size, size) for size in WINDOWS_EXECUTABLE_ICON_SIZES
+        }
 
 
 def test_package_metadata_is_safe_across_windows_console_encodings(tmp_path) -> None:
