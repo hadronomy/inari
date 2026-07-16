@@ -17,7 +17,28 @@ from PySide6.QtSvg import QSvgRenderer
 FOUNDATION = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 UAP = "http://schemas.microsoft.com/appx/manifest/uap/windows10"
 DESKTOP6 = "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
-WINDOWS_ICON_SIZES = (16, 24, 32, 48, 256)
+WINDOWS_EXECUTABLE_ICON_SIZES = (16, 24, 32, 48, 256)
+WINDOWS_APP_LIST_ICON_SIZES = (
+    16,
+    20,
+    24,
+    30,
+    32,
+    36,
+    40,
+    48,
+    60,
+    64,
+    72,
+    80,
+    96,
+    256,
+)
+WINDOWS_APP_LIST_VARIANTS = (
+    "",
+    "_altform-unplated",
+    "_altform-lightunplated",
+)
 
 
 class PackageMetadata(BaseModel):
@@ -158,6 +179,11 @@ def _write_assets(destination: Path) -> None:
             destination / name
         )
 
+    for size in WINDOWS_APP_LIST_ICON_SIZES:
+        icon = _render_svg(BrandAsset.APP_ICON, width=size, height=size)
+        for variant in WINDOWS_APP_LIST_VARIANTS:
+            icon.save(destination / f"Square44x44Logo.targetsize-{size}{variant}.png")
+
     mark = _render_svg(BrandAsset.APP_ICON, width=150, height=150)
     wide = Image.new("RGBA", (310, 150), (242, 242, 239, 255))
     wide.alpha_composite(mark, ((wide.width - mark.width) // 2, 0))
@@ -168,7 +194,9 @@ def write_executable_icon(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     source = _render_svg(BrandAsset.APP_ICON, width=256, height=256)
     source.save(
-        destination, format="ICO", sizes=[(size, size) for size in WINDOWS_ICON_SIZES]
+        destination,
+        format="ICO",
+        sizes=[(size, size) for size in WINDOWS_EXECUTABLE_ICON_SIZES],
     )
 
 

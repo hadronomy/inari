@@ -172,7 +172,43 @@ function Get-EnhancedKeyUsage(
         Select-Object -First 1
 }
 
+function Write-PackageResourceIndex(
+    [string]$MakePri,
+    [string]$PackageRoot,
+    [string]$WorkingDirectory
+) {
+    $Configuration = Join-Path $WorkingDirectory "priconfig.xml"
+    $ResourceIndex = Join-Path $PackageRoot "resources.pri"
+    Write-Host "Indexing theme-aware Windows application assets."
+    try {
+        Invoke-BoundedProcess `
+            $MakePri `
+            @("createconfig", "/cf", $Configuration, "/dq", "lang-en-US", "/o") `
+            60 `
+            "MSIX resource configuration"
+        Invoke-BoundedProcess `
+            $MakePri `
+            @(
+                "new",
+                "/pr", $PackageRoot,
+                "/cf", $Configuration,
+                "/mn", (Join-Path $PackageRoot "AppxManifest.xml"),
+                "/of", $ResourceIndex,
+                "/o"
+            ) `
+            60 `
+            "MSIX resource indexing"
+    }
+    finally {
+        Remove-Item $Configuration -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path -LiteralPath $ResourceIndex -PathType Leaf)) {
+        throw "MSIX resource indexing did not produce resources.pri."
+    }
+}
+
 $MakeAppx = Require-WindowsSdkCommand "makeappx.exe"
+$MakePri = Require-WindowsSdkCommand "makepri.exe"
 $SignTool = Require-WindowsSdkCommand "signtool.exe"
 $OsslSignCode = Require-Command "osslsigncode"
 $Syft = Require-Command "syft"
@@ -317,6 +353,7 @@ try {
     $ReleaseDirectory = Join-Path $WindowsTarget $Metadata.version
     New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
     Write-Host "MSIX package tree ready for version $($Metadata.version)."
+    Write-PackageResourceIndex $MakePri $PackageRoot $WindowsTarget
 
     Write-Host "Validating the MSIX publisher identity."
     $ActualPublisherName = $PublisherCertificate.Subject.Normalize(
