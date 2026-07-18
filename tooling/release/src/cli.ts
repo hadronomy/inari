@@ -2,8 +2,10 @@ import { runCli } from "tegami/cli";
 
 import { release } from "./config.ts";
 import { readReleaseTargets } from "./targets.ts";
+import { resolveWorkflowPlan } from "./workflow.ts";
 
 const [command] = process.argv.slice(2);
+const publishLock = new URL("../../../.tegami/publish-lock.yaml", import.meta.url);
 
 switch (command) {
   case "preview":
@@ -16,14 +18,10 @@ switch (command) {
     await release.publish({ dryRun: true });
     break;
   case "targets":
-    console.log(
-      JSON.stringify(
-        await readReleaseTargets(new URL("../../../.tegami/publish-lock.yaml", import.meta.url)),
-      ),
-    );
+    console.log(JSON.stringify(await readReleaseTargets(publishLock)));
     break;
   case "workflow-plan":
-    console.log(JSON.stringify(await resolveWorkflowPlan()));
+    console.log(JSON.stringify(await resolveWorkflowPlan(release, publishLock)));
     break;
   default:
     await runCli(release);
@@ -52,20 +50,4 @@ async function status(): Promise<void> {
   const result = await release.getPublishStatus();
   console.log(result.reason ? `${result.status}: ${result.reason}` : result.status);
   if (result.status === "pending") process.exitCode = 1;
-}
-
-async function resolveWorkflowPlan(): Promise<{
-  publish: boolean;
-  edge: boolean;
-  controllerChart: boolean;
-}> {
-  const { status: publishStatus } = await release.getPublishStatus();
-  if (publishStatus !== "pending") {
-    return { publish: false, edge: false, controllerChart: false };
-  }
-
-  return {
-    publish: true,
-    ...(await readReleaseTargets(new URL("../../../.tegami/publish-lock.yaml", import.meta.url))),
-  };
 }
