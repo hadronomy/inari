@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..devices.service import DeviceCatalog
 from ..events import EventHub
-from ..models import JobEventRecord, JobKind, JobRecord, JobState
+from ..models import JobEventRecord, JobKind, JobRecord, JobState, RuntimeEventKind
 from ..repositories import JobRepository
 from .operations import (
     QueuedDeviceCommandOperation,
@@ -43,7 +43,7 @@ class JobService:
             command_kind=None,
             max_attempts=self.settings.job_max_attempts,
         )
-        await self.publish_event("job.queued", job)
+        await self.publish_event(RuntimeEventKind.JOB_QUEUED, job)
         return job
 
     async def enqueue_command(
@@ -63,7 +63,7 @@ class JobService:
             command_kind=canonical.command.kind.value,
             max_attempts=self.settings.job_max_attempts,
         )
-        await self.publish_event("job.queued", job)
+        await self.publish_event(RuntimeEventKind.JOB_QUEUED, job)
         return job
 
     def list_jobs(
@@ -96,10 +96,10 @@ class JobService:
                 f"Job {job_id!r} can no longer be cancelled once it is running or finished.",
                 status_code=409,
             )
-        await self.publish_event("job.cancelled", job)
+        await self.publish_event(RuntimeEventKind.JOB_CANCELLED, job)
         return job
 
-    async def publish_event(self, event_type: str, job: JobRecord) -> None:
+    async def publish_event(self, event_type: RuntimeEventKind, job: JobRecord) -> None:
         event = self.job_repository.append_event(
             job_id=job.id,
             event_type=event_type,

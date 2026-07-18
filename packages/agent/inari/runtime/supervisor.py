@@ -8,6 +8,7 @@ from ..config import AgentSettings
 from .devices.service import DeviceCatalog
 from .jobs.execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator
 from .jobs.service import JobService
+from .models import RuntimeEventKind
 from .store import RuntimeStore
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class RuntimeSupervisor:
         self.store.initialize()
         await self.device_catalog.refresh()
         for job in self.job_scheduler.job_repository.recover_expired():
-            await self.job_service.publish_event("job.recovered", job)
+            await self.job_service.publish_event(RuntimeEventKind.JOB_RECOVERED, job)
         self._tasks = [
             asyncio.create_task(self._discovery_loop(), name="inari-discovery"),
             asyncio.create_task(

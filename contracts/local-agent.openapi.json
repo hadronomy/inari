@@ -2054,9 +2054,12 @@
           "device.disconnected",
           "device.updated",
           "job.cancelled",
+          "job.dispatched",
           "job.failed",
           "job.queued",
+          "job.recovered",
           "job.retry_scheduled",
+          "job.running",
           "job.succeeded"
         ],
         "title": "RuntimeEventKind",

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from ...core.exceptions import AgentError
 from ...drivers import DeviceKind, DriverRegistry
 from ..events import EventHub
-from ..models import DeviceConnectionState, DeviceRecord, utc_now
+from ..models import DeviceConnectionState, DeviceRecord, RuntimeEventKind, utc_now
 from ..repositories import DeviceRepository
 
 logger = logging.getLogger(__name__)
@@ -36,13 +36,17 @@ class DiscoveryCoordinator:
             prior = previous.get(device.id)
             saved = self.device_repository.upsert(device)
             if prior is None:
-                await self._publish_device_event("device.connected", saved)
+                await self._publish_device_event(
+                    RuntimeEventKind.DEVICE_CONNECTED, saved
+                )
                 continue
             if prior.connection_state is DeviceConnectionState.OFFLINE:
-                await self._publish_device_event("device.connected", saved)
+                await self._publish_device_event(
+                    RuntimeEventKind.DEVICE_CONNECTED, saved
+                )
                 continue
             if _device_changed_materially(prior, saved):
-                await self._publish_device_event("device.updated", saved)
+                await self._publish_device_event(RuntimeEventKind.DEVICE_UPDATED, saved)
 
         for device_id, prior in previous.items():
             if (
@@ -54,7 +58,9 @@ class DiscoveryCoordinator:
                 DeviceConnectionState.OFFLINE, observed_at=observed_at
             )
             saved = self.device_repository.upsert(offline)
-            await self._publish_device_event("device.disconnected", saved)
+            await self._publish_device_event(
+                RuntimeEventKind.DEVICE_DISCONNECTED, saved
+            )
 
         return tuple(self.device_repository.list())
 
@@ -86,7 +92,7 @@ class DiscoveryCoordinator:
                 yield DeviceRecord.from_printer(printer, observed_at=observed_at)
 
     async def _publish_device_event(
-        self, event_type: str, device: DeviceRecord
+        self, event_type: RuntimeEventKind, device: DeviceRecord
     ) -> None:
         event = self.device_repository.append_event(
             device_id=device.id,

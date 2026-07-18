@@ -16,6 +16,8 @@ use crate::{
     transport,
 };
 
+const DEFAULT_AGENT_ENDPOINT: &str = "http://127.0.0.1:7310/";
+
 #[derive(Clone, Debug)]
 pub struct AgentClientOptions {
     pub endpoint: Url,
@@ -26,11 +28,26 @@ pub struct AgentClientOptions {
 impl Default for AgentClientOptions {
     fn default() -> Self {
         Self {
-            endpoint: Url::parse("http://127.0.0.1:8765/")
+            endpoint: Url::parse(DEFAULT_AGENT_ENDPOINT)
                 .expect("the built-in local endpoint is valid"),
             pairing_mode: PairingMode::default(),
             request_timeout: Duration::from_secs(10),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_to_the_agent_listener() {
+        assert_eq!(
+            AgentClientOptions::default()
+                .endpoint
+                .as_str(),
+            DEFAULT_AGENT_ENDPOINT
+        );
     }
 }
 

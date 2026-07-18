@@ -26,9 +26,12 @@ pub enum AgentEventKind {
     DeviceDisconnected,
     DeviceUpdated,
     JobQueued,
+    JobDispatched,
+    JobRunning,
     JobSucceeded,
     JobFailed,
     JobCancelled,
+    JobRecovered,
     JobRetryScheduled,
 }
 
@@ -129,12 +132,18 @@ enum WireEventKind {
     DeviceUpdated,
     #[serde(rename = "job.queued")]
     JobQueued,
+    #[serde(rename = "job.dispatched")]
+    JobDispatched,
+    #[serde(rename = "job.running")]
+    JobRunning,
     #[serde(rename = "job.succeeded")]
     JobSucceeded,
     #[serde(rename = "job.failed")]
     JobFailed,
     #[serde(rename = "job.cancelled")]
     JobCancelled,
+    #[serde(rename = "job.recovered")]
+    JobRecovered,
     #[serde(rename = "job.retry_scheduled")]
     JobRetryScheduled,
 }
@@ -158,9 +167,14 @@ impl TryFrom<WireEvent> for AgentEvent {
             },
             WireEventKind::DeviceUpdated => (AgentEventKind::DeviceUpdated, "Device updated"),
             WireEventKind::JobQueued => (AgentEventKind::JobQueued, "Job queued"),
+            WireEventKind::JobDispatched => (AgentEventKind::JobDispatched, "Job dispatched"),
+            WireEventKind::JobRunning => (AgentEventKind::JobRunning, "Job running"),
             WireEventKind::JobSucceeded => (AgentEventKind::JobSucceeded, "Job completed"),
             WireEventKind::JobFailed => (AgentEventKind::JobFailed, "Job failed"),
             WireEventKind::JobCancelled => (AgentEventKind::JobCancelled, "Job cancelled"),
+            WireEventKind::JobRecovered => {
+                (AgentEventKind::JobRecovered, "Job recovered after restart")
+            },
             WireEventKind::JobRetryScheduled => {
                 (AgentEventKind::JobRetryScheduled, "Job retry scheduled")
             },
@@ -180,20 +194,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn event_fixture_maps_into_curated_domain_types() {
-        let message: LiveMessage =
+    fn event_fixture_maps_every_runtime_event_into_curated_domain_types() {
+        let messages: Vec<LiveMessage> =
             serde_json::from_str(include_str!("../../../contracts/local-agent.events.json"))
                 .expect("fixture is valid");
-        let LiveMessage::EventUpdate { event } = message else {
-            panic!("expected event update");
-        };
-        let event = AgentEvent::try_from(event).expect("event maps");
+        let events = messages
+            .into_iter()
+            .map(|message| {
+                let LiveMessage::EventUpdate { event } = message else {
+                    panic!("expected event update");
+                };
+                AgentEvent::try_from(event).expect("event maps")
+            })
+            .collect::<Vec<_>>();
 
-        assert_eq!(event.sequence, 42);
-        assert_eq!(event.kind, AgentEventKind::DeviceConnected);
         assert_eq!(
-            event.resource,
+            events
+                .iter()
+                .map(|event| event.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                AgentEventKind::DeviceConnected,
+                AgentEventKind::DeviceDisconnected,
+                AgentEventKind::DeviceUpdated,
+                AgentEventKind::JobQueued,
+                AgentEventKind::JobDispatched,
+                AgentEventKind::JobRunning,
+                AgentEventKind::JobSucceeded,
+                AgentEventKind::JobFailed,
+                AgentEventKind::JobCancelled,
+                AgentEventKind::JobRecovered,
+                AgentEventKind::JobRetryScheduled,
+            ]
+        );
+        assert_eq!(
+            events[0].resource,
             EventResource::Device(DeviceId::parse("dev_front_desk").expect("valid device id"))
+        );
+        assert_eq!(
+            events[3].resource,
+            EventResource::Job(JobId::parse("job_front_desk").expect("valid job id"))
         );
     }
 }
