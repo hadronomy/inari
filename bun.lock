@@ -21,10 +21,13 @@
     "tooling/release": {
       "name": "@inari/release",
       "dependencies": {
+        "@inari/release-core": "workspace:*",
         "@inari/tegami-helm": "workspace:*",
         "@inari/tegami-msix": "workspace:*",
+        "@rainbowatcher/toml-edit-js": "0.6.5",
         "@tegami/pip": "1.2.5",
         "tegami": "1.2.5",
+        "tinyexec": "1.2.4",
         "yaml": "2.9.0",
         "zod": "4.4.3",
       },

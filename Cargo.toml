@@ -31,6 +31,11 @@ version     = "0.1.0-alpha.1"
 [workspace.dependencies]
 axum = { version = "0.8", features = ["http1", "json", "macros", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
+async-tungstenite = { version = "0.34", default-features = false, features = [
+  "tokio-runtime",
+  "url",
+] }
+async-channel = "2"
 base64 = "0.22"
 bytes = "1.10"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
@@ -38,24 +43,44 @@ clap = { version = "4.6", features = ["derive"] }
 config = "0.14"
 console_error_panic_hook = "0.1"
 data-encoding = "2"
+directories = "6"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core", "zeroize"] }
+fastrand = "2"
 futures-util = "0.3"
 getrandom = "0.3"
+gpui = "=0.2.2"
+gpui-component = "=0.5.1"
 hex = "0.4"
 html-escape = "0.2"
 http = "1.3"
 http-body = "1"
 human-panic = "2.0.8"
 humantime-serde = "1.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 jsonwebtoken = { version = "10.4", default-features = false, features = ["rust_crypto", "use_pem"] }
+keyring = "4"
 leptos = { version = "0.8", features = ["nonce"] }
 leptos_axum = "0.8"
 leptos_meta = { version = "0.8", features = ["nonce"] }
 leptos_router = "0.8"
 mime = "0.3"
 openidconnect = { version = "4.0", default-features = false, features = ["reqwest", "rustls-tls"] }
+open = "5"
+pkcs8 = { version = "0.10", features = ["pem"] }
+progenitor = "=0.14.0"
+progenitor-client = "=0.14.0"
 qrcode = "0.14"
 rayon = "1.10"
+raw-window-handle = "0.6"
+reqwest = { version = "0.13", default-features = false, features = [
+  "json",
+  "query",
+  "rustls",
+  "stream",
+] }
+rust-embed = "8"
 secrecy = "0.10"
+service-manager = "=0.11.0"
 sea-orm = { version = "=2.0.0-rc.42", default-features = false, features = [
   "macros",
   "runtime-tokio-rustls",
@@ -84,6 +109,7 @@ thiserror = "2"
 time = "0.3"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = "0.1"
+tokio-util = "0.7"
 toml = "0.8"
 tower = { version = "0.5", features = ["timeout", "util"] }
 tower-sessions = "=0.15.0"
@@ -100,12 +126,15 @@ tower-http = { version = "0.6", features = [
   "normalize-path",
 ] }
 tracing = "0.1"
+tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tray-icon = { version = "=0.24.1", default-features = false, features = ["gtk"] }
 url = { version = "2", features = ["serde"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Clipboard", "Navigator", "Window"] }
 x509-parser = { version = "0.18", features = ["verify"] }
+zeroize = { version = "1", features = ["derive"] }
 zenoh = "1"
 
 

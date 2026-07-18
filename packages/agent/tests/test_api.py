@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import anyio
+import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,7 @@ from inari.drivers import (
 from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.local_api.app import create_app
+from inari.local_api.schemas import RuntimeEventResponse
 from inari.printing.protocols import (
     PrinterCapabilities,
     PrinterDevice,
@@ -370,6 +372,19 @@ async def test_redoc_route_is_disabled(mocker) -> None:
         response = await client.get("/redoc")
 
     assert response.status_code == 404
+
+
+def test_committed_event_fixture_matches_the_python_contract() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[3] / "contracts" / "local-agent.events.json"
+    )
+    envelope = json.loads(fixture.read_text(encoding="utf-8"))
+
+    event = RuntimeEventResponse.model_validate(envelope["event"])
+
+    assert envelope["kind"] == "event_update"
+    assert event.sequence == 42
+    assert event.resource_id == "dev_front_desk"
 
 
 @pytest.mark.anyio

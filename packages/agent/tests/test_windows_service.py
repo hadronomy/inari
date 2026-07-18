@@ -54,7 +54,7 @@ def test_service_cli_uses_handle_command_line_for_management_commands(
         argv=["inari-windows-service", "install"],
     )
     fake_win32serviceutil.SetServiceCustomOption.assert_called_once_with(
-        "InariService",
+        "InariAgent",
         "ConfigPath",
         str((tmp_path / "agent.toml").resolve()),
     )
@@ -98,7 +98,7 @@ def test_service_custom_option_round_trip_uses_pywin32_storage(
     set_windows_service_config_path(config_path)
 
     fake_win32serviceutil.SetServiceCustomOption.assert_called_once_with(
-        "InariService",
+        "InariAgent",
         "ConfigPath",
         str(config_path.resolve()),
     )

@@ -267,6 +267,7 @@ jobs:
         with:
           name: inari-windows-release
           path: |
+            target/release/windows/*/*.exe
             target/release/windows/*/*.msix
             target/release/windows/*/*.spdx.json
             target/release/windows/*/*.cer

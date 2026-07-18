@@ -59,14 +59,19 @@ constructor injection and do not depend on the container framework.
 
 ### Device Center
 
-`packages/agent_tray` is the user-session desktop application. It observes and
-controls the service through the local API, presents setup and device state, and
-owns the tray icon. It never becomes the hardware service and never connects to
-Zenoh directly.
+`crates/inari-device-center` is the native GPUI application in the user
+session. It presents setup and device state, owns the tray icon, and controls
+the service through the local API. It never becomes the hardware service and
+never connects to Zenoh directly.
 
-Installed Windows systems use service-control mode. Development can use spawn
-mode, where the tray owns a child agent process. Closing the installed tray must
-not stop the Windows service.
+`crates/inari-agent-client` owns that local boundary: generated HTTP transport,
+curated domain types, event-stream supervision, protected client identity, and
+pairing. Transport models remain private so that the application is not shaped
+by OpenAPI implementation details.
+
+The installed application controls the operating-system service. Closing Device
+Center hides the window while the tray remains active; explicitly quitting it
+stops only the desktop client and leaves the agent running.
 
 ### Drivers and runtime
 
@@ -122,7 +127,7 @@ The [gateway protocol](docs/gateway_protocol.md) is the canonical wire contract.
 
 - Local browser and desktop clients authenticate to the loopback agent with
   paired identities and short-lived tokens.
-- The tray is a client of the agent, not a privileged in-process extension.
+- Device Center is a client of the agent, not a privileged in-process extension.
 - The controller authenticates people with OIDC and authorizes typed roles.
 - Agent enrollment consumes one-use credentials and binds them to cryptographic
   identity.
@@ -188,7 +193,7 @@ authorization, and protocol transitions.
 ## Related documentation
 
 - [Agent guide](packages/agent/README.md)
-- [Device Center guide](packages/agent_tray/README.md)
+- [Device Center guide](crates/inari-device-center/README.md)
 - [Gateway protocol](docs/gateway_protocol.md)
 - [Managed deployment](docs/managed_gateway_stacks.md)
 - [Controller database](docs/controller_database.md)

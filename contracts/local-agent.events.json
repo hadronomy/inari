@@ -1,0 +1,16 @@
+{
+  "kind": "event_update",
+  "status": {
+    "service": "running"
+  },
+  "event": {
+    "sequence": 42,
+    "resource_kind": "device",
+    "resource_id": "dev_front_desk",
+    "event_type": "device.connected",
+    "occurred_at": "2026-07-17T10:00:00Z",
+    "payload": {
+      "transport": "usb"
+    }
+  }
+}

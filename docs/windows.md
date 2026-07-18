@@ -18,6 +18,7 @@ Each edge release has a small, stable set of assets:
 
 | Asset | Purpose |
 | --- | --- |
+| `Inari-Device-Center_<version>_x64.exe` | Signed native Device Center binary included in the MSIX |
 | `Inari-Device-Center_<version>_x64.msix` | Signed Windows 11 package |
 | `Inari-Device-Center_<version>_x64.spdx.json` | SPDX software bill of materials for the packaged payload |
 | `SHA256SUMS` | SHA-256 digest of every release-owned asset |
@@ -26,7 +27,10 @@ Each edge release has a small, stable set of assets:
 | `*-fingerprint.txt` | Human-readable SHA-256 fingerprints for the two certificates |
 
 The MSIX and its SBOM share one basename, including version and Windows
-architecture. `SHA256SUMS` is deliberately one aggregate manifest rather than a
+architecture; the native executable uses the same stem. Install the MSIX for a
+complete supported installation—the standalone executable is published for
+inspection and managed diagnostics, and does not install the agent service.
+`SHA256SUMS` is deliberately one aggregate manifest rather than a
 collection of per-file sidecars. GitHub presents release assets as a flat list;
 one manifest keeps that list short and works with standard checksum tools. The
 certificate names stay version-independent because they identify the signing

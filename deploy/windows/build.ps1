@@ -213,6 +213,7 @@ $SignTool = Require-WindowsSdkCommand "signtool.exe"
 $OsslSignCode = Require-Command "osslsigncode"
 $Syft = Require-Command "syft"
 $Uv = Require-Command "uv"
+$Cargo = Require-Command "cargo"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
 $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
 $RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
@@ -328,7 +329,7 @@ try {
     & $Uv run --no-sync python deploy/windows/build.py icon --output $ExecutableIcon
     Assert-NativeCommandSucceeded $LASTEXITCODE "Windows icon generation"
 
-    Write-Host "Building the Device Center and agent service executables."
+    Write-Host "Building the frozen agent service."
     & $Uv run --no-sync pyinstaller `
         --noconfirm `
         --clean `
@@ -337,16 +338,25 @@ try {
         $BundleSpec
     Assert-NativeCommandSucceeded $LASTEXITCODE "PyInstaller bundle creation"
 
-    $Payload = Join-Path $PyInstallerTarget "dist\InariDeviceCenter"
-    Assert-FrozenRuntime `
-        (Join-Path $Payload "InariDeviceCenter.exe") `
-        "Device Center" `
-        (Join-Path $PyInstallerTarget "device-center-runtime.txt")
+    $Payload = Join-Path $PyInstallerTarget "dist\InariAgentService"
     Assert-FrozenRuntime `
         (Join-Path $Payload "InariAgentService.exe") `
         "Agent service" `
         (Join-Path $PyInstallerTarget "agent-service-runtime.txt")
-    Write-Host "Moving the frozen bundle into the MSIX package tree."
+
+    Write-Host "Building the native GPUI Device Center."
+    & $Cargo build --locked --release --package inari-device-center
+    Assert-NativeCommandSucceeded $LASTEXITCODE "Device Center build"
+    $DeviceCenterExecutable = Join-Path $WorkspaceRoot "target\release\InariDeviceCenter.exe"
+    if (-not (Test-Path -LiteralPath $DeviceCenterExecutable -PathType Leaf)) {
+        throw "The Device Center build did not produce '$DeviceCenterExecutable'."
+    }
+    Copy-Item `
+        -LiteralPath $DeviceCenterExecutable `
+        -Destination (Join-Path $Payload "InariDeviceCenter.exe") `
+        -Force
+
+    Write-Host "Combining the native client and frozen service in the MSIX package tree."
     $MetadataJson = & $Uv run --no-sync python deploy/windows/build.py package --payload $Payload --output $PackageRoot
     Assert-NativeCommandSucceeded $LASTEXITCODE "MSIX package preparation"
     $Metadata = $MetadataJson | ConvertFrom-Json
@@ -392,6 +402,11 @@ try {
     }
 
     $ArtifactBase = "Inari-Device-Center_$($Metadata.version)_x64"
+    $DeviceCenterArtifact = Join-Path $ReleaseDirectory "$ArtifactBase.exe"
+    Copy-Item `
+        -LiteralPath (Join-Path $PackageRoot "InariDeviceCenter.exe") `
+        -Destination $DeviceCenterArtifact `
+        -Force
     $MsixPath = Join-Path $ReleaseDirectory "$ArtifactBase.msix"
     Write-Host "Packing the signed payload into $ArtifactBase.msix."
     $MakeAppxArguments = @("pack", "/d", $PackageRoot, "/p", $MsixPath, "/o")
@@ -429,6 +444,7 @@ try {
         -Encoding utf8NoBOM
 
     $Assets = @(
+        $DeviceCenterArtifact,
         $MsixPath,
         $SbomPath,
         $PublishedRoot,

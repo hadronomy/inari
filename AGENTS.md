@@ -66,15 +66,17 @@ The main components are:
 
 - `packages/agent`
   The local IoT agent, API server, runtime, managed gateway, security, and service logic.
-- `packages/agent_tray`
-  The desktop tray companion. It is not the service/daemon.
+- `crates/inari-agent-client`
+  The typed local-agent transport, protected identity, and event-stream boundary.
+- `crates/inari-device-center`
+  The native GPUI desktop and tray companion. It is not the service/daemon.
 - `docs/`
   Protocol, deployment, and behavior documentation.
 
 High-level architecture:
 
 - the agent is the long-running background service
-- the tray is a user-session companion UI
+- Device Center is a user-session companion UI
 - Odoo or the controller talks to the agent, not directly to hardware
 - managed gateway enrollment happens over HTTPS
 - steady-state managed gateway traffic uses Zenoh
@@ -86,14 +88,14 @@ These are not suggestions.
 ### 3.1 Agent vs Tray
 
 - The agent is the service/daemon.
-- The tray is never the service.
-- The tray may control the service, monitor it, and auto-start at login, but it remains a user-session app.
+- Device Center is never the service.
+- Device Center may control the service, monitor it, and auto-start at login, but it remains a user-session app.
 
 Platform model:
 
-- Windows: agent as Windows Service, tray as startup/login app
-- Linux: agent as `systemd` service, tray as desktop autostart app
-- macOS: agent as LaunchDaemon or LaunchAgent depending on scope, tray as login/session app
+- Windows: agent as Windows Service, Device Center as startup/login app
+- Linux: agent as `systemd` service, Device Center as desktop autostart app
+- macOS: agent as LaunchDaemon or LaunchAgent depending on scope, Device Center as login/session app
 
 ### 3.2 Composition Root
 

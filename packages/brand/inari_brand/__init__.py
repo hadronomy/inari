@@ -10,6 +10,7 @@ class BrandAsset(StrEnum):
     """Stable names for assets consumed by product surfaces."""
 
     APP_ICON = "inari-app-icon.svg"
+    APP_ICON_1024 = "inari-icon-1024.png"
     FAVICON_DEVELOPMENT = "favicon-development.svg"
     FAVICON_PREVIEW = "favicon-preview.svg"
     FAVICON_PRODUCTION = "favicon.svg"

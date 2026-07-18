@@ -17,8 +17,6 @@ EXECUTABLE_ICON = (
 )
 PYTHON_PATHS = [
     str(WORKSPACE_ROOT / "packages" / "agent"),
-    str(WORKSPACE_ROOT / "packages" / "agent_tray"),
-    str(WORKSPACE_ROOT / "packages" / "brand"),
 ]
 WINDOWS_MODULES = [
     "pywintypes",
@@ -66,31 +64,10 @@ agent_data = collect_data_files(
     "inari",
     includes=["db/alembic/script.py.mako"],
 )
-device_center_analysis = analyze(
-    "device_center_entry.py",
-    datas=agent_data + collect_data_files("inari_brand"),
-    hiddenimports=INARI_LAZY_MODULES + INARI_MIGRATIONS + WINDOWS_MODULES,
-)
 agent_service_analysis = analyze(
     "agent_service_entry.py",
     datas=agent_data,
     hiddenimports=INARI_LAZY_MODULES + INARI_MIGRATIONS + WINDOWS_MODULES,
-)
-
-device_center_archive = PYZ(device_center_analysis.pure)
-device_center = EXE(
-    device_center_archive,
-    device_center_analysis.scripts,
-    [],
-    exclude_binaries=True,
-    name="InariDeviceCenter",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    console=False,
-    disable_windowed_traceback=False,
-    icon=str(EXECUTABLE_ICON),
 )
 
 agent_service_archive = PYZ(agent_service_analysis.pure)
@@ -110,13 +87,10 @@ agent_service = EXE(
 )
 
 bundle = COLLECT(
-    device_center,
     agent_service,
-    device_center_analysis.binaries,
-    device_center_analysis.datas,
     agent_service_analysis.binaries,
     agent_service_analysis.datas,
     strip=False,
     upx=False,
-    name="InariDeviceCenter",
+    name="InariAgentService",
 )

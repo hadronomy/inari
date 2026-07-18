@@ -26,7 +26,12 @@ from .devices import (
     PrinterDetailsResponse,
 )
 from .errors import ErrorItemResponse, ErrorResponse, ErrorSourceResponse
-from .events import DeviceEventCollectionResponse, RuntimeEventResponse
+from .events import (
+    DeviceEventCollectionResponse,
+    RuntimeEventKind,
+    RuntimeEventResponse,
+    RuntimeResourceKind,
+)
 from .gateway import (
     GatewayIdentityResponse,
     GatewayUpstreamStatusResponse,
@@ -141,6 +146,8 @@ __all__ = [
     "RawDocumentContentInput",
     "ReceiptImageContentInput",
     "RuntimeEventResponse",
+    "RuntimeEventKind",
+    "RuntimeResourceKind",
     "ServiceDescriptorResponse",
     "StructuredReceiptContentInput",
     "SystemStatusResponse",

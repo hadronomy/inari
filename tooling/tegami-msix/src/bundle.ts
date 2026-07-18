@@ -18,6 +18,7 @@ export interface ReleaseBundle {
 export function artifactNames(pkg: Pick<MsixPackage, "version">): string[] {
   const base = `Inari-Device-Center_${pkg.version}_x64`;
   return [
+    `${base}.exe`,
     `${base}.msix`,
     `${base}.spdx.json`,
     "hadronomy-code-signing-root.cer",

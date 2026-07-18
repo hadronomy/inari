@@ -1,0 +1,3275 @@
+{
+  "components": {
+    "schemas": {
+      "AccessScope": {
+        "enum": [
+          "system:read",
+          "devices:read",
+          "events:read",
+          "jobs:read",
+          "jobs:submit",
+          "commands:execute",
+          "admin:read",
+          "admin:write"
+        ],
+        "title": "AccessScope",
+        "type": "string"
+      },
+      "AuthenticatedPrincipalResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalResponse"
+          }
+        },
+        "required": [
+          "principal"
+        ],
+        "title": "AuthenticatedPrincipalResponse",
+        "type": "object"
+      },
+      "BinaryContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "base64": {
+            "title": "Base64",
+            "type": "string"
+          },
+          "declared_mime_type": {
+            "nullable": true,
+            "title": "Declared Mime Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base64"
+        ],
+        "title": "BinaryContentInput",
+        "type": "object"
+      },
+      "CutMode": {
+        "enum": [
+          "full",
+          "partial"
+        ],
+        "title": "CutMode",
+        "type": "string"
+      },
+      "CutPaperCommandInput": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "default": "cut_paper",
+            "enum": [
+              "cut_paper"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/CutMode",
+            "default": "partial"
+          }
+        },
+        "title": "CutPaperCommandInput",
+        "type": "object"
+      },
+      "DefaultDeviceSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "DefaultDeviceSummaryResponse",
+        "type": "object"
+      },
+      "DeviceClass": {
+        "enum": [
+          "physical",
+          "virtual"
+        ],
+        "title": "DeviceClass",
+        "type": "string"
+      },
+      "DeviceCommandKind": {
+        "enum": [
+          "open_cash_drawer",
+          "print_test_page",
+          "feed_lines",
+          "feed_dots",
+          "cut_paper"
+        ],
+        "title": "DeviceCommandKind",
+        "type": "string"
+      },
+      "DeviceCommandRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "discriminator": {
+              "mapping": {
+                "cut_paper": "#/components/schemas/CutPaperCommandInput",
+                "feed_dots": "#/components/schemas/FeedDotsCommandInput",
+                "feed_lines": "#/components/schemas/FeedLinesCommandInput",
+                "open_cash_drawer": "#/components/schemas/OpenCashDrawerCommandInput",
+                "print_test_page": "#/components/schemas/PrintTestPageCommandInput"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OpenCashDrawerCommandInput"
+              },
+              {
+                "$ref": "#/components/schemas/PrintTestPageCommandInput"
+              },
+              {
+                "$ref": "#/components/schemas/FeedLinesCommandInput"
+              },
+              {
+                "$ref": "#/components/schemas/FeedDotsCommandInput"
+              },
+              {
+                "$ref": "#/components/schemas/CutPaperCommandInput"
+              }
+            ],
+            "title": "Command"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DeviceTargetInput"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "DeviceCommandRequest",
+        "type": "object"
+      },
+      "DeviceConnectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "first_seen_at": {
+            "format": "date-time",
+            "title": "First Seen At",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DeviceConnectionState"
+          }
+        },
+        "required": [
+          "state",
+          "first_seen_at",
+          "last_seen_at",
+          "observed_at"
+        ],
+        "title": "DeviceConnectionResponse",
+        "type": "object"
+      },
+      "DeviceConnectionState": {
+        "enum": [
+          "online",
+          "offline"
+        ],
+        "title": "DeviceConnectionState",
+        "type": "string"
+      },
+      "DeviceDirectoryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceResponse"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DeviceDirectorySummaryResponse"
+          }
+        },
+        "required": [
+          "devices",
+          "summary"
+        ],
+        "title": "DeviceDirectoryResponse",
+        "type": "object"
+      },
+      "DeviceDirectorySummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "default_device": {
+            "$ref": "#/components/schemas/DefaultDeviceSummaryResponse",
+            "nullable": true
+          },
+          "kind_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Kind Counts",
+            "type": "object"
+          },
+          "offline_count": {
+            "title": "Offline Count",
+            "type": "integer"
+          },
+          "online_count": {
+            "title": "Online Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "online_count",
+          "offline_count",
+          "kind_counts"
+        ],
+        "title": "DeviceDirectorySummaryResponse",
+        "type": "object"
+      },
+      "DeviceEventCollectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeEventResponse"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "DeviceEventCollectionResponse",
+        "type": "object"
+      },
+      "DeviceKind": {
+        "enum": [
+          "printer",
+          "scanner",
+          "scale",
+          "display"
+        ],
+        "title": "DeviceKind",
+        "type": "string"
+      },
+      "DeviceResourceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/DeviceResponse"
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "title": "DeviceResourceResponse",
+        "type": "object"
+      },
+      "DeviceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/DeviceConnectionResponse"
+          },
+          "device_class": {
+            "$ref": "#/components/schemas/DeviceClass"
+          },
+          "driver": {
+            "$ref": "#/components/schemas/DriverResponse",
+            "nullable": true
+          },
+          "driver_key": {
+            "title": "Driver Key",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DeviceKind"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "printer": {
+            "$ref": "#/components/schemas/PrinterDetailsResponse",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "device_class",
+          "name",
+          "driver_key",
+          "connection"
+        ],
+        "title": "DeviceResponse",
+        "type": "object"
+      },
+      "DeviceTargetInput": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "nullable": true,
+            "title": "Device Id",
+            "type": "string"
+          },
+          "printer_name": {
+            "nullable": true,
+            "title": "Printer Name",
+            "type": "string"
+          }
+        },
+        "title": "DeviceTargetInput",
+        "type": "object"
+      },
+      "DriverResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DeviceKind"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "display_name",
+          "kind",
+          "platform"
+        ],
+        "title": "DriverResponse",
+        "type": "object"
+      },
+      "FeedDotsCommandInput": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "exclusiveMinimum": true,
+            "maximum": 255.0,
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "kind": {
+            "default": "feed_dots",
+            "enum": [
+              "feed_dots"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "FeedDotsCommandInput",
+        "type": "object"
+      },
+      "FeedLinesCommandInput": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "exclusiveMinimum": true,
+            "maximum": 24.0,
+            "minimum": 0.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "kind": {
+            "default": "feed_lines",
+            "enum": [
+              "feed_lines"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "FeedLinesCommandInput",
+        "type": "object"
+      },
+      "GatewayExposure": {
+        "enum": [
+          "loopback",
+          "lan"
+        ],
+        "title": "GatewayExposure",
+        "type": "string"
+      },
+      "GatewayIdentityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "algorithm": {
+            "title": "Algorithm",
+            "type": "string"
+          },
+          "certificate_pem": {
+            "nullable": true,
+            "title": "Certificate Pem",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "exposure": {
+            "$ref": "#/components/schemas/GatewayExposure"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/GatewayMode"
+          },
+          "public_jwk": {
+            "additionalProperties": true,
+            "title": "Public Jwk",
+            "type": "object"
+          }
+        },
+        "required": [
+          "agent_id",
+          "key_id",
+          "algorithm",
+          "public_jwk",
+          "created_at",
+          "mode",
+          "exposure"
+        ],
+        "title": "GatewayIdentityResponse",
+        "type": "object"
+      },
+      "GatewayMode": {
+        "enum": [
+          "standalone",
+          "managed"
+        ],
+        "title": "GatewayMode",
+        "type": "string"
+      },
+      "GatewayUpstreamStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "nullable": true,
+            "title": "Base Url",
+            "type": "string"
+          },
+          "certificate_bootstrap_pending": {
+            "default": false,
+            "title": "Certificate Bootstrap Pending",
+            "type": "boolean"
+          },
+          "certificate_lifecycle": {
+            "$ref": "#/components/schemas/ManagedCertificateStatusResponse",
+            "nullable": true
+          },
+          "certificate_mode": {
+            "$ref": "#/components/schemas/UpstreamCertificateMode"
+          },
+          "client_certificate_present": {
+            "default": false,
+            "title": "Client Certificate Present",
+            "type": "boolean"
+          },
+          "controller_instance_id": {
+            "nullable": true,
+            "title": "Controller Instance Id",
+            "type": "string"
+          },
+          "controller_name": {
+            "nullable": true,
+            "title": "Controller Name",
+            "type": "string"
+          },
+          "data_plane_kind": {
+            "$ref": "#/components/schemas/UpstreamDataPlaneKind",
+            "nullable": true
+          },
+          "data_plane_namespace": {
+            "nullable": true,
+            "title": "Data Plane Namespace",
+            "type": "string"
+          },
+          "data_plane_session_mode": {
+            "$ref": "#/components/schemas/ZenohSessionMode",
+            "nullable": true
+          },
+          "detail": {
+            "nullable": true,
+            "title": "Detail",
+            "type": "string"
+          },
+          "edge_provider": {
+            "$ref": "#/components/schemas/UpstreamEdgeProvider"
+          },
+          "enrolled_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Enrolled At",
+            "type": "string"
+          },
+          "failed_data_plane_connection_count": {
+            "default": 0,
+            "title": "Failed Data Plane Connection Count",
+            "type": "integer"
+          },
+          "failed_status_publication_count": {
+            "default": 0,
+            "title": "Failed Status Publication Count",
+            "type": "integer"
+          },
+          "last_applied_controller_sequence": {
+            "nullable": true,
+            "title": "Last Applied Controller Sequence",
+            "type": "integer"
+          },
+          "last_command_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Command At",
+            "type": "string"
+          },
+          "last_command_id": {
+            "nullable": true,
+            "title": "Last Command Id",
+            "type": "string"
+          },
+          "last_data_plane_activity_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Data Plane Activity At",
+            "type": "string"
+          },
+          "last_error": {
+            "nullable": true,
+            "title": "Last Error",
+            "type": "string"
+          },
+          "last_status_published_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Status Published At",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/GatewayMode"
+          },
+          "mutual_tls_mode": {
+            "$ref": "#/components/schemas/MutualTlsMode"
+          },
+          "protocol_version": {
+            "nullable": true,
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "retry_delay_seconds": {
+            "nullable": true,
+            "title": "Retry Delay Seconds",
+            "type": "number"
+          },
+          "state": {
+            "$ref": "#/components/schemas/UpstreamConnectionState"
+          },
+          "successful_data_plane_connection_count": {
+            "default": 0,
+            "title": "Successful Data Plane Connection Count",
+            "type": "integer"
+          },
+          "successful_status_publication_count": {
+            "default": 0,
+            "title": "Successful Status Publication Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "state",
+          "certificate_mode",
+          "edge_provider",
+          "mutual_tls_mode"
+        ],
+        "title": "GatewayUpstreamStatusResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HtmlDocumentContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "document_name": {
+            "default": "HTML Document",
+            "title": "Document Name",
+            "type": "string"
+          },
+          "html": {
+            "title": "Html",
+            "type": "string"
+          },
+          "kind": {
+            "default": "html",
+            "enum": [
+              "html"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "title": "HtmlDocumentContentInput",
+        "type": "object"
+      },
+      "JobAttemptResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_number": {
+            "title": "Attempt Number",
+            "type": "integer"
+          },
+          "error": {
+            "$ref": "#/components/schemas/JobErrorResponse",
+            "nullable": true
+          },
+          "finished_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          }
+        },
+        "required": [
+          "id",
+          "attempt_number",
+          "state",
+          "started_at"
+        ],
+        "title": "JobAttemptResponse",
+        "type": "object"
+      },
+      "JobCollectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueSummaryResponse"
+          }
+        },
+        "required": [
+          "jobs",
+          "queue"
+        ],
+        "title": "JobCollectionResponse",
+        "type": "object"
+      },
+      "JobErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "JobErrorResponse",
+        "type": "object"
+      },
+      "JobExecutionResultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_written": {
+            "title": "Bytes Written",
+            "type": "integer"
+          },
+          "device_job_id": {
+            "nullable": true,
+            "title": "Device Job Id",
+            "type": "integer"
+          },
+          "target": {
+            "$ref": "#/components/schemas/JobExecutionTargetResponse"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/PrinterTransport"
+          }
+        },
+        "required": [
+          "target",
+          "transport",
+          "bytes_written"
+        ],
+        "title": "JobExecutionResultResponse",
+        "type": "object"
+      },
+      "JobExecutionTargetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "nullable": true,
+            "title": "Device Id",
+            "type": "string"
+          },
+          "driver_key": {
+            "title": "Driver Key",
+            "type": "string"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "printer_name": {
+            "title": "Printer Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_name",
+          "driver_key",
+          "is_default"
+        ],
+        "title": "JobExecutionTargetResponse",
+        "type": "object"
+      },
+      "JobHistoryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/JobAttemptResponse"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeEventResponse"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobResponse"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job",
+          "attempts",
+          "events"
+        ],
+        "title": "JobHistoryResponse",
+        "type": "object"
+      },
+      "JobKind": {
+        "enum": [
+          "print_job",
+          "device_command"
+        ],
+        "title": "JobKind",
+        "type": "string"
+      },
+      "JobResourceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobResponse"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "title": "JobResourceResponse",
+        "type": "object"
+      },
+      "JobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_count": {
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "command_kind": {
+            "nullable": true,
+            "title": "Command Kind",
+            "type": "string"
+          },
+          "content_kind": {
+            "nullable": true,
+            "title": "Content Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "$ref": "#/components/schemas/JobErrorResponse",
+            "nullable": true
+          },
+          "finished_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Finished At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "max_attempts": {
+            "title": "Max Attempts",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "next_run_at": {
+            "format": "date-time",
+            "title": "Next Run At",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "queued_at": {
+            "format": "date-time",
+            "title": "Queued At",
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/JobExecutionResultResponse",
+            "nullable": true
+          },
+          "started_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Started At",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "target": {
+            "$ref": "#/components/schemas/JobTargetResponse"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "operation",
+          "state",
+          "target",
+          "attempt_count",
+          "max_attempts",
+          "created_at",
+          "updated_at",
+          "queued_at",
+          "next_run_at"
+        ],
+        "title": "JobResponse",
+        "type": "object"
+      },
+      "JobState": {
+        "enum": [
+          "queued",
+          "dispatched",
+          "running",
+          "retry_scheduled",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ],
+        "title": "JobState",
+        "type": "string"
+      },
+      "JobTargetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "device_kind": {
+            "$ref": "#/components/schemas/DeviceKind"
+          },
+          "device_name": {
+            "title": "Device Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id",
+          "device_kind",
+          "device_name"
+        ],
+        "title": "JobTargetResponse",
+        "type": "object"
+      },
+      "LocalChallengePurpose": {
+        "enum": [
+          "pairing",
+          "token"
+        ],
+        "title": "LocalChallengePurpose",
+        "type": "string"
+      },
+      "LocalChallengeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "nullable": true,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/LocalChallengePurpose"
+          }
+        },
+        "required": [
+          "purpose"
+        ],
+        "title": "LocalChallengeRequest",
+        "type": "object"
+      },
+      "LocalChallengeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "title": "Challenge",
+            "type": "string"
+          },
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/LocalChallengePurpose"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "challenge",
+          "purpose",
+          "expires_at"
+        ],
+        "title": "LocalChallengeResponse",
+        "type": "object"
+      },
+      "LocalClientAttestationInput": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "origin": {
+            "nullable": true,
+            "title": "Origin",
+            "type": "string"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "challenge_id",
+          "signature"
+        ],
+        "title": "LocalClientAttestationInput",
+        "type": "object"
+      },
+      "LocalPairingCompleteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "attestation": {
+            "$ref": "#/components/schemas/LocalClientAttestationInput"
+          },
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "default": "local-client",
+            "title": "Client Name",
+            "type": "string"
+          },
+          "origin": {
+            "nullable": true,
+            "title": "Origin",
+            "type": "string"
+          },
+          "pairing_secret": {
+            "title": "Pairing Secret",
+            "type": "string"
+          },
+          "public_key_pem": {
+            "title": "Public Key Pem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id",
+          "public_key_pem",
+          "pairing_secret",
+          "attestation"
+        ],
+        "title": "LocalPairingCompleteRequest",
+        "type": "object"
+      },
+      "LocalPairingCompleteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/TrustedLocalClientResponse"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "title": "LocalPairingCompleteResponse",
+        "type": "object"
+      },
+      "LocalPairingRevokeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_id"
+        ],
+        "title": "LocalPairingRevokeRequest",
+        "type": "object"
+      },
+      "LocalPairingStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "pairing_secret": {
+            "title": "Pairing Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pairing_secret",
+          "expires_at"
+        ],
+        "title": "LocalPairingStartResponse",
+        "type": "object"
+      },
+      "LocalTokenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "attestation": {
+            "$ref": "#/components/schemas/LocalClientAttestationInput",
+            "nullable": true
+          },
+          "client_name": {
+            "default": "local-client",
+            "title": "Client Name",
+            "type": "string"
+          },
+          "requested_scopes": {
+            "items": {
+              "$ref": "#/components/schemas/AccessScope"
+            },
+            "nullable": true,
+            "title": "Requested Scopes",
+            "type": "array"
+          }
+        },
+        "title": "LocalTokenRequest",
+        "type": "object"
+      },
+      "LocalTrustLevel": {
+        "enum": [
+          "loopback",
+          "paired_browser",
+          "paired_native"
+        ],
+        "title": "LocalTrustLevel",
+        "type": "string"
+      },
+      "LocalTrustStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_pairing_expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Active Pairing Expires At",
+            "type": "string"
+          },
+          "paired": {
+            "title": "Paired",
+            "type": "boolean"
+          },
+          "pairing_required": {
+            "title": "Pairing Required",
+            "type": "boolean"
+          },
+          "trusted_clients": {
+            "items": {
+              "$ref": "#/components/schemas/TrustedLocalClientResponse"
+            },
+            "title": "Trusted Clients",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pairing_required",
+          "paired",
+          "trusted_clients"
+        ],
+        "title": "LocalTrustStatusResponse",
+        "type": "object"
+      },
+      "ManagedCertificateFailureReason": {
+        "enum": [
+          "none",
+          "network_error",
+          "auth_failed",
+          "ca_unavailable",
+          "root_fingerprint_mismatch",
+          "local_certificate_invalid",
+          "bootstrap_required",
+          "bootstrap_expired",
+          "renewal_unsupported",
+          "unknown"
+        ],
+        "title": "ManagedCertificateFailureReason",
+        "type": "string"
+      },
+      "ManagedCertificateOperation": {
+        "enum": [
+          "idle",
+          "inspect",
+          "bootstrap_root",
+          "issue",
+          "renew"
+        ],
+        "title": "ManagedCertificateOperation",
+        "type": "string"
+      },
+      "ManagedCertificateState": {
+        "enum": [
+          "disabled",
+          "waiting_for_enrollment",
+          "waiting_for_bootstrap",
+          "valid",
+          "renewal_due",
+          "bootstrapping",
+          "renewing",
+          "renewal_failed",
+          "rebootstrap_required",
+          "expired"
+        ],
+        "title": "ManagedCertificateState",
+        "type": "string"
+      },
+      "ManagedCertificateStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bootstrap_pending": {
+            "default": false,
+            "title": "Bootstrap Pending",
+            "type": "boolean"
+          },
+          "certificate_present": {
+            "default": false,
+            "title": "Certificate Present",
+            "type": "boolean"
+          },
+          "current_expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Current Expires At",
+            "type": "string"
+          },
+          "detail": {
+            "nullable": true,
+            "title": "Detail",
+            "type": "string"
+          },
+          "failed_issue_count": {
+            "default": 0,
+            "title": "Failed Issue Count",
+            "type": "integer"
+          },
+          "failed_renewal_count": {
+            "default": 0,
+            "title": "Failed Renewal Count",
+            "type": "integer"
+          },
+          "failure_reason": {
+            "$ref": "#/components/schemas/ManagedCertificateFailureReason"
+          },
+          "issuer": {
+            "nullable": true,
+            "title": "Issuer",
+            "type": "string"
+          },
+          "last_checked_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Checked At",
+            "type": "string"
+          },
+          "last_failure_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Failure At",
+            "type": "string"
+          },
+          "last_operation_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Operation At",
+            "type": "string"
+          },
+          "last_success_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Success At",
+            "type": "string"
+          },
+          "next_action_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Next Action At",
+            "type": "string"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/ManagedCertificateOperation"
+          },
+          "retry_delay_seconds": {
+            "nullable": true,
+            "title": "Retry Delay Seconds",
+            "type": "number"
+          },
+          "serial_number": {
+            "nullable": true,
+            "title": "Serial Number",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ManagedCertificateState"
+          },
+          "subject": {
+            "nullable": true,
+            "title": "Subject",
+            "type": "string"
+          },
+          "successful_issue_count": {
+            "default": 0,
+            "title": "Successful Issue Count",
+            "type": "integer"
+          },
+          "successful_renewal_count": {
+            "default": 0,
+            "title": "Successful Renewal Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "state",
+          "operation",
+          "failure_reason"
+        ],
+        "title": "ManagedCertificateStatusResponse",
+        "type": "object"
+      },
+      "ManagedOnboardingDeviceConfirmationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "default_printer_device_id": {
+            "nullable": true,
+            "title": "Default Printer Device Id",
+            "type": "string"
+          },
+          "device_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Device Ids",
+            "type": "array"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "object"
+          }
+        },
+        "title": "ManagedOnboardingDeviceConfirmationRequest",
+        "type": "object"
+      },
+      "ManagedOnboardingInvitationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "controller_url": {
+            "maxLength": 2048,
+            "nullable": true,
+            "title": "Controller Url",
+            "type": "string"
+          },
+          "invitation": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Invitation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation"
+        ],
+        "title": "ManagedOnboardingInvitationRequest",
+        "type": "object"
+      },
+      "ManagedOnboardingPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "certificate_mode": {
+            "$ref": "#/components/schemas/UpstreamCertificateMode"
+          },
+          "controller_instance_id": {
+            "nullable": true,
+            "title": "Controller Instance Id",
+            "type": "string"
+          },
+          "controller_name": {
+            "nullable": true,
+            "title": "Controller Name",
+            "type": "string"
+          },
+          "controller_url": {
+            "title": "Controller Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invite_id": {
+            "title": "Invite Id",
+            "type": "string"
+          },
+          "requires_mutual_tls_after_issuance": {
+            "title": "Requires Mutual Tls After Issuance",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supported_protocol_versions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Protocol Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "invite_id",
+          "controller_url",
+          "expires_at",
+          "status",
+          "certificate_mode",
+          "requires_mutual_tls_after_issuance"
+        ],
+        "title": "ManagedOnboardingPreviewResponse",
+        "type": "object"
+      },
+      "ManagedOnboardingStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "certificate_mode": {
+            "$ref": "#/components/schemas/UpstreamCertificateMode"
+          },
+          "controller_instance_id": {
+            "nullable": true,
+            "title": "Controller Instance Id",
+            "type": "string"
+          },
+          "controller_name": {
+            "nullable": true,
+            "title": "Controller Name",
+            "type": "string"
+          },
+          "controller_url": {
+            "title": "Controller Url",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invite_id": {
+            "title": "Invite Id",
+            "type": "string"
+          },
+          "requires_mutual_tls_after_issuance": {
+            "title": "Requires Mutual Tls After Issuance",
+            "type": "boolean"
+          },
+          "restart_required": {
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supported_protocol_versions": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Protocol Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "invite_id",
+          "controller_url",
+          "expires_at",
+          "status",
+          "certificate_mode",
+          "requires_mutual_tls_after_issuance",
+          "restart_required"
+        ],
+        "title": "ManagedOnboardingStartResponse",
+        "type": "object"
+      },
+      "ManagedOnboardingStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "nullable": true,
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "certificate_expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Certificate Expires At",
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Completed At",
+            "type": "string"
+          },
+          "controller_name": {
+            "nullable": true,
+            "title": "Controller Name",
+            "type": "string"
+          },
+          "controller_url": {
+            "nullable": true,
+            "title": "Controller Url",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceResponse"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "last_error": {
+            "nullable": true,
+            "title": "Last Error",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "not_started",
+              "restart_required",
+              "securing_connection",
+              "connecting",
+              "finding_devices",
+              "ready",
+              "failed"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "protocol_version": {
+            "nullable": true,
+            "title": "Protocol Version",
+            "type": "string"
+          },
+          "restart_required": {
+            "default": false,
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "zenoh_namespace": {
+            "nullable": true,
+            "title": "Zenoh Namespace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "detail"
+        ],
+        "title": "ManagedOnboardingStatusResponse",
+        "type": "object"
+      },
+      "MutualTlsMode": {
+        "enum": [
+          "disabled",
+          "optional",
+          "required"
+        ],
+        "title": "MutualTlsMode",
+        "type": "string"
+      },
+      "OpenCashDrawerCommandInput": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "default": "open_cash_drawer",
+            "enum": [
+              "open_cash_drawer"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "OpenCashDrawerCommandInput",
+        "type": "object"
+      },
+      "PdfDocumentContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "binary": {
+            "$ref": "#/components/schemas/BinaryContentInput"
+          },
+          "document_name": {
+            "default": "PDF Document",
+            "title": "Document Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "pdf",
+            "enum": [
+              "pdf"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "binary"
+        ],
+        "title": "PdfDocumentContentInput",
+        "type": "object"
+      },
+      "PrincipalKind": {
+        "enum": [
+          "local_client",
+          "api_client",
+          "upstream_gateway"
+        ],
+        "title": "PrincipalKind",
+        "type": "string"
+      },
+      "PrincipalResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "audience": {
+            "title": "Audience",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Expires At",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "principal_kind": {
+            "$ref": "#/components/schemas/PrincipalKind"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/AccessScope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "token_id": {
+            "nullable": true,
+            "title": "Token Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "principal_kind",
+          "scopes",
+          "issuer",
+          "audience"
+        ],
+        "title": "PrincipalResponse",
+        "type": "object"
+      },
+      "PrintContentKind": {
+        "enum": [
+          "structured_receipt",
+          "receipt_image",
+          "text",
+          "html",
+          "pdf",
+          "raw"
+        ],
+        "title": "PrintContentKind",
+        "type": "string"
+      },
+      "PrintExecutionOptionsInput": {
+        "additionalProperties": false,
+        "properties": {
+          "open_cash_drawer": {
+            "default": false,
+            "title": "Open Cash Drawer",
+            "type": "boolean"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/PrinterTransport",
+            "default": "auto"
+          }
+        },
+        "title": "PrintExecutionOptionsInput",
+        "type": "object"
+      },
+      "PrintJobRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "discriminator": {
+              "mapping": {
+                "html": "#/components/schemas/HtmlDocumentContentInput",
+                "pdf": "#/components/schemas/PdfDocumentContentInput",
+                "raw": "#/components/schemas/RawDocumentContentInput",
+                "receipt_image": "#/components/schemas/ReceiptImageContentInput",
+                "structured_receipt": "#/components/schemas/StructuredReceiptContentInput",
+                "text": "#/components/schemas/TextDocumentContentInput"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StructuredReceiptContentInput"
+              },
+              {
+                "$ref": "#/components/schemas/ReceiptImageContentInput"
+              },
+              {
+                "$ref": "#/components/schemas/TextDocumentContentInput"
+              },
+              {
+                "$ref": "#/components/schemas/HtmlDocumentContentInput"
+              },
+              {
+                "$ref": "#/components/schemas/PdfDocumentContentInput"
+              },
+              {
+                "$ref": "#/components/schemas/RawDocumentContentInput"
+              }
+            ],
+            "title": "Content"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "options": {
+            "$ref": "#/components/schemas/PrintExecutionOptionsInput"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DeviceTargetInput"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "PrintJobRequest",
+        "type": "object"
+      },
+      "PrintTestPageCommandInput": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "default": "print_test_page",
+            "enum": [
+              "print_test_page"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/PrinterTransport",
+            "default": "auto"
+          }
+        },
+        "title": "PrintTestPageCommandInput",
+        "type": "object"
+      },
+      "PrinterCapability": {
+        "enum": [
+          "cash_drawer"
+        ],
+        "title": "PrinterCapability",
+        "type": "string"
+      },
+      "PrinterDetailsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PrinterCapability"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "preferred_transport": {
+            "$ref": "#/components/schemas/PrinterTransport",
+            "nullable": true
+          },
+          "supported_transports": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PrinterTransport"
+            },
+            "title": "Supported Transports",
+            "type": "array"
+          }
+        },
+        "required": [
+          "is_default"
+        ],
+        "title": "PrinterDetailsResponse",
+        "type": "object"
+      },
+      "PrinterTransport": {
+        "enum": [
+          "auto",
+          "raw",
+          "text",
+          "document"
+        ],
+        "title": "PrinterTransport",
+        "type": "string"
+      },
+      "QueueSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled": {
+            "default": 0,
+            "title": "Cancelled",
+            "type": "integer"
+          },
+          "dispatched": {
+            "default": 0,
+            "title": "Dispatched",
+            "type": "integer"
+          },
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "queued": {
+            "default": 0,
+            "title": "Queued",
+            "type": "integer"
+          },
+          "retry_scheduled": {
+            "default": 0,
+            "title": "Retry Scheduled",
+            "type": "integer"
+          },
+          "running": {
+            "default": 0,
+            "title": "Running",
+            "type": "integer"
+          },
+          "succeeded": {
+            "default": 0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total"
+        ],
+        "title": "QueueSummaryResponse",
+        "type": "object"
+      },
+      "RawDocumentContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "binary": {
+            "$ref": "#/components/schemas/BinaryContentInput"
+          },
+          "data_type": {
+            "default": "RAW",
+            "title": "Data Type",
+            "type": "string"
+          },
+          "document_name": {
+            "default": "Raw Document",
+            "title": "Document Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "raw",
+            "enum": [
+              "raw"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "binary"
+        ],
+        "title": "RawDocumentContentInput",
+        "type": "object"
+      },
+      "ReceiptImageContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "binary": {
+            "$ref": "#/components/schemas/BinaryContentInput"
+          },
+          "document_name": {
+            "default": "Receipt",
+            "title": "Document Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "receipt_image",
+            "enum": [
+              "receipt_image"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "binary"
+        ],
+        "title": "ReceiptImageContentInput",
+        "type": "object"
+      },
+      "RuntimeEventKind": {
+        "enum": [
+          "device.connected",
+          "device.disconnected",
+          "device.updated",
+          "job.cancelled",
+          "job.failed",
+          "job.queued",
+          "job.retry_scheduled",
+          "job.succeeded"
+        ],
+        "title": "RuntimeEventKind",
+        "type": "string"
+      },
+      "RuntimeEventResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "event_type": {
+            "$ref": "#/components/schemas/RuntimeEventKind"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "resource_kind": {
+            "$ref": "#/components/schemas/RuntimeResourceKind"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "resource_kind",
+          "resource_id",
+          "event_type",
+          "occurred_at"
+        ],
+        "title": "RuntimeEventResponse",
+        "type": "object"
+      },
+      "RuntimeResourceKind": {
+        "enum": [
+          "device",
+          "job"
+        ],
+        "title": "RuntimeResourceKind",
+        "type": "string"
+      },
+      "ServiceDescriptorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ],
+        "title": "ServiceDescriptorResponse",
+        "type": "object"
+      },
+      "StructuredReceiptContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "document_name": {
+            "default": "Receipt",
+            "title": "Document Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "structured_receipt",
+            "enum": [
+              "structured_receipt"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "StructuredReceiptContentInput",
+        "type": "object"
+      },
+      "SystemStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "devices": {
+            "$ref": "#/components/schemas/DeviceDirectorySummaryResponse"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueSummaryResponse"
+          },
+          "service": {
+            "$ref": "#/components/schemas/ServiceDescriptorResponse"
+          },
+          "status": {
+            "default": "healthy",
+            "enum": [
+              "healthy"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "supported_content_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/PrintContentKind"
+            },
+            "title": "Supported Content Kinds",
+            "type": "array"
+          },
+          "supported_device_commands": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceCommandKind"
+            },
+            "title": "Supported Device Commands",
+            "type": "array"
+          }
+        },
+        "required": [
+          "service",
+          "devices",
+          "queue",
+          "supported_content_kinds",
+          "supported_device_commands"
+        ],
+        "title": "SystemStatusResponse",
+        "type": "object"
+      },
+      "TextDocumentContentInput": {
+        "additionalProperties": false,
+        "properties": {
+          "document_name": {
+            "default": "Text Document",
+            "title": "Document Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "text",
+            "enum": [
+              "text"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "TextDocumentContentInput",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "principal_kind": {
+            "$ref": "#/components/schemas/PrincipalKind"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/AccessScope"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "token_type": {
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_at",
+          "scopes",
+          "subject",
+          "principal_kind"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "TrustedLocalClientResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "title": "Client Name",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "origins": {
+            "description": "Trusted browser origins for this local client. Native clients usually have none.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Origins",
+            "type": "array"
+          },
+          "paired_at": {
+            "format": "date-time",
+            "title": "Paired At",
+            "type": "string"
+          },
+          "trust_level": {
+            "$ref": "#/components/schemas/LocalTrustLevel"
+          }
+        },
+        "required": [
+          "client_id",
+          "client_name",
+          "trust_level",
+          "origins",
+          "paired_at"
+        ],
+        "title": "TrustedLocalClientResponse",
+        "type": "object"
+      },
+      "UpstreamCertificateMode": {
+        "enum": [
+          "none",
+          "controller",
+          "step_ca"
+        ],
+        "title": "UpstreamCertificateMode",
+        "type": "string"
+      },
+      "UpstreamConnectionState": {
+        "enum": [
+          "disabled",
+          "disconnected",
+          "enrolling",
+          "connecting",
+          "online",
+          "degraded",
+          "auth_failed",
+          "protocol_mismatch",
+          "recovering"
+        ],
+        "title": "UpstreamConnectionState",
+        "type": "string"
+      },
+      "UpstreamDataPlaneKind": {
+        "enum": [
+          "zenoh"
+        ],
+        "title": "UpstreamDataPlaneKind",
+        "type": "string"
+      },
+      "UpstreamEdgeProvider": {
+        "enum": [
+          "direct",
+          "caddy"
+        ],
+        "title": "UpstreamEdgeProvider",
+        "type": "string"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ZenohSessionMode": {
+        "enum": [
+          "client"
+        ],
+        "title": "ZenohSessionMode",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "Inari",
+    "version": "1.20.0a1"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/auth/local-challenge": {
+      "post": {
+        "operationId": "issue_local_challenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalChallengeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Local Challenge",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/local-token": {
+      "post": {
+        "operationId": "issue_local_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Issue Local Token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/local-trust": {
+      "get": {
+        "operationId": "local_trust_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalTrustStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Local Trust Status",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "auth_me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticatedPrincipalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/pairing/complete": {
+      "post": {
+        "operationId": "complete_local_pairing",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalPairingCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalPairingCompleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Complete Local Pairing",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/pairing/revoke": {
+      "post": {
+        "operationId": "revoke_local_pairing",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalPairingRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalTrustStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Local Pairing",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/pairing/rotate": {
+      "post": {
+        "operationId": "rotate_local_pairing_secret",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalPairingStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rotate Local Pairing Secret",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/pairing/start": {
+      "post": {
+        "operationId": "start_local_pairing",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalPairingStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start Local Pairing",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/device-commands": {
+      "post": {
+        "operationId": "submit_device_command",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Device Command",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/devices": {
+      "get": {
+        "operationId": "list_devices",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDirectoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Devices",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/devices/{device_id}": {
+      "get": {
+        "operationId": "get_device",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Device",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/devices/{device_id}/events": {
+      "get": {
+        "operationId": "list_device_events",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceEventCollectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Device Events",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/gateway/identity": {
+      "get": {
+        "operationId": "gateway_identity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayIdentityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gateway Identity",
+        "tags": [
+          "gateway"
+        ]
+      }
+    },
+    "/gateway/upstream/status": {
+      "get": {
+        "operationId": "gateway_upstream_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayUpstreamStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gateway Upstream Status",
+        "tags": [
+          "gateway"
+        ]
+      }
+    },
+    "/jobs": {
+      "get": {
+        "operationId": "list_jobs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/JobState",
+              "nullable": true,
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCollectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancel_job",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/jobs/{job_id}/history": {
+      "get": {
+        "operationId": "get_job_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job History",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/onboarding/cancel": {
+      "post": {
+        "operationId": "cancel_managed_onboarding",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedOnboardingStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cancel Managed Onboarding",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/onboarding/devices/confirm": {
+      "post": {
+        "operationId": "confirm_onboarding_devices",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedOnboardingDeviceConfirmationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedOnboardingStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Onboarding Devices",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/onboarding/managed/preview": {
+      "post": {
+        "operationId": "preview_managed_onboarding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedOnboardingInvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedOnboardingPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Managed Onboarding",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/onboarding/managed/start": {
+      "post": {
+        "operationId": "start_managed_onboarding",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedOnboardingInvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedOnboardingStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Managed Onboarding",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/onboarding/status": {
+      "get": {
+        "operationId": "managed_onboarding_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedOnboardingStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Managed Onboarding Status",
+        "tags": [
+          "onboarding"
+        ]
+      }
+    },
+    "/print-jobs": {
+      "post": {
+        "operationId": "submit_print_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrintJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Print Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/system/status": {
+      "get": {
+        "operationId": "system_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "System Status",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

@@ -16,6 +16,7 @@ export default {
     "deploy/helm/inari/README.md",
     "deploy/kustomize/inari/README.md",
     "packages/agent/README.md",
-    "packages/agent_tray/README.md",
+    "crates/inari-agent-client/README.md",
+    "crates/inari-device-center/README.md",
   ],
 };

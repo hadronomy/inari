@@ -14,8 +14,9 @@ const publishLockSchema = z.looseObject({
 
 const edgePackages = new Set([
   "pip:inari",
-  "pip:inari-tray",
   "pip:inari-brand",
+  "cargo:inari-agent-client",
+  "cargo:inari-device-center",
   "msix:inari-device-center",
 ]);
 
