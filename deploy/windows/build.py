@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import shutil
 import tomllib
 import xml.etree.ElementTree as ET
@@ -10,9 +11,6 @@ from typing import Literal
 from inari_brand import BrandAsset, read_asset
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QImage, QPainter
-from PySide6.QtSvg import QSvgRenderer
 
 FOUNDATION = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 UAP = "http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -175,16 +173,14 @@ def _write_assets(destination: Path) -> None:
         "AppInstallerLogo.png": 96,
     }
     for name, size in square_sizes.items():
-        _render_svg(BrandAsset.APP_ICON, width=size, height=size).save(
-            destination / name
-        )
+        _render_icon(width=size, height=size).save(destination / name)
 
     for size in WINDOWS_APP_LIST_ICON_SIZES:
-        icon = _render_svg(BrandAsset.APP_ICON, width=size, height=size)
+        icon = _render_icon(width=size, height=size)
         for variant in WINDOWS_APP_LIST_VARIANTS:
             icon.save(destination / f"Square44x44Logo.targetsize-{size}{variant}.png")
 
-    mark = _render_svg(BrandAsset.APP_ICON, width=150, height=150)
+    mark = _render_icon(width=150, height=150)
     wide = Image.new("RGBA", (310, 150), (242, 242, 239, 255))
     wide.alpha_composite(mark, ((wide.width - mark.width) // 2, 0))
     wide.save(destination / "Wide310x150Logo.png")
@@ -192,7 +188,7 @@ def _write_assets(destination: Path) -> None:
 
 def write_executable_icon(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    source = _render_svg(BrandAsset.APP_ICON, width=256, height=256)
+    source = _render_icon(width=256, height=256)
     source.save(
         destination,
         format="ICO",
@@ -200,25 +196,15 @@ def write_executable_icon(destination: Path) -> None:
     )
 
 
-def _render_svg(asset: BrandAsset, *, width: int, height: int) -> Image.Image:
-    renderer = QSvgRenderer(QByteArray(read_asset(asset)))
-    if not renderer.isValid():
-        raise ValueError(f"Invalid packaged brand asset: {asset.value}")
-    surface = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
-    surface.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(surface)
-    renderer.render(painter)
-    painter.end()
-    surface = surface.convertToFormat(QImage.Format.Format_RGBA8888)
-    return Image.frombytes(
-        "RGBA",
-        (surface.width(), surface.height()),
-        bytes(surface.constBits()),
-        "raw",
-        "RGBA",
-        surface.bytesPerLine(),
-        1,
-    )
+def _render_icon(*, width: int, height: int) -> Image.Image:
+    with Image.open(io.BytesIO(read_asset(BrandAsset.APP_ICON_1024))) as source:
+        icon = source.convert("RGBA").resize(
+            (width, height),
+            resample=Image.Resampling.LANCZOS,
+        )
+    alpha = icon.getchannel("A").point(lambda value: 0 if value <= 1 else value)
+    icon.putalpha(alpha)
+    return icon
 
 
 def _required(element: ET.Element | None, name: str) -> ET.Element:

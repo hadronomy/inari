@@ -1,0 +1,45 @@
+[package]
+name = "inari-device-center"
+version = "1.20.0-alpha.6"
+authors.workspace = true
+description = "Native Device Center and tray for Inari"
+edition.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[[bin]]
+name = "InariDeviceCenter"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-channel.workspace = true
+chrono.workspace = true
+directories.workspace = true
+fastrand.workspace = true
+futures-util.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+inari-agent-client = { path = "../inari-agent-client" }
+image.workspace = true
+open.workspace = true
+raw-window-handle.workspace = true
+rust-embed.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+tray-icon.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"

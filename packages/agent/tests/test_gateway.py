@@ -41,6 +41,7 @@ from inari.runtime.models import (
     JobKind,
     JobRecord,
     JobState,
+    RuntimeEventKind,
     utc_now,
 )
 from inari.runtime.jobs.service import JobService
@@ -176,7 +177,7 @@ async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
             JobEventRecord(
                 sequence=7,
                 resource_id="job_123",
-                event_type="job.succeeded",
+                event_type=RuntimeEventKind.JOB_SUCCEEDED,
                 occurred_at=utc_now(),
                 payload={"job_id": "job_123"},
             )

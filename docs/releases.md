@@ -13,8 +13,10 @@ There are two release lines:
 | `edge` | Agent, Device Center, shared brand package, and Windows MSIX | One synchronized version and tag |
 | `controller-chart` | Helm chart | Independent version and tag |
 
-The Python packages are bundled into Device Center and are not published to
-PyPI.
+The Python agent and shared brand package are private release inputs. The Rust
+desktop crates are versioned with the edge group but are not published to
+crates.io; the signed Device Center executable ships with the GitHub release
+and inside the MSIX.
 
 ## Add a release note to the pull request
 

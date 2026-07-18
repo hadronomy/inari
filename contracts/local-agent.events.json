@@ -1,0 +1,156 @@
+[
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 1,
+      "resource_kind": "device",
+      "resource_id": "dev_front_desk",
+      "event_type": "device.connected",
+      "occurred_at": "2026-07-17T10:00:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 2,
+      "resource_kind": "device",
+      "resource_id": "dev_front_desk",
+      "event_type": "device.disconnected",
+      "occurred_at": "2026-07-17T10:01:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 3,
+      "resource_kind": "device",
+      "resource_id": "dev_front_desk",
+      "event_type": "device.updated",
+      "occurred_at": "2026-07-17T10:02:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 4,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.queued",
+      "occurred_at": "2026-07-17T10:03:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 5,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.dispatched",
+      "occurred_at": "2026-07-17T10:04:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 6,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.running",
+      "occurred_at": "2026-07-17T10:05:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 7,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.succeeded",
+      "occurred_at": "2026-07-17T10:06:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 8,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.failed",
+      "occurred_at": "2026-07-17T10:07:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 9,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.cancelled",
+      "occurred_at": "2026-07-17T10:08:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 10,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.recovered",
+      "occurred_at": "2026-07-17T10:09:00Z",
+      "payload": {}
+    }
+  },
+  {
+    "kind": "event_update",
+    "status": {
+      "service": "running"
+    },
+    "event": {
+      "sequence": 11,
+      "resource_kind": "job",
+      "resource_id": "job_front_desk",
+      "event_type": "job.retry_scheduled",
+      "occurred_at": "2026-07-17T10:10:00Z",
+      "payload": {}
+    }
+  }
+]

@@ -6,6 +6,7 @@ from http import HTTPStatus
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 from scalar_fastapi import AgentScalarConfig, Layout, Theme, get_scalar_api_reference
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,6 +27,12 @@ from ..core.logging import configure_logging
 from ..core.version import API_VERSION, SERVICE_NAME
 from .middleware import install_security_middleware
 from .routes import router
+
+
+def operation_id(route: APIRoute) -> str:
+    """Return the stable, human-authored function name for client generation."""
+
+    return route.name
 
 
 @asynccontextmanager
@@ -59,7 +66,11 @@ def create_app(
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
+        generate_unique_id_function=operation_id,
     )
+    # Progenitor currently consumes OpenAPI 3.0. FastAPI adapts nullable schemas
+    # and other dialect-specific details when it builds this document.
+    app.openapi_version = "3.0.3"
     app.state.container = app_container
     app.add_middleware(
         CORSMiddleware,

@@ -85,7 +85,7 @@ cargo leptos watch
 The edge components have focused guides:
 
 - [Agent development](packages/agent/README.md)
-- [Device Center development](packages/agent_tray/README.md)
+- [Device Center development](crates/inari-device-center/README.md)
 
 Before submitting a change, run:
 

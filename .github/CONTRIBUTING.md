@@ -12,8 +12,10 @@ managed wire contract also need the [gateway protocol](../docs/gateway_protocol.
 
 - `packages/agent` — local device service, drivers, job runtime, and managed
   edge client;
-- `packages/agent_tray` — user-session tray, setup assistant, and Device Center;
 - `packages/brand` — canonical identity assets;
+- `crates/inari-agent-client` — typed local API, protected identity, and event
+  stream boundary;
+- `crates/inari-device-center` — native GPUI application, setup, and tray;
 - `crates/inari-server` — Axum composition root, configuration, and concrete
   Zenoh adapter;
 - `crates/inari-gateway` — controller domain, protocol, security, and
@@ -25,7 +27,7 @@ managed wire contract also need the [gateway protocol](../docs/gateway_protocol.
 - `deploy/windows` — Device Center packaging and signing;
 - `tooling` — Tegami configuration and release plugins.
 
-The agent is the service; the tray is its desktop client. Enrollment uses
+The agent is the service; Device Center is its desktop client. Enrollment uses
 HTTPS; managed traffic uses Zenoh. Axum owns `/api`, while Leptos owns browser
 pages. These boundaries should remain obvious after your change.
 

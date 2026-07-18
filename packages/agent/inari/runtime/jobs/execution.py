@@ -16,7 +16,7 @@ from ...printing.commands import (
 )
 from ...printing.protocols import PrintJobResult
 from ...printing.service import PrinterService
-from ..models import DeviceRecord, JobKind, JobRecord, JobState
+from ..models import DeviceRecord, JobKind, JobRecord, JobState, RuntimeEventKind
 from ..repositories import JobRepository
 from .operations import (
     QueuedDeviceCommandOperation,
@@ -143,7 +143,7 @@ class DeviceWorkerPool:
             job.id,
             lease_seconds=self.settings.job_execution_lease_seconds,
         )
-        await self.job_service.publish_event("job.running", job)
+        await self.job_service.publish_event(RuntimeEventKind.JOB_RUNNING, job)
 
         heartbeat = asyncio.create_task(self._heartbeat(job.id))
         try:
@@ -181,7 +181,7 @@ class DeviceWorkerPool:
             attempt_number=attempt.attempt_number,
             result_payload=_serialize_execution_result(result),
         )
-        await self.job_service.publish_event("job.succeeded", completed)
+        await self.job_service.publish_event(RuntimeEventKind.JOB_SUCCEEDED, completed)
 
     def _handle_failure(
         self,
@@ -189,7 +189,7 @@ class DeviceWorkerPool:
         job: JobRecord,
         attempt_number: int,
         exc: Exception,
-    ) -> tuple[str, JobRecord]:
+    ) -> tuple[RuntimeEventKind, JobRecord]:
         error = _coerce_error(exc)
         if _is_retryable(error) and attempt_number < job.max_attempts:
             retry_at = _retry_at(
@@ -204,14 +204,14 @@ class DeviceWorkerPool:
                 error_code=error.code,
                 error_detail=error.message,
             )
-            return "job.retry_scheduled", updated
+            return RuntimeEventKind.JOB_RETRY_SCHEDULED, updated
         updated = self.job_repository.mark_failed(
             job.id,
             attempt_number=attempt_number,
             error_code=error.code,
             error_detail=error.message,
         )
-        return "job.failed", updated
+        return RuntimeEventKind.JOB_FAILED, updated
 
     async def _heartbeat(self, job_id: str) -> None:
         while True:
@@ -244,7 +244,9 @@ class JobScheduler:
                     lease_seconds=self.settings.job_dispatch_lease_seconds,
                 )
                 for job in claimed:
-                    await self.job_service.publish_event("job.dispatched", job)
+                    await self.job_service.publish_event(
+                        RuntimeEventKind.JOB_DISPATCHED, job
+                    )
                     await self.worker_pool.enqueue(job)
             except Exception:
                 logger.exception("Job scheduler loop failed")
@@ -268,9 +270,9 @@ class LeaseRecoveryCoordinator:
             try:
                 for job in self.job_repository.recover_expired():
                     event_type = (
-                        "job.retry_scheduled"
+                        RuntimeEventKind.JOB_RETRY_SCHEDULED
                         if job.state is JobState.RETRY_SCHEDULED
-                        else "job.failed"
+                        else RuntimeEventKind.JOB_FAILED
                     )
                     await self.job_service.publish_event(event_type, job)
             except Exception:

@@ -76,7 +76,7 @@ def test_windows_service_manager_install_persists_config_path(tmp_path, mocker) 
     message = manager.install()
 
     assert message == (
-        "Installed Windows service 'InariService'. "
+        "Installed Windows service 'InariAgent'. "
         f"Wrote default config to {tmp_path / 'inari.toml'}."
     )
     config_path = tmp_path / "inari.toml"

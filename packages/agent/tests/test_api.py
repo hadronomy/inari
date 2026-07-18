@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import anyio
+import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,7 @@ from inari.drivers import (
 from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.local_api.app import create_app
+from inari.local_api.schemas import RuntimeEventResponse
 from inari.printing.protocols import (
     PrinterCapabilities,
     PrinterDevice,
@@ -39,6 +41,7 @@ from inari.runtime.models import (
     JobKind,
     JobRecord,
     JobState,
+    RuntimeEventKind,
     utc_now,
 )
 from inari.security.models import (
@@ -372,6 +375,21 @@ async def test_redoc_route_is_disabled(mocker) -> None:
     assert response.status_code == 404
 
 
+def test_committed_event_fixture_matches_the_python_contract() -> None:
+    fixture = (
+        Path(__file__).resolve().parents[3] / "contracts" / "local-agent.events.json"
+    )
+    envelopes = json.loads(fixture.read_text(encoding="utf-8"))
+
+    events = [
+        RuntimeEventResponse.model_validate(envelope["event"]) for envelope in envelopes
+    ]
+
+    assert all(envelope["kind"] == "event_update" for envelope in envelopes)
+    assert {event.event_type for event in events} == set(RuntimeEventKind)
+    assert events[0].resource_id == "dev_front_desk"
+
+
 @pytest.mark.anyio
 async def test_submit_print_job_returns_queued_job_resource(mocker) -> None:
     container = make_test_container(mocker=mocker)
@@ -502,7 +520,7 @@ def test_events_websocket_streams_snapshot_backed_updates(mocker) -> None:
     event = JobEventRecord(
         sequence=2,
         resource_id="job_123",
-        event_type="job.failed",
+        event_type=RuntimeEventKind.JOB_FAILED,
         occurred_at=utc_now(),
         payload={"job_id": "job_123", "error_detail": "Printer offline"},
     )
@@ -706,7 +724,7 @@ def make_test_container(
     event = JobEventRecord(
         sequence=1,
         resource_id=job.id,
-        event_type="job.queued",
+        event_type=RuntimeEventKind.JOB_QUEUED,
         occurred_at=now,
         payload={"job_id": job.id},
     )

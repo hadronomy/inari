@@ -30,8 +30,8 @@ class ServiceIdentity:
 
 DEFAULT_SERVICE_IDENTITY = ServiceIdentity(
     display_name="Inari",
-    description="Secure local gateway service for IoT devices and the Inari tray.",
-    windows_name="InariService",
+    description="Secure local gateway service for physical devices and Inari Device Center.",
+    windows_name="InariAgent",
     systemd_unit_name="inari.service",
     launchd_label="io.inari.service",
 )

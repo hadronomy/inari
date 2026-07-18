@@ -1,0 +1,40 @@
+[package]
+name = "inari-agent-client"
+version = "1.20.0-alpha.6"
+authors.workspace = true
+description = "Typed local-agent client for Inari desktop applications"
+edition.workspace = true
+license.workspace = true
+publish = false
+repository.workspace = true
+
+[dependencies]
+async-tungstenite.workspace = true
+base64.workspace = true
+chrono.workspace = true
+ed25519-dalek.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+keyring.workspace = true
+pkcs8.workspace = true
+progenitor.workspace = true
+progenitor-client.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+service-manager.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+serde_json.workspace = true

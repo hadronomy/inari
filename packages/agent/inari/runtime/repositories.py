@@ -27,6 +27,7 @@ from .models import (
     JobKind,
     JobRecord,
     JobState,
+    RuntimeEventKind,
     normalize_timestamp,
     timestamp_to_iso,
     utc_now,
@@ -111,13 +112,13 @@ class DeviceRepository:
         self,
         *,
         device_id: str,
-        event_type: str,
+        event_type: RuntimeEventKind,
         payload: Mapping[str, Any],
     ) -> DeviceEventRecord:
         occurred_at = utc_now()
         stmt = insert(device_events_table).values(
             device_id=device_id,
-            event_type=event_type,
+            event_type=event_type.value,
             payload_json=dump_json(payload),
             occurred_at=timestamp_to_iso(occurred_at),
         )
@@ -455,13 +456,13 @@ class JobRepository:
         self,
         *,
         job_id: str,
-        event_type: str,
+        event_type: RuntimeEventKind,
         payload: Mapping[str, Any],
     ) -> JobEventRecord:
         occurred_at = utc_now()
         stmt = insert(job_events_table).values(
             job_id=job_id,
-            event_type=event_type,
+            event_type=event_type.value,
             payload_json=dump_json(payload),
             occurred_at=timestamp_to_iso(occurred_at),
         )
@@ -665,7 +666,7 @@ def _row_to_device_event(row: RowMapping | Mapping[str, Any]) -> DeviceEventReco
     return DeviceEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["device_id"]),
-        event_type=str(row["event_type"]),
+        event_type=RuntimeEventKind(str(row["event_type"])),
         occurred_at=normalize_timestamp(str(row["occurred_at"])) or utc_now(),
         payload=load_json(str(row["payload_json"])),
     )
@@ -675,7 +676,7 @@ def _row_to_job_event(row: RowMapping | Mapping[str, Any]) -> JobEventRecord:
     return JobEventRecord(
         sequence=int(row["sequence"]),
         resource_id=str(row["job_id"]),
-        event_type=str(row["event_type"]),
+        event_type=RuntimeEventKind(str(row["event_type"])),
         occurred_at=normalize_timestamp(str(row["occurred_at"])) or utc_now(),
         payload=load_json(str(row["payload_json"])),
     )

@@ -6,14 +6,14 @@ from typing import Any, Literal
 from pydantic import Field
 
 from .base import APIModel
-from ...runtime.models import RuntimeEvent
+from ...runtime.models import RuntimeEvent, RuntimeEventKind, RuntimeResourceKind
 
 
 class RuntimeEventResponse(APIModel):
     sequence: int
-    resource_kind: str
+    resource_kind: RuntimeResourceKind
     resource_id: str
-    event_type: str
+    event_type: RuntimeEventKind
     occurred_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
 

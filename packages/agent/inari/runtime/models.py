@@ -61,6 +61,25 @@ class JobState(StrEnum):
     CANCELLED = "cancelled"
 
 
+class RuntimeResourceKind(StrEnum):
+    DEVICE = "device"
+    JOB = "job"
+
+
+class RuntimeEventKind(StrEnum):
+    DEVICE_CONNECTED = "device.connected"
+    DEVICE_DISCONNECTED = "device.disconnected"
+    DEVICE_UPDATED = "device.updated"
+    JOB_CANCELLED = "job.cancelled"
+    JOB_DISPATCHED = "job.dispatched"
+    JOB_FAILED = "job.failed"
+    JOB_QUEUED = "job.queued"
+    JOB_RECOVERED = "job.recovered"
+    JOB_RETRY_SCHEDULED = "job.retry_scheduled"
+    JOB_RUNNING = "job.running"
+    JOB_SUCCEEDED = "job.succeeded"
+
+
 INARI_DEVICE_NAMESPACE = UUID("efdbfb52-14ac-5c5c-a01c-b2a846f71d76")
 
 
@@ -245,21 +264,25 @@ class DeviceRecord:
 @dataclass(slots=True, frozen=True)
 class RuntimeEvent:
     sequence: int
-    resource_kind: str
+    resource_kind: RuntimeResourceKind
     resource_id: str
-    event_type: str
+    event_type: RuntimeEventKind
     occurred_at: datetime
     payload: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True, frozen=True)
 class DeviceEventRecord(RuntimeEvent):
-    resource_kind: str = field(default="device", init=False)
+    resource_kind: RuntimeResourceKind = field(
+        default=RuntimeResourceKind.DEVICE, init=False
+    )
 
 
 @dataclass(slots=True, frozen=True)
 class JobEventRecord(RuntimeEvent):
-    resource_kind: str = field(default="job", init=False)
+    resource_kind: RuntimeResourceKind = field(
+        default=RuntimeResourceKind.JOB, init=False
+    )
 
 
 @dataclass(slots=True, frozen=True)
