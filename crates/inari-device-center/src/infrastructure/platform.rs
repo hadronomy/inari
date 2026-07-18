@@ -47,10 +47,11 @@ pub fn forward_activation(invitation: Option<&str>) -> bool {
 }
 
 pub fn hide_window(window: &mut Window, cx: &mut App) {
-    #[cfg(target_os = "macos")]
-    let _ = window;
+    hide_window_on_platform(window, cx);
+}
 
-    #[cfg(windows)]
+#[cfg(windows)]
+fn hide_window_on_platform(window: &mut Window, _: &mut App) {
     if let Some(handle) = windows_handle(window) {
         unsafe {
             let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
@@ -60,11 +61,16 @@ pub fn hide_window(window: &mut Window, cx: &mut App) {
         }
         return;
     }
+    window.minimize_window();
+}
 
-    #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
+fn hide_window_on_platform(_: &mut Window, cx: &mut App) {
     cx.hide();
+}
 
-    #[cfg(all(not(windows), not(target_os = "macos")))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn hide_window_on_platform(window: &mut Window, _: &mut App) {
     window.minimize_window();
 }
 
