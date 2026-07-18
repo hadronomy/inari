@@ -1,6 +1,6 @@
 [package]
 name = "inari-device-center"
-version = "1.20.0-alpha.6"
+version = "1.20.0-alpha.7"
 authors.workspace = true
 description = "Native Device Center and tray for Inari"
 edition.workspace = true

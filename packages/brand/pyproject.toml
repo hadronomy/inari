@@ -1,6 +1,6 @@
 [project]
 name = "inari-brand"
-version = "1.20.0-alpha.6"
+version = "1.20.0-alpha.7"
 description = "Canonical identity assets for Inari"
 requires-python = ">=3.12"
 dependencies = []
@@ -15,6 +15,7 @@ include = ["inari_brand*"]
 
 [tool.setuptools.package-data]
 inari_brand = ["assets/*", "assets/fonts/*"]
+
 
 
 

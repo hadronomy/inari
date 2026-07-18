@@ -1,13 +1,4 @@
----
-packages:
-  group:edge:
-    replay:
-      - exit-prerelease(cargo:inari-agent-client)
-      - exit-prerelease(cargo:inari-device-center)
-      - exit-prerelease(pip:inari)
-      - exit-prerelease(pip:inari-brand)
-      - exit-prerelease(msix:inari-device-center)
----
+## inari-device-center@1.20.0-alpha.7
 
 ### Make Device Center a native Rust application
 

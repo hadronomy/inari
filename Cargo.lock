@@ -4757,7 +4757,7 @@ checksum = "89194689a993ab15268672e99e7b0e19da2da3268ac682e8f02d29d4d1434cd7"
 
 [[package]]
 name = "inari-agent-client"
-version = "1.20.0-alpha.6"
+version = "1.20.0-alpha.7"
 dependencies = [
  "async-tungstenite",
  "base64 0.22.1",
@@ -4787,7 +4787,7 @@ dependencies = [
 
 [[package]]
 name = "inari-device-center"
-version = "1.20.0-alpha.6"
+version = "1.20.0-alpha.7"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
