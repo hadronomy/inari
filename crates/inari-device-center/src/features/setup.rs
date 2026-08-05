@@ -1,21 +1,25 @@
+use std::collections::HashSet;
+
+use chrono::Local;
 use gpui::{
     Entity, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    Styled, div, prelude::FluentBuilder as _, rems,
+    StatefulInteractiveElement as _, Styled, WeakEntity, div, prelude::FluentBuilder as _, rems,
+    svg,
 };
 use gpui_component::{
-    Disableable as _, StyledExt as _,
+    Disableable as _, IconName, StyledExt as _,
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     input::{Input, InputState},
 };
-use inari_agent_client::{EnrollmentPreview, SetupAccess, SetupSnapshot, SetupStage};
+use inari_agent_client::{DeviceId, EnrollmentPreview, SetupAccess, SetupSnapshot, SetupStage};
 
 use crate::{
     app::{
-        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RetryConnection,
-        StartOver,
+        BeginSetup, ConfirmDevices, ContinueWithoutDevices, DeviceCenter, PreviewInvitation,
+        RetryConnection, StartOver,
     },
-    assets::image as brand_image,
-    ui::palette,
+    ui::{Message, MessageTone, palette},
 };
 
 #[derive(IntoElement)]
@@ -25,6 +29,8 @@ pub struct SetupView {
     preview: Option<EnrollmentPreview>,
     error: Option<String>,
     working: bool,
+    selected_devices: HashSet<DeviceId>,
+    center: WeakEntity<DeviceCenter>,
 }
 
 impl SetupView {
@@ -34,107 +40,129 @@ impl SetupView {
         preview: Option<EnrollmentPreview>,
         error: Option<String>,
         working: bool,
+        selected_devices: HashSet<DeviceId>,
+        center: WeakEntity<DeviceCenter>,
     ) -> Self {
-        Self { snapshot, invitation_input, preview, error, working }
+        Self { snapshot, invitation_input, preview, error, working, selected_devices, center }
     }
 }
 
 impl RenderOnce for SetupView {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let colors = palette::Palette::current(cx);
-        let (eyebrow, title, detail) = copy_for(&self.snapshot);
+        let (label, title, detail) = copy_for(&self.snapshot);
         let stage = self.snapshot.stage;
         let access = self.snapshot.access;
         let working = self.working;
         let has_preview = self.preview.is_some();
+        let selected_count = self.selected_devices.len();
+        let (guidance_title, guidance_tone) = if access == SetupAccess::Unknown {
+            ("Agent connection unavailable", MessageTone::Warning)
+        } else {
+            ("Connection required", MessageTone::Info)
+        };
 
         div()
             .id("setup")
             .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .px(rems(2.))
-            .py(rems(2.))
+            .overflow_y_scroll()
             .bg(colors.canvas)
             .child(
                 div()
                     .w_full()
-                    .max_w(rems(52.))
+                    .max_w(rems(48.))
+                    .mx_auto()
                     .v_flex()
-                    .gap(rems(1.4))
-                    .p(rems(2.5))
-                    .rounded(rems(1.35))
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.surface)
-                    .child(
-                        brand_image("inari-icon-128.png")
-                            .size(rems(3.25))
-                            .rounded(rems(0.95))
-                            .flex_shrink_0(),
-                    )
+                    .gap(rems(1.5))
+                    .px(rems(1.5))
+                    .py(rems(1.5))
                     .child(
                         div()
-                            .text_size(rems(0.75))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(colors.vermilion)
-                            .child(eyebrow.to_uppercase()),
-                    )
-                    .child(
-                        div()
-                            .text_size(rems(2.15))
-                            .line_height(rems(2.45))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(title),
+                            .flex()
+                            .items_center()
+                            .gap(rems(0.75))
+                            .child(
+                                svg()
+                                    .path("inari-mark-torii-ui.svg")
+                                    .size(rems(2.))
+                                    .text_color(colors.vermilion)
+                                    .flex_shrink_0(),
+                            )
+                            .child(
+                                div()
+                                    .v_flex()
+                                    .gap(rems(0.25))
+                                    .child(
+                                        div()
+                                            .text_size(rems(0.75))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(colors.vermilion)
+                                            .child(label),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(rems(1.75))
+                                            .line_height(rems(2.))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child(title),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
                             .max_w(rems(40.))
-                            .text_size(rems(0.98))
-                            .line_height(rems(1.5))
+                            .text_size(rems(0.875))
+                            .line_height(rems(1.25))
                             .text_color(colors.text_muted)
                             .child(detail),
                     )
-                    .when_some(self.snapshot.guidance, |card, guidance| {
-                        card.child(information_message(guidance, colors))
+                    .when_some(self.snapshot.guidance, |view, guidance| {
+                        view.child(Message::new(
+                            "setup-status",
+                            guidance_tone,
+                            guidance_title,
+                            guidance,
+                        ))
                     })
-                    .when_some(self.error, |card, error| card.child(error_message(error, colors)))
+                    .when_some(self.error, |view, error| {
+                        view.child(Message::new(
+                            "setup-error",
+                            MessageTone::Danger,
+                            "Setup could not continue",
+                            error,
+                        ))
+                    })
                     .when(
                         access == SetupAccess::Required && stage == SetupStage::Invitation,
-                        |card| {
-                            card.child(
+                        |view| {
+                            view.child(
                                 div()
                                     .v_flex()
-                                    .gap(rems(0.65))
-                                    .pt(rems(0.35))
-                                    .child(
-                                        div()
-                                            .text_size(rems(0.78))
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .child("Invitation"),
-                                    )
+                                    .gap(rems(0.75))
+                                    .child(field_label("Invitation link"))
                                     .child(
                                         Input::new(&self.invitation_input)
                                             .cleanable(true)
                                             .disabled(working),
                                     )
                                     .when_some(self.preview, |form, preview| {
-                                        form.child(preview_card(preview, colors))
+                                        form.child(trust_review(preview, colors))
                                     })
                                     .child(
                                         div()
                                             .flex()
+                                            .flex_wrap()
                                             .items_center()
-                                            .gap(rems(0.65))
+                                            .gap(rems(0.75))
                                             .when(!has_preview, |actions| {
                                                 actions.child(action_button(
                                                     "review-invitation",
                                                     if working {
-                                                        "Checking invitation…"
+                                                        "Checking invitation"
                                                     } else {
                                                         "Review invitation"
                                                     },
+                                                    IconName::Search,
                                                     working,
                                                     PreviewInvitation,
                                                     true,
@@ -144,10 +172,11 @@ impl RenderOnce for SetupView {
                                                 actions.child(action_button(
                                                     "begin-setup",
                                                     if working {
-                                                        "Connecting…"
+                                                        "Connecting"
                                                     } else {
                                                         "Connect this computer"
                                                     },
+                                                    IconName::ArrowRight,
                                                     working,
                                                     BeginSetup,
                                                     true,
@@ -157,51 +186,62 @@ impl RenderOnce for SetupView {
                             )
                         },
                     )
-                    .when(stage == SetupStage::Devices, |card| {
+                    .when(stage == SetupStage::Devices, |view| {
+                        let center = self.center.clone();
+                        let selected_devices = self.selected_devices.clone();
                         let device_count = self.snapshot.devices.len();
-                        card.child(
+                        view.child(
                             div()
                                 .v_flex()
-                                .gap(rems(0.85))
+                                .gap(rems(0.75))
+                                .child(field_label("Devices to share"))
                                 .children(
                                     self.snapshot
                                         .devices
                                         .into_iter()
-                                        .map(|device| {
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .justify_between()
-                                                .px(rems(0.9))
-                                                .py(rems(0.75))
-                                                .rounded(rems(0.7))
-                                                .border_1()
-                                                .border_color(colors.border)
-                                                .child(
-                                                    div()
-                                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                                        .child(device.name),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_size(rems(0.76))
-                                                        .text_color(colors.text_muted)
-                                                        .child("Ready to share"),
-                                                )
+                                        .enumerate()
+                                        .map(move |(index, device)| {
+                                            let id = device.id.clone();
+                                            let center = center.clone();
+                                            Checkbox::new(("setup-device", index))
+                                                .checked(selected_devices.contains(&device.id))
+                                                .disabled(working)
+                                                .label(device.name)
+                                                .on_click(move |checked, _, cx| {
+                                                    center
+                                                        .update(cx, |center, cx| {
+                                                            center.set_setup_device_selected(
+                                                                id.clone(),
+                                                                *checked,
+                                                                cx,
+                                                            );
+                                                        })
+                                                        .ok();
+                                                })
                                         }),
                                 )
                                 .child(
                                     div()
+                                        .text_size(rems(0.75))
+                                        .text_color(colors.text_muted)
+                                        .child(format!(
+                                            "{selected_count} of {device_count} selected"
+                                        )),
+                                )
+                                .child(
+                                    div()
                                         .flex()
+                                        .flex_wrap()
                                         .items_center()
-                                        .gap(rems(0.65))
+                                        .gap(rems(0.75))
                                         .child(action_button(
                                             "confirm-devices",
                                             if device_count == 0 {
                                                 "Finish setup"
                                             } else {
-                                                "Share these devices"
+                                                "Share selected devices"
                                             },
+                                            IconName::Check,
                                             working,
                                             ConfirmDevices,
                                             true,
@@ -210,6 +250,7 @@ impl RenderOnce for SetupView {
                                             actions.child(action_button(
                                                 "continue-without-devices",
                                                 "Continue without devices",
+                                                IconName::ArrowRight,
                                                 working,
                                                 ContinueWithoutDevices,
                                                 false,
@@ -218,19 +259,21 @@ impl RenderOnce for SetupView {
                                 ),
                         )
                     })
-                    .when(stage == SetupStage::Failed, |card| {
-                        card.child(action_button(
+                    .when(stage == SetupStage::Failed, |view| {
+                        view.child(action_button(
                             "start-over",
-                            if working { "Resetting…" } else { "Start over" },
+                            if working { "Resetting" } else { "Start over" },
+                            IconName::Redo2,
                             working,
                             StartOver,
                             true,
                         ))
                     })
-                    .when(access == SetupAccess::Unknown, |card| {
-                        card.child(action_button(
+                    .when(access == SetupAccess::Unknown, |view| {
+                        view.child(action_button(
                             "retry-agent",
-                            if working { "Checking…" } else { "Try again" },
+                            if working { "Checking" } else { "Try again" },
+                            IconName::Redo2,
                             working,
                             RetryConnection,
                             true,
@@ -243,14 +286,17 @@ impl RenderOnce for SetupView {
 fn action_button(
     id: &'static str,
     label: &'static str,
+    icon: IconName,
     disabled: bool,
     action: impl gpui::Action,
     primary: bool,
 ) -> impl IntoElement {
     let action = Box::new(action);
     Button::new(id)
+        .h(rems(2.))
         .when(primary, |button| button.primary())
         .when(!primary, |button| button.ghost())
+        .icon(icon)
         .label(label)
         .disabled(disabled)
         .on_click(move |_, window, cx| {
@@ -258,7 +304,7 @@ fn action_button(
         })
 }
 
-fn preview_card(preview: EnrollmentPreview, colors: palette::Palette) -> impl IntoElement {
+fn trust_review(preview: EnrollmentPreview, colors: palette::Palette) -> impl IntoElement {
     let controller = preview
         .controller_name
         .unwrap_or_else(|| {
@@ -270,31 +316,36 @@ fn preview_card(preview: EnrollmentPreview, colors: palette::Palette) -> impl In
         });
     div()
         .v_flex()
-        .gap(rems(0.65))
+        .gap(rems(0.75))
         .p(rems(1.))
-        .rounded(rems(0.75))
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.blue_wash)
+        .rounded(rems(0.5))
+        .bg(colors.info_wash)
         .child(
             div()
-                .text_size(rems(0.75))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(colors.blue_text)
+                .text_color(colors.info)
                 .child("Review this connection"),
         )
-        .child(trust_row("Controller", controller, colors))
-        .child(trust_row("Address", preview.controller_url.to_string(), colors))
+        .child(trust_row("Organization", controller, colors))
+        .child(trust_row("Controller", preview.controller_url.to_string(), colors))
         .child(trust_row(
-            "Certificate",
+            "Connection security",
             if preview.requires_mutual_tls {
                 "Mutual TLS after enrollment"
             } else {
-                "Controller-managed"
+                "Controller managed"
             },
             colors,
         ))
-        .child(trust_row("Expires", preview.expires_at.to_rfc3339(), colors))
+        .child(trust_row(
+            "Link expires",
+            preview
+                .expires_at
+                .with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M %Z")
+                .to_string(),
+            colors,
+        ))
 }
 
 fn trust_row(
@@ -304,46 +355,33 @@ fn trust_row(
 ) -> impl IntoElement {
     div()
         .flex()
+        .flex_wrap()
         .items_start()
-        .gap(rems(1.))
+        .gap(rems(0.5))
         .child(
             div()
-                .w(rems(7.))
+                .w(rems(8.))
                 .flex_shrink_0()
-                .text_size(rems(0.76))
-                .text_color(colors.text_muted)
+                .text_size(rems(0.75))
+                .text_color(colors.info)
                 .child(label),
         )
         .child(
             div()
-                .text_size(rems(0.8))
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .min_w(rems(12.))
+                .flex_1()
+                .text_size(rems(0.8125))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(colors.info)
                 .child(value.into()),
         )
 }
 
-fn information_message(
-    message: impl Into<SharedString>,
-    colors: palette::Palette,
-) -> impl IntoElement {
+fn field_label(label: &'static str) -> impl IntoElement {
     div()
-        .id("setup-status")
-        .p(rems(1.))
-        .rounded(rems(0.75))
-        .bg(colors.blue_wash)
-        .text_color(colors.blue_text)
-        .child(message.into())
-}
-
-fn error_message(message: impl Into<SharedString>, colors: palette::Palette) -> impl IntoElement {
-    div()
-        .id("setup-error")
-        .p(rems(1.))
-        .rounded(rems(0.75))
-        .border_1()
-        .border_color(colors.vermilion)
-        .text_color(colors.vermilion)
-        .child(message.into())
+        .text_size(rems(0.8125))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .child(label)
 }
 
 fn copy_for(snapshot: &SetupSnapshot) -> (&'static str, &'static str, &'static str) {
@@ -351,44 +389,44 @@ fn copy_for(snapshot: &SetupSnapshot) -> (&'static str, &'static str, &'static s
         SetupAccess::Unknown => (
             "Checking this computer",
             "Connecting to the Inari agent",
-            "Device Center is verifying the local service and protected identity.",
+            "Device Center is checking the agent service on this computer.",
         ),
         SetupAccess::Required => match snapshot.stage {
             SetupStage::Invitation => (
                 "Set up Inari",
                 "Connect this computer",
-                "Review the organization and controller before this computer joins Inari.",
+                "Confirm the organization and controller before you connect this computer.",
             ),
             SetupStage::Securing => (
                 "Securing the connection",
                 "Protecting this computer",
-                "Setup will continue from this checkpoint when the local agent is ready.",
+                "Setup continues when the agent is ready.",
             ),
             SetupStage::Connecting => (
                 "Connecting to Inari",
-                "Reaching your controller",
-                "The local agent is establishing its managed connection.",
+                "Contacting the controller",
+                "The agent is connecting to your controller.",
             ),
             SetupStage::Devices => (
-                "Finding devices",
+                "Select devices",
                 "Choose what this computer shares",
-                "Confirm the discovered hardware, or finish setup without sharing a device yet.",
+                "All found devices are selected. Clear a device to keep it local.",
             ),
             SetupStage::Failed => (
                 "Setup needs attention",
-                "We could not finish connecting",
-                "The incomplete attempt has not granted access to Device Center.",
+                "Setup did not finish",
+                "No new access was granted. Start again when you are ready.",
             ),
             SetupStage::Complete => (
                 "Setup complete",
                 "This computer is connected",
-                "Device Center is preparing your operational overview.",
+                "Device Center is preparing the overview.",
             ),
         },
         SetupAccess::Complete => (
             "Setup complete",
             "This computer is connected",
-            "Device Center is preparing your operational overview.",
+            "Device Center is preparing the overview.",
         ),
     }
 }

@@ -133,7 +133,7 @@ impl SetupSnapshot {
 
     pub fn unavailable() -> Self {
         Self::unavailable_with(
-            "Device Center could not reach the local agent. Start the service, then try again.",
+            "Device Center could not reach the agent. Start the service, then try again.",
         )
     }
 

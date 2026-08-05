@@ -49,6 +49,29 @@ mod tests {
             DEFAULT_AGENT_ENDPOINT
         );
     }
+
+    #[test]
+    fn generated_transport_base_has_no_trailing_slash() {
+        let endpoint = AgentClientOptions::default().endpoint;
+
+        assert_eq!(generated_transport_base(&endpoint), "http://127.0.0.1:7310");
+    }
+
+    #[tokio::test]
+    async fn communication_errors_report_an_unavailable_agent() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let error = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .unwrap_err();
+
+        let error = map_transport_error(progenitor_client::Error::<()>::CommunicationError(error));
+
+        assert!(matches!(error, AgentClientError::Unavailable(_)));
+    }
 }
 
 pub struct AgentClient {
@@ -191,7 +214,7 @@ impl AgentClient {
             .timeout(self.request_timeout)
             .build()
             .map_err(AgentClientError::Unavailable)?;
-        Ok(transport::Client::new_with_client(self.endpoint.as_str(), http))
+        Ok(transport::Client::new_with_client(generated_transport_base(&self.endpoint), http))
     }
 
     async fn access_token(&self) -> AgentClientResult<AccessToken> {
@@ -210,8 +233,10 @@ impl AgentClient {
                 identity
             },
         };
-        let transport =
-            transport::Client::new_with_client(self.endpoint.as_str(), self.http.clone());
+        let transport = transport::Client::new_with_client(
+            generated_transport_base(&self.endpoint),
+            self.http.clone(),
+        );
         let request = self
             .access_token_request(&transport, &identity)
             .await?;
@@ -376,8 +401,28 @@ fn sign_challenge(
     ))
 }
 
-fn map_transport_error(error: impl std::error::Error + Send + Sync + 'static) -> AgentClientError {
-    AgentClientError::invalid_response(error)
+fn generated_transport_base(endpoint: &Url) -> &str {
+    endpoint.as_str().trim_end_matches('/')
+}
+
+fn map_transport_error<E>(error: progenitor_client::Error<E>) -> AgentClientError
+where
+    E: std::fmt::Debug + Send + Sync + 'static,
+{
+    match error {
+        progenitor_client::Error::CommunicationError(error) => AgentClientError::Unavailable(error),
+        progenitor_client::Error::ErrorResponse(response)
+            if matches!(response.status().as_u16(), 401 | 403 | 409) =>
+        {
+            AgentClientError::Rejected
+        },
+        progenitor_client::Error::UnexpectedResponse(response)
+            if matches!(response.status().as_u16(), 401 | 403 | 409) =>
+        {
+            AgentClientError::Rejected
+        },
+        error => AgentClientError::invalid_response(error),
+    }
 }
 
 #[derive(Clone)]

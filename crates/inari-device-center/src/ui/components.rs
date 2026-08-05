@@ -2,15 +2,17 @@ use gpui::{
     Action, App, Div, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce,
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, rems,
 };
-use gpui_component::StyledExt as _;
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::{
+    Icon, IconName, StyledExt as _,
+    button::{Button, ButtonVariants as _},
+};
 
 use super::palette;
 
 #[derive(IntoElement)]
 pub struct NavigationItem {
     label: SharedString,
-    description: SharedString,
+    icon: IconName,
     active: bool,
     action: Box<dyn Action>,
 }
@@ -18,16 +20,11 @@ pub struct NavigationItem {
 impl NavigationItem {
     pub fn new(
         label: impl Into<SharedString>,
-        description: impl Into<SharedString>,
+        icon: IconName,
         active: bool,
         action: impl Action,
     ) -> Self {
-        Self {
-            label: label.into(),
-            description: description.into(),
-            active,
-            action: Box::new(action),
-        }
+        Self { label: label.into(), icon, active, action: Box::new(action) }
     }
 }
 
@@ -37,32 +34,17 @@ impl RenderOnce for NavigationItem {
         Button::new(self.label.clone())
             .ghost()
             .w_full()
+            .h(rems(2.25))
             .justify_start()
-            .py(rems(0.65))
-            .px(rems(0.7))
+            .gap(rems(0.75))
+            .px(rems(0.75))
             .when(self.active, |button| {
                 button
-                    .bg(colors.surface)
-                    .border_1()
-                    .border_color(colors.border)
+                    .bg(colors.surface_raised)
+                    .text_color(colors.text)
             })
-            .child(
-                div()
-                    .v_flex()
-                    .items_start()
-                    .gap(rems(0.1))
-                    .child(
-                        div()
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(self.label),
-                    )
-                    .child(
-                        div()
-                            .text_size(rems(0.68))
-                            .text_color(colors.text_muted)
-                            .child(self.description),
-                    ),
-            )
+            .icon(self.icon)
+            .label(self.label)
             .on_click(move |_, window, cx| {
                 window.dispatch_action(self.action.boxed_clone(), cx);
             })
@@ -82,27 +64,97 @@ impl PageHeader {
 }
 
 impl RenderOnce for PageHeader {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = palette::Palette::current(cx);
         div()
             .v_flex()
-            .gap(rems(0.45))
-            .pb(rems(0.45))
+            .gap(rems(0.5))
+            .pb(rems(0.5))
             .child(
                 div()
                     .id("page-heading")
-                    .text_size(rems(2.05))
-                    .line_height(rems(2.35))
+                    .text_size(rems(1.75))
+                    .line_height(rems(2.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(self.title),
             )
             .child(
                 div()
-                    .max_w(rems(44.))
-                    .text_size(rems(0.92))
-                    .line_height(rems(1.35))
+                    .max_w(rems(42.))
+                    .text_size(rems(0.875))
+                    .line_height(rems(1.25))
                     .text_color(colors.text_muted)
                     .child(self.description),
+            )
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum MessageTone {
+    Info,
+    Success,
+    Warning,
+    Danger,
+}
+
+#[derive(IntoElement)]
+pub struct Message {
+    id: &'static str,
+    tone: MessageTone,
+    title: SharedString,
+    detail: SharedString,
+}
+
+impl Message {
+    pub fn new(
+        id: &'static str,
+        tone: MessageTone,
+        title: impl Into<SharedString>,
+        detail: impl Into<SharedString>,
+    ) -> Self {
+        Self { id, tone, title: title.into(), detail: detail.into() }
+    }
+}
+
+impl RenderOnce for Message {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let colors = palette::Palette::current(cx);
+        let (color, background, icon) = match self.tone {
+            MessageTone::Info => (colors.info, colors.info_wash, IconName::Info),
+            MessageTone::Success => (colors.success, colors.success_wash, IconName::CircleCheck),
+            MessageTone::Warning => (colors.warning, colors.warning_wash, IconName::TriangleAlert),
+            MessageTone::Danger => (colors.danger, colors.danger_wash, IconName::CircleX),
+        };
+        div()
+            .id(self.id)
+            .flex()
+            .items_start()
+            .gap(rems(0.75))
+            .p(rems(1.))
+            .rounded(rems(0.5))
+            .bg(background)
+            .child(
+                Icon::new(icon)
+                    .size(rems(1.))
+                    .text_color(color),
+            )
+            .child(
+                div()
+                    .v_flex()
+                    .gap(rems(0.25))
+                    .child(
+                        div()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(color)
+                            .child(self.title),
+                    )
+                    .child(
+                        div()
+                            .text_size(rems(0.8125))
+                            .line_height(rems(1.125))
+                            .text_color(color)
+                            .child(self.detail),
+                    ),
             )
     }
 }
@@ -127,27 +179,31 @@ impl MetricCard {
 }
 
 impl RenderOnce for MetricCard {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = palette::Palette::current(cx);
-        card(colors)
+        div()
+            .v_flex()
+            .gap(rems(0.5))
+            .p(rems(1.))
+            .rounded(rems(0.5))
+            .bg(colors.surface)
             .child(
                 div()
-                    .text_size(rems(0.72))
+                    .text_size(rems(0.75))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(self.accent)
-                    .child(self.label.to_uppercase()),
+                    .text_color(colors.text_muted)
+                    .child(self.label),
             )
             .child(
                 div()
-                    .mt(rems(1.1))
-                    .text_size(rems(1.55))
+                    .text_size(rems(1.375))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(self.accent)
                     .child(self.value),
             )
             .child(
                 div()
-                    .mt(rems(0.25))
-                    .text_size(rems(0.78))
+                    .text_size(rems(0.75))
                     .text_color(colors.text_muted)
                     .child(self.detail),
             )
@@ -172,41 +228,42 @@ impl SectionCard {
 }
 
 impl RenderOnce for SectionCard {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = palette::Palette::current(cx);
-        card(colors)
-            .min_h(rems(10.))
+        div()
+            .v_flex()
+            .gap(rems(0.5))
+            .p(rems(1.))
+            .rounded(rems(0.5))
+            .bg(colors.surface)
             .child(
                 div()
-                    .text_size(rems(0.78))
+                    .text_size(rems(0.75))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(colors.text_muted)
-                    .child(self.title.to_uppercase()),
+                    .child(self.title),
             )
             .child(
                 div()
-                    .mt(rems(1.35))
-                    .text_size(rems(1.15))
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(self.summary),
             )
             .child(
                 div()
-                    .mt(rems(0.45))
-                    .text_size(rems(0.82))
-                    .line_height(rems(1.25))
+                    .text_size(rems(0.8125))
+                    .line_height(rems(1.125))
                     .text_color(colors.text_muted)
                     .child(self.detail),
             )
     }
 }
 
-fn card(colors: palette::Palette) -> Div {
+pub fn page() -> Div {
     div()
         .v_flex()
-        .p(rems(1.15))
-        .rounded(rems(1.))
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.surface)
+        .gap(rems(1.5))
+        .max_w(rems(72.))
+        .mx_auto()
+        .px(rems(1.5))
+        .py(rems(1.5))
 }

@@ -11,6 +11,8 @@ class BrandAsset(StrEnum):
 
     APP_ICON = "inari-app-icon.svg"
     APP_ICON_1024 = "inari-icon-1024.png"
+    APP_ICON_MACOS = "inari-app-icon-macos.svg"
+    APP_ICON_MACOS_BUNDLE = "inari.icns"
     FAVICON_DEVELOPMENT = "favicon-development.svg"
     FAVICON_PREVIEW = "favicon-preview.svg"
     FAVICON_PRODUCTION = "favicon.svg"
@@ -20,11 +22,12 @@ class BrandAsset(StrEnum):
     MARK_MICRO = "inari-mark-micro.svg"
     MARK_REVERSED = "inari-mark-reversed.svg"
     MARK_TORII = "inari-mark-torii.svg"
+    MARK_TORII_UI = "inari-mark-torii-ui.svg"
     TRAY_ICON = "inari-tray-icon.svg"
 
 
 def read_asset(asset: BrandAsset) -> bytes:
-    """Read a packaged vector without exposing filesystem assumptions."""
+    """Read a packaged asset without exposing filesystem assumptions."""
 
     return resources.files(__package__).joinpath("assets", asset.value).read_bytes()
 

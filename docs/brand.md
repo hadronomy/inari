@@ -32,9 +32,12 @@ path geometry into components or redraw the mark for a platform.
 | `inari-mark.svg` | Sumi mark on light surfaces |
 | `inari-mark-reversed.svg` | White mark on dark surfaces |
 | `inari-mark-torii.svg` | Deliberate vermilion brand moment |
+| `inari-mark-torii-ui.svg` | Theme-aware Device Center mark |
 | `inari-mark-micro.svg` | 16–20 px symbol use |
 | `inari-lockup*.svg` | Horizontal lockups |
-| `inari-app-icon.svg` | Application and installer tile |
+| `inari-app-icon.svg` | Pre-shaped application and installer tile |
+| `inari-app-icon-macos.svg` | Square, unmasked macOS icon source |
+| `inari.icns` | Generated macOS bundle icon |
 | `inari-tray-icon.svg` | Tray base before one status overlay |
 | `favicon-development.svg` | Development environment cue |
 | `favicon-preview.svg` | Preview environment cue |
@@ -44,11 +47,14 @@ path geometry into components or redraw the mark for a platform.
 After changing an approved vector, run:
 
 ```sh
-python packages/brand/tools/build_assets.py
+uv run python packages/brand/tools/build_assets.py
 ```
 
-The script creates the exact-size raster, ICO, and ICNS variants and verifies
-the bundled fonts.
+The script creates the exact-size raster, ICO, and ICNS variants. It also
+verifies the bundled fonts and Lucide interface icons.
+
+Keep the macOS source square and unmasked. macOS applies the final corner shape
+and platform effects.
 
 ## Color and type
 
@@ -63,9 +69,11 @@ the bundled fonts.
 | Signal blue | `#2563EB` | Development environment cue |
 | Relay green | `#18794E` | Preview environment cue |
 
-Instrument Sans is the product and communication face. IBM Plex Mono is for
-identifiers, commands, and protocol values. Introduce Japanese type only with
-real localization and native-language review.
+Atkinson Hyperlegible Next is the Device Center face. Use Regular for body text
+and SemiBold for headings and selected controls. Instrument Sans is the
+communication face. IBM Plex Mono is for identifiers, commands, and protocol
+values. Introduce Japanese type only with real localization and native-language
+review.
 
 Vermilion is a brand color, not an error state. Success, warning, failure, and
 information keep their own semantic tokens, visible labels, and accessible

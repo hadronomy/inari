@@ -35,6 +35,7 @@ fn main() {
         .with_assets(BrandAssets)
         .run(move |cx| {
             gpui_component::init(cx);
+            assets::install_fonts(cx).expect("failed to load Device Center fonts");
             app::bind_keys(cx);
 
             let (tray_sender, tray_commands) = async_channel::bounded(32);

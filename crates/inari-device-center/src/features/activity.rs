@@ -1,14 +1,14 @@
 use std::cmp::Reverse;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled,
     div, prelude::FluentBuilder as _, rems,
 };
-use gpui_component::StyledExt as _;
+use gpui_component::{Icon, IconName, StyledExt as _};
 use inari_agent_client::{AgentEvent, EventResource, Job, JobState};
 
-use crate::ui::{PageHeader, SectionCard, palette};
+use crate::ui::{PageHeader, SectionCard, page, palette};
 
 #[derive(IntoElement)]
 pub struct ActivityView {
@@ -28,32 +28,25 @@ impl RenderOnce for ActivityView {
         let mut items = activity_items(self.jobs, self.events, colors);
         items.sort_unstable_by_key(|item| Reverse(item.occurred_at));
 
-        div()
-            .v_flex()
-            .gap(rems(1.35))
-            .max_w(rems(78.))
-            .mx_auto()
-            .px(rems(2.5))
-            .py(rems(2.25))
+        page()
             .child(PageHeader::new(
                 "Activity",
-                "Durable jobs and device events, ordered by what happened.",
+                "Review recent jobs and device events. Times use this computer's time zone.",
             ))
-            .when(items.is_empty(), |page| {
-                page.child(SectionCard::new(
-                    "Operational timeline",
-                    "No activity has been recorded.",
-                    "New device work and connection changes will appear here.",
+            .when(items.is_empty(), |view| {
+                view.child(SectionCard::new(
+                    "Recent activity",
+                    "No activity recorded",
+                    "New jobs and device events appear here.",
                 ))
             })
-            .when(!items.is_empty(), |page| {
-                page.child(
+            .when(!items.is_empty(), |view| {
+                view.child(
                     div()
                         .id("activity-timeline")
                         .v_flex()
-                        .rounded(rems(1.))
-                        .border_1()
-                        .border_color(colors.border)
+                        .rounded(rems(0.5))
+                        .bg(colors.surface)
                         .overflow_hidden()
                         .children(
                             items
@@ -72,6 +65,7 @@ struct ActivityItem {
     title: SharedString,
     detail: SharedString,
     color: gpui::Hsla,
+    icon: IconName,
 }
 
 fn activity_items(
@@ -89,18 +83,20 @@ fn activity_items(
             occurred_at: event.occurred_at,
             title: event.summary.into(),
             detail: resource.into(),
-            color: colors.blue,
+            color: colors.info,
+            icon: IconName::Info,
         }
     }));
-    items.extend(
-        jobs.into_iter()
-            .map(|job| ActivityItem {
-                occurred_at: job.created_at,
-                title: job_state(job.state).into(),
-                detail: format!("Job {} · device {}", job.id, job.device_id).into(),
-                color: job_color(job.state, colors),
-            }),
-    );
+    items.extend(jobs.into_iter().map(|job| {
+        let (color, icon) = job_treatment(job.state, colors);
+        ActivityItem {
+            occurred_at: job.created_at,
+            title: job_state(job.state).into(),
+            detail: format!("Job {} · device {}", job.id, job.device_id).into(),
+            color,
+            icon,
+        }
+    }));
     items
 }
 
@@ -112,46 +108,46 @@ fn activity_row(
     div()
         .id(("activity", index))
         .flex()
+        .flex_wrap()
         .items_start()
-        .gap(rems(1.))
-        .px(rems(1.15))
-        .py(rems(0.95))
+        .gap(rems(0.75))
+        .px(rems(1.))
+        .py(rems(0.75))
         .when(index > 0, |row| {
             row.border_t_1()
-                .border_color(colors.border)
+                .border_color(colors.separator)
         })
         .child(
-            div()
-                .w(rems(0.22))
-                .h(rems(2.2))
-                .rounded(rems(0.12))
-                .bg(item.color)
-                .flex_shrink_0(),
+            Icon::new(item.icon)
+                .size(rems(1.))
+                .text_color(item.color),
         )
         .child(
             div()
+                .min_w(rems(13.))
+                .flex_1()
                 .v_flex()
-                .gap(rems(0.2))
+                .gap(rems(0.25))
                 .child(
                     div()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child(item.title),
                 )
                 .child(
                     div()
-                        .text_size(rems(0.76))
+                        .text_size(rems(0.75))
                         .text_color(colors.text_muted)
                         .child(item.detail),
                 ),
         )
         .child(
             div()
-                .ml_auto()
-                .text_size(rems(0.72))
+                .text_size(rems(0.75))
                 .text_color(colors.text_muted)
                 .child(
                     item.occurred_at
-                        .format("%Y-%m-%d %H:%M UTC")
+                        .with_timezone(&Local)
+                        .format("%Y-%m-%d %H:%M %Z")
                         .to_string(),
                 ),
         )
@@ -168,11 +164,13 @@ fn job_state(state: JobState) -> &'static str {
     }
 }
 
-fn job_color(state: JobState, colors: palette::Palette) -> gpui::Hsla {
+fn job_treatment(state: JobState, colors: palette::Palette) -> (gpui::Hsla, IconName) {
     match state {
-        JobState::Succeeded => colors.green,
-        JobState::Failed => colors.vermilion,
-        JobState::Queued | JobState::Running => colors.blue,
-        JobState::Cancelled | JobState::Unknown => colors.text_muted,
+        JobState::Succeeded => (colors.success, IconName::CircleCheck),
+        JobState::Failed => (colors.danger, IconName::CircleX),
+        JobState::Queued => (colors.info, IconName::Calendar),
+        JobState::Running => (colors.info, IconName::LoaderCircle),
+        JobState::Cancelled => (colors.text_muted, IconName::Close),
+        JobState::Unknown => (colors.warning, IconName::TriangleAlert),
     }
 }
