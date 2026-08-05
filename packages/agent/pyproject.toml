@@ -15,7 +15,7 @@ dependencies = [
   "puremagic>=2.0.0,<3.0.0",
   "pywin32>=306; platform_system == 'Windows'",
   "httpx>=0.28.1",
-  "cryptography>=46.0.5",
+  "cryptography>=50.0.0",
   "joserfc>=1.6.3",
   "keyring>=25.7.0",
   "platformdirs>=4.4.0",
