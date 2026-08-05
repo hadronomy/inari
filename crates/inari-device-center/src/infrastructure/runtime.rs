@@ -18,6 +18,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+pub struct SetupResult {
+    pub snapshot: SetupSnapshot,
+    pub diagnostic: Option<String>,
+}
+
 #[derive(Clone)]
 pub enum AgentRuntimeUpdate {
     Connection(AgentConnection),
@@ -57,12 +62,16 @@ impl AgentRuntime {
         self.updates.subscribe()
     }
 
-    pub fn setup(&self) -> oneshot::Receiver<SetupSnapshot> {
+    pub fn setup(&self) -> oneshot::Receiver<SetupResult> {
         self.spawn(|client| async move {
-            client
-                .setup()
-                .await
-                .unwrap_or_else(setup_failure)
+            match client.setup().await {
+                Ok(snapshot) => SetupResult { snapshot, diagnostic: None },
+                Err(error) => {
+                    let diagnostic = error_chain(&error);
+                    tracing::warn!(%diagnostic, "could not read Device Center setup state");
+                    SetupResult { snapshot: setup_failure(&error), diagnostic: Some(diagnostic) }
+                },
+            }
         })
     }
 
@@ -223,29 +232,43 @@ impl AgentRuntime {
     }
 }
 
-fn setup_failure(error: AgentClientError) -> SetupSnapshot {
-    let guidance = match error {
+fn setup_failure(error: &AgentClientError) -> SetupSnapshot {
+    SetupSnapshot::unavailable_with(agent_failure_message(error))
+}
+
+pub(crate) fn agent_failure_message(error: &AgentClientError) -> &'static str {
+    match error {
         AgentClientError::MalformedIdentity => {
-            "The protected Device Center identity is damaged. Ask an administrator to reset local trust before trying again."
+            "Device Center cannot use its saved identity. Ask an administrator to reset it, then try again."
         },
         AgentClientError::IdentityUnavailable(_) => {
-            "Device Center cannot use the protected credential store. Unlock it or ask an administrator for help."
+            "Device Center cannot use its saved sign-in information. Unlock the computer, then try again."
         },
         AgentClientError::IdentityRequired | AgentClientError::PairingUnavailable(_) => {
-            "Device Center could not establish protected local trust. Restart the installed agent service, then try again."
+            "Device Center could not create a trusted connection. Restart the agent service, then try again."
         },
         AgentClientError::InvalidResponse(_) => {
-            "The installed agent and Device Center do not understand the same local contract. Update the Inari installation, then try again."
+            "The agent returned an invalid response. Restart the agent service."
         },
         AgentClientError::Unavailable(_)
         | AgentClientError::Rejected
         | AgentClientError::EventStreamUnavailable(_)
         | AgentClientError::InvalidInvitation
         | AgentClientError::EventStreamClosed => {
-            "Device Center could not reach the local agent. Start the service, then try again."
+            "Device Center could not reach the agent. Start the service, then try again."
         },
-    };
-    SetupSnapshot::unavailable_with(guidance)
+    }
+}
+
+fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(error) = source {
+        message.push_str(": ");
+        message.push_str(&error.to_string());
+        source = error.source();
+    }
+    message
 }
 
 #[cfg(windows)]
@@ -332,22 +355,34 @@ mod tests {
 
     #[test]
     fn damaged_identity_fails_closed_with_recovery_guidance() {
-        let snapshot = setup_failure(AgentClientError::MalformedIdentity);
+        let snapshot = setup_failure(&AgentClientError::MalformedIdentity);
 
         assert_eq!(snapshot.access, SetupAccess::Unknown);
         assert!(
             snapshot
                 .guidance
                 .as_deref()
-                .is_some_and(|guidance| guidance.contains("protected Device Center identity"))
+                .is_some_and(|guidance| guidance.contains("saved identity"))
         );
     }
 
     #[test]
     fn unavailable_agent_never_grants_setup_access() {
-        let snapshot = setup_failure(AgentClientError::InvalidInvitation);
+        let snapshot = setup_failure(&AgentClientError::InvalidInvitation);
 
         assert_eq!(snapshot.access, SetupAccess::Unknown);
         assert!(snapshot.completed_at.is_none());
+    }
+
+    #[test]
+    fn post_install_invalid_response_uses_operator_copy() {
+        let snapshot = setup_failure(&AgentClientError::InvalidResponse(Box::new(
+            std::io::Error::other("invalid response"),
+        )));
+
+        assert_eq!(
+            snapshot.guidance.as_deref(),
+            Some("The agent returned an invalid response. Restart the agent service.")
+        );
     }
 }

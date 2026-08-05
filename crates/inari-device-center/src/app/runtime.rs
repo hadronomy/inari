@@ -3,7 +3,9 @@ use std::sync::Arc;
 use gpui::{AnyWindowHandle, Context, Task, Window};
 #[cfg(windows)]
 use inari_agent_client::SetupSnapshot;
-use inari_agent_client::{AgentConnection, ServiceControlResult, ServiceState, SetupAccess};
+use inari_agent_client::{
+    AgentClientOptions, AgentConnection, ServiceControlResult, ServiceState, SetupAccess,
+};
 
 use super::{DeviceCenter, OpenApiReference, OpenLogs};
 use crate::infrastructure::{AgentRuntime, AgentRuntimeUpdate, TrayCommand, platform};
@@ -81,6 +83,10 @@ impl DeviceCenter {
                                         AgentRuntimeUpdate::Activation(invitation) => {
                                             platform::show_window(window, cx);
                                             if let Some(invitation) = invitation {
+                                                let parsed_invitation =
+                                                    inari_agent_client::InvitationLink::parse(
+                                                        invitation.as_str(),
+                                                    );
                                                 center
                                                     .invitation_input
                                                     .update(cx, |input, cx| {
@@ -90,6 +96,22 @@ impl DeviceCenter {
                                                 center.setup = SetupSnapshot::invitation();
                                                 center.preview = None;
                                                 center.setup_error = None;
+                                                match parsed_invitation {
+                                                    Ok(invitation) => {
+                                                        center.setup_working = true;
+                                                        center._setup_task =
+                                                            Self::load_invitation_preview(
+                                                                center.runtime.clone(),
+                                                                invitation,
+                                                                cx,
+                                                            );
+                                                    },
+                                                    Err(error) => {
+                                                        center.setup_working = false;
+                                                        center.setup_error =
+                                                            Some(error.to_string());
+                                                    },
+                                                }
                                             }
                                         },
                                     }
@@ -273,7 +295,11 @@ impl DeviceCenter {
         _: &mut Window,
         _: &mut Context<Self>,
     ) {
-        if let Err(error) = open::that_detached("http://127.0.0.1:8765/docs") {
+        let endpoint = AgentClientOptions::default()
+            .endpoint
+            .join("docs")
+            .expect("the built-in API reference URL is valid");
+        if let Err(error) = open::that_detached(endpoint.as_str()) {
             tracing::warn!(%error, "could not open the local API reference");
         }
     }

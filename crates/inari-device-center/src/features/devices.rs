@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use gpui::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, rems,
+    Render, Styled, Subscription, Window, div, prelude::FluentBuilder as _, rems,
 };
 use gpui_component::{
-    StyledExt as _,
+    Icon, IconName, StyledExt as _,
+    button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
 use inari_agent_client::{Device, DeviceId, DeviceKind, DeviceState};
 
-use crate::ui::{PageHeader, palette};
+use crate::ui::{PageHeader, page, palette};
 
 pub struct DeviceDirectory {
     devices: Arc<[Device]>,
@@ -24,7 +24,7 @@ impl DeviceDirectory {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Search by device name, kind, or identifier")
+                .placeholder("Search devices")
                 .clean_on_escape()
         });
         let search_subscription = cx.subscribe_in(&search, window, |_, _, event, _, cx| {
@@ -89,20 +89,14 @@ impl Render for DeviceDirectory {
             })
             .cloned();
 
-        div()
-            .v_flex()
-            .gap(rems(1.35))
-            .max_w(rems(78.))
-            .mx_auto()
-            .px(rems(2.5))
-            .py(rems(2.25))
+        page()
             .child(PageHeader::new(
                 "Devices",
-                "Find connected hardware and understand its current state.",
+                "Find connected hardware and check its current state.",
             ))
             .child(
                 div()
-                    .max_w(rems(30.))
+                    .max_w(rems(24.))
                     .child(Input::new(&self.search).cleanable(true)),
             )
             .child(
@@ -110,16 +104,15 @@ impl Render for DeviceDirectory {
                     .flex()
                     .flex_wrap()
                     .items_start()
-                    .gap(rems(0.85))
+                    .gap(rems(0.75))
                     .child(
                         div()
                             .id("device-directory")
-                            .min_w(rems(24.))
+                            .min_w(rems(20.))
                             .flex_1()
                             .v_flex()
-                            .rounded(rems(1.))
-                            .border_1()
-                            .border_color(colors.border)
+                            .rounded(rems(0.5))
+                            .bg(colors.surface)
                             .overflow_hidden()
                             .when(visible.is_empty(), |list| {
                                 list.child(empty_directory(self.devices.is_empty(), colors))
@@ -141,8 +134,8 @@ impl Render for DeviceDirectory {
                     )
                     .child(
                         div()
-                            .min_w(rems(18.))
-                            .w(rems(23.))
+                            .min_w(rems(16.))
+                            .w(rems(21.))
                             .flex_1()
                             .child(selected.map_or_else(
                                 || empty_detail(colors),
@@ -153,103 +146,110 @@ impl Render for DeviceDirectory {
     }
 }
 
-fn device_row(
-    device: Device,
-    index: usize,
-    selected: bool,
-    colors: palette::Palette,
-) -> gpui::Stateful<gpui::Div> {
+fn device_row(device: Device, index: usize, selected: bool, colors: palette::Palette) -> Button {
     let kind = device_kind(device.kind);
-    div()
-        .id(("device", index))
-        .flex()
-        .items_center()
-        .gap(rems(1.))
-        .px(rems(1.15))
-        .py(rems(1.))
-        .cursor_pointer()
+    let (state_color, state_icon) = state_treatment(device.state, colors);
+    Button::new(("device", index))
+        .ghost()
+        .w_full()
+        .justify_start()
+        .gap(rems(0.75))
+        .px(rems(1.))
+        .py(rems(0.75))
+        .rounded_none()
         .when(index > 0, |row| {
             row.border_t_1()
-                .border_color(colors.border)
+                .border_color(colors.separator)
         })
-        .when(selected, |row| row.bg(colors.blue_wash))
-        .hover(|row| row.bg(colors.surface_raised))
+        .when(selected, |row| row.bg(colors.info_wash))
         .child(
-            div()
-                .size(rems(2.35))
-                .rounded(rems(0.7))
-                .bg(colors.surface_raised)
-                .flex()
-                .items_center()
-                .justify_center()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .child(
-                    kind.chars()
-                        .next()
-                        .unwrap_or('D')
-                        .to_string(),
-                ),
+            Icon::new(device_icon(device.kind))
+                .size(rems(1.125))
+                .text_color(colors.text_muted),
         )
         .child(
             div()
+                .min_w(rems(9.))
+                .flex_1()
                 .v_flex()
-                .gap(rems(0.15))
+                .items_start()
+                .gap(rems(0.25))
                 .child(
                     div()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
                         .child(device.name),
                 )
                 .child(
                     div()
-                        .text_size(rems(0.78))
+                        .text_size(rems(0.75))
                         .text_color(colors.text_muted)
                         .child(kind),
                 ),
         )
         .child(
             div()
-                .ml_auto()
-                .text_size(rems(0.8))
-                .text_color(state_color(device.state, colors))
+                .flex()
+                .items_center()
+                .gap(rems(0.25))
+                .text_size(rems(0.75))
+                .text_color(state_color)
+                .child(Icon::new(state_icon).size(rems(0.875)))
                 .child(device_state(device.state)),
         )
 }
 
 fn device_detail(device: Device, colors: palette::Palette) -> gpui::Div {
+    let (state_color, state_icon) = state_treatment(device.state, colors);
     div()
         .v_flex()
-        .gap(rems(1.15))
-        .p(rems(1.25))
-        .rounded(rems(1.))
-        .border_1()
-        .border_color(colors.border)
+        .gap(rems(1.))
+        .p(rems(1.))
+        .rounded(rems(0.5))
         .bg(colors.surface)
         .child(
             div()
-                .v_flex()
-                .gap(rems(0.25))
+                .flex()
+                .items_center()
+                .gap(rems(0.75))
                 .child(
-                    div()
-                        .text_size(rems(1.2))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(device.name),
+                    Icon::new(device_icon(device.kind))
+                        .size(rems(1.25))
+                        .text_color(colors.text_muted),
                 )
                 .child(
                     div()
-                        .text_size(rems(0.8))
-                        .text_color(colors.text_muted)
-                        .child(device_kind(device.kind)),
+                        .v_flex()
+                        .gap(rems(0.25))
+                        .child(
+                            div()
+                                .text_size(rems(1.125))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .child(device.name),
+                        )
+                        .child(
+                            div()
+                                .text_size(rems(0.75))
+                                .text_color(colors.text_muted)
+                                .child(device_kind(device.kind)),
+                        ),
                 ),
         )
-        .child(detail_row("Status", device_state(device.state), colors))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(rems(0.5))
+                .text_color(state_color)
+                .child(Icon::new(state_icon).size(rems(1.)))
+                .child(device_state(device.state)),
+        )
         .child(detail_row("Device ID", device.id.to_string(), colors))
         .child(
             div()
-                .pt(rems(0.4))
-                .text_size(rems(0.78))
-                .line_height(rems(1.2))
+                .text_size(rems(0.75))
+                .line_height(rems(1.125))
                 .text_color(colors.text_muted)
-                .child("The stable device ID is the value integrations should use."),
+                .child("Use the device ID in integrations."),
         )
 }
 
@@ -263,38 +263,33 @@ fn detail_row(
         .gap(rems(0.25))
         .child(
             div()
-                .text_size(rems(0.7))
+                .text_size(rems(0.75))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(colors.text_muted)
-                .child(label.to_uppercase()),
+                .child(label),
         )
         .child(
             div()
-                .text_size(rems(0.82))
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_size(rems(0.8125))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
                 .child(value.into()),
         )
 }
 
 fn empty_directory(no_devices: bool, colors: palette::Palette) -> gpui::Div {
     div()
-        .p(rems(1.25))
+        .p(rems(1.))
         .text_color(colors.text_muted)
-        .child(if no_devices {
-            "No devices have been discovered yet."
-        } else {
-            "No devices match this search."
-        })
+        .child(if no_devices { "No devices found." } else { "No devices match this search." })
 }
 
 fn empty_detail(colors: palette::Palette) -> gpui::Div {
     div()
-        .p(rems(1.25))
-        .rounded(rems(1.))
-        .border_1()
-        .border_color(colors.border)
+        .p(rems(1.))
+        .rounded(rems(0.5))
+        .bg(colors.surface)
         .text_color(colors.text_muted)
-        .child("Select a device to see its operational details.")
+        .child("Select a device to view its details.")
 }
 
 fn matches_search(device: &Device, query: &str) -> bool {
@@ -322,6 +317,15 @@ fn device_kind(kind: DeviceKind) -> &'static str {
     }
 }
 
+fn device_icon(kind: DeviceKind) -> IconName {
+    match kind {
+        DeviceKind::Printer => IconName::File,
+        DeviceKind::Scale => IconName::ChartPie,
+        DeviceKind::Scanner => IconName::Frame,
+        DeviceKind::Other => IconName::SquareTerminal,
+    }
+}
+
 fn device_state(state: DeviceState) -> &'static str {
     match state {
         DeviceState::Online => "Online",
@@ -332,11 +336,12 @@ fn device_state(state: DeviceState) -> &'static str {
     }
 }
 
-fn state_color(state: DeviceState, colors: palette::Palette) -> gpui::Hsla {
+fn state_treatment(state: DeviceState, colors: palette::Palette) -> (gpui::Hsla, IconName) {
     match state {
-        DeviceState::Online => colors.green,
-        DeviceState::Degraded | DeviceState::Blocked => colors.vermilion,
-        DeviceState::Offline | DeviceState::Unknown => colors.text_muted,
+        DeviceState::Online => (colors.success, IconName::CircleCheck),
+        DeviceState::Degraded | DeviceState::Blocked => (colors.danger, IconName::TriangleAlert),
+        DeviceState::Offline => (colors.text_muted, IconName::CircleX),
+        DeviceState::Unknown => (colors.warning, IconName::Info),
     }
 }
 

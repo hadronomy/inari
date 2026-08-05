@@ -1,18 +1,17 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, KeyBinding, ParentElement as _, Render, StatefulInteractiveElement as _, Styled,
-    Subscription, Task, Window, actions, div, prelude::FluentBuilder as _, rems,
+    Subscription, Task, Window, actions, div, prelude::FluentBuilder as _, rems, svg,
 };
-use gpui_component::{StyledExt as _, Theme, input::InputState};
+use gpui_component::{IconName, StyledExt as _, Theme, input::InputState};
 use inari_agent_client::{
-    AgentConnection, AgentEvent, Device, EnrollmentPreview, Job, ServiceState, SetupAccess,
-    SetupSnapshot,
+    AgentConnection, AgentEvent, Device, DeviceId, EnrollmentPreview, InvitationLink, Job,
+    ServiceState, SetupAccess, SetupSnapshot,
 };
 
 use crate::{
-    assets::image as brand_image,
     features::{
         activity::ActivityView, devices::DeviceDirectory, overview::OverviewView, setup::SetupView,
         support::SupportView,
@@ -68,6 +67,20 @@ enum Destination {
     Support,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RootSurface {
+    Operations,
+    Setup,
+}
+
+fn root_surface(access: SetupAccess, setup_forced: bool) -> RootSurface {
+    if setup_forced || access == SetupAccess::Required {
+        RootSurface::Setup
+    } else {
+        RootSurface::Operations
+    }
+}
+
 pub struct DeviceCenter {
     destination: Destination,
     setup: SetupSnapshot,
@@ -78,9 +91,11 @@ pub struct DeviceCenter {
     connection: AgentConnection,
     service_state: ServiceState,
     service_error: Option<String>,
+    agent_error: Option<String>,
     invitation_input: Entity<InputState>,
     preview: Option<EnrollmentPreview>,
     setup_error: Option<String>,
+    selected_setup_devices: HashSet<DeviceId>,
     setup_working: bool,
     setup_forced: bool,
     runtime: Arc<AgentRuntime>,
@@ -102,7 +117,13 @@ impl DeviceCenter {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let setup_task = Self::load_setup(runtime.clone(), cx);
+        let initial_preview = initial_invitation
+            .as_deref()
+            .and_then(|value| InvitationLink::parse(value).ok());
+        let setup_task = match initial_preview.clone() {
+            Some(invitation) => Self::load_invitation_preview(runtime.clone(), invitation, cx),
+            None => Self::load_setup(runtime.clone(), cx),
+        };
         let service_task = Self::load_service_state(runtime.clone(), cx);
         let updates_task = Self::listen_for_updates(runtime.clone(), window.window_handle(), cx);
         let device_directory = cx.new(|cx| DeviceDirectory::new(window, cx));
@@ -136,10 +157,12 @@ impl DeviceCenter {
             connection: AgentConnection::Checking,
             service_state: ServiceState::Checking,
             service_error: None,
+            agent_error: None,
             invitation_input,
             preview: None,
             setup_error: None,
-            setup_working: false,
+            selected_setup_devices: HashSet::new(),
+            setup_working: initial_preview.is_some(),
             setup_forced: initial_invitation.is_some(),
             runtime,
             tray: None,
@@ -160,6 +183,20 @@ impl DeviceCenter {
         self.tray = Some(tray);
     }
 
+    pub(crate) fn set_setup_device_selected(
+        &mut self,
+        id: DeviceId,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if selected {
+            self.selected_setup_devices.insert(id);
+        } else {
+            self.selected_setup_devices.remove(&id);
+        }
+        cx.notify();
+    }
+
     fn show_overview(&mut self, _: &ShowOverview, _: &mut Window, cx: &mut Context<Self>) {
         self.navigate(Destination::Overview, cx);
     }
@@ -177,7 +214,7 @@ impl DeviceCenter {
     }
 
     fn navigate(&mut self, destination: Destination, cx: &mut Context<Self>) {
-        if self.setup.access == SetupAccess::Complete {
+        if self.setup.access != SetupAccess::Required && !self.setup_forced {
             self.destination = destination;
             cx.notify();
         }
@@ -185,18 +222,25 @@ impl DeviceCenter {
 
     fn main_content(&self) -> impl IntoElement {
         match self.destination {
-            Destination::Overview => {
-                OverviewView::new(&self.devices, &self.jobs, self.connection, self.service_state)
-                    .into_any_element()
-            },
+            Destination::Overview => OverviewView::new(
+                &self.devices,
+                &self.jobs,
+                self.connection,
+                self.service_state,
+                self.setup.guidance.clone(),
+            )
+            .into_any_element(),
             Destination::Devices => self
                 .device_directory
                 .clone()
                 .into_any_element(),
             Destination::Activity => ActivityView::new(&self.jobs, &self.events).into_any_element(),
-            Destination::Support => {
-                SupportView::new(self.service_state, self.service_error.clone()).into_any_element()
-            },
+            Destination::Support => SupportView::new(
+                self.service_state,
+                self.service_error.clone(),
+                self.agent_error.clone(),
+            )
+            .into_any_element(),
         }
     }
 
@@ -204,24 +248,25 @@ impl DeviceCenter {
         div()
             .id("primary-navigation")
             .v_flex()
-            .w(rems(14.5))
+            .w(rems(11.))
             .h_full()
             .flex_shrink_0()
-            .p(rems(1.25))
+            .p(rems(1.))
             .border_r_1()
-            .border_color(colors.border)
+            .border_color(colors.separator)
             .bg(colors.sidebar)
             .child(
                 div()
-                    .h(rems(3.5))
+                    .h(rems(2.5))
                     .flex()
                     .items_center()
-                    .gap(rems(0.7))
-                    .px(rems(0.55))
+                    .gap(rems(0.75))
+                    .px(rems(0.75))
                     .child(
-                        brand_image("inari-icon-64.png")
-                            .size(rems(1.85))
-                            .rounded(rems(0.55))
+                        svg()
+                            .path("inari-mark-torii-ui.svg")
+                            .size(rems(1.5))
+                            .text_color(colors.vermilion)
                             .flex_shrink_0(),
                     )
                     .child(
@@ -234,29 +279,29 @@ impl DeviceCenter {
             .child(
                 div()
                     .v_flex()
-                    .gap(rems(0.35))
-                    .mt(rems(1.35))
+                    .gap(rems(0.25))
+                    .mt(rems(1.))
                     .child(NavigationItem::new(
                         "Overview",
-                        "System health and next actions",
+                        IconName::LayoutDashboard,
                         self.destination == Destination::Overview,
                         ShowOverview,
                     ))
                     .child(NavigationItem::new(
                         "Devices",
-                        "Printers, scales, and scanners",
+                        IconName::GalleryVerticalEnd,
                         self.destination == Destination::Devices,
                         ShowDevices,
                     ))
                     .child(NavigationItem::new(
                         "Activity",
-                        "Jobs and device events",
+                        IconName::Calendar,
                         self.destination == Destination::Activity,
                         ShowActivity,
                     ))
                     .child(NavigationItem::new(
                         "Support",
-                        "Diagnostics and recovery",
+                        IconName::Settings2,
                         self.destination == Destination::Support,
                         ShowSupport,
                     )),
@@ -264,11 +309,11 @@ impl DeviceCenter {
             .child(
                 div()
                     .mt_auto()
-                    .px(rems(0.55))
-                    .pb(rems(0.4))
+                    .px(rems(0.75))
+                    .pb(rems(0.5))
                     .text_size(rems(0.75))
                     .text_color(colors.text_muted)
-                    .child("Private device operations"),
+                    .child("Local device operations"),
             )
     }
 }
@@ -282,6 +327,7 @@ impl Focusable for DeviceCenter {
 impl Render for DeviceCenter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = palette::Palette::current(cx);
+        let root_surface = root_surface(self.setup.access, self.setup_forced);
         div()
             .id("device-center")
             .key_context(KEY_CONTEXT)
@@ -304,7 +350,7 @@ impl Render for DeviceCenter {
             .size_full()
             .bg(colors.canvas)
             .text_color(colors.text)
-            .when(self.setup.access == SetupAccess::Complete && !self.setup_forced, |layout| {
+            .when(root_surface == RootSurface::Operations, |layout| {
                 layout
                     .flex()
                     .child(self.navigation(colors))
@@ -317,14 +363,26 @@ impl Render for DeviceCenter {
                             .child(self.main_content()),
                     )
             })
-            .when(self.setup.access != SetupAccess::Complete || self.setup_forced, |layout| {
+            .when(root_surface == RootSurface::Setup, |layout| {
                 layout.child(SetupView::new(
                     self.setup.clone(),
                     self.invitation_input.clone(),
                     self.preview.clone(),
                     self.setup_error.clone(),
                     self.setup_working,
+                    self.selected_setup_devices.clone(),
+                    cx.entity().downgrade(),
                 ))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn post_install_agent_failure_keeps_support_available() {
+        assert_eq!(root_surface(SetupAccess::Unknown, false), RootSurface::Operations);
     }
 }
