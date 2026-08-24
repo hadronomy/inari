@@ -46,6 +46,7 @@ jobs:
         with:
           install_args: >-
             just
+            python
             actionlint
             helm@4.2.3
             helm@3.21.3

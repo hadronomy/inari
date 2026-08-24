@@ -82,6 +82,7 @@ jobs:
           install_args: >-
             node
             bun
+            python
             just
             actionlint
             helm@4.2.3
