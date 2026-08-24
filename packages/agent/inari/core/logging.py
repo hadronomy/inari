@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -19,9 +20,6 @@ def configure_logging(level: str = "INFO", *, log_dir: str | Path = "./logs") ->
     )
     file_handler.setFormatter(formatter)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-
     root = logging.getLogger()
     root.setLevel(level.upper())
     for handler in list(root.handlers):
@@ -31,4 +29,7 @@ def configure_logging(level: str = "INFO", *, log_dir: str | Path = "./logs") ->
         except Exception:  # pragma: no cover - defensive cleanup
             pass
     root.addHandler(file_handler)
-    root.addHandler(console_handler)
+    if sys.stderr is not None:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        root.addHandler(console_handler)

@@ -34,3 +34,20 @@ impl AssetSource for BrandAssets {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_titlebar_icons_are_embedded() {
+        for path in [
+            "icons/window-close.svg",
+            "icons/window-maximize.svg",
+            "icons/window-minimize.svg",
+            "icons/window-restore.svg",
+        ] {
+            assert!(BrandAssets::get(path).is_some(), "missing {path}");
+        }
+    }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 import uvicorn
@@ -40,6 +41,11 @@ class AgentServerController:
             host=settings.host,
             port=settings.port,
             log_level=settings.log_level.lower(),
+            log_config=(
+                None
+                if sys.stdout is None or sys.stderr is None
+                else uvicorn.config.LOGGING_CONFIG
+            ),
             reload=False,
             ssl_certfile=tls_options.get("ssl_certfile"),
             ssl_keyfile=tls_options.get("ssl_keyfile"),
