@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 pub struct SetupResult {
     pub snapshot: SetupSnapshot,
     pub diagnostic: Option<String>,
+    pub identity_retry_available: bool,
 }
 
 #[derive(Clone)]
@@ -60,18 +61,6 @@ impl AgentRuntime {
 
     pub fn subscribe(&self) -> broadcast::Receiver<AgentRuntimeUpdate> {
         self.updates.subscribe()
-    }
-
-    /// Forget the cached identity so the next request reads the credential
-    /// store again.
-    ///
-    /// Wired only to an explicit operator retry. A denied vault read is cached
-    /// on purpose, and re-reading it on any timer is what produces an endless
-    /// run of system prompts. The event supervisor picks the change up on its
-    /// next pass, so this needs no ordering against anything.
-    pub fn forget_identity(&self) {
-        let client = self.client.clone();
-        self.spawn_owned(async move { client.forget_identity().await });
     }
 
     pub fn setup(&self) -> oneshot::Receiver<SetupResult> {
@@ -249,11 +238,18 @@ impl AgentRuntime {
 
 async fn read_setup(client: &AgentClient) -> SetupResult {
     match client.setup().await {
-        Ok(snapshot) => SetupResult { snapshot, diagnostic: None },
+        Ok(snapshot) => SetupResult { snapshot, diagnostic: None, identity_retry_available: false },
         Err(error) => {
             let diagnostic = error_chain(&error);
             tracing::warn!(%diagnostic, "could not read Device Center setup state");
-            SetupResult { snapshot: setup_failure(&error), diagnostic: Some(diagnostic) }
+            SetupResult {
+                snapshot: setup_failure(&error),
+                diagnostic: Some(diagnostic),
+                identity_retry_available: matches!(
+                    error,
+                    AgentClientError::IdentityUnavailable(_) | AgentClientError::IdentityLocked(_)
+                ),
+            }
         },
     }
 }

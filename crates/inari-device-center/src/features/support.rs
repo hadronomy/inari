@@ -37,6 +37,7 @@ pub struct SupportView {
     service: ServiceState,
     service_error: Option<String>,
     agent_error: Option<String>,
+    identity_retry_available: bool,
 }
 
 impl SupportView {
@@ -45,15 +46,17 @@ impl SupportView {
         service: ServiceState,
         service_error: Option<String>,
         agent_error: Option<String>,
+        identity_retry_available: bool,
     ) -> Self {
-        Self { agent, service, service_error, agent_error }
+        Self { agent, service, service_error, agent_error, identity_retry_available }
     }
 }
 
 impl RenderOnce for SupportView {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let theme = cx.inari();
-        let recovery = Recovery::for_state(self.service, self.agent.tone);
+        let recovery =
+            Recovery::for_state(self.service, self.agent.tone, self.identity_retry_available);
         let endpoint = AgentClientOptions::default()
             .endpoint
             .to_string();
@@ -168,9 +171,14 @@ enum Recovery {
 }
 
 impl Recovery {
-    fn for_state(service: ServiceState, tone: Tone) -> Option<Self> {
+    fn for_state(
+        service: ServiceState,
+        tone: Tone,
+        identity_retry_available: bool,
+    ) -> Option<Self> {
         match service {
             ServiceState::Stopped => Some(Self::Start),
+            ServiceState::Running if identity_retry_available => Some(Self::Check),
             // A service that is up but not answering is the case where a
             // restart is the fix; restarting a healthy one is not offered.
             ServiceState::Running if tone == Tone::Critical => Some(Self::Restart),
@@ -294,21 +302,31 @@ mod tests {
 
     #[test]
     fn a_healthy_service_offers_no_recovery_action() {
-        assert_eq!(Recovery::for_state(ServiceState::Running, Tone::Positive), None);
+        assert_eq!(Recovery::for_state(ServiceState::Running, Tone::Positive, false), None);
     }
 
     #[test]
     fn a_running_but_unresponsive_service_offers_a_restart() {
         assert_eq!(
-            Recovery::for_state(ServiceState::Running, Tone::Critical),
+            Recovery::for_state(ServiceState::Running, Tone::Critical, false),
             Some(Recovery::Restart)
         );
     }
 
     #[test]
+    fn a_running_service_with_a_failed_identity_read_offers_a_retry() {
+        for tone in [Tone::Critical, Tone::Caution] {
+            assert_eq!(
+                Recovery::for_state(ServiceState::Running, tone, true),
+                Some(Recovery::Check)
+            );
+        }
+    }
+
+    #[test]
     fn a_stopped_service_offers_start_rather_than_restart() {
         assert_eq!(
-            Recovery::for_state(ServiceState::Stopped, Tone::Critical),
+            Recovery::for_state(ServiceState::Stopped, Tone::Critical, false),
             Some(Recovery::Start)
         );
     }
@@ -316,7 +334,7 @@ mod tests {
     #[test]
     fn transient_states_offer_nothing_to_press() {
         for state in [ServiceState::Checking, ServiceState::Starting] {
-            assert_eq!(Recovery::for_state(state, Tone::Busy), None);
+            assert_eq!(Recovery::for_state(state, Tone::Busy, false), None);
         }
     }
 }

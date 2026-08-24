@@ -61,6 +61,9 @@ impl DeviceCenter {
             if let Some(center) = center.upgrade() {
                 center
                     .update(cx, |center, cx| {
+                        center.identity_retry_available = snapshot
+                            .as_ref()
+                            .is_some_and(|result| result.identity_retry_available);
                         center.agent_error = snapshot
                             .as_ref()
                             .and_then(|result| result.diagnostic.clone());

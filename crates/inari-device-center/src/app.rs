@@ -133,6 +133,7 @@ pub struct DeviceCenter {
     service_state: ServiceState,
     service_error: Option<String>,
     agent_error: Option<String>,
+    identity_retry_available: bool,
     invitation_input: Entity<InputState>,
     preview: Option<EnrollmentPreview>,
     setup_error: Option<String>,
@@ -197,6 +198,7 @@ impl DeviceCenter {
             service_state: ServiceState::Checking,
             service_error: None,
             agent_error: None,
+            identity_retry_available: false,
             invitation_input,
             preview: None,
             setup_error: None,
@@ -327,6 +329,7 @@ impl DeviceCenter {
                 self.service_state,
                 self.service_error.clone(),
                 self.agent_error.clone(),
+                self.identity_retry_available,
             )
             .into_any_element(),
         }
