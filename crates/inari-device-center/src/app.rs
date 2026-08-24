@@ -3,8 +3,8 @@ use std::{collections::HashSet, sync::Arc};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, actions, div,
-    prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowControlArea,
+    actions, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{IconName, StyledExt as _, TitleBar, input::InputState, tooltip::Tooltip};
 use inari_agent_client::{
@@ -359,7 +359,13 @@ impl DeviceCenter {
             .bg(gpui::transparent_black())
             .border_color(gpui::transparent_black())
             .child(chrome::brand_lockup(theme))
-            .child(div().flex_1())
+            .child(
+                div()
+                    .id("titlebar-drag-region")
+                    .h_full()
+                    .flex_1()
+                    .window_control_area(WindowControlArea::Drag),
+            )
             .child(
                 div()
                     .id("agent-health")
