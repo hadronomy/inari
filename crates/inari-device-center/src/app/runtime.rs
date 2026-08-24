@@ -192,6 +192,9 @@ impl DeviceCenter {
     ) {
         self.service_state = ServiceState::Checking;
         self.service_error = None;
+        // "Check again" is the operator saying they want another attempt, so
+        // it is also the moment to let the credential store be read again.
+        self.runtime.forget_identity();
         self.update_tray_service_state();
         self._service_task = Self::load_service_state(self.runtime.clone(), cx);
         cx.notify();

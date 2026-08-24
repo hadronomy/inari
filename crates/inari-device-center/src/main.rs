@@ -9,15 +9,16 @@ mod infrastructure;
 mod ui;
 
 use gpui::{
-    AppContext as _, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
+    AppContext as _, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, point, px,
+    size,
 };
-use gpui_component::{Root, Theme};
+use gpui_component::Root;
 
 use crate::{
     app::DeviceCenter,
     assets::BrandAssets,
     infrastructure::{AgentRuntime, TrayController, initialize_logging, platform},
-    ui::palette,
+    ui::{material, motion, theme::Theme},
 };
 
 fn main() {
@@ -29,6 +30,8 @@ fn main() {
     }
 
     let _log_guard = initialize_logging().expect("failed to initialize Device Center logging");
+    material::init_from_environment();
+    motion::init_from_environment();
 
     let runtime = AgentRuntime::start().expect("failed to start the local-agent runtime");
     Application::new()
@@ -42,21 +45,32 @@ fn main() {
             let center_slot = Rc::new(RefCell::new(None));
             let center_slot_for_window = center_slot.clone();
             let runtime = runtime.clone();
-            let bounds = Bounds::centered(None, size(px(1120.), px(760.)), cx);
+            let bounds = Bounds::centered(None, size(px(1160.), px(780.)), cx);
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(780.), px(560.))),
+                    // Below this the rail and the content panel start fighting
+                    // for the same pixels and the device list stops being
+                    // readable beside its detail pane.
+                    window_min_size: Some(size(px(880.), px(600.))),
                     titlebar: Some(TitlebarOptions {
                         title: Some("Inari Device Center".into()),
-                        ..TitlebarOptions::default()
+                        // The shell draws its own titlebar so the rail and the
+                        // content panel share one continuous glass plane.
+                        appears_transparent: true,
+                        // Center AppKit's 12px control frames in the titlebar's
+                        // design height.
+                        traffic_light_position: Some(point(
+                            px(20.),
+                            px((Theme::TITLEBAR_HEIGHT - 12.0) / 2.0),
+                        )),
                     }),
+                    window_background: material::resolve().window_background(),
                     app_id: Some("dev.inari.device-center".into()),
                     ..WindowOptions::default()
                 },
                 |window, cx| {
-                    Theme::sync_system_appearance(Some(window), cx);
-                    palette::apply_brand(cx);
+                    Theme::sync(window, cx);
                     window.on_window_should_close(cx, |window, cx| {
                         platform::hide_window(window, cx);
                         false

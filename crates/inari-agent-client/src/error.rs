@@ -22,6 +22,14 @@ pub enum AgentClientError {
     #[error("the local client identity is unavailable")]
     IdentityUnavailable(#[source] keyring::Error),
 
+    /// A previous read of the credential store failed and has not been retried.
+    ///
+    /// Distinct from [`Self::IdentityUnavailable`] so the interface can say
+    /// that nothing will change until the operator asks again, rather than
+    /// implying the client is still trying.
+    #[error("this computer's stored identity is locked: {0}")]
+    IdentityLocked(String),
+
     #[error("the stored local client identity is malformed")]
     MalformedIdentity,
 

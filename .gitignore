@@ -271,3 +271,6 @@ data
 !report/lib
 .tmp*
 *.duckdb
+
+# Machine-local mise overrides
+mise.local.toml

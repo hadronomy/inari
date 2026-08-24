@@ -62,16 +62,31 @@ impl AgentRuntime {
         self.updates.subscribe()
     }
 
+    /// Forget the cached identity so the next request reads the credential
+    /// store again.
+    ///
+    /// Wired only to an explicit operator retry. A denied vault read is cached
+    /// on purpose, and re-reading it on any timer is what produces an endless
+    /// run of system prompts. The event supervisor picks the change up on its
+    /// next pass, so this needs no ordering against anything.
+    pub fn forget_identity(&self) {
+        let client = self.client.clone();
+        self.spawn_owned(async move { client.forget_identity().await });
+    }
+
     pub fn setup(&self) -> oneshot::Receiver<SetupResult> {
+        self.spawn(|client| async move { read_setup(&client).await })
+    }
+
+    /// Forget the cached identity and read setup again, in one task.
+    ///
+    /// Sequenced deliberately: run as two tasks, the read could reach the
+    /// client before the cache was cleared and fail against the very state the
+    /// retry exists to clear.
+    pub fn retry_setup(&self) -> oneshot::Receiver<SetupResult> {
         self.spawn(|client| async move {
-            match client.setup().await {
-                Ok(snapshot) => SetupResult { snapshot, diagnostic: None },
-                Err(error) => {
-                    let diagnostic = error_chain(&error);
-                    tracing::warn!(%diagnostic, "could not read Device Center setup state");
-                    SetupResult { snapshot: setup_failure(&error), diagnostic: Some(diagnostic) }
-                },
-            }
+            client.forget_identity().await;
+            read_setup(&client).await
         })
     }
 
@@ -232,6 +247,17 @@ impl AgentRuntime {
     }
 }
 
+async fn read_setup(client: &AgentClient) -> SetupResult {
+    match client.setup().await {
+        Ok(snapshot) => SetupResult { snapshot, diagnostic: None },
+        Err(error) => {
+            let diagnostic = error_chain(&error);
+            tracing::warn!(%diagnostic, "could not read Device Center setup state");
+            SetupResult { snapshot: setup_failure(&error), diagnostic: Some(diagnostic) }
+        },
+    }
+}
+
 fn setup_failure(error: &AgentClientError) -> SetupSnapshot {
     SetupSnapshot::unavailable_with(agent_failure_message(error))
 }
@@ -243,6 +269,11 @@ pub(crate) fn agent_failure_message(error: &AgentClientError) -> &'static str {
         },
         AgentClientError::IdentityUnavailable(_) => {
             "Device Center cannot use its saved sign-in information. Unlock the computer, then try again."
+        },
+        // Says plainly that nothing is being retried, because nothing is: the
+        // failed read is held until the operator asks for it again.
+        AgentClientError::IdentityLocked(_) => {
+            "Device Center stopped asking for its saved sign-in information. Select Check again to allow access."
         },
         AgentClientError::IdentityRequired | AgentClientError::PairingUnavailable(_) => {
             "Device Center could not create a trusted connection. Restart the agent service, then try again."
