@@ -1,3 +1,9 @@
+## inari@1.20.0-alpha.10
+
+### Fix Windows service startup and window controls
+
+The Windows agent now starts when the service has no attached console. Device Center also shows its window controls and supports title bar dragging.
+
 ## inari@1.20.0-alpha.9
 
 ### Rebuild Device Center around a translucent shell

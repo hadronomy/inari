@@ -1,7 +1,7 @@
 [package]
 name = "inari-device-center"
-version = "1.20.0-alpha.9"
-msix_version = "1.20.0.1009"
+version = "1.20.0-alpha.10"
+msix_version = "1.20.0.1010"
 identity_name = "Inari.DeviceCenter"
 publisher = "CN=Pablo Hernández Jiménez"
 display_name = "Inari Device Center"

@@ -1,35 +1,27 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Rebuild Device Center around a translucent shell\n\nDevice Center now opens with one glass tint across the window. The titlebar and\nthe navigation rail share this plane. The brand sits beside the native window\ncontrols on their centerline. The content panel adds a thin tonal step, and\ncards use quiet light or dark washes. The desktop remains visible through the\nsurfaces on macOS and Windows.\n\nTranslucency is a preference, not a fixed style. Support has a Display section\nthat switches the window to solid surfaces and stops the connection pulse and\nthe navigation slide. `INARI_MATERIAL=opaque` and `INARI_REDUCED_MOTION` apply\nthe same settings from launch. Linux keeps solid surfaces, because a blur\nbehind the window is not guaranteed there.\n\n### Show the path from this computer to the devices\n\nOverview opens with the connection path: this computer, the local agent, and\nthe devices it operates. A broken segment shows where the path stops, so the\nfirst question an operator has is answered before they read anything else.\n\nItems that need a person are now listed one by one with their state and what to\ndo, in place of a count that sent you to another screen to learn what it meant.\n\n### Act on a problem from where you find it\n\nItems in Needs attention are now controls. Selecting a device opens the device\ndirectory with that device already selected, and selecting failed work opens\nActivity. Reading a problem no longer means finding the same device again by\nhand on another screen.\n\n### Reach every control from the keyboard\n\nThe navigation rail, the agent health indicator, the device list, and the\nattention items are all focus stops. Tab moves between them, Enter and Space\nactivate them, and Up and Down move the selection through the device list.\n\nFocus rings follow the input device. They appear when you move with the\nkeyboard and stay hidden while you use the pointer, so selecting something with\nthe mouse no longer leaves an outline behind on it.\n\n### Stop the repeated credential prompts\n\nDevice Center read this computer's stored identity on every attempt to reach\nthe agent. With the agent stopped, the reconnect loop turned that into a system\ncredential prompt every few seconds. The identity is now read once. A read that\nfails is held, and Device Center reports that it stopped asking rather than\nimplying it is still trying. Select \"Check again\" in Support to allow access and\nretry.\n\n### Report agent health on every screen\n\nThe titlebar carries the agent state on all screens and opens Support when you\nselect it. A service that runs but does not answer now reports as \"Not\nresponding\" instead of \"Running\", and Support offers only the recovery action\nthat matches the current state.\n\n### Make device and job states readable without color\n\nDevices, jobs, and the agent service share one set of states. Each state has\nits own label and its own icon, so the interface stays readable with\nDifferentiate Without Color, in high contrast, and in a grayscale screenshot.\n\nDevice kinds now have their own icons for printers, scales, and scanners.\nIdentifiers, endpoints, and error text are set in a monospace face.\n"
-    filename: 2026-08-24-3d7a91c4.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Start the Windows agent service\n\nWindows can now start the packaged agent under the `LocalService` account. The\nservice uses production defaults when no custom config path exists.\n"
-    filename: 2026-08-24-a9c41e7d.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix Windows service startup and window controls\n\nThe Windows agent now starts when the service has no attached console. Device Center also shows its window controls and supports title bar dragging.\n"
+    filename: 2026-08-24-8c21e7a4.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-08-24-3d7a91c4.md
-      - 2026-08-24-a9c41e7d.md
+      - 2026-08-24-8c21e7a4.md
     id: cargo:inari-agent-client
     updated: true
   - changelogIds:
-      - 2026-08-24-3d7a91c4.md
-      - 2026-08-24-a9c41e7d.md
+      - 2026-08-24-8c21e7a4.md
     id: cargo:inari-device-center
     updated: true
   - changelogIds:
-      - 2026-08-24-3d7a91c4.md
-      - 2026-08-24-a9c41e7d.md
+      - 2026-08-24-8c21e7a4.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-08-24-3d7a91c4.md
-      - 2026-08-24-a9c41e7d.md
+      - 2026-08-24-8c21e7a4.md
     id: pip:inari-brand
     updated: true
   - id: helm:inari
     updated: false
   - changelogIds:
-      - 2026-08-24-3d7a91c4.md
-      - 2026-08-24-a9c41e7d.md
+      - 2026-08-24-8c21e7a4.md
     id: msix:inari-device-center
     updated: true
