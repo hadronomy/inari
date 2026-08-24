@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from deploy.windows.frozen_runtime import verify_when_requested
+from deploy.windows.frozen_runtime import verify_migration_bundle, verify_when_requested
 
 
 def test_normal_launch_does_not_run_bundle_verification(tmp_path: Path) -> None:
@@ -58,3 +58,7 @@ def test_bundle_verification_records_import_failure(tmp_path: Path) -> None:
     assert raised.value.code == 1
     contents = report.read_text(encoding="utf-8")
     assert "RuntimeError: application import failed" in contents
+
+
+def test_migration_bundle_verification_runs_to_the_single_head() -> None:
+    assert verify_migration_bundle() == "20260712_0004"

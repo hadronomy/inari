@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import importlib
 import logging
 import socket
 import sys
 import traceback
 from pathlib import Path
-from typing import Callable
-from typing import Any
+from typing import Any, Callable
 
 from ..config import AgentSettings
 from ..core.config_paths import resolve_default_path_bundle
@@ -69,8 +69,10 @@ def create_windows_service_class(
             self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
             self._controller: AgentServerController | None = None
             self._pairing_bootstrap = None
+            self._stop_requested = False
 
         def SvcStop(self) -> None:
+            self._stop_requested = True
             self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
             if self._controller is not None:
                 self._controller.request_shutdown()
@@ -100,10 +102,19 @@ def create_windows_service_class(
                     )
                     if self._pairing_bootstrap is not None:
                         self._pairing_bootstrap.start()
-                self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-                _write_bootstrap_log("Service host is running.")
-                self._controller.run()
-            except Exception as exc:  # pragma: no cover - defensive integration path
+
+                def report_ready() -> None:
+                    self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+                    _write_bootstrap_log("Service host is ready.")
+
+                self._controller.run(on_started=report_ready)
+                if not self._stop_requested:
+                    raise RuntimeError(
+                        "Agent server stopped without a service stop request. "
+                        "See agent.log for the startup failure."
+                    )
+            # Uvicorn uses SystemExit when the API socket cannot bind.
+            except (Exception, SystemExit) as exc:
                 _write_bootstrap_log(
                     "Service startup failed with "
                     f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
@@ -209,8 +220,10 @@ def _bootstrap_log_path() -> Path:
 def _write_bootstrap_log(message: str) -> None:
     try:
         log_path = _bootstrap_log_path()
+        timestamp = datetime.now(UTC).isoformat(timespec="milliseconds")
         with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(message.rstrip() + "\n")
+            for line in message.rstrip().splitlines():
+                handle.write(f"{timestamp} {line}\n")
     except Exception:
         logging.getLogger(__name__).debug(
             "Failed to write Windows service bootstrap log.", exc_info=True

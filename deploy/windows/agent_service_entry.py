@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from frozen_runtime import verify_when_requested
+from frozen_runtime import verify_migration_bundle, verify_when_requested
 
 
 def _load_agent_service() -> object:
     from inari.host_service import windows_entrypoint
 
+    verify_migration_bundle()
     return windows_entrypoint
 
 

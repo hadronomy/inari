@@ -10,8 +10,10 @@ on:
       - "crates/inari-agent-client/**"
       - "crates/inari-device-center/**"
       - "deploy/windows/**"
-      - "packages/agent/inari/local_api/**"
+      - "packages/agent/**"
+      - "pyproject.toml"
       - "rust-toolchain.toml"
+      - "uv.lock"
   push:
     branches:
       - main
@@ -23,8 +25,10 @@ on:
       - "crates/inari-agent-client/**"
       - "crates/inari-device-center/**"
       - "deploy/windows/**"
-      - "packages/agent/inari/local_api/**"
+      - "packages/agent/**"
+      - "pyproject.toml"
       - "rust-toolchain.toml"
+      - "uv.lock"
   workflow_dispatch:
 
 permissions:
@@ -40,6 +44,32 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
+  frozen-agent:
+    name: Windows frozen Agent
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: uv
+          cache: true
+
+      - name: Install the Windows CPython runtime
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+          architecture: x64
+
+      - name: Build and verify the frozen Agent
+        shell: pwsh
+        run: ./deploy/windows/verify-agent-bundle.ps1
+
   client:
     name: ${{ matrix.platform }}
     strategy:

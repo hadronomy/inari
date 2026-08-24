@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import socket
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import uvicorn
@@ -11,10 +13,19 @@ from .app import create_app
 
 
 class ManagedUvicornServer(uvicorn.Server):
+    def __init__(self, config: uvicorn.Config) -> None:
+        super().__init__(config)
+        self.started_callback: Callable[[], None] | None = None
+
     def install_signal_handlers(
         self,
     ) -> None:  # pragma: no cover - integration behavior
         return None
+
+    async def startup(self, sockets: list[socket.socket] | None = None) -> None:
+        await super().startup(sockets=sockets)
+        if self.started and self.started_callback is not None:
+            self.started_callback()
 
 
 @dataclass(slots=True)
@@ -56,7 +67,8 @@ class AgentServerController:
             server=ManagedUvicornServer(config),
         )
 
-    def run(self) -> None:
+    def run(self, *, on_started: Callable[[], None] | None = None) -> None:
+        self.server.started_callback = on_started
         self.server.run()
 
     def request_shutdown(self) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import traceback
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -41,6 +42,15 @@ def verify_when_requested(
         ),
     )
     return True
+
+
+def verify_migration_bundle() -> str:
+    """Run every packaged migration against a temporary empty database."""
+    from inari.db.migrations import DatabaseMigrator
+
+    with tempfile.TemporaryDirectory(prefix="inari-frozen-runtime-") as directory:
+        result = DatabaseMigrator(Path(directory) / "agent.sqlite3").ensure_current()
+    return result.current_revision
 
 
 def _write_report(path: Path, content: str) -> None:

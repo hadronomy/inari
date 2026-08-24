@@ -89,6 +89,33 @@ pub fn show_window(window: &mut Window, cx: &mut App) {
     window.activate_window();
 }
 
+pub fn start_window_drag(window: &Window) {
+    start_window_drag_on_platform(window);
+}
+
+#[cfg(windows)]
+fn start_window_drag_on_platform(window: &Window) {
+    use windows::Win32::{
+        Foundation::WPARAM,
+        UI::{
+            Input::KeyboardAndMouse::ReleaseCapture,
+            WindowsAndMessaging::{HTCAPTION, SendMessageW, WM_NCLBUTTONDOWN},
+        },
+    };
+
+    let Some(handle) = windows_handle(window) else {
+        return;
+    };
+
+    unsafe {
+        let _ = ReleaseCapture();
+        let _ = SendMessageW(handle, WM_NCLBUTTONDOWN, Some(WPARAM(HTCAPTION as usize)), None);
+    }
+}
+
+#[cfg(not(windows))]
+fn start_window_drag_on_platform(_: &Window) {}
+
 #[cfg(windows)]
 fn windows_handle(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
     use raw_window_handle::RawWindowHandle;
