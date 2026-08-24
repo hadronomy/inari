@@ -22,6 +22,9 @@ WINDOWS_SERVICE_DISPLAY_NAME = DEFAULT_SERVICE_IDENTITY.display_name
 WINDOWS_SERVICE_DESCRIPTION = DEFAULT_SERVICE_IDENTITY.description
 WINDOWS_SERVICE_CONFIG_OPTION = "ConfigPath"
 WINDOWS_SERVICE_BOOTSTRAP_LOG = "service-bootstrap.log"
+WINDOWS_SERVICE_PARAMETERS_KEY = (
+    rf"SYSTEM\CurrentControlSet\Services\{WINDOWS_SERVICE_NAME}\Parameters"
+)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -152,12 +155,23 @@ def _parse_service_cli_args(argv: list[str]) -> tuple[Path | None, list[str]]:
 
 
 def get_windows_service_config_path() -> Path | None:
-    _, _, _, win32serviceutil = _import_pywin32_service_modules()
-    raw_value = win32serviceutil.GetServiceCustomOption(
-        WINDOWS_SERVICE_NAME,
-        WINDOWS_SERVICE_CONFIG_OPTION,
-        None,
-    )
+    winreg = importlib.import_module("winreg")
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            WINDOWS_SERVICE_PARAMETERS_KEY,
+            0,
+            winreg.KEY_READ,
+        ) as parameters_key:
+            try:
+                raw_value, _ = winreg.QueryValueEx(
+                    parameters_key,
+                    WINDOWS_SERVICE_CONFIG_OPTION,
+                )
+            except FileNotFoundError:
+                return None
+    except FileNotFoundError:
+        return None
     if raw_value in {None, ""}:
         return None
     return Path(str(raw_value)).expanduser().resolve()
@@ -182,16 +196,12 @@ def _load_service_settings(config_path: Path | str | None = None) -> AgentSettin
 
 
 def _bootstrap_log_path() -> Path:
-    config_path = get_windows_service_config_path()
-    if config_path is not None:
-        log_dir = config_path.parent / "logs"
-    else:
-        defaults = resolve_default_path_bundle(
-            profile="production",
-            working_directory=Path.cwd(),
-            platform_system="Windows",
-        )
-        log_dir = defaults.log_dir
+    defaults = resolve_default_path_bundle(
+        profile="production",
+        working_directory=Path.cwd(),
+        platform_system="Windows",
+    )
+    log_dir = defaults.log_dir
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / WINDOWS_SERVICE_BOOTSTRAP_LOG
 

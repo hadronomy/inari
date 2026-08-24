@@ -1,127 +1,115 @@
+//! Support: recover the agent, then hand an administrator the facts.
+//!
+//! The recovery control offered is the one that matches the current state, and
+//! only that one. A row of Start / Restart / Check buttons where two are
+//! always wrong makes an operator guess during the exact moment they are least
+//! able to.
+
 use gpui::{
-    IntoElement, ParentElement as _, RenderOnce, Styled, div, prelude::FluentBuilder as _, rems,
+    IntoElement, ParentElement as _, RenderOnce, SharedString, Styled, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    IconName, StyledExt as _,
+    Disableable as _, IconName, StyledExt as _,
     button::{Button, ButtonVariants as _},
+    switch::Switch,
 };
 use inari_agent_client::{AgentClientOptions, ServiceState};
 
 use crate::{
     app::{
         OpenApiReference, OpenLogs, RefreshAgentService, RestartAgentService, StartAgentService,
+        ToggleReducedMotion, ToggleTranslucency,
     },
-    ui::{Message, MessageTone, PageHeader, page, palette},
+    ui::{
+        banner::Banner,
+        content::{Field, PageTitle, Section, Typography as _, page},
+        material, motion,
+        status::{Status, Tone},
+        surface::card,
+        theme::{ActiveTheme as _, Theme},
+    },
 };
 
 #[derive(IntoElement)]
 pub struct SupportView {
+    agent: Status,
     service: ServiceState,
     service_error: Option<String>,
     agent_error: Option<String>,
+    identity_retry_available: bool,
 }
 
 impl SupportView {
     pub fn new(
+        agent: Status,
         service: ServiceState,
         service_error: Option<String>,
         agent_error: Option<String>,
+        identity_retry_available: bool,
     ) -> Self {
-        Self { service, service_error, agent_error }
+        Self { agent, service, service_error, agent_error, identity_retry_available }
     }
 }
 
 impl RenderOnce for SupportView {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
-        let colors = palette::Palette::current(cx);
-        let needs_restart = self.agent_error.is_some();
-        let (title, detail, tone) = if self.service == ServiceState::Running && needs_restart {
-            (
-                "The agent needs attention",
-                "Restart the agent service, then try again.",
-                MessageTone::Danger,
-            )
-        } else {
-            service_copy(self.service)
-        };
-        let agent_endpoint = AgentClientOptions::default()
+        let theme = cx.inari();
+        let recovery =
+            Recovery::for_state(self.service, self.agent.tone, self.identity_retry_available);
+        let endpoint = AgentClientOptions::default()
             .endpoint
             .to_string();
-        let diagnostic = break_diagnostic(
-            self.agent_error
-                .or(self.service_error)
-                .unwrap_or_else(|| "No error details are available.".into()),
-        );
+        let diagnostic = self
+            .agent_error
+            .or(self.service_error)
+            .unwrap_or_else(|| "No error has been recorded.".into());
+        let translucent = material::resolve().is_glass();
+        let glass_available = material::platform_supports_glass();
 
-        page()
-            .child(PageHeader::new(
+        page("support")
+            .child(PageTitle::new(
                 "Support",
-                "Check the agent service. Use technical details when an administrator asks for them.",
+                "Restore the agent, and collect what an administrator will ask for.",
             ))
             .child(
-                div()
-                    .v_flex()
-                    .gap(rems(0.75))
-                    .child(section_heading("Service health"))
-                    .child(Message::new("service-health", tone, title, detail))
-                    .when(self.service == ServiceState::Stopped, |section| {
-                        section.child(recovery_button(
-                            "start-agent-service",
-                            "Start agent service",
-                            IconName::ArrowRight,
-                            StartAgentService,
-                        ))
-                    })
-                    .when(self.service == ServiceState::Running && needs_restart, |section| {
-                        section.child(recovery_button(
-                            "restart-agent-service",
-                            "Restart agent service",
-                            IconName::Redo2,
-                            RestartAgentService,
-                        ))
-                    })
-                    .when(self.service == ServiceState::Unavailable, |section| {
-                        section.child(recovery_button(
-                            "refresh-agent-service",
-                            "Check service again",
-                            IconName::Redo2,
-                            RefreshAgentService,
-                        ))
-                    }),
+                Section::new("Agent service").child(
+                    Banner::new(
+                        "service-health",
+                        self.agent.tone,
+                        self.agent.label.clone(),
+                        self.agent.detail.clone(),
+                    )
+                    .when_some(recovery, |banner, recovery| banner.action(recovery.button())),
+                ),
             )
             .child(
-                div()
-                    .v_flex()
-                    .gap(rems(0.75))
-                    .child(section_heading("Technical details"))
+                Section::new("Technical details")
                     .child(
-                        div()
-                            .v_flex()
-                            .gap(rems(0.75))
-                            .p(rems(1.))
-                            .rounded(rems(0.5))
-                            .bg(colors.surface)
-                            .child(detail_row(
-                                "Device Center version",
-                                env!("CARGO_PKG_VERSION"),
-                                colors,
-                            ))
-                            .child(detail_row("Agent API", agent_endpoint, colors))
-                            .child(detail_row("Latest error", diagnostic, colors)),
+                        card(theme)
+                            .gap(px(Theme::SPACE_MD))
+                            .w_full()
+                            .p(px(Theme::SPACE_LG))
+                            .child(
+                                Field::new("Device Center version", env!("CARGO_PKG_VERSION"))
+                                    .technical(),
+                            )
+                            .child(Field::new("Agent API", endpoint).technical())
+                            .child(Field::new("Latest error", breakable(diagnostic)).technical()),
                     )
                     .child(
                         div()
-                            .flex()
+                            .h_flex()
                             .flex_wrap()
                             .items_center()
-                            .gap(rems(0.75))
-                            .child(quiet_button(
+                            .gap(px(Theme::SPACE_SM))
+                            .child(action_button(
                                 "open-logs",
                                 "Open local logs",
                                 IconName::FolderOpen,
                                 OpenLogs,
                             ))
-                            .child(quiet_button(
+                            .child(action_button(
                                 "open-api-reference",
                                 "Open API reference",
                                 IconName::ExternalLink,
@@ -129,68 +117,175 @@ impl RenderOnce for SupportView {
                             )),
                     ),
             )
+            .child(
+                Section::new("Display")
+                    .child(
+                        card(theme)
+                            .w_full()
+                            .child(preference_row(
+                                "translucency",
+                                "Translucent window",
+                                if glass_available {
+                                    "Blur the desktop behind the window chrome."
+                                } else {
+                                    "This platform does not blur behind windows."
+                                },
+                                translucent,
+                                glass_available,
+                                ToggleTranslucency,
+                            ))
+                            .child(
+                                div()
+                                    .h(px(1.0))
+                                    .w_full()
+                                    .bg(theme.hairline),
+                            )
+                            .child(preference_row(
+                                "reduced-motion",
+                                "Reduce motion",
+                                "Stop the connection pulse and the navigation slide.",
+                                motion::reduced(),
+                                true,
+                                ToggleReducedMotion,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_caption()
+                            .text_color(theme.text_tertiary)
+                            .child(
+                                "These apply for this session. Set INARI_MATERIAL=opaque or \
+                                 INARI_REDUCED_MOTION to start this way every time.",
+                            ),
+                    ),
+            )
     }
 }
 
-fn service_copy(state: ServiceState) -> (&'static str, &'static str, MessageTone) {
-    match state {
-        ServiceState::Checking => (
-            "Checking the agent service",
-            "Device Center is reading the service state.",
-            MessageTone::Info,
-        ),
-        ServiceState::Starting => (
-            "Starting the agent service",
-            "Wait for the service request to finish.",
-            MessageTone::Info,
-        ),
-        ServiceState::Running => (
-            "Agent service is running",
-            "Restart the service only when the agent response is invalid.",
-            MessageTone::Success,
-        ),
-        ServiceState::Stopped => (
-            "Agent service is stopped",
-            "Start the service to restore device operations.",
-            MessageTone::Warning,
-        ),
-        ServiceState::NotInstalled => (
-            "Agent service is not installed",
-            "Repair the Inari installation to restore the service.",
-            MessageTone::Danger,
-        ),
-        ServiceState::Unavailable => (
-            "Service status is unavailable",
-            "Check the service again. If the problem continues, open the local logs.",
-            MessageTone::Danger,
-        ),
+/// The single recovery action that matches the current service state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Recovery {
+    Start,
+    Restart,
+    Check,
+}
+
+impl Recovery {
+    fn for_state(
+        service: ServiceState,
+        tone: Tone,
+        identity_retry_available: bool,
+    ) -> Option<Self> {
+        match service {
+            ServiceState::Stopped => Some(Self::Start),
+            ServiceState::Running if identity_retry_available => Some(Self::Check),
+            // A service that is up but not answering is the case where a
+            // restart is the fix; restarting a healthy one is not offered.
+            ServiceState::Running if tone == Tone::Critical => Some(Self::Restart),
+            ServiceState::Unavailable => Some(Self::Check),
+            _ => None,
+        }
+    }
+
+    fn button(self) -> Button {
+        match self {
+            Self::Start => primary_button(
+                "start-agent-service",
+                "Start service",
+                IconName::ArrowRight,
+                StartAgentService,
+            ),
+            Self::Restart => primary_button(
+                "restart-agent-service",
+                "Restart service",
+                IconName::Redo2,
+                RestartAgentService,
+            ),
+            Self::Check => primary_button(
+                "refresh-agent-service",
+                "Check again",
+                IconName::Redo2,
+                RefreshAgentService,
+            ),
+        }
     }
 }
 
-fn detail_row(
-    label: &'static str,
-    value: impl Into<gpui::SharedString>,
-    colors: palette::Palette,
+fn preference_row(
+    id: &'static str,
+    title: &'static str,
+    detail: &'static str,
+    checked: bool,
+    enabled: bool,
+    action: impl gpui::Action,
 ) -> impl IntoElement {
+    let action = Box::new(action);
     div()
-        .v_flex()
-        .gap(rems(0.25))
+        .h_flex()
+        .items_center()
+        .justify_between()
+        .gap(px(Theme::SPACE_LG))
+        .w_full()
+        .px(px(Theme::SPACE_LG))
+        .py(px(Theme::SPACE_MD))
         .child(
             div()
-                .text_size(rems(0.75))
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(colors.text_muted)
-                .child(label),
+                .v_flex()
+                .gap(px(1.0))
+                .child(div().text_body().child(title))
+                .child(
+                    div()
+                        .text_caption()
+                        .opacity(0.75)
+                        .child(detail),
+                ),
         )
         .child(
-            div()
-                .text_size(rems(0.8125))
-                .line_height(rems(1.125))
-                .child(value.into()),
+            Switch::new(id)
+                .checked(checked)
+                .disabled(!enabled)
+                .on_click(move |_, window, cx| {
+                    window.dispatch_action(action.boxed_clone(), cx);
+                }),
         )
 }
 
-fn break_diagnostic(message: String) -> String {
+fn primary_button(
+    id: &'static str,
+    label: &'static str,
+    icon: IconName,
+    action: impl gpui::Action,
+) -> Button {
+    let action = Box::new(action);
+    Button::new(id)
+        .primary()
+        .icon(icon)
+        .label(label)
+        .on_click(move |_, window, cx| {
+            window.dispatch_action(action.boxed_clone(), cx);
+        })
+}
+
+fn action_button(
+    id: &'static str,
+    label: &'static str,
+    icon: IconName,
+    action: impl gpui::Action,
+) -> Button {
+    let action = Box::new(action);
+    Button::new(id)
+        .outline()
+        .icon(icon)
+        .label(label)
+        .on_click(move |_, window, cx| {
+            window.dispatch_action(action.boxed_clone(), cx);
+        })
+}
+
+/// Insert zero-width spaces after URL and path punctuation so a long
+/// diagnostic wraps inside its card instead of forcing the card wider than the
+/// panel.
+fn breakable(message: String) -> SharedString {
     let mut wrapped = String::with_capacity(message.len());
     for character in message.chars() {
         wrapped.push(character);
@@ -198,45 +293,48 @@ fn break_diagnostic(message: String) -> String {
             wrapped.push('\u{200b}');
         }
     }
-    wrapped
+    wrapped.into()
 }
 
-fn section_heading(title: &'static str) -> impl IntoElement {
-    div()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .child(title)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn recovery_button(
-    id: &'static str,
-    label: &'static str,
-    icon: IconName,
-    action: impl gpui::Action,
-) -> impl IntoElement {
-    let action = Box::new(action);
-    Button::new(id)
-        .primary()
-        .h(rems(2.))
-        .icon(icon)
-        .label(label)
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(action.boxed_clone(), cx);
-        })
-}
+    #[test]
+    fn a_healthy_service_offers_no_recovery_action() {
+        assert_eq!(Recovery::for_state(ServiceState::Running, Tone::Positive, false), None);
+    }
 
-fn quiet_button(
-    id: &'static str,
-    label: &'static str,
-    icon: IconName,
-    action: impl gpui::Action,
-) -> impl IntoElement {
-    let action = Box::new(action);
-    Button::new(id)
-        .ghost()
-        .h(rems(2.))
-        .icon(icon)
-        .label(label)
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(action.boxed_clone(), cx);
-        })
+    #[test]
+    fn a_running_but_unresponsive_service_offers_a_restart() {
+        assert_eq!(
+            Recovery::for_state(ServiceState::Running, Tone::Critical, false),
+            Some(Recovery::Restart)
+        );
+    }
+
+    #[test]
+    fn a_running_service_with_a_failed_identity_read_offers_a_retry() {
+        for tone in [Tone::Critical, Tone::Caution] {
+            assert_eq!(
+                Recovery::for_state(ServiceState::Running, tone, true),
+                Some(Recovery::Check)
+            );
+        }
+    }
+
+    #[test]
+    fn a_stopped_service_offers_start_rather_than_restart() {
+        assert_eq!(
+            Recovery::for_state(ServiceState::Stopped, Tone::Critical, false),
+            Some(Recovery::Start)
+        );
+    }
+
+    #[test]
+    fn transient_states_offer_nothing_to_press() {
+        for state in [ServiceState::Checking, ServiceState::Starting] {
+            assert_eq!(Recovery::for_state(state, Tone::Busy, false), None);
+        }
+    }
 }

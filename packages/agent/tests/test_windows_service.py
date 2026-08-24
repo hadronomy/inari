@@ -16,7 +16,6 @@ def test_service_cli_uses_handle_command_line_for_management_commands(
     fake_win32serviceutil = SimpleNamespace(
         HandleCommandLine=mocker.Mock(),
         SetServiceCustomOption=mocker.Mock(),
-        GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     fake_modules = (
         SimpleNamespace(
@@ -60,7 +59,7 @@ def test_service_cli_uses_handle_command_line_for_management_commands(
     )
 
 
-def test_service_custom_option_round_trip_uses_pywin32_storage(
+def test_service_custom_option_uses_write_api_and_read_only_registry_access(
     mocker, tmp_path
 ) -> None:
     fake_servicemanager = SimpleNamespace(
@@ -75,9 +74,6 @@ def test_service_custom_option_round_trip_uses_pywin32_storage(
             "FakeServiceFramework", (), {"__init__": lambda self, args: None}
         ),
         SetServiceCustomOption=mocker.Mock(),
-        GetServiceCustomOption=mocker.Mock(
-            return_value=str((tmp_path / "agent.toml").resolve())
-        ),
     )
     mocker.patch(
         "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
@@ -87,6 +83,19 @@ def test_service_custom_option_round_trip_uses_pywin32_storage(
             fake_win32service,
             fake_win32serviceutil,
         ),
+    )
+    registry_key = mocker.MagicMock()
+    fake_winreg = SimpleNamespace(
+        HKEY_LOCAL_MACHINE=object(),
+        KEY_READ=0x20019,
+        OpenKey=mocker.Mock(return_value=registry_key),
+        QueryValueEx=mocker.Mock(
+            return_value=(str((tmp_path / "agent.toml").resolve()), 1)
+        ),
+    )
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.importlib.import_module",
+        return_value=fake_winreg,
     )
 
     from inari.host_service.windows_entrypoint import (
@@ -103,6 +112,78 @@ def test_service_custom_option_round_trip_uses_pywin32_storage(
         str(config_path.resolve()),
     )
     assert get_windows_service_config_path() == config_path.resolve()
+    fake_winreg.OpenKey.assert_called_once_with(
+        fake_winreg.HKEY_LOCAL_MACHINE,
+        r"SYSTEM\CurrentControlSet\Services\InariAgent\Parameters",
+        0,
+        fake_winreg.KEY_READ,
+    )
+    fake_winreg.QueryValueEx.assert_called_once_with(
+        registry_key.__enter__.return_value,
+        "ConfigPath",
+    )
+
+
+def test_missing_service_config_path_does_not_require_registry_write_access(
+    mocker,
+) -> None:
+    fake_win32serviceutil = SimpleNamespace(
+        GetServiceCustomOption=mocker.Mock(
+            side_effect=PermissionError("RegCreateKey requires write access")
+        )
+    )
+    mocker.patch(
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
+        return_value=(
+            SimpleNamespace(),
+            SimpleNamespace(),
+            SimpleNamespace(),
+            fake_win32serviceutil,
+        ),
+    )
+    fake_winreg = SimpleNamespace(
+        HKEY_LOCAL_MACHINE=object(),
+        KEY_READ=0x20019,
+        OpenKey=mocker.Mock(side_effect=FileNotFoundError),
+    )
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.importlib.import_module",
+        return_value=fake_winreg,
+    )
+
+    from inari.host_service.windows_entrypoint import (
+        WINDOWS_SERVICE_NAME,
+        get_windows_service_config_path,
+    )
+
+    assert get_windows_service_config_path() is None
+    fake_win32serviceutil.GetServiceCustomOption.assert_not_called()
+    fake_winreg.OpenKey.assert_called_once_with(
+        fake_winreg.HKEY_LOCAL_MACHINE,
+        rf"SYSTEM\CurrentControlSet\Services\{WINDOWS_SERVICE_NAME}\Parameters",
+        0,
+        fake_winreg.KEY_READ,
+    )
+
+
+def test_bootstrap_log_path_does_not_read_the_service_registry(
+    mocker, tmp_path
+) -> None:
+    log_dir = tmp_path / "logs"
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.resolve_default_path_bundle",
+        return_value=SimpleNamespace(log_dir=log_dir),
+    )
+    registry_reader = mocker.patch(
+        "inari.host_service.windows_entrypoint.get_windows_service_config_path",
+        side_effect=PermissionError("the bootstrap log must not read the registry"),
+    )
+
+    from inari.host_service.windows_entrypoint import _bootstrap_log_path
+
+    assert _bootstrap_log_path() == log_dir / "service-bootstrap.log"
+    assert log_dir.is_dir()
+    registry_reader.assert_not_called()
 
 
 def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
@@ -123,7 +204,6 @@ def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
 
     fake_win32serviceutil = SimpleNamespace(
         ServiceFramework=FakeServiceFramework,
-        GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
         "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
@@ -168,7 +248,6 @@ def test_service_class_uses_python_module_host(mocker) -> None:
         ServiceFramework=type(
             "FakeServiceFramework", (), {"__init__": lambda self, args: None}
         ),
-        GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
         "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
@@ -216,7 +295,6 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
     )
     fake_win32serviceutil = SimpleNamespace(
         ServiceFramework=FakeServiceFramework,
-        GetServiceCustomOption=mocker.Mock(return_value=None),
     )
     mocker.patch(
         "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
@@ -228,6 +306,10 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
         ),
     )
     mocker.patch("inari.host_service.windows_entrypoint._write_bootstrap_log")
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.get_windows_service_config_path",
+        return_value=None,
+    )
     fake_controller = SimpleNamespace(
         container=SimpleNamespace(standalone_trust_service=None),
         run=mocker.Mock(),
@@ -273,9 +355,7 @@ def test_load_service_settings_uses_production_defaults_without_registered_confi
         CreateEvent=mocker.Mock(return_value="event"), SetEvent=mocker.Mock()
     )
     fake_win32service = SimpleNamespace(SERVICE_STOP_PENDING=3)
-    fake_win32serviceutil = SimpleNamespace(
-        GetServiceCustomOption=mocker.Mock(return_value=None),
-    )
+    fake_win32serviceutil = SimpleNamespace()
     mocker.patch(
         "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
         return_value=(
@@ -284,6 +364,10 @@ def test_load_service_settings_uses_production_defaults_without_registered_confi
             fake_win32service,
             fake_win32serviceutil,
         ),
+    )
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.get_windows_service_config_path",
+        return_value=None,
     )
 
     from inari.host_service.windows_entrypoint import _load_service_settings
@@ -316,9 +400,6 @@ def test_module_entrypoint_invokes_main_when_run_as_script(
     )
     cast(Any, fake_win32serviceutil).HandleCommandLine = mocker.Mock()
     cast(Any, fake_win32serviceutil).SetServiceCustomOption = mocker.Mock()
-    cast(Any, fake_win32serviceutil).GetServiceCustomOption = mocker.Mock(
-        return_value=None
-    )
 
     monkeypatch.setitem(sys.modules, "servicemanager", fake_servicemanager)
     monkeypatch.setitem(sys.modules, "win32event", fake_win32event)

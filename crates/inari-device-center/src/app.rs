@@ -1,14 +1,15 @@
 use std::{collections::HashSet, sync::Arc};
 
 use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, KeyBinding, ParentElement as _, Render, StatefulInteractiveElement as _, Styled,
-    Subscription, Task, Window, actions, div, prelude::FluentBuilder as _, rems, svg,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, actions, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::{IconName, StyledExt as _, Theme, input::InputState};
+use gpui_component::{IconName, StyledExt as _, TitleBar, input::InputState, tooltip::Tooltip};
 use inari_agent_client::{
-    AgentConnection, AgentEvent, Device, DeviceId, EnrollmentPreview, InvitationLink, Job,
-    ServiceState, SetupAccess, SetupSnapshot,
+    AgentConnection, AgentEvent, Device, DeviceId, DeviceState, EnrollmentPreview, InvitationLink,
+    Job, ServiceState, SetupAccess, SetupSnapshot,
 };
 
 use crate::{
@@ -17,7 +18,15 @@ use crate::{
         support::SupportView,
     },
     infrastructure::{AgentRuntime, TrayCommand, TrayController},
-    ui::{NavigationItem, palette},
+    ui::{
+        chrome::{self, NavigationRail, PANEL_INSET, RailItem, content_panel},
+        content::Typography as _,
+        focus,
+        icon::{Glyph, Symbol},
+        material, motion,
+        status::{Status, StatusDot},
+        theme::{ActiveTheme as _, Theme},
+    },
 };
 
 mod runtime;
@@ -40,7 +49,9 @@ actions!(
         StartAgentService,
         RestartAgentService,
         OpenLogs,
-        OpenApiReference
+        OpenApiReference,
+        ToggleTranslucency,
+        ToggleReducedMotion
     ]
 );
 
@@ -67,6 +78,33 @@ enum Destination {
     Support,
 }
 
+impl Destination {
+    const ALL: [Self; 4] = [Self::Overview, Self::Devices, Self::Activity, Self::Support];
+
+    fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|destination| *destination == self)
+            .unwrap_or(0)
+    }
+
+    fn rail_item(self) -> RailItem {
+        match self {
+            Self::Overview => RailItem::new(
+                "nav-overview",
+                "Overview",
+                Symbol::Component(IconName::LayoutDashboard),
+                ShowOverview,
+            ),
+            Self::Devices => RailItem::new("nav-devices", "Devices", Glyph::Device, ShowDevices),
+            Self::Activity => {
+                RailItem::new("nav-activity", "Activity", Glyph::Activity, ShowActivity)
+            },
+            Self::Support => RailItem::new("nav-support", "Support", Glyph::Support, ShowSupport),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RootSurface {
     Operations,
@@ -83,6 +121,9 @@ fn root_surface(access: SetupAccess, setup_forced: bool) -> RootSurface {
 
 pub struct DeviceCenter {
     destination: Destination,
+    /// Where the rail indicator slides from. Equal to `destination` until the
+    /// first navigation, so the rail does not animate while the window opens.
+    previous_destination: Destination,
     setup: SetupSnapshot,
     devices: Arc<[Device]>,
     device_directory: Entity<DeviceDirectory>,
@@ -92,6 +133,7 @@ pub struct DeviceCenter {
     service_state: ServiceState,
     service_error: Option<String>,
     agent_error: Option<String>,
+    identity_retry_available: bool,
     invitation_input: Entity<InputState>,
     preview: Option<EnrollmentPreview>,
     setup_error: Option<String>,
@@ -127,10 +169,7 @@ impl DeviceCenter {
         let service_task = Self::load_service_state(runtime.clone(), cx);
         let updates_task = Self::listen_for_updates(runtime.clone(), window.window_handle(), cx);
         let device_directory = cx.new(|cx| DeviceDirectory::new(window, cx));
-        let appearance_subscription = window.observe_window_appearance(|window, cx| {
-            Theme::sync_system_appearance(Some(window), cx);
-            palette::apply_brand(cx);
-        });
+        let appearance_subscription = window.observe_window_appearance(Theme::sync);
         let invitation_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Paste an invitation link")
@@ -145,6 +184,7 @@ impl DeviceCenter {
         focus_handle.focus(window);
         Self {
             destination: Destination::Overview,
+            previous_destination: Destination::Overview,
             setup: if initial_invitation.is_some() {
                 SetupSnapshot::invitation()
             } else {
@@ -158,6 +198,7 @@ impl DeviceCenter {
             service_state: ServiceState::Checking,
             service_error: None,
             agent_error: None,
+            identity_retry_available: false,
             invitation_input,
             preview: None,
             setup_error: None,
@@ -197,6 +238,29 @@ impl DeviceCenter {
         cx.notify();
     }
 
+    /// Open the device directory with `id` selected.
+    ///
+    /// The route an operator takes most: they see a device in Needs attention
+    /// and want its detail. Without this the only way through is Devices, then
+    /// finding the same name again in the list they just read it from.
+    pub(crate) fn show_device(&mut self, id: DeviceId, cx: &mut Context<Self>) {
+        self.device_directory
+            .update(cx, |directory, cx| directory.select(id, cx));
+        self.navigate(Destination::Devices, cx);
+    }
+
+    /// Open Activity, where a failed job's history is.
+    pub(crate) fn show_work(&mut self, cx: &mut Context<Self>) {
+        self.navigate(Destination::Activity, cx);
+    }
+
+    /// The agent's health, resolved once per frame and shared by the titlebar,
+    /// the Overview gate, and Support. One resolution means those three can
+    /// never disagree about whether the agent is healthy.
+    fn agent_status(&self) -> Status {
+        Status::service(self.service_state, self.connection)
+    }
+
     fn show_overview(&mut self, _: &ShowOverview, _: &mut Window, cx: &mut Context<Self>) {
         self.navigate(Destination::Overview, cx);
     }
@@ -213,21 +277,46 @@ impl DeviceCenter {
         self.navigate(Destination::Support, cx);
     }
 
-    fn navigate(&mut self, destination: Destination, cx: &mut Context<Self>) {
-        if self.setup.access != SetupAccess::Required && !self.setup_forced {
-            self.destination = destination;
-            cx.notify();
-        }
+    fn toggle_translucency(
+        &mut self,
+        _: &ToggleTranslucency,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        material::set_prefer_opaque(material::resolve().is_glass());
+        Theme::sync(window, cx);
+        cx.notify();
     }
 
-    fn main_content(&self) -> impl IntoElement {
+    fn toggle_reduced_motion(
+        &mut self,
+        _: &ToggleReducedMotion,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        motion::set_reduced(!motion::reduced());
+        cx.notify();
+    }
+
+    fn navigate(&mut self, destination: Destination, cx: &mut Context<Self>) {
+        if root_surface(self.setup.access, self.setup_forced) != RootSurface::Operations
+            || self.destination == destination
+        {
+            return;
+        }
+        self.previous_destination = self.destination;
+        self.destination = destination;
+        cx.notify();
+    }
+
+    fn main_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         match self.destination {
             Destination::Overview => OverviewView::new(
                 &self.devices,
                 &self.jobs,
-                self.connection,
-                self.service_state,
+                self.agent_status(),
                 self.setup.guidance.clone(),
+                cx.entity().downgrade(),
             )
             .into_any_element(),
             Destination::Devices => self
@@ -236,85 +325,95 @@ impl DeviceCenter {
                 .into_any_element(),
             Destination::Activity => ActivityView::new(&self.jobs, &self.events).into_any_element(),
             Destination::Support => SupportView::new(
+                self.agent_status(),
                 self.service_state,
                 self.service_error.clone(),
                 self.agent_error.clone(),
+                self.identity_retry_available,
             )
             .into_any_element(),
         }
     }
 
-    fn navigation(&self, colors: palette::Palette) -> impl IntoElement {
-        div()
-            .id("primary-navigation")
-            .v_flex()
-            .w(rems(11.))
-            .h_full()
-            .flex_shrink_0()
-            .p(rems(1.))
-            .border_r_1()
-            .border_color(colors.separator)
-            .bg(colors.sidebar)
+    /// The window titlebar.
+    ///
+    /// The brand starts after the native window controls. GPUI Component gives
+    /// titlebar content an 80px macOS inset, followed by one deliberate gap.
+    ///
+    /// Agent health lives here rather than on one screen because it is the
+    /// fact that decides whether anything else on screen can be trusted, and
+    /// it has to stay true while the operator is reading Devices or Activity.
+    fn titlebar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.inari();
+        let status = self.agent_status();
+        let tone = status.tone;
+        let detail = status.detail.clone();
+        let reachable =
+            root_surface(self.setup.access, self.setup_forced) == RootSurface::Operations;
+
+        TitleBar::new()
+            .h(px(Theme::TITLEBAR_HEIGHT))
+            // The chip's own padding then lands its edge exactly on the
+            // panel's right border, so the two right edges read as one line.
+            .pr(px(PANEL_INSET - Theme::SPACE_SM))
+            .bg(gpui::transparent_black())
+            .border_color(gpui::transparent_black())
+            .child(chrome::brand_lockup(theme))
+            .child(div().flex_1())
             .child(
                 div()
-                    .h(rems(2.5))
-                    .flex()
+                    .id("agent-health")
+                    .h_flex()
                     .items_center()
-                    .gap(rems(0.75))
-                    .px(rems(0.75))
-                    .child(
-                        svg()
-                            .path("inari-mark-torii-ui.svg")
-                            .size(rems(1.5))
-                            .text_color(colors.vermilion)
-                            .flex_shrink_0(),
-                    )
+                    .gap(px(Theme::SPACE_SM))
+                    .h(px(26.0))
+                    .px(px(Theme::SPACE_SM))
+                    .rounded(px(Theme::RADIUS_CONTROL))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .when(reachable, |chip| {
+                        chip.cursor_pointer()
+                            .focusable()
+                            .tab_stop(true)
+                            .when(focus::visible(), |chip| {
+                                chip.focus(|style| style.border_color(theme.focus_ring))
+                            })
+                            .hover(|chip| chip.bg(theme.wash_hover))
+                            .active(|chip| chip.bg(theme.wash_pressed))
+                            .tooltip(move |window, cx| {
+                                Tooltip::new(detail.clone()).build(window, cx)
+                            })
+                            .on_click(cx.listener(|center, _, _, cx| {
+                                center.navigate(Destination::Support, cx);
+                            }))
+                            .on_key_down(cx.listener(|center, event: &KeyDownEvent, _, cx| {
+                                if chrome::is_activation(event) {
+                                    center.navigate(Destination::Support, cx);
+                                    cx.stop_propagation();
+                                }
+                            }))
+                    })
+                    .child(StatusDot::new(tone).size(7.0))
                     .child(
                         div()
-                            .text_size(rems(1.05))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child("inari"),
+                            .text_caption()
+                            .text_color(theme.text_secondary)
+                            .child(format!("Agent {}", status.label.to_lowercase())),
                     ),
             )
-            .child(
-                div()
-                    .v_flex()
-                    .gap(rems(0.25))
-                    .mt(rems(1.))
-                    .child(NavigationItem::new(
-                        "Overview",
-                        IconName::LayoutDashboard,
-                        self.destination == Destination::Overview,
-                        ShowOverview,
-                    ))
-                    .child(NavigationItem::new(
-                        "Devices",
-                        IconName::GalleryVerticalEnd,
-                        self.destination == Destination::Devices,
-                        ShowDevices,
-                    ))
-                    .child(NavigationItem::new(
-                        "Activity",
-                        IconName::Calendar,
-                        self.destination == Destination::Activity,
-                        ShowActivity,
-                    ))
-                    .child(NavigationItem::new(
-                        "Support",
-                        IconName::Settings2,
-                        self.destination == Destination::Support,
-                        ShowSupport,
-                    )),
-            )
-            .child(
-                div()
-                    .mt_auto()
-                    .px(rems(0.75))
-                    .pb(rems(0.5))
-                    .text_size(rems(0.75))
-                    .text_color(colors.text_muted)
-                    .child("Local device operations"),
-            )
+            .into_any_element()
+    }
+
+    fn rail(&self, enabled: bool) -> impl IntoElement {
+        NavigationRail::new(
+            Destination::ALL
+                .into_iter()
+                .map(Destination::rail_item)
+                .collect(),
+            self.destination.index(),
+            self.previous_destination.index(),
+        )
+        .enabled(enabled)
     }
 }
 
@@ -326,8 +425,14 @@ impl Focusable for DeviceCenter {
 
 impl Render for DeviceCenter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = palette::Palette::current(cx);
-        let root_surface = root_surface(self.setup.access, self.setup_forced);
+        let surface_kind = root_surface(self.setup.access, self.setup_forced);
+        let titlebar = self.titlebar(cx);
+        let theme = cx.inari();
+        let font = theme.font_sans.clone();
+        let text = theme.text;
+        let surface = content_panel(theme);
+        let rail = self.rail(surface_kind == RootSurface::Operations);
+
         div()
             .id("device-center")
             .key_context(KEY_CONTEXT)
@@ -347,34 +452,67 @@ impl Render for DeviceCenter {
             .on_action(cx.listener(Self::restart_agent_service))
             .on_action(cx.listener(Self::open_logs))
             .on_action(cx.listener(Self::open_api_reference))
+            .on_action(cx.listener(Self::toggle_translucency))
+            .on_action(cx.listener(Self::toggle_reduced_motion))
+            // Focus rings follow the input device. Tracked at the root so one
+            // pair of handlers covers every control in the window.
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|_, _, _, cx| {
+                    if focus::set_keyboard(false) {
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_key_down(cx.listener(|_, event: &gpui::KeyDownEvent, _, cx| {
+                if focus::is_navigation(event) && focus::set_keyboard(true) {
+                    cx.notify();
+                }
+            }))
             .size_full()
-            .bg(colors.canvas)
-            .text_color(colors.text)
-            .when(root_surface == RootSurface::Operations, |layout| {
-                layout
-                    .flex()
-                    .child(self.navigation(colors))
+            .v_flex()
+            .font_family(font)
+            .text_color(text)
+            .child(titlebar)
+            .child(
+                div()
+                    .h_flex()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .w_full()
+                    .child(rail)
                     .child(
-                        div()
-                            .id("main-content")
-                            .flex_1()
-                            .h_full()
-                            .overflow_y_scroll()
-                            .child(self.main_content()),
-                    )
-            })
-            .when(root_surface == RootSurface::Setup, |layout| {
-                layout.child(SetupView::new(
-                    self.setup.clone(),
-                    self.invitation_input.clone(),
-                    self.preview.clone(),
-                    self.setup_error.clone(),
-                    self.setup_working,
-                    self.selected_setup_devices.clone(),
-                    cx.entity().downgrade(),
-                ))
-            })
+                        surface.child(match surface_kind {
+                            RootSurface::Operations => self.main_content(cx).into_any_element(),
+                            RootSurface::Setup => SetupView::new(
+                                self.setup.clone(),
+                                self.invitation_input.clone(),
+                                self.preview.clone(),
+                                self.setup_error.clone(),
+                                self.setup_working,
+                                self.selected_setup_devices.clone(),
+                                cx.entity().downgrade(),
+                            )
+                            .into_any_element(),
+                        }),
+                    ),
+            )
     }
+}
+
+/// Devices that are online over devices found, or `None` when the agent cannot
+/// be reached.
+///
+/// An unknown count is not zero. Reporting "0 online" during an agent outage
+/// sends an operator to check hardware that is working.
+pub(crate) fn device_health(devices: &[Device], agent_reachable: bool) -> Option<(usize, usize)> {
+    agent_reachable.then(|| {
+        let online = devices
+            .iter()
+            .filter(|device| device.state == DeviceState::Online)
+            .count();
+        (online, devices.len())
+    })
 }
 
 #[cfg(test)]
@@ -384,5 +522,18 @@ mod tests {
     #[test]
     fn post_install_agent_failure_keeps_support_available() {
         assert_eq!(root_surface(SetupAccess::Unknown, false), RootSurface::Operations);
+    }
+
+    #[test]
+    fn destination_order_matches_the_rail_indicator_positions() {
+        for (index, destination) in Destination::ALL.into_iter().enumerate() {
+            assert_eq!(destination.index(), index);
+        }
+    }
+
+    #[test]
+    fn device_health_is_unknown_rather_than_zero_when_the_agent_is_unreachable() {
+        assert_eq!(device_health(&[], false), None);
+        assert_eq!(device_health(&[], true), Some((0, 0)));
     }
 }

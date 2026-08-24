@@ -21,6 +21,7 @@ PYTHON_PATHS = [
 WINDOWS_MODULES = [
     "pywintypes",
     "servicemanager",
+    "winreg",
     "win32crypt",
     "win32event",
     "win32file",

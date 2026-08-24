@@ -46,6 +46,8 @@ jobs:
         with:
           install_args: >-
             just
+            python
+            uv
             actionlint
             helm@4.2.3
             helm@3.21.3

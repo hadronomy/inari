@@ -47,6 +47,20 @@ It exists to preserve the standards the project has converged on over time:
 
 Read this before making changes.
 
+## Rust Storage
+
+Never download Rust crates or build Rust targets on the current drive.
+
+Use the existing Yggdrasil storage for all Cargo data and build output:
+
+```sh
+export CARGO_HOME=/Volumes/Yggdrasil/rust/cargo
+export CARGO_TARGET_DIR=/Volumes/Yggdrasil/rust/target/inari
+```
+
+Set both variables before every Cargo command. Do not use a repository-local
+`target` directory or the default Cargo cache.
+
 ## 1. Core Standard
 
 Build the repository like a careful product engineer, not like a patch bot.

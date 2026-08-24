@@ -192,6 +192,9 @@ impl DeviceCenter {
     ) {
         self.service_state = ServiceState::Checking;
         self.service_error = None;
+        // Keep the cache reset and the read in one task. Splitting these lets
+        // the read race ahead and return the cached failure.
+        self._setup_task = Self::retry_setup(self.runtime.clone(), cx);
         self.update_tray_service_state();
         self._service_task = Self::load_service_state(self.runtime.clone(), cx);
         cx.notify();

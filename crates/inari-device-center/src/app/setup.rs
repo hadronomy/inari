@@ -7,7 +7,7 @@ use super::{
     BeginSetup, ConfirmDevices, ContinueWithoutDevices, DeviceCenter, PreviewInvitation,
     RetryConnection, StartOver,
 };
-use crate::infrastructure::{AgentRuntime, agent_failure_message};
+use crate::infrastructure::{AgentRuntime, SetupResult, agent_failure_message};
 
 impl DeviceCenter {
     pub(super) fn load_invitation_preview(
@@ -44,12 +44,26 @@ impl DeviceCenter {
     }
 
     pub(super) fn load_setup(runtime: Arc<AgentRuntime>, cx: &mut Context<Self>) -> Task<()> {
-        let response = runtime.setup();
+        Self::apply_setup(runtime.setup(), cx)
+    }
+
+    /// Read setup again after clearing the cached identity.
+    pub(super) fn retry_setup(runtime: Arc<AgentRuntime>, cx: &mut Context<Self>) -> Task<()> {
+        Self::apply_setup(runtime.retry_setup(), cx)
+    }
+
+    fn apply_setup(
+        response: tokio::sync::oneshot::Receiver<SetupResult>,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         cx.spawn(async move |center, cx| {
             let snapshot = response.await.ok();
             if let Some(center) = center.upgrade() {
                 center
                     .update(cx, |center, cx| {
+                        center.identity_retry_available = snapshot
+                            .as_ref()
+                            .is_some_and(|result| result.identity_retry_available);
                         center.agent_error = snapshot
                             .as_ref()
                             .and_then(|result| result.diagnostic.clone());
@@ -80,7 +94,9 @@ impl DeviceCenter {
         cx: &mut Context<Self>,
     ) {
         self.setup_error = None;
-        self._setup_task = Self::load_setup(self.runtime.clone(), cx);
+        // Clears the cached identity before reading, so a denied credential
+        // store is actually retried rather than answered from the same cache.
+        self._setup_task = Self::retry_setup(self.runtime.clone(), cx);
         cx.notify();
     }
 
