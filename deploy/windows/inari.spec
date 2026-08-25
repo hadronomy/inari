@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files
 
 
 SPEC_DIRECTORY = Path(SPECPATH)
@@ -32,14 +32,12 @@ WINDOWS_MODULES = [
     "win32serviceutil",
 ]
 INARI_LAZY_MODULES = [
+    "inari.db.alembic",
     "inari.host_service.manager",
     "inari.host_service.models",
     "inari.local_api.app",
     "inari.printing.service",
 ]
-INARI_MIGRATIONS = collect_submodules("inari.db.alembic.versions")
-
-
 def analyze(
     entrypoint: str,
     *,
@@ -63,12 +61,17 @@ def analyze(
 
 agent_data = collect_data_files(
     "inari",
-    includes=["db/alembic/script.py.mako"],
+    includes=[
+        "db/alembic/*.py",
+        "db/alembic/*.mako",
+        "db/alembic/versions/*.py",
+    ],
+    include_py_files=True,
 )
 agent_service_analysis = analyze(
     "agent_service_entry.py",
     datas=agent_data,
-    hiddenimports=INARI_LAZY_MODULES + INARI_MIGRATIONS + WINDOWS_MODULES,
+    hiddenimports=INARI_LAZY_MODULES + WINDOWS_MODULES,
 )
 
 agent_service_archive = PYZ(agent_service_analysis.pure)

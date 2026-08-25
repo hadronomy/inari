@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from types import SimpleNamespace
 from typing import Any, cast
 
+import uvicorn
+
 from inari.config import AgentSettings
-from inari.local_api.server import AgentServerController
+from inari.local_api.server import AgentServerController, ManagedUvicornServer
 
 
 def test_server_config_supports_a_process_without_console_streams(
@@ -25,3 +28,19 @@ def test_server_config_supports_a_process_without_console_streams(
     )
 
     assert controller.server.config.log_config is None
+
+
+def test_managed_server_reports_readiness_after_uvicorn_starts(mocker) -> None:
+    callback = mocker.Mock()
+    server = object.__new__(ManagedUvicornServer)
+    server.started = False
+    server.started_callback = callback
+
+    async def complete_startup(instance, *, sockets=None) -> None:
+        instance.started = True
+
+    mocker.patch.object(uvicorn.Server, "startup", new=complete_startup)
+
+    asyncio.run(server.startup())
+
+    callback.assert_called_once_with()

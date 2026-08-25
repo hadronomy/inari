@@ -2,9 +2,9 @@ use std::{collections::HashSet, sync::Arc};
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowControlArea,
-    actions, div, prelude::FluentBuilder as _, px,
+    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, MouseButton,
+    ParentElement as _, Render, StatefulInteractiveElement as _, Styled, Subscription, Task,
+    Window, WindowControlArea, actions, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{IconName, StyledExt as _, TitleBar, input::InputState, tooltip::Tooltip};
 use inari_agent_client::{
@@ -17,7 +17,7 @@ use crate::{
         activity::ActivityView, devices::DeviceDirectory, overview::OverviewView, setup::SetupView,
         support::SupportView,
     },
-    infrastructure::{AgentRuntime, TrayCommand, TrayController},
+    infrastructure::{AgentRuntime, TrayCommand, TrayController, platform},
     ui::{
         chrome::{self, NavigationRail, PANEL_INSET, RailItem, content_panel},
         content::Typography as _,
@@ -364,7 +364,14 @@ impl DeviceCenter {
                     .id("titlebar-drag-region")
                     .h_full()
                     .flex_1()
-                    .window_control_area(WindowControlArea::Drag),
+                    // Declared on every platform. gpui 0.2.2 consumes control
+                    // areas on Windows only, and its caption press path still
+                    // loses drags (fixed upstream after this release), so
+                    // movement goes through platform::start_window_drag.
+                    .window_control_area(WindowControlArea::Drag)
+                    .on_mouse_down(MouseButton::Left, |_, window, _| {
+                        platform::start_window_drag(window);
+                    }),
             )
             .child(
                 div()

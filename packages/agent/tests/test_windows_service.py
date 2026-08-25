@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import runpy
 import sys
+from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 from inari.config import AgentSettings
@@ -186,6 +186,25 @@ def test_bootstrap_log_path_does_not_read_the_service_registry(
     registry_reader.assert_not_called()
 
 
+def test_bootstrap_log_timestamps_every_line(mocker, tmp_path) -> None:
+    log_path = tmp_path / "service-bootstrap.log"
+    mocker.patch(
+        "inari.host_service.windows_entrypoint._bootstrap_log_path",
+        return_value=log_path,
+    )
+
+    from inari.host_service.windows_entrypoint import _write_bootstrap_log
+
+    _write_bootstrap_log("First line.\nSecond line.")
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert [line.split(" ", 1)[1] for line in lines] == [
+        "First line.",
+        "Second line.",
+    ]
+    assert all(datetime.fromisoformat(line.split(" ", 1)[0]) for line in lines)
+
+
 def test_service_class_requests_shutdown_when_stopped(mocker) -> None:
     fake_servicemanager = SimpleNamespace(
         LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock()
@@ -305,7 +324,9 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
             fake_win32serviceutil,
         ),
     )
-    mocker.patch("inari.host_service.windows_entrypoint._write_bootstrap_log")
+    bootstrap_log = mocker.patch(
+        "inari.host_service.windows_entrypoint._write_bootstrap_log"
+    )
     mocker.patch(
         "inari.host_service.windows_entrypoint.get_windows_service_config_path",
         return_value=None,
@@ -325,6 +346,12 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
     service_class = create_windows_service_class(settings=AgentSettings())
     service = service_class(["inari-windows-service"])
 
+    def run_until_stopped(*, on_started) -> None:
+        on_started()
+        service.SvcStop()
+
+    fake_controller.run.side_effect = run_until_stopped
+
     controller_factory.assert_not_called()
 
     service.SvcDoRun()
@@ -332,7 +359,75 @@ def test_service_class_builds_controller_during_run(mocker) -> None:
     controller_factory.assert_called_once()
     assert (2, 20000, 0, 0) in service.reported_statuses
     assert (4, 5000, 0, 0) in service.reported_statuses
-    fake_controller.run.assert_called_once_with()
+    fake_controller.run.assert_called_once()
+    bootstrap_log.assert_any_call("Service host is ready.")
+
+
+def test_service_class_fails_when_server_exits_before_readiness(mocker) -> None:
+    import pytest
+
+    fake_servicemanager = SimpleNamespace(
+        LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock()
+    )
+    fake_win32event = SimpleNamespace(
+        CreateEvent=mocker.Mock(return_value="event"), SetEvent=mocker.Mock()
+    )
+
+    class FakeServiceFramework:
+        def __init__(self, args):
+            self.reported_statuses = []
+
+        def ReportServiceStatus(
+            self, status_code, waitHint=5000, win32ExitCode=0, svcExitCode=0
+        ):
+            self.reported_statuses.append(
+                (status_code, waitHint, win32ExitCode, svcExitCode)
+            )
+
+    fake_win32service = SimpleNamespace(
+        SERVICE_STOP_PENDING=3,
+        SERVICE_START_PENDING=2,
+        SERVICE_RUNNING=4,
+        SERVICE_STOPPED=1,
+    )
+    fake_win32serviceutil = SimpleNamespace(ServiceFramework=FakeServiceFramework)
+    mocker.patch(
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
+        return_value=(
+            fake_servicemanager,
+            fake_win32event,
+            fake_win32service,
+            fake_win32serviceutil,
+        ),
+    )
+    bootstrap_log = mocker.patch(
+        "inari.host_service.windows_entrypoint._write_bootstrap_log"
+    )
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.get_windows_service_config_path",
+        return_value=None,
+    )
+    fake_controller = SimpleNamespace(
+        container=SimpleNamespace(standalone_trust_service=None),
+        run=mocker.Mock(),
+        request_shutdown=mocker.Mock(),
+    )
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
+        return_value=fake_controller,
+    )
+
+    from inari.host_service.windows_entrypoint import create_windows_service_class
+
+    service_class = create_windows_service_class(settings=AgentSettings())
+    service = service_class(["inari-windows-service"])
+
+    with pytest.raises(RuntimeError, match="stopped without a service stop request"):
+        service.SvcDoRun()
+
+    assert (4, 5000, 0, 0) not in service.reported_statuses
+    assert (1, 5000, 1, 1) in service.reported_statuses
+    assert any("See agent.log" in call.args[0] for call in bootstrap_log.call_args_list)
 
 
 def test_windows_service_entrypoint_requires_windows(monkeypatch) -> None:
