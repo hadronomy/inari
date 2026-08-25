@@ -113,6 +113,8 @@ fn start_window_drag_on_platform(window: &Window) {
     }
 }
 
+// Only Windows needs the nudge. macOS drags through the native title bar,
+// and Linux drags through TitleBar's deferred `start_window_move`.
 #[cfg(not(windows))]
 fn start_window_drag_on_platform(_: &Window) {}
 
