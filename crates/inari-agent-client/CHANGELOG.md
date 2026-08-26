@@ -1,3 +1,19 @@
+## inari-agent-client@1.20.0-alpha.11
+
+### Start the packaged Windows agent
+
+The Windows package now includes every database migration that the agent needs
+at startup. The service reports that it is running only after the API is ready.
+
+### Drag Device Center from its title bar
+
+The empty title bar area now starts the native Windows move action. Status and
+window controls remain independent controls.
+
+### Cleaner title bar drag wiring
+
+Device Center declares its title bar drag region on every platform again instead of gating it per OS in the view. The Windows-only native drag workaround stays inside the platform module, where it stays until a gpui release ships fixed caption handling.
+
 ## inari-agent-client@1.20.0-alpha.10
 
 ### Fix Windows service startup and window controls
