@@ -4,6 +4,8 @@ bun = "1.3.14"
 python = "3.13.14"
 uv = "0.11.28"
 just = "latest"
+# Cargo wrapper that shares compiled work across checkouts; CI uses it too.
+"github:jdx/mr-boxington" = "0.4.0"
 actionlint = "1.7.12"
 helm = ["4.2.3", "3.21.3"]
 kustomize = "5.8.1"
