@@ -1,4 +1,3 @@
-use clap::Parser;
 use inari_server::cli::{Cli, CommandOutcome, database_status, migrate_database};
 use inari_server::{AppError, LoadedConfig, ServerBuilder, build_runtime, init_observability};
 
