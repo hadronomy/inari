@@ -27,6 +27,8 @@ const CONFIG_PATH_ENV: &str = "INARI_SERVER_CONFIG";
 pub const CONFIG_VERSION: u32 = 1;
 const ENV_PREFIX: &str = "INARI_SERVER";
 const ENV_SEPARATOR: &str = "__";
+/// What `config`'s Environment source records as a value's origin.
+const ENVIRONMENT_ORIGIN: &str = "the environment";
 const DEFAULT_CONFIG_CANDIDATES: &[&str] = &["inari-server.toml", "config/inari-server.toml"];
 const ENV_LIST_KEYS: &[&str] = &[
     "http.cors.allow_origins",
@@ -59,14 +61,45 @@ const DEFAULT_INARI_API_MAX_CONCURRENT_REQUESTS: usize = 1024;
 pub struct LoadedConfig {
     pub settings: AppConfig,
     pub origin: ConfigOrigin,
+    /// Which layer supplied each setting's effective value, sorted by key.
+    pub provenance: Vec<SettingOrigin>,
+}
+
+/// The layer a setting's effective value came from.
+///
+/// `config` stamps every value with the source that produced it: the path for a
+/// file, the literal `the environment` for an environment override, and nothing
+/// at all for the serialized defaults, which are read from a string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingSource {
+    Default,
+    File(PathBuf),
+    Environment,
+}
+
+impl std::fmt::Display for SettingSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Default => f.write_str("built-in default"),
+            Self::File(path) => write!(f, "{}", path.display()),
+            Self::Environment => f.write_str("environment"),
+        }
+    }
+}
+
+/// One setting's dotted key and the layer that supplied its value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingOrigin {
+    pub key: String,
+    pub source: SettingSource,
 }
 
 impl LoadedConfig {
     pub fn load() -> Result<Self, ConfigError> {
         let origin = ConfigOrigin::discover()?;
-        let settings = build_settings(&origin.files, environment_source())?;
+        let (settings, provenance) = build_settings(&origin.files, environment_source())?;
 
-        Ok(Self { settings, origin })
+        Ok(Self { settings, origin, provenance })
     }
 
     #[doc(hidden)]
@@ -77,9 +110,10 @@ impl LoadedConfig {
             files: config_files(None)?,
             includes_environment: !overrides.is_empty(),
         };
-        let settings = build_settings(&origin.files, environment_source_with(overrides))?;
+        let (settings, provenance) =
+            build_settings(&origin.files, environment_source_with(overrides))?;
 
-        Ok(Self { settings, origin })
+        Ok(Self { settings, origin, provenance })
     }
 }
 
@@ -515,7 +549,10 @@ fn default_inari_api_max_concurrent_requests() -> ConcurrencyLimit {
         .expect("default protocol concurrency limit must be valid")
 }
 
-fn build_settings(files: &[PathBuf], environment: Environment) -> Result<AppConfig, ConfigError> {
+fn build_settings(
+    files: &[PathBuf],
+    environment: Environment,
+) -> Result<(AppConfig, Vec<SettingOrigin>), ConfigError> {
     let defaults = toml::to_string(&AppConfig::default())
         .map_err(|source| ConfigError::SerializeDefaults { source })?;
     let mut builder = Config::builder().add_source(File::from_str(&defaults, FileFormat::Toml));
@@ -529,10 +566,57 @@ fn build_settings(files: &[PathBuf], environment: Environment) -> Result<AppConf
         .build()
         .map_err(|source| ConfigError::Build { source })?;
 
-    config
+    let settings: AppConfig = config
+        .clone()
         .try_deserialize()
         .map_err(|source| ConfigError::Deserialize { source })
-        .and_then(AppConfig::validate)
+        .and_then(AppConfig::validate)?;
+    let provenance = setting_origins(&config);
+
+    Ok((settings, provenance))
+}
+
+/// Ask `config` where each setting's effective value came from.
+///
+/// `Config::cache` is the merged tree, and every leaf still carries the source
+/// that produced it. Walking it reports the merge's own record rather than a
+/// second opinion, so this cannot describe a precedence the loader stopped
+/// implementing. `Config::get` cannot be used here: it deserializes, which
+/// builds a fresh value and drops the origin.
+fn setting_origins(config: &Config) -> Vec<SettingOrigin> {
+    let mut origins = Vec::new();
+    collect_origins(&config.cache, &mut String::new(), &mut origins);
+    origins.sort_by(|a, b| a.key.cmp(&b.key));
+    origins
+}
+
+/// Walk to every leaf, naming nested tables as `server.bind`.
+fn collect_origins(value: &config::Value, prefix: &mut String, out: &mut Vec<SettingOrigin>) {
+    if let config::ValueKind::Table(table) = &value.kind {
+        for (name, child) in table {
+            let restore = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push('.');
+            }
+            prefix.push_str(name);
+            collect_origins(child, prefix, out);
+            prefix.truncate(restore);
+        }
+        return;
+    }
+
+    let source = value.origin().map_or(SettingSource::Default, |origin| {
+        if origin == ENVIRONMENT_ORIGIN {
+            SettingSource::Environment
+        } else {
+            // `config` reports the path it resolved, which is relative to the
+            // working directory. Canonicalize so the same file reads the same
+            // way whatever directory the command ran from.
+            let path = PathBuf::from(origin);
+            SettingSource::File(path.canonicalize().unwrap_or(path))
+        }
+    });
+    out.push(SettingOrigin { key: prefix.clone(), source });
 }
 
 fn config_files(explicit_path: Option<PathBuf>) -> Result<Vec<PathBuf>, ConfigError> {
@@ -583,6 +667,47 @@ fn is_environment_override_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::SettingSource;
+
+    fn source_of(loaded: &LoadedConfig, key: &str) -> SettingSource {
+        loaded
+            .provenance
+            .iter()
+            .find(|setting| setting.key == key)
+            .unwrap_or_else(|| panic!("{key} should appear in the provenance"))
+            .source
+            .clone()
+    }
+
+    #[test]
+    fn untouched_settings_report_the_built_in_default() {
+        let loaded = LoadedConfig::load_from_environment_map(HashMap::new())
+            .expect("defaults should load");
+        assert_eq!(source_of(&loaded, "server.bind"), SettingSource::Default);
+    }
+
+    #[test]
+    fn an_environment_override_is_reported_against_the_environment() {
+        let loaded = LoadedConfig::load_from_environment_map(HashMap::from([(
+            "INARI_SERVER_SERVER__BIND".to_owned(),
+            "0.0.0.0:9999".to_owned(),
+        )]))
+        .expect("override should load");
+
+        assert_eq!(source_of(&loaded, "server.bind"), SettingSource::Environment);
+        // Its neighbours are untouched, which is what a per-setting report buys
+        // over one line saying the environment was involved somewhere.
+        assert_eq!(source_of(&loaded, "server.environment"), SettingSource::Default);
+    }
+
+    #[test]
+    fn provenance_covers_every_effective_setting() {
+        let loaded = LoadedConfig::load_from_environment_map(HashMap::new())
+            .expect("defaults should load");
+        assert!(loaded.provenance.len() > 50, "expected the whole tree, got {}", loaded.provenance.len());
+        assert!(loaded.provenance.windows(2).all(|pair| pair[0].key <= pair[1].key), "keys should be sorted");
+    }
+
     use std::collections::HashMap;
     use std::time::Duration;
 

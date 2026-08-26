@@ -1,6 +1,7 @@
 use toml::Value;
 
 use crate::database::ControllerDatabase;
+use crate::config::SettingSource;
 use crate::{AppError, AppResult, LoadedConfig};
 
 // unknown_flags = "error" restores clap's strictness: usage parses unknown
@@ -121,6 +122,33 @@ fn print_explanation(loaded: &LoadedConfig) {
     println!(
         "Secret-bearing output is redacted unless `config print-effective --no-redact` is used explicitly."
     );
+
+    // Reported by `config` from the value it actually merged, not asserted here,
+    // so this cannot describe a precedence the loader no longer implements.
+    let overridden: Vec<_> = loaded
+        .provenance
+        .iter()
+        .filter(|setting| setting.source != SettingSource::Default)
+        .collect();
+
+    println!();
+    if overridden.is_empty() {
+        println!(
+            "All {} settings hold their built-in default.",
+            loaded.provenance.len()
+        );
+        return;
+    }
+
+    println!(
+        "{} of {} settings are overridden:",
+        overridden.len(),
+        loaded.provenance.len()
+    );
+    let width = overridden.iter().map(|setting| setting.key.len()).max().unwrap_or_default();
+    for setting in overridden {
+        println!("  {:width$}  {}", setting.key, setting.source);
+    }
 }
 
 fn effective_toml(loaded: &LoadedConfig, redact: bool) -> AppResult<String> {
@@ -236,6 +264,7 @@ mod tests {
             .expect_err("only the explicit disclosure flag should be accepted");
     }
 
+    #[test]
     fn effective_configuration_is_redacted_by_default() {
         let mut loaded = LoadedConfig::default();
         loaded.settings.managed_gateway.enabled = true;
