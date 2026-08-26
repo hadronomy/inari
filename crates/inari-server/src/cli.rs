@@ -236,6 +236,7 @@ mod tests {
             .expect_err("only the explicit disclosure flag should be accepted");
     }
 
+    #[test]
     fn effective_configuration_is_redacted_by_default() {
         let mut loaded = LoadedConfig::default();
         loaded.settings.managed_gateway.enabled = true;
