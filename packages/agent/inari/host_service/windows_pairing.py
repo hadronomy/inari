@@ -11,7 +11,7 @@ from ..security.local_trust.native_bootstrap import (
     WINDOWS_PAIRING_PIPE,
     NativePairingResponse,
 )
-from ..windows_identity import current_package_family_name, package_family_for_process
+from ..windows_identity import current_package_family_name, package_family_for_token
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +78,7 @@ class WindowsPairingBootstrapServer:
                 _close_pipe(pipe)
 
     def _serve_client(self, pipe: Any) -> None:
-        win32pipe = importlib.import_module("win32pipe")
-        process_id = int(win32pipe.GetNamedPipeClientProcessId(pipe))
-        if package_family_for_process(process_id) != self._package_family:
+        if _client_package_family(pipe) != self._package_family:
             raise PermissionError(
                 "The pairing client is not part of the Inari MSIX package."
             )
@@ -95,6 +93,36 @@ class WindowsPairingBootstrapServer:
         )
         win32file.WriteFile(pipe, response.model_dump_json().encode("utf-8"))
         win32file.FlushFileBuffers(pipe)
+
+
+def _client_package_family(pipe: Any) -> str | None:
+    """Read the package family of the client on the other end of the pipe.
+
+    Impersonation is what makes this readable at all. The agent runs as
+    LocalService, so it cannot open the interactive user's process to ask which
+    package the caller belongs to. Impersonating the pipe borrows the client's
+    own token for the length of the question, which carries package identity
+    and costs no rights over the client.
+    """
+
+    win32api = importlib.import_module("win32api")
+    win32pipe = importlib.import_module("win32pipe")
+    win32security = importlib.import_module("win32security")
+    win32pipe.ImpersonateNamedPipeClient(pipe)
+    try:
+        # bOpenAsSelf: check access with the service's own token, not the
+        # client's, so a low-privilege caller cannot deny us its own token.
+        token = win32security.OpenThreadToken(
+            win32api.GetCurrentThread(),
+            win32security.TOKEN_QUERY,
+            True,
+        )
+        try:
+            return package_family_for_token(int(token))
+        finally:
+            token.Close()
+    finally:
+        win32security.RevertToSelf()
 
 
 def _create_pipe():
