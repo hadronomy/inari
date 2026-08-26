@@ -398,6 +398,12 @@ $LocationPushed = $false
 try {
     Push-Location $WorkspaceRoot
     $LocationPushed = $true
+    # uv prefers its own managed CPython, which is published with Authenticode
+    # signatures stripped. Those binaries end up in the frozen payload and make
+    # the MSIX unsignable, so a release build asks for a system interpreter and
+    # leaves managed downloads as the fallback the payload check will catch.
+    $env:UV_PYTHON_PREFERENCE = "system"
+
     Write-Host "Synchronizing frozen application dependencies."
     & $Uv sync --all-packages --frozen --group windows-build
     Assert-NativeCommandSucceeded $LASTEXITCODE "Python dependency synchronization"
