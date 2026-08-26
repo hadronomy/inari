@@ -80,6 +80,10 @@ reqwest = { version = "0.13", default-features = false, features = [
 rust-embed = "8"
 secrecy = "0.10"
 service-manager = "=0.11.0"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_Services",
+] }
 sea-orm = { version = "=2.0.0-rc.42", default-features = false, features = [
   "macros",
   "runtime-tokio-rustls",
