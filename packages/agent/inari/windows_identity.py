@@ -7,7 +7,6 @@ from typing import Protocol
 
 _APPMODEL_ERROR_NO_PACKAGE = 15_700
 _ERROR_INSUFFICIENT_BUFFER = 122
-_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 
 class _WindowsFunction(Protocol):
@@ -29,36 +28,27 @@ def current_package_family_name() -> str | None:
     return _read_package_family(function)
 
 
-def package_family_for_process(process_id: int) -> str | None:
-    """Return the Windows package family for a process visible to this service."""
+def package_family_for_token(token: int) -> str | None:
+    """Return the package family recorded in an access token, if any.
+
+    Callers identify a peer by its token rather than by its process id. A
+    service running as LocalService holds no rights over a process owned by the
+    interactive user, so opening that process to ask the same question is
+    refused before the answer can be read. A token the peer already handed us
+    carries the package identity and needs no rights over the peer at all.
+    """
 
     if sys.platform != "win32":
         return None
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    open_process: _WindowsFunction = kernel32.OpenProcess
-    open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    open_process.restype = wintypes.HANDLE
-    close_handle: _WindowsFunction = kernel32.CloseHandle
-    close_handle.argtypes = [wintypes.HANDLE]
-    close_handle.restype = wintypes.BOOL
-    process = open_process(
-        _PROCESS_QUERY_LIMITED_INFORMATION,
-        False,
-        process_id,
-    )
-    if not process:
-        raise _windows_error(ctypes.get_last_error())
-    try:
-        function: _WindowsFunction = kernel32.GetPackageFamilyName
-        function.argtypes = [
-            wintypes.HANDLE,
-            ctypes.POINTER(wintypes.UINT),
-            wintypes.LPWSTR,
-        ]
-        function.restype = wintypes.LONG
-        return _read_package_family(function, process)
-    finally:
-        close_handle(process)
+    function: _WindowsFunction = kernel32.GetPackageFamilyNameFromToken
+    function.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.UINT),
+        wintypes.LPWSTR,
+    ]
+    function.restype = wintypes.LONG
+    return _read_package_family(function, wintypes.HANDLE(token))
 
 
 def _read_package_family(
@@ -73,6 +63,8 @@ def _read_package_family(
         raise _windows_error(result)
     buffer = ctypes.create_unicode_buffer(length.value)
     result = function(*prefix, ctypes.byref(length), buffer)
+    if result == _APPMODEL_ERROR_NO_PACKAGE:
+        return None
     if result != 0:
         raise _windows_error(result)
     return buffer.value
