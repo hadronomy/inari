@@ -1,7 +1,7 @@
 use toml::Value;
 
 use crate::database::ControllerDatabase;
-use crate::config::SettingSource;
+use crate::config::Origin;
 use crate::{AppError, AppResult, LoadedConfig};
 
 // unknown_flags = "error" restores clap's strictness: usage parses unknown
@@ -44,8 +44,12 @@ enum ConfigCommand {
     /// Print the effective configuration as TOML.
     PrintEffective {
         /// Include configured secret values. Never use this in support bundles or logs.
-        #[usage(long = "no-redact")]
-        no_redact: bool,
+        ///
+        /// `negate` gives the pair `--redact` / `--no-redact`. Redaction is on
+        /// unless it is switched off explicitly, and the positive flag can only
+        /// ever ask for the safe state.
+        #[usage(long = "redact", negate = "--no-redact", default = "true")]
+        redact: bool,
     },
 }
 
@@ -70,9 +74,8 @@ impl Cli {
                         println!("Configuration is valid ({}).", loaded.origin);
                     },
                     ConfigCommand::Explain => print_explanation(&loaded),
-                    ConfigCommand::PrintEffective { no_redact } => {
-                        let redact = !no_redact;
-                        if no_redact {
+                    ConfigCommand::PrintEffective { redact } => {
+                        if !redact {
                             eprintln!(
                                 "WARNING: effective configuration output includes sensitive values; handle it as a secret."
                             );
@@ -123,31 +126,32 @@ fn print_explanation(loaded: &LoadedConfig) {
         "Secret-bearing output is redacted unless `config print-effective --no-redact` is used explicitly."
     );
 
-    // Reported by `config` from the value it actually merged, not asserted here,
-    // so this cannot describe a precedence the loader no longer implements.
-    let overridden: Vec<_> = loaded
-        .provenance
-        .iter()
-        .filter(|setting| setting.source != SettingSource::Default)
-        .collect();
+    // Read from the value `config` actually merged, not asserted here, so this
+    // cannot describe a precedence the loader no longer implements.
+    let provenance = loaded.provenance();
+    let overridden = provenance.overrides();
+    let total = provenance.all().len();
 
     println!();
     if overridden.is_empty() {
-        println!(
-            "All {} settings hold their built-in default.",
-            loaded.provenance.len()
-        );
+        println!("All {total} settings hold their built-in default.");
         return;
     }
 
-    println!(
-        "{} of {} settings are overridden:",
-        overridden.len(),
-        loaded.provenance.len()
-    );
-    let width = overridden.iter().map(|setting| setting.key.len()).max().unwrap_or_default();
-    for setting in overridden {
-        println!("  {:width$}  {}", setting.key, setting.source);
+    println!("{} of {total} settings are overridden:", overridden.len());
+    let width = overridden.iter().map(|(key, _)| key.len()).max().unwrap_or_default();
+    for (key, origin) in overridden {
+        // `config` reports the path it resolved, relative to the working
+        // directory. Absolute reads the same whichever directory the command
+        // ran from. Done here because `Origin` borrows and cannot allocate.
+        match origin {
+            Origin::File(path) => {
+                let shown = path.canonicalize();
+                let shown = shown.as_deref().unwrap_or(path);
+                println!("  {key:width$}  {}", shown.display());
+            },
+            other => println!("  {key:width$}  {other}"),
+        }
     }
 }
 
@@ -232,12 +236,12 @@ mod tests {
 
     fn print_effective_redaction(arguments: &[&str]) -> bool {
         let cli = Cli::try_parse_from(&argv(arguments)).expect("CLI arguments should parse");
-        let Some(Command::Config { command: ConfigCommand::PrintEffective { no_redact } }) =
+        let Some(Command::Config { command: ConfigCommand::PrintEffective { redact } }) =
             cli.command
         else {
             panic!("arguments should select config print-effective");
         };
-        !no_redact
+        redact
     }
 
     #[test]
@@ -255,13 +259,13 @@ mod tests {
         ]));
     }
 
-    // usage has no CommandFactory, so the old debug_assert() consistency check is
-    // gone; the derive validates the same shape at compile time instead. What is
-    // still worth asserting at runtime is that the positive flag stays absent.
+    // `negate` pairs --redact with --no-redact, so unlike the clap version the
+    // positive flag exists. It can only ask for the state redaction already
+    // defaults to, so the property worth protecting is unchanged: nothing but
+    // --no-redact discloses secrets.
     #[test]
-    fn positive_redact_flag_is_not_a_parallel_interface() {
-        Cli::try_parse_from(&argv(&["inari-server", "config", "print-effective", "--redact"]))
-            .expect_err("only the explicit disclosure flag should be accepted");
+    fn the_positive_flag_can_only_ask_for_redaction() {
+        assert!(print_effective_redaction(&["inari-server", "config", "print-effective", "--redact"]));
     }
 
     #[test]

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use config as config_rs;
@@ -57,49 +57,170 @@ const DEFAULT_ZENOH_EVENT_BUFFER: usize = 128;
 const DEFAULT_ZENOH_REST_MAX_CONCURRENT_QUERIES: usize = 64;
 const DEFAULT_INARI_API_MAX_CONCURRENT_REQUESTS: usize = 1024;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct LoadedConfig {
     pub settings: AppConfig,
     pub origin: ConfigOrigin,
-    /// Which layer supplied each setting's effective value, sorted by key.
-    pub provenance: Vec<SettingOrigin>,
+    /// The merged tree, kept so provenance can be read on demand.
+    ///
+    /// `config` records the layer behind every value here and `Config::get`
+    /// drops it, so answering "where did this come from" means holding the
+    /// tree. It is a few kilobytes, and cheaper than walking it into an owned
+    /// list at load that the server never reads.
+    raw: Config,
 }
 
-/// The layer a setting's effective value came from.
+/// The layer that supplied a setting's effective value.
 ///
-/// `config` stamps every value with the source that produced it: the path for a
-/// file, the literal `the environment` for an environment override, and nothing
-/// at all for the serialized defaults, which are read from a string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SettingSource {
+/// Borrows from the merged tree, so classifying a setting allocates nothing.
+/// Prefer [`Origin::is_default`] and `Display` over matching: a new layer adds
+/// a variant, and callers asking only those two questions do not change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Origin<'a> {
+    /// The serialized defaults, which `config` records with no origin at all.
     Default,
-    File(PathBuf),
+    /// A configuration file, at the path `config` resolved.
+    File(&'a Path),
+    /// An `INARI_SERVER_*` environment variable.
     Environment,
+    /// An origin string this module does not recognize, kept verbatim.
+    ///
+    /// It exists so an unknown layer can never be reported as a built-in
+    /// default, which would be a silent lie in the one command whose job is
+    /// telling the truth about layers.
+    Unknown(&'a str),
 }
 
-impl std::fmt::Display for SettingSource {
+impl Origin<'_> {
+    /// True for the built-in defaults. Filter on this rather than matching.
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Default)
+    }
+}
+
+impl std::fmt::Display for Origin<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Default => f.write_str("built-in default"),
             Self::File(path) => write!(f, "{}", path.display()),
             Self::Environment => f.write_str("environment"),
+            Self::Unknown(origin) => write!(f, "unrecognized source ({origin})"),
         }
     }
 }
 
-/// One setting's dotted key and the layer that supplied its value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SettingOrigin {
-    pub key: String,
-    pub source: SettingSource,
+/// A read-only view over the merged tree that reports where values came from.
+///
+/// `Copy`, because it holds one reference. Costs nothing to make, so build one
+/// where the answer is needed rather than storing it.
+#[derive(Debug, Clone, Copy)]
+pub struct Provenance<'a> {
+    config: &'a Config,
 }
 
+impl<'a> Provenance<'a> {
+    /// The layer that supplied `key`, or `None` when no such setting exists.
+    ///
+    /// A misspelled key and a key naming a table both give `None`, so a typo in
+    /// a test fails rather than quietly reading as a default. Costs the depth of
+    /// the key, not the size of the tree.
+    pub fn origin_of(&self, key: &str) -> Option<Origin<'a>> {
+        let mut value: &'a config::Value = &self.config.cache;
+        for segment in key.split('.') {
+            let config::ValueKind::Table(table) = &value.kind else {
+                return None;
+            };
+            value = table.get(segment)?;
+        }
+        if matches!(value.kind, config::ValueKind::Table(_)) {
+            return None;
+        }
+        Some(classify(value.origin()))
+    }
+
+    /// Every setting a layer above the defaults supplied, sorted by key.
+    ///
+    /// Never yields [`Origin::Default`], so a caller cannot forget to filter. A
+    /// file that restates a default value still appears: this reports the
+    /// supplying layer, not a comparison against the default.
+    pub fn overrides(self) -> Vec<(String, Origin<'a>)> {
+        let mut found = self.all();
+        found.retain(|(_, origin)| !origin.is_default());
+        found
+    }
+
+    /// Every effective setting, defaults included, sorted by key.
+    pub fn all(self) -> Vec<(String, Origin<'a>)> {
+        let mut found = Vec::new();
+        collect(&self.config.cache, &mut String::new(), &mut found);
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        found
+    }
+}
+
+/// Classify one leaf's recorded origin.
+///
+/// `config` 0.14 records exactly three things: nothing for values read from a
+/// string, which is how the defaults are supplied; the literal below for the
+/// environment; and the resolved path for a file. Anything else is reported as
+/// unknown rather than guessed at. `origin_dialect_is_unchanged` pins this.
+fn classify(origin: Option<&str>) -> Origin<'_> {
+    match origin {
+        None => Origin::Default,
+        Some(ENVIRONMENT_ORIGIN) => Origin::Environment,
+        Some(other) if other.contains(std::path::MAIN_SEPARATOR) => Origin::File(Path::new(other)),
+        Some(other) => Origin::Unknown(other),
+    }
+}
+
+/// Walk to every leaf, naming nested tables as `server.bind`.
+///
+/// A table is not a setting: its own origin misleads, because a later layer
+/// writing one child does not own the table. An array is one leaf, because the
+/// layers replace an array whole.
+fn collect<'a>(
+    value: &'a config::Value,
+    prefix: &mut String,
+    out: &mut Vec<(String, Origin<'a>)>,
+) {
+    if let config::ValueKind::Table(table) = &value.kind {
+        for (name, child) in table {
+            let restore = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push('.');
+            }
+            prefix.push_str(name);
+            collect(child, prefix, out);
+            prefix.truncate(restore);
+        }
+        return;
+    }
+    out.push((prefix.clone(), classify(value.origin())));
+}
+
+/// Two loads are equal when they resolved to the same settings from the same
+/// files. `config::Config` is not comparable, and the merged tree is derived
+/// from those two anyway, so comparing it would add nothing.
+impl PartialEq for LoadedConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.settings == other.settings && self.origin == other.origin
+    }
+}
+
+impl Eq for LoadedConfig {}
+
 impl LoadedConfig {
+    /// A view over the layers that produced these settings.
+    pub fn provenance(&self) -> Provenance<'_> {
+        Provenance { config: &self.raw }
+    }
+
     pub fn load() -> Result<Self, ConfigError> {
         let origin = ConfigOrigin::discover()?;
-        let (settings, provenance) = build_settings(&origin.files, environment_source())?;
+        let (settings, raw) = build_settings(&origin.files, environment_source())?;
 
-        Ok(Self { settings, origin, provenance })
+        Ok(Self { settings, origin, raw })
     }
 
     #[doc(hidden)]
@@ -110,10 +231,10 @@ impl LoadedConfig {
             files: config_files(None)?,
             includes_environment: !overrides.is_empty(),
         };
-        let (settings, provenance) =
+        let (settings, raw) =
             build_settings(&origin.files, environment_source_with(overrides))?;
 
-        Ok(Self { settings, origin, provenance })
+        Ok(Self { settings, origin, raw })
     }
 }
 
@@ -552,7 +673,7 @@ fn default_inari_api_max_concurrent_requests() -> ConcurrencyLimit {
 fn build_settings(
     files: &[PathBuf],
     environment: Environment,
-) -> Result<(AppConfig, Vec<SettingOrigin>), ConfigError> {
+) -> Result<(AppConfig, Config), ConfigError> {
     let defaults = toml::to_string(&AppConfig::default())
         .map_err(|source| ConfigError::SerializeDefaults { source })?;
     let mut builder = Config::builder().add_source(File::from_str(&defaults, FileFormat::Toml));
@@ -571,52 +692,7 @@ fn build_settings(
         .try_deserialize()
         .map_err(|source| ConfigError::Deserialize { source })
         .and_then(AppConfig::validate)?;
-    let provenance = setting_origins(&config);
-
-    Ok((settings, provenance))
-}
-
-/// Ask `config` where each setting's effective value came from.
-///
-/// `Config::cache` is the merged tree, and every leaf still carries the source
-/// that produced it. Walking it reports the merge's own record rather than a
-/// second opinion, so this cannot describe a precedence the loader stopped
-/// implementing. `Config::get` cannot be used here: it deserializes, which
-/// builds a fresh value and drops the origin.
-fn setting_origins(config: &Config) -> Vec<SettingOrigin> {
-    let mut origins = Vec::new();
-    collect_origins(&config.cache, &mut String::new(), &mut origins);
-    origins.sort_by(|a, b| a.key.cmp(&b.key));
-    origins
-}
-
-/// Walk to every leaf, naming nested tables as `server.bind`.
-fn collect_origins(value: &config::Value, prefix: &mut String, out: &mut Vec<SettingOrigin>) {
-    if let config::ValueKind::Table(table) = &value.kind {
-        for (name, child) in table {
-            let restore = prefix.len();
-            if !prefix.is_empty() {
-                prefix.push('.');
-            }
-            prefix.push_str(name);
-            collect_origins(child, prefix, out);
-            prefix.truncate(restore);
-        }
-        return;
-    }
-
-    let source = value.origin().map_or(SettingSource::Default, |origin| {
-        if origin == ENVIRONMENT_ORIGIN {
-            SettingSource::Environment
-        } else {
-            // `config` reports the path it resolved, which is relative to the
-            // working directory. Canonicalize so the same file reads the same
-            // way whatever directory the command ran from.
-            let path = PathBuf::from(origin);
-            SettingSource::File(path.canonicalize().unwrap_or(path))
-        }
-    });
-    out.push(SettingOrigin { key: prefix.clone(), source });
+    Ok((settings, config))
 }
 
 fn config_files(explicit_path: Option<PathBuf>) -> Result<Vec<PathBuf>, ConfigError> {
@@ -667,23 +743,13 @@ fn is_environment_override_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::SettingSource;
-
-    fn source_of(loaded: &LoadedConfig, key: &str) -> SettingSource {
-        loaded
-            .provenance
-            .iter()
-            .find(|setting| setting.key == key)
-            .unwrap_or_else(|| panic!("{key} should appear in the provenance"))
-            .source
-            .clone()
-    }
+    use super::{Origin, ENVIRONMENT_ORIGIN};
 
     #[test]
     fn untouched_settings_report_the_built_in_default() {
         let loaded = LoadedConfig::load_from_environment_map(HashMap::new())
             .expect("defaults should load");
-        assert_eq!(source_of(&loaded, "server.bind"), SettingSource::Default);
+        assert_eq!(loaded.provenance().origin_of("server.bind"), Some(Origin::Default));
     }
 
     #[test]
@@ -693,19 +759,52 @@ mod tests {
             "0.0.0.0:9999".to_owned(),
         )]))
         .expect("override should load");
+        let provenance = loaded.provenance();
 
-        assert_eq!(source_of(&loaded, "server.bind"), SettingSource::Environment);
-        // Its neighbours are untouched, which is what a per-setting report buys
-        // over one line saying the environment was involved somewhere.
-        assert_eq!(source_of(&loaded, "server.environment"), SettingSource::Default);
+        assert_eq!(provenance.origin_of("server.bind"), Some(Origin::Environment));
+        // Its neighbours stay untouched, which is what a per-setting report
+        // buys over one line saying the environment was involved somewhere.
+        assert_eq!(provenance.origin_of("server.environment"), Some(Origin::Default));
+    }
+
+    #[test]
+    fn a_missing_key_is_not_a_default() {
+        let loaded = LoadedConfig::load_from_environment_map(HashMap::new())
+            .expect("defaults should load");
+        let provenance = loaded.provenance();
+
+        // A typo must fail rather than read as "at its default".
+        assert_eq!(provenance.origin_of("server.bnid"), None);
+        // Naming a table is as much a miss as a typo: a table's own origin
+        // misleads, because a layer writing one child does not own the table.
+        assert_eq!(provenance.origin_of("server"), None);
+    }
+
+    /// Pins the origin dialect this module decodes. `config` records the
+    /// literal below for environment values and no origin at all for the
+    /// serialized defaults. If an upgrade changes either, this fails before
+    /// the CLI starts reporting environment values as defaults.
+    #[test]
+    fn origin_dialect_is_unchanged() {
+        let loaded = LoadedConfig::load_from_environment_map(HashMap::from([(
+            "INARI_SERVER_SERVER__BIND".to_owned(),
+            "0.0.0.0:9999".to_owned(),
+        )]))
+        .expect("override should load");
+
+        assert_eq!(ENVIRONMENT_ORIGIN, "the environment");
+        assert_eq!(loaded.provenance().origin_of("server.bind"), Some(Origin::Environment));
+        assert_eq!(loaded.provenance().origin_of("server.environment"), Some(Origin::Default));
     }
 
     #[test]
     fn provenance_covers_every_effective_setting() {
         let loaded = LoadedConfig::load_from_environment_map(HashMap::new())
             .expect("defaults should load");
-        assert!(loaded.provenance.len() > 50, "expected the whole tree, got {}", loaded.provenance.len());
-        assert!(loaded.provenance.windows(2).all(|pair| pair[0].key <= pair[1].key), "keys should be sorted");
+        let all = loaded.provenance().all();
+
+        assert!(all.len() > 50, "expected the whole tree, got {}", all.len());
+        assert!(all.windows(2).all(|pair| pair[0].0 <= pair[1].0), "keys should be sorted");
     }
 
     use std::collections::HashMap;
