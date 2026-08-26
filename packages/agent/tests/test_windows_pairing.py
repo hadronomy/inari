@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -63,3 +64,74 @@ def test_stops_impersonating_when_the_token_cannot_be_read(pywin32, mocker):
     # for whatever it does next, so the revert matters more than the failure.
     pywin32.win32security.RevertToSelf.assert_called_once_with()
     pywin32.token.Close.assert_called_once_with()
+
+
+def test_reads_the_request_before_impersonating_the_caller(pywin32, mocker):
+    """Impersonation borrows the context of the last message read from the pipe.
+
+    A message-mode pipe with nothing read yet has no context to borrow, so
+    impersonating first fails with ERROR_CANNOT_IMPERSONATE and every pairing
+    attempt dies exactly where the old process lookup used to.
+    """
+
+    mocker.patch.object(windows_pairing.sys, "platform", "win32")
+    order: list[str] = []
+    pywin32.win32pipe.ImpersonateNamedPipeClient.side_effect = lambda *_: order.append(
+        "impersonate"
+    )
+
+    def read(*_):
+        order.append("read")
+        return 0, b"\x01"
+
+    mocker.patch.dict(
+        sys.modules,
+        {
+            "win32file": SimpleNamespace(
+                ReadFile=mocker.Mock(side_effect=read),
+                WriteFile=mocker.Mock(),
+                FlushFileBuffers=mocker.Mock(),
+            )
+        },
+    )
+    mocker.patch.object(
+        windows_pairing, "package_family_for_token", return_value="Inari.DeviceCenter_x"
+    )
+    trust = mocker.Mock()
+    trust.start_native_pairing.return_value = SimpleNamespace(
+        secret="pairing-secret", expires_at=datetime(2026, 8, 26, tzinfo=timezone.utc)
+    )
+    server = windows_pairing.WindowsPairingBootstrapServer(
+        trust, package_family="Inari.DeviceCenter_x"
+    )
+
+    server._serve_client("pipe")
+
+    assert order == ["read", "impersonate"]
+    trust.start_native_pairing.assert_called_once_with()
+
+
+def test_refuses_a_caller_outside_the_package_without_minting_a_secret(pywin32, mocker):
+    mocker.patch.object(windows_pairing.sys, "platform", "win32")
+    mocker.patch.dict(
+        sys.modules,
+        {
+            "win32file": SimpleNamespace(
+                ReadFile=mocker.Mock(return_value=(0, b"\x01")),
+                WriteFile=mocker.Mock(),
+                FlushFileBuffers=mocker.Mock(),
+            )
+        },
+    )
+    mocker.patch.object(
+        windows_pairing, "package_family_for_token", return_value="Some.Other_app"
+    )
+    trust = mocker.Mock()
+    server = windows_pairing.WindowsPairingBootstrapServer(
+        trust, package_family="Inari.DeviceCenter_x"
+    )
+
+    with pytest.raises(PermissionError):
+        server._serve_client("pipe")
+
+    trust.start_native_pairing.assert_not_called()

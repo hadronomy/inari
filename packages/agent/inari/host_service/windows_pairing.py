@@ -89,23 +89,28 @@ class WindowsPairingBootstrapServer:
                 _close_pipe(pipe)
 
     def _serve_client(self, pipe: Any) -> None:
+        win32file = importlib.import_module("win32file")
+        # The request is read before the caller is identified because
+        # impersonation borrows the context of the last message read from a
+        # message-mode pipe: with nothing read there is no context to borrow.
+        # Reading first concedes nothing, since the pairing secret is minted
+        # only after the package family matches.
+        _, request = win32file.ReadFile(pipe, 1)
+        if bytes(request) not in (b"\x01", b"\x02"):
+            raise ValueError("The native pairing request is invalid.")
         if _client_package_family(pipe) != self._package_family:
             raise PermissionError(
                 "The pairing client is not part of the Inari MSIX package."
             )
-        win32file = importlib.import_module("win32file")
-        _, request = win32file.ReadFile(pipe, 1)
         response: NativeEndpointResponse | NativePairingResponse
         if bytes(request) == b"\x02":
             response = NativeEndpointResponse(agent_endpoint=self._agent_endpoint)
-        elif bytes(request) == b"\x01":
+        else:
             pairing = self._trust_service.start_native_pairing()
             response = NativePairingResponse(
                 pairing_secret=pairing.secret,
                 expires_at=pairing.expires_at,
             )
-        else:
-            raise ValueError("The native pairing request is invalid.")
         win32file.WriteFile(pipe, response.model_dump_json().encode("utf-8"))
         win32file.FlushFileBuffers(pipe)
 
