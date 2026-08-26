@@ -1,27 +1,40 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix Windows service startup and window controls\n\nThe Windows agent now starts when the service has no attached console. Device Center also shows its window controls and supports title bar dragging.\n"
-    filename: 2026-08-24-8c21e7a4.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Start the packaged Windows agent\n\nThe Windows package now includes every database migration that the agent needs\nat startup. The service reports that it is running only after the API is ready.\n\n### Drag Device Center from its title bar\n\nThe empty title bar area now starts the native Windows move action. Status and\nwindow controls remain independent controls.\n"
+    filename: 2026-08-24-c4f18a2d.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Cleaner title bar drag wiring\n\nDevice Center declares its title bar drag region on every platform again instead of gating it per OS in the view. The Windows-only native drag workaround stays inside the platform module, where it stays until a gpui release ships fixed caption handling.\n"
+    filename: 2026-08-25-feac1459.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: minor\n---\n\n### Say where each configuration setting came from\n\n`inari-server config explain` now names the layer behind every setting that is\nnot at its built-in default, and the file path or the environment that supplied\nit.\n\n```\n2 of 75 settings are overridden:\n  organization.name  /etc/inari/inari-server.toml\n  server.bind        environment\n```\n\nThe command previously printed the precedence order and the list of files it\nhad read. That answered which layers exist, not which one won a given setting,\nso the effect of a stray environment variable had to be worked out by hand.\nThe report is read from the values the loader actually merged, so it cannot\ndescribe a precedence the loader no longer applies.\n\n### Accept an explicit --redact\n\n`config print-effective` now takes `--redact` alongside `--no-redact`. Output\nis redacted unless `--no-redact` is given, exactly as before; the new flag\nstates that intent rather than relying on the default.\n"
+    filename: 2026-08-26-7d6f28cf.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
     id: cargo:inari-agent-client
     updated: true
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
     id: cargo:inari-device-center
     updated: true
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+    id: pip:inari-brand
+    updated: true
+  - changelogIds:
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
-    id: pip:inari-brand
+      - 2026-08-26-7d6f28cf.md
+    id: helm:inari
     updated: true
-  - id: helm:inari
-    updated: false
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
     id: msix:inari-device-center
     updated: true

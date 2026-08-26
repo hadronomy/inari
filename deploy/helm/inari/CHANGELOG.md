@@ -1,3 +1,29 @@
+## inari@0.3.0
+
+### Say where each configuration setting came from
+
+`inari-server config explain` now names the layer behind every setting that is
+not at its built-in default, and the file path or the environment that supplied
+it.
+
+```
+2 of 75 settings are overridden:
+  organization.name  /etc/inari/inari-server.toml
+  server.bind        environment
+```
+
+The command previously printed the precedence order and the list of files it
+had read. That answered which layers exist, not which one won a given setting,
+so the effect of a stray environment variable had to be worked out by hand.
+The report is read from the values the loader actually merged, so it cannot
+describe a precedence the loader no longer applies.
+
+### Accept an explicit --redact
+
+`config print-effective` now takes `--redact` alongside `--no-redact`. Output
+is redacted unless `--no-redact` is given, exactly as before; the new flag
+states that intent rather than relying on the default.
+
 ## inari@0.2.1
 
 ### Publish the controller chart through Tegami
