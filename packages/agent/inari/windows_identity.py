@@ -40,8 +40,12 @@ def package_family_for_token(token: int) -> str | None:
 
     if sys.platform != "win32":
         return None
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    function: _WindowsFunction = kernel32.GetPackageFamilyNameFromToken
+    # kernelbase, not kernel32: kernel32 forwards most of the app-model calls
+    # but not this one. The api-ms-win-appmodel-runtime contract exports it too,
+    # yet PyInstaller ships its own copies of those stubs beside the frozen
+    # agent, and a shadowed forwarder resolves to nothing.
+    kernelbase = ctypes.WinDLL("kernelbase", use_last_error=True)
+    function: _WindowsFunction = kernelbase.GetPackageFamilyNameFromToken
     function.argtypes = [
         wintypes.HANDLE,
         ctypes.POINTER(wintypes.UINT),
