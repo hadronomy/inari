@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{Animation, ease_in_out, linear, pulsating_between};
+use gpui::{Animation, ease_in_out, pulsating_between};
 
 /// A state change the user caused and is watching: a selection moving, a panel
 /// swapping. Long enough to read as motion, short enough to feel immediate.
@@ -21,10 +21,6 @@ pub const SWAP: Duration = Duration::from_millis(180);
 /// on purpose: at this rate it reads as breathing rather than as a widget
 /// demanding attention.
 pub const AMBIENT: Duration = Duration::from_millis(2600);
-
-/// One turn of a loader. Fast enough to read as working, slow enough that it
-/// does not buzz beside the sentence explaining what it is working on.
-pub const SPIN: Duration = Duration::from_millis(1100);
 
 static REDUCED: AtomicBool = AtomicBool::new(false);
 
@@ -62,14 +58,4 @@ pub fn pulse(min: f32, max: f32) -> Animation {
 /// A one-shot ease for an element entering or settling in place.
 pub fn settle() -> Animation {
     Animation::new(SWAP).with_easing(ease_in_out)
-}
-
-/// One continuous turn, for a loader that is reporting real work.
-///
-/// Linear on purpose: an eased rotation appears to stall twice per turn, which
-/// reads as the work stalling.
-pub fn spin() -> Animation {
-    Animation::new(SPIN)
-        .repeat()
-        .with_easing(linear)
 }
