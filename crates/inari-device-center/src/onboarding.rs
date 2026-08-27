@@ -48,6 +48,11 @@ const COLUMN: f32 = 372.0;
 /// opens lives in `main`, which already owns the runtime and the tray.
 pub type OpenOperations = Rc<dyn Fn(&mut App) -> Option<AnyWindowHandle>>;
 
+/// Reopens enrollment for an `inari://` link that arrived while the operations
+/// shell was up. The link is a credential the operator wants reviewed, so it
+/// belongs in the window built to review one.
+pub type OpenOnboarding = Rc<dyn Fn(Option<String>, &mut App)>;
+
 pub struct Onboarding {
     runtime: Arc<AgentRuntime>,
     open_operations: OpenOperations,
