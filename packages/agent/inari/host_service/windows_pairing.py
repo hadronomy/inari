@@ -111,9 +111,8 @@ def _client_package_family(pipe: Any) -> str | None:
     """
 
     win32api = importlib.import_module("win32api")
-    win32pipe = importlib.import_module("win32pipe")
     win32security = importlib.import_module("win32security")
-    win32pipe.ImpersonateNamedPipeClient(pipe)
+    win32security.ImpersonateNamedPipeClient(pipe)
     try:
         # bOpenAsSelf: check access with the service's own token, not the
         # client's, so a low-privilege caller cannot deny us its own token.

@@ -19,9 +19,9 @@ def pywin32(mocker):
         "win32api": SimpleNamespace(
             GetCurrentThread=mocker.Mock(return_value="thread")
         ),
-        "win32pipe": SimpleNamespace(ImpersonateNamedPipeClient=mocker.Mock()),
         "win32security": SimpleNamespace(
             TOKEN_QUERY=8,
+            ImpersonateNamedPipeClient=mocker.Mock(),
             OpenThreadToken=mocker.Mock(return_value=token),
             RevertToSelf=mocker.Mock(),
         ),
@@ -40,7 +40,7 @@ def test_identifies_the_pairing_client_from_the_token_it_supplies(pywin32, mocke
     family = windows_pairing._client_package_family("pipe")
 
     assert family == "Inari.DeviceCenter_rstr038xqpvrg"
-    pywin32.win32pipe.ImpersonateNamedPipeClient.assert_called_once_with("pipe")
+    pywin32.win32security.ImpersonateNamedPipeClient.assert_called_once_with("pipe")
     # The agent runs as LocalService. Reading the caller's identity has to work
     # without any right over the caller's process, so the token has to come
     # from the pipe rather than from a process the service cannot open.
@@ -76,8 +76,8 @@ def test_reads_the_request_before_impersonating_the_caller(pywin32, mocker):
 
     mocker.patch.object(windows_pairing.sys, "platform", "win32")
     order: list[str] = []
-    pywin32.win32pipe.ImpersonateNamedPipeClient.side_effect = lambda *_: order.append(
-        "impersonate"
+    pywin32.win32security.ImpersonateNamedPipeClient.side_effect = lambda *_: (
+        order.append("impersonate")
     )
 
     def read(*_):
