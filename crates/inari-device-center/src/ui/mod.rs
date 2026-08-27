@@ -12,3 +12,4 @@ pub mod motion;
 pub mod status;
 pub mod surface;
 pub mod theme;
+pub mod titlebar;
