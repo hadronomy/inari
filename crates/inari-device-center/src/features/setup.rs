@@ -11,8 +11,8 @@ use std::collections::HashSet;
 
 use chrono::Local;
 use gpui::{
-    Entity, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce,
-    StatefulInteractiveElement as _, Styled, WeakEntity, div, prelude::FluentBuilder as _, px, svg,
+    Entity, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, Styled,
+    WeakEntity, div, prelude::FluentBuilder as _, px, svg,
 };
 use gpui_component::{
     Disableable as _, IconName, StyledExt as _,
@@ -24,9 +24,10 @@ use inari_agent_client::{DeviceId, EnrollmentPreview, SetupAccess, SetupSnapshot
 
 use crate::{
     app::{
-        BeginSetup, ConfirmDevices, ContinueWithoutDevices, DeviceCenter, PreviewInvitation,
-        RetryConnection, StartOver,
+        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RetryConnection,
+        StartOver,
     },
+    onboarding::Onboarding,
     ui::{
         banner::Banner,
         content::{Field, Section, Typography as _},
@@ -49,7 +50,7 @@ pub struct SetupView {
     error: Option<String>,
     working: bool,
     selected_devices: HashSet<DeviceId>,
-    center: WeakEntity<DeviceCenter>,
+    center: WeakEntity<Onboarding>,
 }
 
 impl SetupView {
@@ -60,7 +61,7 @@ impl SetupView {
         error: Option<String>,
         working: bool,
         selected_devices: HashSet<DeviceId>,
-        center: WeakEntity<DeviceCenter>,
+        center: WeakEntity<Onboarding>,
     ) -> Self {
         Self { snapshot, invitation_input, preview, error, working, selected_devices, center }
     }
@@ -78,18 +79,14 @@ impl RenderOnce for SetupView {
 
         div()
             .id("setup")
-            .size_full()
-            .overflow_y_scroll()
+            .v_flex()
+            .w_full()
+            .gap(px(Theme::SPACE_XL))
             .child(
                 div()
                     .v_flex()
                     .w_full()
-                    .max_w(px(600.0))
-                    .mx_auto()
                     .gap(px(Theme::SPACE_XL))
-                    .px(px(Theme::SPACE_2XL))
-                    .pt(px(Theme::SPACE_2XL))
-                    .pb(px(Theme::SPACE_2XL))
                     .child(
                         div()
                             .v_flex()
@@ -234,7 +231,7 @@ impl RenderOnce for SetupView {
                                                 .on_click(move |checked, _, cx| {
                                                     center
                                                         .update(cx, |center, cx| {
-                                                            center.set_setup_device_selected(
+                                                            center.set_device_selected(
                                                                 id.clone(),
                                                                 *checked,
                                                                 cx,
