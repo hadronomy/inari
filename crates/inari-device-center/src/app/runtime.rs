@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use gpui::{AnyWindowHandle, Context, Task, Window};
-#[cfg(windows)]
-use inari_agent_client::SetupSnapshot;
 use inari_agent_client::{
     AgentClientOptions, AgentConnection, ServiceControlResult, ServiceState, SetupAccess,
 };
