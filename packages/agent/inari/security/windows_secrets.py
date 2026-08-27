@@ -83,8 +83,10 @@ def _apply_service_acl(path: Path) -> None:
         _SECRET_FILE_SDDL,
         win32security.SDDL_REVISION_1,
     )
-    dacl_present, dacl, _ = descriptor.GetSecurityDescriptorDacl()
-    if not dacl_present:
+    # pywin32 collapses the Win32 out-parameters and hands back the ACL alone,
+    # or None when the descriptor carries no DACL.
+    dacl = descriptor.GetSecurityDescriptorDacl()
+    if dacl is None:
         raise RuntimeError("The Windows service secret DACL is missing.")
     win32security.SetNamedSecurityInfo(
         str(path),
