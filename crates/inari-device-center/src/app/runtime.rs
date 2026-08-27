@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{AnyWindowHandle, Context, Task, Window};
-#[cfg(windows)]
-use inari_agent_client::SetupSnapshot;
-use inari_agent_client::{AgentConnection, ServiceControlResult, ServiceState, SetupAccess};
+use inari_agent_client::{AgentClientOptions, AgentConnection, ServiceControlResult, ServiceState, SetupAccess};
 
 use super::{DeviceCenter, OpenApiReference, OpenLogs};
 use crate::infrastructure::{AgentRuntime, AgentRuntimeUpdate, TrayCommand, platform};
