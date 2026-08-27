@@ -17,7 +17,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Render,
     StatefulInteractiveElement as _, Styled, Task, Window, WindowHandle, div, px,
 };
-use gpui_component::{Root, StyledExt as _, TitleBar, input::InputState};
+use gpui_component::{Root, StyledExt as _, input::InputState};
 use inari_agent_client::{
     DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
 };
@@ -30,8 +30,8 @@ use crate::{
     features::setup::SetupView,
     infrastructure::{AgentRuntime, SetupResult, agent_failure_message, platform},
     ui::{
-        content::Typography as _,
         theme::{ActiveTheme as _, Theme},
+        titlebar::{self, WindowChrome},
     },
 };
 
@@ -189,16 +189,8 @@ impl Render for Onboarding {
             .font_family(font)
             .text_color(text)
             .child(
-                TitleBar::new()
-                    .h(px(Theme::TITLEBAR_HEIGHT))
-                    .bg(gpui::transparent_black())
-                    .border_color(gpui::transparent_black())
-                    .child(
-                        div()
-                            .text_caption()
-                            .text_color(theme.text_tertiary)
-                            .child("Set up Inari"),
-                    ),
+                WindowChrome::new("onboarding-drag")
+                    .leading(titlebar::title(theme, "Set up Inari")),
             )
             .child(
                 div()

@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, MouseButton,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled, Subscription, Task,
-    Window, WindowControlArea, actions, div, prelude::FluentBuilder as _, px,
+    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, actions, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::{IconName, StyledExt as _, TitleBar, tooltip::Tooltip};
+use gpui_component::{IconName, StyledExt as _, tooltip::Tooltip};
 use inari_agent_client::{
     AgentConnection, AgentEvent, Device, DeviceId, DeviceState, Job, ServiceState, SetupAccess,
     SetupSnapshot,
@@ -17,7 +17,7 @@ use crate::{
         activity::ActivityView, devices::DeviceDirectory, overview::OverviewView,
         support::SupportView,
     },
-    infrastructure::{AgentRuntime, TrayCommand, TrayController, platform},
+    infrastructure::{AgentRuntime, TrayCommand, TrayController},
     ui::{
         chrome::{self, NavigationRail, PANEL_INSET, RailItem, content_panel},
         content::Typography as _,
@@ -26,6 +26,7 @@ use crate::{
         material, motion,
         status::{Status, StatusDot},
         theme::{ActiveTheme as _, Theme},
+        titlebar::WindowChrome,
     },
 };
 
@@ -294,29 +295,12 @@ impl DeviceCenter {
         let tone = status.tone;
         let detail = status.detail.clone();
 
-        TitleBar::new()
-            .h(px(Theme::TITLEBAR_HEIGHT))
+        WindowChrome::new("titlebar-drag-region")
             // The chip's own padding then lands its edge exactly on the
             // panel's right border, so the two right edges read as one line.
-            .pr(px(PANEL_INSET - Theme::SPACE_SM))
-            .bg(gpui::transparent_black())
-            .border_color(gpui::transparent_black())
-            .child(chrome::brand_lockup(theme))
-            .child(
-                div()
-                    .id("titlebar-drag-region")
-                    .h_full()
-                    .flex_1()
-                    // Declared on every platform. gpui 0.2.2 consumes control
-                    // areas on Windows only, and its caption press path still
-                    // loses drags (fixed upstream after this release), so
-                    // movement goes through platform::start_window_drag.
-                    .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |_, window, _| {
-                        platform::start_window_drag(window);
-                    }),
-            )
-            .child(
+            .trailing_pad(PANEL_INSET - Theme::SPACE_SM)
+            .leading(chrome::brand_lockup(theme))
+            .trailing(
                 div()
                     .id("agent-health")
                     .h_flex()
