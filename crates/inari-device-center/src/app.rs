@@ -121,6 +121,11 @@ pub struct DeviceCenter {
     agent_error: Option<String>,
     identity_retry_available: bool,
     runtime: Arc<AgentRuntime>,
+    /// Reopens enrollment for a forwarded `inari://` link. Only Windows
+    /// forwards activations, so on other platforms this is held and never
+    /// called rather than making the constructor differ per platform.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    open_onboarding: crate::onboarding::OpenOnboarding,
     tray: Option<TrayController>,
     focus_handle: FocusHandle,
     _setup_task: Task<()>,
@@ -135,6 +140,7 @@ impl DeviceCenter {
     pub fn new(
         runtime: Arc<AgentRuntime>,
         tray_commands: async_channel::Receiver<TrayCommand>,
+        open_onboarding: crate::onboarding::OpenOnboarding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -160,6 +166,7 @@ impl DeviceCenter {
             agent_error: None,
             identity_retry_available: false,
             runtime,
+            open_onboarding,
             tray: None,
             focus_handle,
             _setup_task: setup_task,

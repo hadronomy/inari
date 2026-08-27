@@ -81,37 +81,15 @@ impl DeviceCenter {
                                         },
                                         #[cfg(windows)]
                                         AgentRuntimeUpdate::Activation(invitation) => {
-                                            platform::show_window(window, cx);
-                                            if let Some(invitation) = invitation {
-                                                let parsed_invitation =
-                                                    inari_agent_client::InvitationLink::parse(
-                                                        invitation.as_str(),
-                                                    );
-                                                center
-                                                    .invitation_input
-                                                    .update(cx, |input, cx| {
-                                                        input.set_value(invitation, window, cx);
-                                                    });
-                                                center.setup_forced = true;
-                                                center.setup = SetupSnapshot::invitation();
-                                                center.preview = None;
-                                                center.setup_error = None;
-                                                match parsed_invitation {
-                                                    Ok(invitation) => {
-                                                        center.setup_working = true;
-                                                        center._setup_task =
-                                                            Self::load_invitation_preview(
-                                                                center.runtime.clone(),
-                                                                invitation,
-                                                                cx,
-                                                            );
-                                                    },
-                                                    Err(error) => {
-                                                        center.setup_working = false;
-                                                        center.setup_error =
-                                                            Some(error.to_string());
-                                                    },
-                                                }
+                                            // A bare activation means "show me
+                                            // the app". One carrying a link
+                                            // means "read this", which is the
+                                            // enrollment window's job.
+                                            match invitation {
+                                                Some(invitation) => {
+                                                    (center.open_onboarding)(Some(invitation), cx);
+                                                },
+                                                None => platform::show_window(window, cx),
                                             }
                                         },
                                     }

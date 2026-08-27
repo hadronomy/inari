@@ -22,29 +22,27 @@ use crate::{
     ui::{material, motion, theme::Theme},
 };
 
-/// What the operations window needs, held until enrollment lets it open.
+/// The operations window, built at startup and shown only once enrollment is
+/// out of the way.
 ///
-/// The tray is created at startup because it is the app's presence on the
-/// system whether or not a window is up, but it belongs to the operations
-/// shell once that exists.
+/// It is created rather than deferred because it owns the `inari://` activation
+/// listener, the agent update stream, and the tray. Deferring the window would
+/// defer all three, and a link forwarded to an app that is running but has no
+/// listener starts a second copy of it.
 struct Operations {
-    runtime: std::sync::Arc<AgentRuntime>,
-    tray_commands: RefCell<Option<async_channel::Receiver<TrayCommand>>>,
-    tray: RefCell<Option<TrayController>>,
     window: RefCell<Option<AnyWindowHandle>>,
 }
 
 impl Operations {
-    /// Open the operations window, or raise it if it is already open.
-    fn open(self: &Rc<Self>, cx: &mut App) -> Option<AnyWindowHandle> {
-        if let Some(handle) = *self.window.borrow() {
-            handle
-                .update(cx, |_, window, cx| platform::show_window(window, cx))
-                .ok();
-            return Some(handle);
-        }
-        let tray_commands = self.tray_commands.borrow_mut().take()?;
-        let runtime = self.runtime.clone();
+    /// Build the window, unshown.
+    fn create(
+        self: &Rc<Self>,
+        runtime: std::sync::Arc<AgentRuntime>,
+        tray_commands: async_channel::Receiver<TrayCommand>,
+        tray: TrayController,
+        open_onboarding: onboarding::OpenOnboarding,
+        cx: &mut App,
+    ) {
         let bounds = Bounds::centered(None, size(px(1160.), px(780.)), cx);
         let handle = cx
             .open_window(
@@ -68,6 +66,7 @@ impl Operations {
                     }),
                     window_background: material::resolve().window_background(),
                     app_id: Some("dev.inari.device-center".into()),
+                    show: false,
                     ..WindowOptions::default()
                 },
                 |window, cx| {
@@ -76,16 +75,23 @@ impl Operations {
                         platform::hide_window(window, cx);
                         false
                     });
-                    let center = cx.new(|cx| DeviceCenter::new(runtime, tray_commands, window, cx));
-                    if let Some(tray) = self.tray.borrow_mut().take() {
-                        center.update(cx, |center, _| center.install_tray(tray));
-                    }
+                    let center = cx.new(|cx| {
+                        DeviceCenter::new(runtime, tray_commands, open_onboarding, window, cx)
+                    });
+                    center.update(cx, |center, _| center.install_tray(tray));
                     cx.new(|cx| Root::new(center, window, cx))
                 },
             )
-            .ok()?;
-        let handle = handle.into();
-        *self.window.borrow_mut() = Some(handle);
+            .expect("failed to open Device Center");
+        *self.window.borrow_mut() = Some(handle.into());
+    }
+
+    /// Show the operations window. Enrollment calls this when it is finished.
+    fn reveal(self: &Rc<Self>, cx: &mut App) -> Option<AnyWindowHandle> {
+        let handle = (*self.window.borrow())?;
+        handle
+            .update(cx, |_, window, cx| platform::show_window(window, cx))
+            .ok();
         cx.activate(true);
         Some(handle)
     }
@@ -114,23 +120,28 @@ fn main() {
             let (tray_sender, tray_commands) = async_channel::bounded(32);
             let tray =
                 TrayController::new(tray_sender).expect("failed to create the Device Center tray");
-            let operations = Rc::new(Operations {
-                runtime: runtime.clone(),
-                tray_commands: RefCell::new(Some(tray_commands)),
-                tray: RefCell::new(Some(tray)),
-                window: RefCell::new(None),
-            });
+            let operations = Rc::new(Operations { window: RefCell::new(None) });
 
-            // Enrollment opens first and unshown. It reveals itself only if the
-            // agent says this computer still needs it, and otherwise hands
-            // straight over to the operations window without ever appearing.
             let launcher = operations.clone();
-            onboarding::open(
-                runtime.clone(),
-                Rc::new(move |cx: &mut App| launcher.open(cx)),
-                invitation,
-                cx,
-            )
-            .expect("failed to open Inari setup");
+            let open_operations: onboarding::OpenOperations =
+                Rc::new(move |cx: &mut App| launcher.reveal(cx));
+            let onboarding_runtime = runtime.clone();
+            let onboarding_operations = open_operations.clone();
+            let open_onboarding: onboarding::OpenOnboarding =
+                Rc::new(move |invitation: Option<String>, cx: &mut App| {
+                    onboarding::open(
+                        onboarding_runtime.clone(),
+                        onboarding_operations.clone(),
+                        invitation,
+                        cx,
+                    )
+                    .ok();
+                });
+
+            operations.create(runtime.clone(), tray_commands, tray, open_onboarding.clone(), cx);
+            // Both windows start unshown. Enrollment reveals itself only if the
+            // agent says this computer still needs it, and otherwise hands
+            // straight to the operations window without either one flashing.
+            open_onboarding(invitation, cx);
         });
 }
