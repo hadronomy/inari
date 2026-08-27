@@ -53,6 +53,28 @@ function Require-WindowsSdkCommand([string]$Name) {
     return $Tool.Path
 }
 
+function Get-PinnedPythonSeries([string]$WorkspaceRoot) {
+    # mise.toml is the one place the workspace states which Python it runs on,
+    # so the release build reads the pin rather than repeating it.
+    $Manifest = Join-Path $WorkspaceRoot "mise.toml"
+    $Pin = Select-String `
+        -LiteralPath $Manifest `
+        -Pattern '^\s*python\s*=\s*"([^"]+)"' |
+        Select-Object -First 1
+    if ($null -eq $Pin) {
+        throw "'$Manifest' does not pin a Python version for the frozen agent."
+    }
+    $Version = $Pin.Matches[0].Groups[1].Value
+    $Parts = $Version -split '\.'
+    if ($Parts.Count -lt 2) {
+        throw "The pinned Python version '$Version' has no minor component."
+    }
+    # The series, not the exact patch: a release host supplies its own signed
+    # interpreter, and demanding one patch level would reject a newer 3.13 and
+    # send uv back to a managed build the payload check has to reject anyway.
+    return "$($Parts[0]).$($Parts[1])"
+}
+
 function Require-Environment([string]$Name) {
     $Value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -402,6 +424,11 @@ try {
     # signatures stripped. Those binaries end up in the frozen payload and make
     # the MSIX unsignable, so a release build asks for a system interpreter and
     # leaves managed downloads as the fallback the payload check will catch.
+    # Naming the series as well keeps the shipped agent on the interpreter the
+    # workspace pins instead of whichever Python the host happens to expose.
+    $PythonSeries = Get-PinnedPythonSeries $WorkspaceRoot
+    Write-Host "Freezing the agent against a system CPython $PythonSeries."
+    $env:UV_PYTHON = $PythonSeries
     $env:UV_PYTHON_PREFERENCE = "system"
 
     Write-Host "Synchronizing frozen application dependencies."
