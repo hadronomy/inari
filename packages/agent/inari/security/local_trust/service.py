@@ -226,7 +226,12 @@ class StandaloneTrustService:
             expected_client_id=client_id,
         )
         fingerprint = public_key_fingerprint(public_key_pem)
-        if client_id != f"tray_{fingerprint[:24]}" and not client_id.startswith(
+        # What has to hold is the binding: a native client id carries the
+        # fingerprint of the key the caller just proved it holds, so no client
+        # can claim an id derived from another client's key. The leading word
+        # only names the product, and pinning it here once cost every Device
+        # Center a pairing when the tray was renamed.
+        if not client_id.endswith(f"_{fingerprint[:24]}") and not client_id.startswith(
             "local_"
         ):
             raise AgentError(
