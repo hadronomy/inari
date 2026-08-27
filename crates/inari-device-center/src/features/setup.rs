@@ -125,7 +125,11 @@ impl RenderOnce for SetupView {
                         let (title, tone) = if access == SetupAccess::Unknown {
                             ("Device Center cannot reach the agent", Tone::Caution)
                         } else {
-                            ("Connection required", Tone::Busy)
+                            // Neutral, not busy: nothing is under way here. The
+                            // computer is waiting for a person to paste a link,
+                            // and a busy tone would promise progress that is not
+                            // happening.
+                            ("Connection required", Tone::Neutral)
                         };
                         view.child(Banner::new("setup-status", tone, title, guidance))
                     })
