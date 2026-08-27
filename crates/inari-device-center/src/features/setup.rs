@@ -11,8 +11,8 @@ use std::collections::HashSet;
 
 use chrono::Local;
 use gpui::{
-    Entity, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, Styled,
-    WeakEntity, div, prelude::FluentBuilder as _, px, svg,
+    AnimationExt as _, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    RenderOnce, Styled, WeakEntity, div, prelude::FluentBuilder as _, px, svg,
 };
 use gpui_component::{
     Disableable as _, IconName, StyledExt as _,
@@ -31,6 +31,7 @@ use crate::{
     ui::{
         banner::Banner,
         content::{Field, Section, Typography as _},
+        motion,
         status::Tone,
         surface::card,
         theme::{ActiveTheme as _, Theme},
@@ -325,11 +326,30 @@ fn stage_track(stage: SetupStage, theme: &Theme) -> impl IntoElement {
                         .enumerate()
                         .map(|(index, _)| {
                             let filled = reached.is_some_and(|current| index <= current);
-                            div()
+                            let segment = div()
                                 .h(px(3.0))
                                 .flex_1()
                                 .rounded_full()
-                                .bg(if filled { theme.accent } else { theme.hairline_strong })
+                                .bg(if filled { theme.accent } else { theme.hairline_strong });
+                            // Only the segment that just became current moves.
+                            // The id carries the stage, so advancing a step
+                            // remounts this one element and replays its fill;
+                            // the segments behind it are settled and hold
+                            // still, which is what makes the motion read as
+                            // "that step completed" rather than as the whole
+                            // track redrawing.
+                            let current = reached.is_some_and(|current| index == current);
+                            if current && motion::enabled() {
+                                segment
+                                    .with_animation(
+                                        ("setup-stage", index),
+                                        motion::settle(),
+                                        |segment, delta| segment.opacity(delta),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                segment.into_any_element()
+                            }
                         }),
                 ),
         )
