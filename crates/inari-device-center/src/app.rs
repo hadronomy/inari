@@ -153,6 +153,11 @@ impl DeviceCenter {
         let tray_task = Self::listen_for_tray(tray_commands, window.window_handle(), cx);
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
+        // The dev previews navigate this shell; noted so the preview window
+        // can reach it. Debug builds only — the module does not exist in a
+        // release.
+        #[cfg(debug_assertions)]
+        crate::dev_tools::note_center(&cx.entity(), cx);
         Self {
             destination: Destination::Overview,
             previous_destination: Destination::Overview,
