@@ -131,6 +131,10 @@ impl Onboarding {
         // focus flip below is what starts the chrome's fade.
         invitation_input.update(cx, |state, cx| state.focus(window, cx));
         let focus_handle = cx.focus_handle();
+        // The dev previews render the setup stages against this window's
+        // entity; debug builds only.
+        #[cfg(debug_assertions)]
+        crate::dev_tools::note_onboarding(&cx.entity(), cx);
         Self {
             runtime,
             open_operations,
