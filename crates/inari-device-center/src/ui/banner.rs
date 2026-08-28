@@ -29,7 +29,7 @@
 //! computer is not connected" claims work that nobody is doing.
 
 use gpui::{
-    AnimationExt as _, AnyElement, Bounds, Hsla, InteractiveElement as _, IntoElement,
+    AnimationExt as _, AnyElement, Bounds, Canvas, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, RenderOnce, SharedString, Styled, canvas, div, fill, hsla, point,
     px, size,
 };
@@ -173,12 +173,13 @@ impl Banner {
             .py(px(Theme::SPACE_MD + 2.0))
             .pr(px(Theme::SPACE_MD + 2.0))
             .rounded(px(Theme::RADIUS_CARD))
-            // The container clips the cascade, so one radius serves both and
-            // no cell needs a corner of its own.
+            // Trims the wall's overrun at the top, the bottom and the leading
+            // edge. Only the overrun: GPUI's clip is rectangular, so the two
+            // rounded corners are the paint's own problem.
             .overflow_hidden()
             .bg(self.tone.wash(theme))
-            // Behind everything and wider than the gutter: the wall runs the
-            // full height of the surface and reaches past the glyph, so the
+            // Behind everything, edge to edge: the wall spans the alert's
+            // whole box, padding included, and reaches past the glyph, so the
             // light is something the alert sits in rather than a bar bolted to
             // its edge.
             .child(cascade(color, Theme::RADIUS_CARD))
@@ -251,28 +252,35 @@ impl Banner {
 /// the rest of the reach dark, so the exponent sits just above one: the light
 /// still gathers at the edge, but it carries the distance it is given.
 fn cascade(color: Hsla, radius: f32) -> impl IntoElement {
-    let still = canvas(
-        |_, _, _| (),
-        move |bounds, _, window, _| {
-            paint_cascade(bounds, 0.0, color, radius, window);
-        },
-    );
     if !motion::enabled() {
-        return still.into_any_element();
+        return wall(0.0, color, radius).into_any_element();
     }
     // Each frame rebuilds the canvas with the current place in the wave, which
     // is how a painted effect reads an animation that only ever hands an
     // element a scalar.
-    still
+    wall(0.0, color, radius)
         .with_animation("banner-cascade", motion::cascade(), move |_, delta| {
-            canvas(
-                |_, _, _| (),
-                move |bounds, _, window, _| {
-                    paint_cascade(bounds, delta, color, radius, window);
-                },
-            )
+            wall(delta, color, radius)
         })
         .into_any_element()
+}
+
+/// The wall at one moment in the wave, placed over the alert's whole box.
+///
+/// Absolute and inset to nothing, because a canvas asks for no size of its own:
+/// as an ordinary flex child it measures zero and paints a single row inside
+/// the alert's padding. Taffy resolves an absolute child's insets against the
+/// parent's padding box, so `inset_0` is the alert's own edges — full height,
+/// no inset from the padding above and below.
+fn wall(delta: f32, color: Hsla, radius: f32) -> Canvas<()> {
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            paint_cascade(bounds, delta, color, radius, window);
+        },
+    )
+    .absolute()
+    .inset_0()
 }
 
 /// Paint the wall across whatever bounds the layout gave it.
@@ -303,7 +311,7 @@ fn paint_cascade(
         let x = f32::from(bounds.origin.x) + column as f32 * pitch;
         for row in 0..rows {
             let y = top + row as f32 * pitch;
-            if !inside_rounded(bounds, radius, x, y) {
+            if !clears_corner(bounds, radius, x, y) {
                 continue;
             }
             window.paint_quad(fill(
@@ -324,34 +332,42 @@ fn rows_for(height: f32) -> usize {
     (height / (CELL + GAP)).ceil() as usize + 1
 }
 
-/// Whether a cell at `x`, `y` falls inside the alert's rounded corners.
+/// Whether a cell clears the alert's rounded corners.
 ///
-/// GPUI's content mask is a rectangle, so `overflow_hidden` alone would let the
-/// wall square off the two corners it touches. Only the leading corners can be
-/// crossed, so only those are tested.
-fn inside_rounded(bounds: Bounds<Pixels>, radius: f32, x: f32, y: f32) -> bool {
+/// The container cannot do this for us. `overflow_hidden` clips through a
+/// [`gpui::ContentMask`], which holds a plain [`Bounds`] — a rectangle. A
+/// corner radius shapes the parent's own background quad and nothing else, so
+/// left to the mask the wall would square off the two corners it reaches and
+/// sit outside the surface it belongs to. Only the leading corners are in
+/// range, so only those are tested.
+fn clears_corner(bounds: Bounds<Pixels>, radius: f32, x: f32, y: f32) -> bool {
     let left = f32::from(bounds.origin.x);
     let top = f32::from(bounds.origin.y);
     let bottom = top + f32::from(bounds.size.height);
-    let corner = |cx: f32, cy: f32| {
-        let dx = cx - (x + CELL / 2.0);
-        let dy = cy - (y + CELL / 2.0);
-        dx * dx + dy * dy <= radius * radius
+    // Past the arcs, where the edge is straight and every cell is inside it.
+    if x + CELL > left + radius {
+        return true;
+    }
+    let centre_y = if y + CELL < top + radius {
+        top + radius
+    } else if y > bottom - radius {
+        bottom - radius
+    } else {
+        return true;
     };
-    if y + CELL < top + radius && x + CELL < left + radius {
-        return corner(left + radius, top + radius);
-    }
-    if y > bottom - radius && x + CELL < left + radius {
-        return corner(left + radius, bottom - radius);
-    }
-    true
+    // Measured to the cell's outermost point, so a cell straddling the curve is
+    // dropped rather than left poking through it.
+    let dx = left + radius - x;
+    let dy = (centre_y - y).abs().max((centre_y - (y + CELL)).abs());
+    dx * dx + dy * dy <= radius * radius
 }
 
 /// A hairline of light along the top edge, stopping short of the corners.
 ///
 /// The same lip the surface ladder uses, so an alert and a card catch the light
-/// from the same direction. It starts after the gutter so it never crosses the
-/// cascade, where two kinds of light meeting would read as a drawn outline.
+/// from the same direction. It starts past the gutter, clear of the bright end
+/// of the cascade, where two kinds of light meeting would read as a drawn
+/// outline.
 fn top_lip(dark: bool) -> Option<gpui::Div> {
     dark.then(|| {
         div()
@@ -383,6 +399,23 @@ mod tests {
         // The failure this replaces: a fixed row count meant the cells had to
         // stretch or squash to fit, and the pixels stopped being square.
         assert!(rows_for(200.0) > rows_for(60.0));
+    }
+
+    #[test]
+    fn the_wall_stays_inside_the_corners_the_mask_cannot_cut() {
+        let bounds = Bounds {
+            origin: point(px(0.0), px(0.0)),
+            size: size(px(400.0), px(60.0)),
+        };
+        let radius = 12.0;
+        // The cell furthest into the top leading corner, and its opposite at the
+        // bottom: both sit outside the arc and would otherwise show as squares
+        // hanging off a rounded surface.
+        assert!(!clears_corner(bounds, radius, 0.0, 0.0));
+        assert!(!clears_corner(bounds, radius, 0.0, 58.0));
+        // Away from the corners the wall is untouched, top edge included.
+        assert!(clears_corner(bounds, radius, 0.0, 30.0));
+        assert!(clears_corner(bounds, radius, 40.0, 0.0));
     }
 
     #[test]
