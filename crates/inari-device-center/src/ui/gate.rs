@@ -48,10 +48,13 @@ const WIRE_REST: f32 = 0.3;
 /// A glitching stream quantises time, so the corruption pattern changes
 /// stepwise — digital, not soft.
 const TICKS_PER_SECOND: f32 = 7.4;
-/// Per cell per tick: the chance dead air replaces a cell, and the chance a
-/// live cell reports corruption in the danger tone.
-const GLITCH_DROPOUT: f32 = 0.07;
-const GLITCH_ERROR: f32 = 0.045;
+/// Per cell per tick outside the tears: the faint chance of dead air, the
+/// texture of a link that is merely imperfect.
+const GLITCH_DROPOUT: f32 = 0.02;
+/// The tears: how many cross a wire, how often, and how wide they tear.
+const TEAR_COUNT: usize = 2;
+const TEAR_PERIOD: Duration = Duration::from_millis(2400);
+const TEAR_HALF_WIDTH: f32 = 2.5;
 /// How long the last packet lives after the path fails.
 const LAST_BREATH: Duration = Duration::from_millis(700);
 const TAU: f32 = std::f32::consts::TAU;
@@ -455,17 +458,57 @@ fn wire_cell(column: usize, columns: usize, t: Option<f32>, glitching: bool) -> 
         }
         alpha = alpha.max(WIRE_HEAD * WIRE_TRAIL[behind as usize]);
     }
-    let mut corrupted = false;
+    let corrupted = false;
     if glitching {
-        // Dead air where a cell should be, and sparse corruption the danger
-        // tone will flash: the two faces of a link that needs attention.
-        if noise(column as u32, tick) < GLITCH_DROPOUT {
+        // The tears carry the corruption: a front passing over the cell
+        // tears it — dead air, or a flash of the danger tone — and the
+        // further out it is, the lighter the touch.
+        let strength = tear_strength(&tears(t, columns), column);
+        if strength > 0.0 {
+            let roll = noise(column as u32, tick);
+            if roll < 0.55 * strength {
+                return (0.0, false);
+            }
+            if roll < 0.85 {
+                return (WIRE_HEAD * 0.6, true);
+            }
+            alpha *= 1.0 - 0.6 * strength;
+        } else if noise(column as u32, tick) < GLITCH_DROPOUT {
             alpha = 0.0;
-        } else if noise((column + 91) as u32, tick) < GLITCH_ERROR {
-            corrupted = true;
         }
     }
     (alpha, corrupted)
+}
+
+/// The two tears crossing the wire at this tick: (centre, half-width) in
+/// cells. Column-quantised with the tick, so the scan steps digitally
+/// instead of sweeping smoothly.
+fn tears(t: f32, columns: usize) -> [(f32, f32); TEAR_COUNT] {
+    let tick = (t * TICKS_PER_SECOND) as u32;
+    let mut fronts = [(0.0, 0.0); TEAR_COUNT];
+    for (index, front) in fronts.iter_mut().enumerate() {
+        let progress =
+            (t / TEAR_PERIOD.as_secs_f32() + index as f32 / TEAR_COUNT as f32).rem_euclid(1.0);
+        *front = (
+            progress * columns as f32,
+            TEAR_HALF_WIDTH * (0.7 + 0.6 * noise(index as u32 + 3, tick)),
+        );
+    }
+    fronts
+}
+
+/// How hard the tears are passing over `column` right now: 0 for untouched,
+/// rising to 1 at a tear's centre.
+fn tear_strength(fronts: &[(f32, f32); TEAR_COUNT], column: usize) -> f32 {
+    let column = column as f32;
+    let mut strength: f32 = 0.0;
+    for &(centre, half_width) in fronts {
+        let distance = (column - centre).abs() / half_width;
+        if distance < 1.0 {
+            strength = strength.max(1.0 - distance);
+        }
+    }
+    strength
 }
 
 /// The information field: two pixel sine traces flanking the line, above and
@@ -489,26 +532,36 @@ fn wake_cells(
     // Fade the traces in from the wire's ends so they never hard-clip at
     // the nodes.
     let edge = ((column as f32 / 3.0).min(1.0)).min(((columns - 1 - column) as f32 / 3.0).min(1.0));
+    // On a glitching tone the traces quantise in time: they jump between
+    // ten shapes a second instead of flowing.
+    let step = if glitching { (t * 10.0).floor() / 10.0 } else { t };
+    let fronts = if glitching { tears(t, columns) } else { Default::default() };
+    let tick = (t * TICKS_PER_SECOND) as u32;
     for (cell, lane) in cells.iter_mut().zip(WAKE_LANES.iter()) {
         let wavelength = WIRE_WAVELENGTH / lane.frequency;
-        // On a glitching tone the traces quantise in time: they jump
-        // between ten shapes a second instead of flowing.
-        let step = if glitching { (t * 10.0).floor() / 10.0 } else { t };
-        let wave = (TAU * (column as f32 * WIRE_PITCH - step * lane.speed) / wavelength).sin();
-        let offset = lane.direction * (WAKE_GAP + lane.amplitude * wave);
-        let snapped = (offset / 2.0).round() * 2.0;
-        let tick = (t * TICKS_PER_SECOND) as u32;
+        let mut wave = (TAU * (column as f32 * WIRE_PITCH - step * lane.speed) / wavelength).sin();
+        let mut corrupted = false;
         if glitching {
-            if noise(column as u32 + 13, tick) < GLITCH_DROPOUT {
-                *cell = (0.0, 0.0, false);
-                continue;
-            }
-            if noise((column + 57) as u32, tick) < GLITCH_ERROR {
-                *cell = (snapped, WIRE_HEAD * 0.5, true);
-                continue;
+            // A tear tears the wave where it passes: the trace jumps a
+            // quarter-turn out of phase and gets yanked off its line.
+            let strength = tear_strength(&fronts, column);
+            if strength > 0.0 {
+                let roll = noise(column as u32 + 17, tick);
+                if roll < 0.35 * strength {
+                    *cell = (0.0, 0.0, false);
+                    continue;
+                }
+                wave = (TAU * (column as f32 * WIRE_PITCH - (step + 0.37) * lane.speed)
+                    / wavelength)
+                    .sin();
+                if roll < 0.6 {
+                    corrupted = true;
+                }
             }
         }
-        *cell = (snapped, WAKE_REST * edge, false);
+        let offset = lane.direction * (WAKE_GAP + lane.amplitude * wave);
+        let snapped = (offset / 2.0).round() * 2.0;
+        *cell = (snapped, WAKE_REST * edge, corrupted);
     }
     cells
 }
@@ -667,6 +720,55 @@ mod tests {
         assert!(corrupted > 0, "no corruption flashed");
         assert!(dead_air > 0, "no dead air");
         assert!(dead_air * 10 < cells, "dead air took over: {dead_air} of {cells}");
+    }
+
+    #[test]
+    fn tears_sweep_the_whole_wire_over_their_period() {
+        let columns = 60usize;
+        let mut torn = vec![false; columns];
+        for step in 0..60 {
+            let t = step as f32 / 60.0 * TEAR_PERIOD.as_secs_f32();
+            for (centre, half_width) in tears(t, columns) {
+                let first = (centre - half_width).floor().max(0.0) as usize;
+                let last = ((centre + half_width).ceil() as usize).min(columns - 1);
+                for torn_cell in &mut torn[first..=last] {
+                    *torn_cell = true;
+                }
+            }
+        }
+        assert!(torn.iter().all(|torn| *torn), "a cell was never torn");
+    }
+
+    #[test]
+    fn corruption_concentrates_where_the_tears_are() {
+        let columns = 60usize;
+        let t0 = 0.4 * TEAR_PERIOD.as_secs_f32();
+        let mut torn_zone = (0, 0);
+        let mut calm_zone = (0, 0);
+        for step in 0..10 {
+            let t = t0 + step as f32 * 0.02;
+            let fronts = tears(t, columns);
+            for column in 0..columns {
+                let (alpha, flash) = wire_cell(column, columns, Some(t), true);
+                let hit = flash || alpha == 0.0;
+                if fronts
+                    .iter()
+                    .any(|&(centre, half)| (column as f32 - centre).abs() <= half)
+                {
+                    torn_zone.0 += u32::from(hit);
+                    torn_zone.1 += 1;
+                } else {
+                    calm_zone.0 += u32::from(hit);
+                    calm_zone.1 += 1;
+                }
+            }
+        }
+        let torn_density = torn_zone.0 as f32 / torn_zone.1 as f32;
+        let calm_density = calm_zone.0 as f32 / calm_zone.1 as f32;
+        assert!(
+            torn_density > calm_density * 2.0,
+            "tear density {torn_density:.2} vs calm {calm_density:.2}"
+        );
     }
 
     #[test]
