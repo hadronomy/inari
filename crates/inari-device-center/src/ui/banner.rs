@@ -62,6 +62,10 @@ const REST: f32 = 0.28;
 /// it — not the other way round, which leaves every cell at `REST` and the
 /// whole band invisible.
 const PEAK: f32 = 0.85;
+/// How sharply the light dies across the wall. Above one so it still gathers at
+/// the leading edge; well below two, which spent the whole reach in the first
+/// few columns.
+const FALLOFF: f32 = 1.4;
 /// The width the cascade occupies, including its trailing gap.
 const BAND: f32 = COLUMNS as f32 * (CELL + GAP);
 /// The leading column of the alert: the cascade runs through it and the tone
@@ -240,10 +244,12 @@ impl Banner {
 /// the height it actually got and every cell keeps its own size at any
 /// dimension.
 ///
-/// The falloff is squared rather than linear. A linear ramp reads as a bar that
-/// someone faded out; a squared one keeps the light gathered at the edge and
-/// lets the tail go to almost nothing, which is what makes it read as light
-/// rather than as a shape.
+/// The falloff is curved rather than linear. A linear ramp reads as a bar that
+/// someone faded out; a curve keeps the light gathered at the edge and lets the
+/// tail go to almost nothing, which is what makes it read as light rather than
+/// as a shape. Squared put the whole of it in the first few columns and left
+/// the rest of the reach dark, so the exponent sits just above one: the light
+/// still gathers at the edge, but it carries the distance it is given.
 fn cascade(color: Hsla, radius: f32) -> impl IntoElement {
     let still = canvas(
         |_, _, _| (),
@@ -290,7 +296,7 @@ fn paint_cascade(
         // The crest is narrow: raising the wave to a high power leaves a
         // travelling band instead of the whole wall breathing together.
         let crest = motion::pulse_wave(phase).powf(6.0);
-        let alpha = PEAK * reach * reach * (REST + (1.0 - REST) * crest);
+        let alpha = PEAK * reach.powf(FALLOFF) * (REST + (1.0 - REST) * crest);
         if alpha < 0.004 {
             continue;
         }
