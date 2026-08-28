@@ -5,9 +5,11 @@
 //! from position and weight rather than from a new size invented per view.
 
 use gpui::{
-    AnyElement, Div, InteractiveElement as _, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Div, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::{Icon, StyledExt as _};
 
 use super::{
@@ -70,26 +72,46 @@ impl ParentElement for Page {
 }
 
 impl RenderOnce for Page {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // The scroll handle persists in keyed element state: the offset and
+        // the scrollbar survive every re-render of the page, and the
+        // scrollbar itself is the library's overlay thumb — shown while
+        // scrolling, fading after idle, themed by the tokens in theme.rs.
+        let scroll = window
+            .use_keyed_state(SharedString::from(format!("{}-scroll", self.id)), cx, |_, _| {
+                gpui::ScrollHandle::new()
+            })
+            .read(cx)
+            .clone();
         div()
             .id(self.id)
+            .relative()
             .size_full()
-            .overflow_y_scroll()
             .child(
                 div()
-                    .v_flex()
-                    .w_full()
-                    .max_w(px(Theme::CONTENT_WIDTH + Theme::SPACE_2XL * 2.0))
-                    .mx_auto()
-                    .gap(px(Theme::SPACE_XL))
-                    .px(px(Theme::SPACE_2XL))
-                    .pt(px(Theme::SPACE_2XL))
-                    // A deep bottom inset, not a symmetric one: scrolled to the
-                    // end, the last line should sit clear of the panel edge
-                    // rather than against it.
-                    .pb(px(Theme::SPACE_2XL + Theme::SPACE_LG))
-                    .children(self.children),
+                    .id(SharedString::from(format!("{}-area", self.id)))
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .child(
+                        div()
+                            .v_flex()
+                            .w_full()
+                            .max_w(px(Theme::CONTENT_WIDTH + Theme::SPACE_2XL * 2.0))
+                            .mx_auto()
+                            .gap(px(Theme::SPACE_XL))
+                            .px(px(Theme::SPACE_2XL))
+                            .pt(px(Theme::SPACE_2XL))
+                            // A deep bottom inset, not a symmetric one: scrolled to the
+                            // end, the last line should sit clear of the panel edge
+                            // rather than against it.
+                            .pb(px(Theme::SPACE_2XL + Theme::SPACE_LG))
+                            .children(self.children),
+                    ),
             )
+            // A sibling of the scroll area, never inside it: an overlay that
+            // scrolls away with the content is no scrollbar at all.
+            .vertical_scrollbar(&scroll)
     }
 }
 
