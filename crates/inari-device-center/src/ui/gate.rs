@@ -30,18 +30,20 @@ use super::{
 const CELL: f32 = 3.0;
 const GAP: f32 = 1.0;
 const WIRE_PITCH: f32 = CELL + GAP;
-/// How many data packets ride a wire at once. Three at different speeds and
+/// How many data packets ride a wire at once. Four at different speeds and
 /// offsets keeps traffic constant: a packet is always somewhere on the line.
-const PACKETS: usize = 3;
+const PACKETS: usize = 4;
 /// Each packet's speed as a multiple of the cascade period, and where in the
 /// period it starts. Uneven speeds make packets pass through each other.
-const WIRE_SPEEDS: [f32; PACKETS] = [1.0, 0.78, 1.21];
-const WIRE_OFFSETS: [f32; PACKETS] = [0.0, 0.37, 0.71];
+const WIRE_SPEEDS: [f32; PACKETS] = [1.0, 0.78, 1.21, 0.9];
+const WIRE_OFFSETS: [f32; PACKETS] = [0.0, 0.37, 0.71, 0.52];
 /// A packet's head alpha, and how the comet trail behind it falls away.
 const WIRE_HEAD: f32 = 0.9;
 const WIRE_TRAIL: [f32; 4] = [1.0, 0.55, 0.28, 0.12];
-/// What a wire cell rests at between packets: the carrier, always lit.
-const WIRE_REST: f32 = 0.16;
+/// What a wire cell rests at between packets: the carrier, always lit. The
+/// line must never vanish — the traffic rides on a wire the operator can
+/// still see.
+const WIRE_REST: f32 = 0.3;
 /// A glitching stream quantises time into this many buckets per period, so
 /// the corruption pattern changes stepwise — digital, not soft.
 const GLITCH_TICKS: u32 = 14;
