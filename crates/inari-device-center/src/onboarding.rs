@@ -14,12 +14,13 @@ use std::{cell::RefCell, collections::HashSet, rc::Rc, sync::Arc};
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowHandle, div, px,
 };
 use gpui_component::{
     Root, StyledExt as _,
     input::{InputEvent, InputState},
+    scroll::ScrollableElement as _,
 };
 use inari_agent_client::{
     DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
@@ -217,6 +218,14 @@ impl Render for Onboarding {
         if motion::hover_fades_live() {
             window.request_animation_frame();
         }
+        // The scroll handle persists in keyed state, so the enrollment
+        // content's offset — and its scrollbar — survive re-renders.
+        let scroll = window
+            .use_keyed_state(SharedString::from("onboarding-scroll"), cx, |_, _| {
+                gpui::ScrollHandle::new()
+            })
+            .read(cx)
+            .clone();
         let theme = cx.inari();
         let font = theme.font_sans.clone();
         let text = theme.text;
@@ -241,38 +250,46 @@ impl Render for Onboarding {
             .child(
                 div()
                     .id("onboarding-scroll")
+                    .relative()
                     .flex_1()
                     .min_h(px(0.0))
-                    .overflow_y_scroll()
                     .child(
-                        // The column is centred in both axes and the padding is
-                        // the window's, not the view's: the same content then
-                        // sits correctly whether it is two fields or a device
-                        // list, and it never touches the window edge.
                         div()
-                            .v_flex()
+                            .id("onboarding-area")
                             .h_full()
-                            .w_full()
-                            .items_center()
-                            .justify_center()
-                            .px(px(Theme::SPACE_XL))
-                            .py(px(Theme::SPACE_2XL))
+                            .overflow_y_scroll()
+                            .track_scroll(&scroll)
                             .child(
+                                // The column is centred in both axes and the padding is
+                                // the window's, not the view's: the same content then
+                                // sits correctly whether it is two fields or a device
+                                // list, and it never touches the window edge.
                                 div()
                                     .v_flex()
+                                    .h_full()
                                     .w_full()
-                                    .max_w(px(COLUMN))
-                                    .child(SetupView::new(
-                                        self.snapshot.clone(),
-                                        self.invitation_input.clone(),
-                                        self.preview.clone(),
-                                        self.error.clone(),
-                                        self.working,
-                                        self.selected_devices.clone(),
-                                        cx.entity().downgrade(),
-                                    )),
+                                    .items_center()
+                                    .justify_center()
+                                    .px(px(Theme::SPACE_XL))
+                                    .py(px(Theme::SPACE_2XL))
+                                    .child(
+                                        div()
+                                            .v_flex()
+                                            .w_full()
+                                            .max_w(px(COLUMN))
+                                            .child(SetupView::new(
+                                                self.snapshot.clone(),
+                                                self.invitation_input.clone(),
+                                                self.preview.clone(),
+                                                self.error.clone(),
+                                                self.working,
+                                                self.selected_devices.clone(),
+                                                cx.entity().downgrade(),
+                                            )),
+                                    ),
                             ),
-                    ),
+                    )
+                    .vertical_scrollbar(&scroll),
             )
     }
 }
