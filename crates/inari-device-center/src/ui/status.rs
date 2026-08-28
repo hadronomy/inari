@@ -221,7 +221,7 @@ impl RenderOnce for StatusChip {
             .h_flex()
             .flex_none()
             .items_center()
-            .gap(px(Theme::SPACE_XS + 2.0))
+            .gap(px(Theme::SPACE_XS))
             .h(px(24.0))
             .px(px(Theme::SPACE_SM))
             .rounded_full()
@@ -236,6 +236,10 @@ impl RenderOnce for StatusChip {
             .child(
                 div()
                     .text_size(px(12.0))
+                    // Pin the line box to the glyphs: a default 1.5em line
+                    // box is taller than the text, and centring that box
+                    // against the icon leaves the label reading low.
+                    .line_height(px(16.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(color)
                     .child(self.status.label),
