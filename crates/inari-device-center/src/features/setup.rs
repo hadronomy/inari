@@ -18,9 +18,11 @@ use gpui_component::{
     Disableable as _, IconName, StyledExt as _,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    input::{Input, InputState},
+    input::InputState,
 };
-use inari_agent_client::{DeviceId, EnrollmentPreview, SetupAccess, SetupSnapshot, SetupStage};
+use inari_agent_client::{
+    DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
+};
 
 use crate::{
     app::{
@@ -31,6 +33,7 @@ use crate::{
     ui::{
         banner::Banner,
         content::{Field, Section, Typography as _},
+        field::CredentialField,
         motion,
         status::Tone,
         surface::card,
@@ -77,6 +80,16 @@ impl RenderOnce for SetupView {
         let working = self.working;
         let has_preview = self.preview.is_some();
         let selected_count = self.selected_devices.len();
+        // Parse the field as it stands, right here: the parse check, the
+        // submit gate, and the field's own error state are then true the
+        // moment the text is, with no owner state to fall behind. A parse is
+        // local and cheap; the network check stays on the action.
+        let value = self.invitation_input.read(cx).value();
+        let parses = InvitationLink::parse(value.as_str()).is_ok();
+        let empty = value.trim().is_empty();
+        // The field reports a failed attempt on the text itself; a network
+        // failure with a well-formed link leaves it alone.
+        let invalid = self.error.is_some() && !parses && !empty;
 
         div()
             .id("setup")
@@ -148,8 +161,9 @@ impl RenderOnce for SetupView {
                             view.child(
                                 Section::new("Invitation link")
                                     .child(
-                                        Input::new(&self.invitation_input)
-                                            .cleanable(true)
+                                        CredentialField::new(self.invitation_input.clone())
+                                            .valid(parses)
+                                            .invalid(invalid)
                                             .disabled(working),
                                     )
                                     .when_some(self.preview, |form, preview| {
@@ -183,7 +197,10 @@ impl RenderOnce for SetupView {
                                                         "Review invitation"
                                                     },
                                                     IconName::Search,
-                                                    working,
+                                                    // An empty field has nothing to
+                                                    // review; the button says so
+                                                    // instead of an error banner.
+                                                    working || empty,
                                                     PreviewInvitation,
                                                     true,
                                                 )

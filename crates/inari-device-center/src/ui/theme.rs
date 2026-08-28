@@ -410,6 +410,32 @@ fn veil(color: Hsla, glass: bool, alpha: f32) -> Hsla {
     if glass { Hsla { a: alpha, ..color } } else { color }
 }
 
+/// Composite `top` over `base`, as the renderer would.
+pub(crate) fn flatten(top: Hsla, base: Hsla) -> Hsla {
+    let mix = |over: f32, under: f32| over * top.a + under * (1.0 - top.a);
+    Hsla {
+        h: if top.a > 0.0 { top.h } else { base.h },
+        s: if top.a > 0.0 { top.s } else { base.s },
+        l: mix(top.l, base.l),
+        a: mix(top.a, base.a),
+    }
+}
+
+/// Transition between two colors the way CSS interpolation would.
+///
+/// Used across tiny distances — a hairline towards an accent, a rest fill
+/// towards its hover — where a straight ramp in HSLA reads the same as the
+/// browser's sRGB one and costs nothing.
+pub(crate) fn mix(from: Hsla, to: Hsla, t: f32) -> Hsla {
+    let t = t.clamp(0.0, 1.0);
+    Hsla {
+        h: from.h + (to.h - from.h) * t,
+        s: from.s + (to.s - from.s) * t,
+        l: from.l + (to.l - from.l) * t,
+        a: from.a + (to.a - from.a) * t,
+    }
+}
+
 fn white(alpha: f32) -> Hsla {
     hsla(0.0, 0.0, 1.0, alpha)
 }

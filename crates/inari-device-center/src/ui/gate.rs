@@ -11,8 +11,8 @@
 //! adds, and it is never the sole carrier of a state.
 
 use gpui::{
-    AnimationExt as _, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled,
-    div, prelude::FluentBuilder as _, px, svg,
+    AnimationExt as _, Bounds, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString,
+    Styled, canvas, div, fill, point, prelude::FluentBuilder as _, px, size, svg,
 };
 use gpui_component::{Icon, StyledExt as _};
 
@@ -23,6 +23,17 @@ use super::{
     status::{Status, StatusDot, Tone},
     theme::{ActiveTheme as _, Theme},
 };
+
+/// The live wire's own geometry: a segment, and the gap to the next one.
+const CELL: f32 = 3.0;
+const GAP: f32 = 1.0;
+/// How far apart two neighbouring columns sit in the wave. Small enough that
+/// the crest reads as one travelling band rather than as cells taking turns.
+const STAGGER: f32 = 0.03;
+/// What a wire segment dims to between crests, as a fraction of its lit
+/// alpha. Never zero: the wire has to describe the same live path when the
+/// crest is elsewhere as when it is here.
+const REST_WIRE: f32 = 0.55;
 
 /// The live path from this computer to the devices.
 #[derive(IntoElement)]
@@ -98,14 +109,18 @@ impl RenderOnce for Gate {
                         Tone::Positive,
                         theme,
                     ))
-                    .child(connector(tone, theme))
+                    .child(connector("gate-wire-in", tone, theme))
                     .child(
                         div()
                             .flex_none()
                             .pt(px(2.0))
                             .child(mark),
                     )
-                    .child(connector(if live { devices_tone } else { tone }, theme))
+                    .child(connector(
+                        "gate-wire-out",
+                        if live { devices_tone } else { tone },
+                        theme,
+                    ))
                     .child(node(
                         Glyph::Device.into(),
                         "Devices",
@@ -203,11 +218,40 @@ fn node(
         )
 }
 
-/// The segment between two nodes. Solid when traffic can pass, and broken by a
-/// visible gap when it cannot, so the failure reads without relying on color.
-fn connector(tone: Tone, theme: &Theme) -> gpui::Div {
+/// The segment between two nodes. When traffic passes it is a live wire: a
+/// dim base with a crest of light travelling source-wards, the same staggered
+/// phase wave the alert's cascade uses, so "live" reads as motion in the
+/// app's one visual language. When it is broken the wire goes still — a gap
+/// and a cross where the light stops — because a broken path has nothing
+/// flowing to show.
+fn connector(id: &'static str, tone: Tone, theme: &Theme) -> gpui::Div {
     let broken = matches!(tone, Tone::Critical | Tone::Neutral);
     let color = if broken { theme.hairline_strong } else { tone.color(theme) };
+    // The stubs survive when broken — the break is a gap in a wire, not the
+    // absence of one — and the cross settles in so the failure arrives rather
+    // than pops. Keyed on the id, so a state change remounts and replays it.
+    let stub = || {
+        div()
+            .h(px(2.0))
+            .flex_1()
+            .rounded_full()
+            .bg(color)
+    };
+    let cross = Icon::from(Symbol::Component(gpui_component::IconName::Close))
+        .size(px(10.0))
+        .flex_none()
+        .text_color(theme.text_tertiary);
+    let cross = if motion::enabled() {
+        cross
+            .with_animation(
+                gpui::SharedString::from(format!("gate-break-{id}")),
+                motion::settle(),
+                |cross, delta| cross.opacity(delta),
+            )
+            .into_any_element()
+    } else {
+        cross.into_any_element()
+    };
     div()
         .h_flex()
         .items_center()
@@ -215,28 +259,73 @@ fn connector(tone: Tone, theme: &Theme) -> gpui::Div {
         .min_w(px(20.0))
         .h(px(38.0))
         .gap(px(if broken { Theme::SPACE_SM } else { 0.0 }))
-        .child(
-            div()
-                .h(px(2.0))
-                .flex_1()
-                .rounded_full()
-                .bg(color),
+        .child(stub())
+        .when(broken, |line| line.child(cross))
+        .when(!broken, |line| line.child(flowing_wire(id, tone, theme)))
+        .child(stub())
+}
+
+/// The live wire at one moment: dim segments with a crest running through.
+///
+/// Painted rather than built from divs for the same reason the alert's wall
+/// is — a canvas answers to the width it is actually given, and a flexed
+/// connector's width is decided at layout time. Cells run the line at the
+/// cascade's own pitch; each carries the wave phase of its position, so one
+/// crest travels source-wards and the rest of the wire stays at a quiet base
+/// alpha. The direction is the story: this computer, through the agent, out
+/// to the devices.
+fn flowing_wire(id: &'static str, tone: Tone, theme: &Theme) -> impl IntoElement {
+    let color = tone.color(theme);
+    let base = 0.35;
+    if !motion::enabled() {
+        return static_wire(color, base).into_any_element();
+    }
+    static_wire(color, base)
+        .with_animation(
+            gpui::SharedString::from(format!("gate-flow-{id}")),
+            motion::cascade(),
+            move |_, delta| flowing_wire_canvas(color, base, delta),
         )
-        .when(broken, |line| {
-            line.child(
-                Icon::from(Symbol::Component(gpui_component::IconName::Close))
-                    .size(px(10.0))
-                    .flex_none()
-                    .text_color(theme.text_tertiary),
-            )
-        })
-        .child(
-            div()
-                .h(px(2.0))
-                .flex_1()
-                .rounded_full()
-                .bg(color),
-        )
+        .into_any_element()
+}
+
+/// The wire with no motion: the base at full presence.
+fn static_wire(color: Hsla, base: f32) -> gpui::Canvas<()> {
+    flowing_wire_canvas(color, base, f32::NAN)
+}
+
+/// The wire at one instant of the travelling wave. `NaN` delta paints the
+/// still form: every segment at base, no crest.
+fn flowing_wire_canvas(color: Hsla, base: f32, delta: f32) -> gpui::Canvas<()> {
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let height = f32::from(bounds.size.height);
+            let width = f32::from(bounds.size.width);
+            let pitch = CELL + GAP;
+            let columns = (width / pitch).ceil() as usize;
+            let y = f32::from(bounds.origin.y) + (height - CELL) / 2.0;
+            for column in 0..columns {
+                let crest = if delta.is_nan() {
+                    0.0
+                } else {
+                    let phase = motion::staggered_phase(delta, column, STAGGER);
+                    motion::pulse_wave(phase).powf(3.0)
+                };
+                let alpha = base * (REST_WIRE + (1.0 - REST_WIRE) * crest);
+                if alpha < 0.004 {
+                    continue;
+                }
+                let x = f32::from(bounds.origin.x) + column as f32 * pitch;
+                window.paint_quad(fill(
+                    Bounds { origin: point(px(x), px(y)), size: size(px(CELL), px(CELL)) },
+                    Hsla { a: alpha, ..color },
+                ));
+            }
+        },
+    )
+    .absolute()
+    .inset_0()
 }
 
 /// "Running" becomes "running" so it reads as a sentence after "Agent".
