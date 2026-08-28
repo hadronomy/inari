@@ -4,6 +4,8 @@ use std::{cell::RefCell, rc::Rc};
 
 mod app;
 mod assets;
+#[cfg(debug_assertions)]
+mod dev_tools;
 mod features;
 mod infrastructure;
 mod onboarding;
@@ -116,6 +118,10 @@ fn main() {
             gpui_component::init(cx);
             assets::install_fonts(cx).expect("failed to load Device Center fonts");
             app::bind_keys(cx);
+            // The preview window exists only where a debugger or a fast edit
+            // loop can reach it; a release build carries no dev surfaces.
+            #[cfg(debug_assertions)]
+            dev_tools::init(cx);
 
             let (tray_sender, tray_commands) = async_channel::bounded(32);
             let tray =
