@@ -279,17 +279,27 @@ fn connector(id: &'static str, tone: Tone, theme: &Theme) -> gpui::Div {
         .flex_1()
         .min_w(px(20.0))
         .h(px(38.0))
-        .gap(px(if broken { Theme::SPACE_SM } else { 0.0 }))
-        .child(stub())
+        .relative()
         .when(broken, |line| {
-            line.child(cross)
+            line.gap(px(Theme::SPACE_SM))
+                .child(stub())
+                .child(cross)
+                .child(stub())
                 // One last packet leaves the source and dies at the break —
                 // the attempt the wire made before it went down. Keyed on the
                 // id and tone, so it plays when the path fails, not forever.
                 .when(motion::enabled(), |line| line.child(last_breath(id, tone, theme)))
         })
-        .when(!broken, |line| line.child(flowing_wire(id, tone)))
-        .child(stub())
+        .when(!broken, |line| {
+            // The wire canvas is absolute; this wrapper is the box it fills.
+            line.child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .h_full()
+                    .child(flowing_wire(id, tone)),
+            )
+        })
 }
 
 /// The live wire at one moment: a dim carrier with discrete packets of light
