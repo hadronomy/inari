@@ -29,8 +29,9 @@
 //! computer is not connected" claims work that nobody is doing.
 
 use gpui::{
-    AnimationExt as _, AnyElement, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
-    RenderOnce, SharedString, Styled, div, hsla, px,
+    AnimationExt as _, AnyElement, Bounds, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, SharedString, Styled, canvas, div, fill, hsla, point,
+    px, size,
 };
 use gpui_component::{Icon, StyledExt as _};
 
@@ -49,10 +50,6 @@ const GAP: f32 = 2.0;
 /// little way under the first words, by which point the squared falloff has
 /// taken it to almost nothing.
 const COLUMNS: usize = 21;
-/// Enough rows to overrun any alert this component produces. The wall is meant
-/// to run the full height, so it is built taller than it needs to be and the
-/// alert's own rounded clip decides where it ends.
-const ROWS: usize = 33;
 /// How far apart two neighbouring columns sit in the wave. Small enough that
 /// the crest reads as one travelling band rather than as cells taking turns.
 const STAGGER: f32 = 0.055;
@@ -180,7 +177,7 @@ impl Banner {
             // full height of the surface and reaches past the glyph, so the
             // light is something the alert sits in rather than a bar bolted to
             // its edge.
-            .child(cascade(color))
+            .child(cascade(color, Theme::RADIUS_CARD))
             .children(top_lip(theme.is_dark()))
             .child(
                 // The leading column. The glyph is centred in it on both axes
@@ -235,74 +232,113 @@ impl Banner {
 /// The lit edge of an alert: a wall of cells with a crest running in from the
 /// leading edge and dying out over a short distance.
 ///
-/// Each column is one repeating animation on a shared period, reading its own
-/// place in the wave from its index, so the whole wall stays phase-locked
-/// without a clock to keep. Cells only ever change colour inside a fixed slot,
-/// so nothing here can move the text beside it.
+/// Painted rather than built from elements, because the wall has to answer to
+/// the size it is given. A fixed grid of divs cannot: the row count is decided
+/// before layout runs, so a taller alert leaves the wall short, and a shorter
+/// one makes flex compress the cells until the pixels stop being square. A
+/// canvas is handed the real bounds at paint time, so the rows are counted from
+/// the height it actually got and every cell keeps its own size at any
+/// dimension.
 ///
 /// The falloff is squared rather than linear. A linear ramp reads as a bar that
 /// someone faded out; a squared one keeps the light gathered at the edge and
 /// lets the tail go to almost nothing, which is what makes it read as light
 /// rather than as a shape.
-///
-/// It runs the full height of the alert. The column is built taller than any
-/// alert gets and centred, so the top and bottom rows fall outside the surface
-/// and the alert's rounded `overflow_hidden` cuts them — corners included,
-/// which is what keeps the wall inside the shape instead of squaring it off.
-fn cascade(color: Hsla) -> gpui::Div {
-    let running = motion::enabled();
-    div()
-        .absolute()
-        .left_0()
-        .top_0()
-        .bottom_0()
-        .w(px(BAND))
-        .flex()
-        .items_center()
-        .overflow_hidden()
-        .children((0..COLUMNS).map(move |column| {
-            let reach = 1.0 - (column as f32 / COLUMNS as f32);
-            let reach = reach * reach;
-            let column_element = div()
-                .w(px(CELL))
-                .mr(px(GAP))
-                .h_full()
-                .flex()
-                .flex_col()
-                .justify_center()
-                .children((0..ROWS).map(move |_| {
-                    // Even top to bottom: the light falls off across the wall,
-                    // not down it, so the edge reads as one surface rather than
-                    // as a band floating in the middle of the alert.
-                    div()
-                        .h(px(CELL))
-                        .mb(px(GAP))
-                        .w_full()
-                        .bg(Hsla { a: PEAK * reach, ..color })
-                }));
-            if running {
-                column_element
-                    .with_animation(
-                        ("banner-cascade", column),
-                        motion::cascade(),
-                        move |cells, delta| {
-                            let phase = motion::staggered_phase(delta, column, STAGGER);
-                            // The crest is narrow: raising the wave to a high
-                            // power leaves a travelling band instead of the
-                            // whole wall breathing together.
-                            let crest = motion::pulse_wave(phase).powf(6.0);
-                            cells.opacity(REST + (1.0 - REST) * crest)
-                        },
-                    )
-                    .into_any_element()
-            } else {
-                // Motion off: hold the wall at its resting light, so the edge
-                // still describes itself.
-                column_element
-                    .opacity(REST)
-                    .into_any_element()
+fn cascade(color: Hsla, radius: f32) -> impl IntoElement {
+    let still = canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            paint_cascade(bounds, 0.0, color, radius, window);
+        },
+    );
+    if !motion::enabled() {
+        return still.into_any_element();
+    }
+    // Each frame rebuilds the canvas with the current place in the wave, which
+    // is how a painted effect reads an animation that only ever hands an
+    // element a scalar.
+    still
+        .with_animation("banner-cascade", motion::cascade(), move |_, delta| {
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _| {
+                    paint_cascade(bounds, delta, color, radius, window);
+                },
+            )
+        })
+        .into_any_element()
+}
+
+/// Paint the wall across whatever bounds the layout gave it.
+fn paint_cascade(
+    bounds: Bounds<Pixels>,
+    delta: f32,
+    color: Hsla,
+    radius: f32,
+    window: &mut gpui::Window,
+) {
+    let pitch = CELL + GAP;
+    let height = f32::from(bounds.size.height);
+    let columns = (BAND / pitch).floor().max(1.0) as usize;
+    let rows = rows_for(height);
+    // Centred, so the overrun is cut evenly at the top and the bottom.
+    let top = f32::from(bounds.origin.y) + (height - rows as f32 * pitch) / 2.0;
+
+    for column in 0..columns {
+        let reach = 1.0 - column as f32 / columns as f32;
+        let phase = motion::staggered_phase(delta, column, STAGGER);
+        // The crest is narrow: raising the wave to a high power leaves a
+        // travelling band instead of the whole wall breathing together.
+        let crest = motion::pulse_wave(phase).powf(6.0);
+        let alpha = PEAK * reach * reach * (REST + (1.0 - REST) * crest);
+        if alpha < 0.004 {
+            continue;
+        }
+        let x = f32::from(bounds.origin.x) + column as f32 * pitch;
+        for row in 0..rows {
+            let y = top + row as f32 * pitch;
+            if !inside_rounded(bounds, radius, x, y) {
+                continue;
             }
-        }))
+            window.paint_quad(fill(
+                Bounds { origin: point(px(x), px(y)), size: size(px(CELL), px(CELL)) },
+                Hsla { a: alpha, ..color },
+            ));
+        }
+    }
+}
+
+/// How many rows cover `height` at the cascade's own pitch.
+///
+/// One more than fits, so the grid always overruns the surface and the wall
+/// reaches both edges rather than stopping short of them. Density is a
+/// constant: the count follows the height instead of the cells stretching to
+/// meet it, which is what keeps a pixel square at every size.
+fn rows_for(height: f32) -> usize {
+    (height / (CELL + GAP)).ceil() as usize + 1
+}
+
+/// Whether a cell at `x`, `y` falls inside the alert's rounded corners.
+///
+/// GPUI's content mask is a rectangle, so `overflow_hidden` alone would let the
+/// wall square off the two corners it touches. Only the leading corners can be
+/// crossed, so only those are tested.
+fn inside_rounded(bounds: Bounds<Pixels>, radius: f32, x: f32, y: f32) -> bool {
+    let left = f32::from(bounds.origin.x);
+    let top = f32::from(bounds.origin.y);
+    let bottom = top + f32::from(bounds.size.height);
+    let corner = |cx: f32, cy: f32| {
+        let dx = cx - (x + CELL / 2.0);
+        let dy = cy - (y + CELL / 2.0);
+        dx * dx + dy * dy <= radius * radius
+    };
+    if y + CELL < top + radius && x + CELL < left + radius {
+        return corner(left + radius, top + radius);
+    }
+    if y > bottom - radius && x + CELL < left + radius {
+        return corner(left + radius, bottom - radius);
+    }
+    true
 }
 
 /// A hairline of light along the top edge, stopping short of the corners.
@@ -325,6 +361,23 @@ fn top_lip(dark: bool) -> Option<gpui::Div> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wall_always_overruns_the_height_it_is_given() {
+        // Whatever the alert measures, the grid covers it and then some, so the
+        // light reaches the top and bottom edges instead of stopping short.
+        for height in [24.0_f32, 48.0, 61.0, 137.0, 400.0] {
+            let covered = rows_for(height) as f32 * (CELL + GAP);
+            assert!(covered >= height, "{height} left uncovered");
+        }
+    }
+
+    #[test]
+    fn a_taller_alert_gets_more_rows_rather_than_taller_ones() {
+        // The failure this replaces: a fixed row count meant the cells had to
+        // stretch or squash to fit, and the pixels stopped being square.
+        assert!(rows_for(200.0) > rows_for(60.0));
+    }
 
     #[test]
     fn only_states_that_block_device_work_earn_a_container() {
