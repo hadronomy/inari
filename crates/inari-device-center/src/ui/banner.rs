@@ -311,12 +311,13 @@ fn paint_cascade(
         let x = f32::from(bounds.origin.x) + column as f32 * pitch;
         for row in 0..rows {
             let y = top + row as f32 * pitch;
-            if !clears_corner(bounds, radius, x, y) {
+            let coverage = corner_coverage(bounds, radius, x, y);
+            if coverage <= 0.0 {
                 continue;
             }
             window.paint_quad(fill(
                 Bounds { origin: point(px(x), px(y)), size: size(px(CELL), px(CELL)) },
-                Hsla { a: alpha, ..color },
+                Hsla { a: alpha * coverage, ..color },
             ));
         }
     }
@@ -332,34 +333,54 @@ fn rows_for(height: f32) -> usize {
     (height / (CELL + GAP)).ceil() as usize + 1
 }
 
-/// Whether a cell clears the alert's rounded corners.
+/// What fraction of the cell at (`x`, `y`) the alert's rounded corner leaves
+/// visible.
 ///
-/// The container cannot do this for us. `overflow_hidden` clips through a
-/// [`gpui::ContentMask`], which holds a plain [`Bounds`] — a rectangle. A
-/// corner radius shapes the parent's own background quad and nothing else, so
-/// left to the mask the wall would square off the two corners it reaches and
-/// sit outside the surface it belongs to. Only the leading corners are in
-/// range, so only those are tested.
-fn clears_corner(bounds: Bounds<Pixels>, radius: f32, x: f32, y: f32) -> bool {
+/// The container cannot clip this for us. GPUI masks children through
+/// [`gpui::ContentMask`], a plain rectangle: `overflow_hidden` trims the wall
+/// at the alert's edges, while a corner radius shapes only the parent's own
+/// background quad (`distance_from_clip_rect` in gpui's shaders takes no
+/// radius). So the wall shades itself along the same arc the background
+/// follows — a cell the corner covers fully stays at full strength, a cell it
+/// covers partly dims by the covered fraction, and a cell it misses drops
+/// out. Dropping whole cells instead cut a second, coarser corner into the
+/// surface.
+///
+/// Coverage is sampled on a three-by-three grid per cell. At two pixels a
+/// side the error is under a pixel, which is what keeps the fade continuous
+/// rather than stepped.
+fn corner_coverage(bounds: Bounds<Pixels>, radius: f32, x: f32, y: f32) -> f32 {
     let left = f32::from(bounds.origin.x);
     let top = f32::from(bounds.origin.y);
     let bottom = top + f32::from(bounds.size.height);
-    // Past the arcs, where the edge is straight and every cell is inside it.
-    if x + CELL > left + radius {
-        return true;
+    // Past the leading arcs the edges are straight and every cell is inside.
+    if x >= left + radius {
+        return 1.0;
     }
-    let centre_y = if y + CELL < top + radius {
-        top + radius
-    } else if y > bottom - radius {
-        bottom - radius
-    } else {
-        return true;
-    };
-    // Measured to the cell's outermost point, so a cell straddling the curve is
-    // dropped rather than left poking through it.
-    let dx = left + radius - x;
-    let dy = (centre_y - y).abs().max((centre_y - (y + CELL)).abs());
-    dx * dx + dy * dy <= radius * radius
+    const SAMPLES: u32 = 3;
+    let step = CELL / SAMPLES as f32;
+    let mut inside = 0;
+    for column in 0..SAMPLES {
+        for row in 0..SAMPLES {
+            let sample_x = x + (column as f32 + 0.5) * step;
+            let sample_y = y + (row as f32 + 0.5) * step;
+            let (centre_x, centre_y) = if sample_y < top + radius {
+                (left + radius, top + radius)
+            } else if sample_y > bottom - radius {
+                (left + radius, bottom - radius)
+            } else {
+                inside += 1;
+                continue;
+            };
+            let dx = sample_x - centre_x;
+            let dy = sample_y - centre_y;
+            if dx * dx + dy * dy <= radius * radius {
+                inside += 1;
+            }
+        }
+    }
+    let total = SAMPLES * SAMPLES;
+    inside as f32 / total as f32
 }
 
 /// A hairline of light along the top edge, stopping short of the corners.
@@ -402,20 +423,25 @@ mod tests {
     }
 
     #[test]
-    fn the_wall_stays_inside_the_corners_the_mask_cannot_cut() {
-        let bounds = Bounds {
-            origin: point(px(0.0), px(0.0)),
-            size: size(px(400.0), px(60.0)),
-        };
+    fn the_wall_meets_the_corner_the_mask_cannot_cut() {
+        let bounds = Bounds { origin: point(px(0.0), px(0.0)), size: size(px(400.0), px(60.0)) };
         let radius = 12.0;
-        // The cell furthest into the top leading corner, and its opposite at the
-        // bottom: both sit outside the arc and would otherwise show as squares
-        // hanging off a rounded surface.
-        assert!(!clears_corner(bounds, radius, 0.0, 0.0));
-        assert!(!clears_corner(bounds, radius, 0.0, 58.0));
+        // The corner cells sit wholly outside the arc: no light escapes the
+        // surface, which is what the rectangular mask cannot guarantee.
+        assert_eq!(corner_coverage(bounds, radius, 0.0, 0.0), 0.0);
+        assert_eq!(corner_coverage(bounds, radius, 0.0, 56.0), 0.0);
+        // A cell straddling the curve fades rather than dropping, so the wall
+        // follows the same arc the alert's own background paints.
+        let straddling = corner_coverage(bounds, radius, 8.0, 0.0);
+        assert!(straddling > 0.0 && straddling < 1.0, "{straddling}");
         // Away from the corners the wall is untouched, top edge included.
-        assert!(clears_corner(bounds, radius, 0.0, 30.0));
-        assert!(clears_corner(bounds, radius, 40.0, 0.0));
+        assert_eq!(corner_coverage(bounds, radius, 0.0, 30.0), 1.0);
+        assert_eq!(corner_coverage(bounds, radius, 12.0, 0.0), 1.0);
+        // The fade follows the arc: nearer the curve reads dimmer than just
+        // inside it.
+        let nearer = corner_coverage(bounds, radius, 0.0, 8.0);
+        let inside = corner_coverage(bounds, radius, 4.0, 4.0);
+        assert!(nearer < inside, "{nearer} should dim harder than {inside}");
     }
 
     #[test]

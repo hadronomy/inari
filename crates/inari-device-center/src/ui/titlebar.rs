@@ -35,6 +35,9 @@
 //! macOS draws its own traffic lights over the transparent titlebar, so this
 //! component only leaves room for them.
 
+// The caption buttons ease their hover fill through `on_hover`, and Linux's
+// handlers click through `on_click` — both live on the stateful interactive
+// trait. macOS draws no controls and never needs it.
 #[cfg(not(target_os = "macos"))]
 use gpui::StatefulInteractiveElement as _;
 use gpui::{
@@ -53,6 +56,14 @@ use crate::infrastructure::platform;
 /// The room macOS needs at the leading edge for its traffic lights.
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHTS: f32 = 80.0;
+
+/// The leading inset every window's content starts at.
+///
+/// On Windows and Linux nothing native claims the leading edge, so the bar
+/// sets the inset itself. It matches the navigation rail's inset, so the brand
+/// mark sits on the same vertical line as the rail items below it.
+#[cfg(not(target_os = "macos"))]
+const LEADING_INSET: f32 = Theme::SPACE_LG;
 
 /// Windows caption buttons are 36px wide at 100% scale, which is what makes a
 /// cluster drawn by an app sit at the size the eye expects from a system one.
@@ -107,6 +118,9 @@ impl RenderOnce for WindowChrome {
         #[cfg(target_os = "macos")]
         let bar = bar.pl(px(TRAFFIC_LIGHTS));
 
+        #[cfg(not(target_os = "macos"))]
+        let bar = bar.pl(px(LEADING_INSET));
+
         bar.children(self.leading)
             .child(drag_region(self.id))
             .children(self.trailing.map(|trailing| {
@@ -115,7 +129,7 @@ impl RenderOnce for WindowChrome {
                     .pr(px(self.trailing_pad))
                     .child(trailing)
             }))
-            .children(controls(window, cx))
+            .children(controls(self.id, window, cx))
     }
 }
 
@@ -141,12 +155,12 @@ fn drag_region(id: &'static str) -> impl IntoElement {
 
 /// Minimise, maximise and close. Absent on macOS, which draws its own.
 #[cfg(target_os = "macos")]
-fn controls(_: &mut Window, _: &mut gpui::App) -> Option<gpui::Div> {
+fn controls(_: &'static str, _: &mut Window, _: &mut gpui::App) -> Option<gpui::Div> {
     None
 }
 
 #[cfg(not(target_os = "macos"))]
-fn controls(window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
+fn controls(chrome_id: &'static str, window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
     let theme = cx.inari();
     // The glyph reports what the button will do next, so a maximised window
     // offers restore rather than claiming it can maximise again.
@@ -162,6 +176,7 @@ fn controls(window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
             .h_full()
             .flex_none()
             .child(caption(
+                chrome_id,
                 "window-minimize",
                 IconName::WindowMinimize,
                 WindowControlArea::Min,
@@ -169,6 +184,7 @@ fn controls(window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
                 theme.text,
             ))
             .child(caption(
+                chrome_id,
                 maximize_id,
                 maximize_icon,
                 WindowControlArea::Max,
@@ -176,6 +192,7 @@ fn controls(window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
                 theme.text,
             ))
             .child(caption(
+                chrome_id,
                 "window-close",
                 IconName::WindowClose,
                 WindowControlArea::Close,
@@ -192,14 +209,20 @@ fn controls(window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
 /// No click handler on Windows by design — see the module note. `occlude` is
 /// what keeps the press away from the drag region beside it, so the system
 /// receives the non-client press it needs to act on.
+///
+/// The hover fill eases in over [`super::motion::HOVER`], and its fade key
+/// carries the chrome id so two windows' captions fade independently.
 #[cfg(not(target_os = "macos"))]
 fn caption(
+    chrome_id: &'static str,
     id: &'static str,
     icon: IconName,
     area: WindowControlArea,
     hover_bg: gpui::Hsla,
     hover_fg: gpui::Hsla,
 ) -> impl IntoElement {
+    let fade_key = format!("{chrome_id}-{id}");
+    let hover_fade_key = fade_key.clone();
     let button = div()
         .id(id)
         .flex()
@@ -210,7 +233,16 @@ fn caption(
         .flex_none()
         .occlude()
         .window_control_area(area)
-        .hover(move |style| style.bg(hover_bg).text_color(hover_fg))
+        .on_hover(move |hovered, window, _| {
+            if super::motion::hover_set(hover_fade_key.clone(), *hovered) {
+                // Refresh: request_animation_frame panics outside paint.
+                window.refresh();
+            }
+        })
+        .bg(super::motion::hover_blend(fade_key, hover_bg))
+        // The label switches the moment the pointer arrives; the fill is what
+        // carries the motion, and a label waiting on it reads as lag.
+        .hover(move |style| style.text_color(hover_fg))
         .child(Icon::new(icon).size(px(13.0)));
 
     // Under client-side decorations GPUI's control-area hit testing never
@@ -227,12 +259,13 @@ fn caption(
 }
 
 /// A quiet window title, for a window with no brand lockup of its own.
+///
+/// The bar owns the leading inset, so this adds none of its own.
 pub fn title(theme: &Theme, label: &'static str) -> impl IntoElement {
     div()
         .h_flex()
         .items_center()
         .h_full()
-        .pl(px(Theme::SPACE_MD))
         .text_xs()
         .text_color(theme.text_tertiary)
         .child(label)
