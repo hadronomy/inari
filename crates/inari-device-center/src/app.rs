@@ -318,7 +318,14 @@ impl DeviceCenter {
                             .when(focus::visible(), |chip| {
                                 chip.focus(|style| style.border_color(theme.focus_ring))
                             })
-                            .hover(|chip| chip.bg(theme.wash_hover))
+                            .on_hover(|hovered, window, _| {
+                                if motion::hover_set("agent-health", *hovered) {
+                                    // Refresh: request_animation_frame panics
+                                    // outside paint (see hover_set).
+                                    window.refresh();
+                                }
+                            })
+                            .bg(motion::hover_blend("agent-health", theme.wash_hover))
                             .active(|chip| chip.bg(theme.wash_pressed))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(detail.clone()).build(window, cx)
@@ -364,7 +371,13 @@ impl Focusable for DeviceCenter {
 }
 
 impl Render for DeviceCenter {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Hover washes ease toward the pointer over a few frames. The root is
+        // what keeps asking for those frames while any fade is mid-flight; an
+        // idle window schedules nothing.
+        if motion::hover_fades_live() {
+            window.request_animation_frame();
+        }
         let titlebar = self.titlebar(cx);
         let theme = cx.inari();
         let font = theme.font_sans.clone();

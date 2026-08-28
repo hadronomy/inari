@@ -38,6 +38,7 @@ use crate::ui::{
     content::{EmptyState, Field, PageTitle, Section, Typography as _, page, row_divider},
     focus,
     icon::{Glyph, Symbol},
+    motion,
     status::{Status, StatusChip, StatusDot},
     surface::{card, list_card},
     theme::{ActiveTheme as _, Theme},
@@ -123,7 +124,12 @@ impl DeviceDirectory {
 }
 
 impl Render for DeviceDirectory {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Keep the hover fades in this view's rows walking; see the root
+        // view for the other half of the loop.
+        if motion::hover_fades_live() {
+            window.request_animation_frame();
+        }
         let theme = cx.inari();
         let query = self
             .search
@@ -202,6 +208,23 @@ impl Render for DeviceDirectory {
                                                 })
                                                 .child(
                                                     device_row(device, active, theme)
+                                                        // A hovered or selected row is a
+                                                        // full-bleed wash, and the card's
+                                                        // rectangular mask cannot round it:
+                                                        // the first and last rows carry the
+                                                        // card's own corner curve, or their
+                                                        // washes square off the card.
+                                                        .when(index == 0, |row| {
+                                                            row.rounded_t(px(Theme::RADIUS_CARD))
+                                                        })
+                                                        .when(
+                                                            index == visible.len() - 1,
+                                                            |row| {
+                                                                row.rounded_b(px(
+                                                                    Theme::RADIUS_CARD,
+                                                                ))
+                                                            },
+                                                        )
                                                         .on_click(cx.listener(
                                                             move |directory, _, _, cx| {
                                                                 directory.select(id.clone(), cx);
@@ -248,8 +271,9 @@ impl Render for DeviceDirectory {
 fn device_row(device: Device, active: bool, theme: &Theme) -> gpui::Stateful<gpui::Div> {
     let status = Status::device(device.state);
     let tone = status.tone;
+    let fade_key = gpui::SharedString::from(format!("device-{}", device.id));
     div()
-        .id(gpui::SharedString::from(format!("device-{}", device.id)))
+        .id(fade_key.clone())
         .relative()
         .h_flex()
         .items_center()
@@ -265,8 +289,18 @@ fn device_row(device: Device, active: bool, theme: &Theme) -> gpui::Stateful<gpu
         .when(focus::visible(), |row| row.focus(|style| style.border_color(theme.focus_ring)))
         .when(active, |row| row.bg(theme.wash_selected))
         .when(!active, |row| {
-            row.hover(|row| row.bg(theme.wash_hover))
-                .active(|row| row.bg(theme.wash_pressed))
+            row.on_hover({
+                let fade_key = fade_key.clone();
+                move |hovered, window, _| {
+                    if motion::hover_set(fade_key.clone(), *hovered) {
+                        // Refresh: request_animation_frame panics outside
+                        // paint (see hover_set).
+                        window.refresh();
+                    }
+                }
+            })
+            .bg(motion::hover_blend(fade_key, theme.wash_hover))
+            .active(|row| row.bg(theme.wash_pressed))
         })
         // Selection is carried by an accent edge as well as the wash, so it
         // survives a grayscale screenshot and Differentiate Without Color.
