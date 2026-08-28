@@ -141,6 +141,31 @@ zeroize = { version = "1", features = ["derive"] }
 zenoh = "1"
 
 
+# Development builds must both compile fast and *run* fast: an unoptimized
+# gpui turns every interaction into visible lag, which pushes the dev loop
+# onto release builds where nothing is incremental. Two sources set this
+# recipe. Comet (zeronsh/comet) optimizes every dependency at opt-level = 2
+# in dev for exactly that reason ("gpui is slow unoptimized"), and the Cargo
+# book's build-performance guide caps debuginfo: line tables keep panic
+# backtraces readable while making codegen and linking cheaper, and
+# dependencies drop debuginfo entirely. The workspace rebuilds alone in
+# seconds after the one-time dependency compile; `--profile debugging`
+# restores full debuginfo when a debugger is actually needed.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.debugging.package."*"]
+opt-level = 0
+debug = true
+
 [profile.release]
 debug       = 1
 incremental = true
