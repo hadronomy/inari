@@ -15,9 +15,12 @@ use std::{cell::RefCell, collections::HashSet, rc::Rc, sync::Arc};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled, Task, Window, WindowHandle, div, px,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowHandle, div, px,
 };
-use gpui_component::{Root, StyledExt as _, input::InputState};
+use gpui_component::{
+    Root, StyledExt as _,
+    input::{InputEvent, InputState},
+};
 use inari_agent_client::{
     DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
 };
@@ -30,6 +33,7 @@ use crate::{
     features::setup::SetupView,
     infrastructure::{AgentRuntime, SetupResult, agent_failure_message, platform},
     ui::{
+        field, motion,
         theme::{ActiveTheme as _, Theme},
         titlebar::{self, WindowChrome},
     },
@@ -71,6 +75,7 @@ pub struct Onboarding {
     selected_devices: HashSet<DeviceId>,
     focus_handle: FocusHandle,
     _setup_task: Task<()>,
+    _field_subscription: Subscription,
 }
 
 impl Onboarding {
@@ -94,8 +99,38 @@ impl Onboarding {
                 .placeholder("Paste an invitation link")
                 .default_value(invitation.clone().unwrap_or_default())
         });
+        // The field drives three things besides its text: the focus chrome
+        // eases in on Focus and out on Blur, a repaint on Change keeps the
+        // parse check and the submit button honest, and Enter runs the same
+        // action the primary button would — a one-field form submits from the
+        // field. Clicking into the field is a focus flip like any other.
+        let field_subscription = cx.subscribe_in(
+            &invitation_input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::Focus | InputEvent::Blur => {
+                    if motion::hover_set(field::FADE_KEY_FOCUS, matches!(event, InputEvent::Focus))
+                    {
+                        window.refresh();
+                    }
+                },
+                InputEvent::Change => cx.notify(),
+                InputEvent::PressEnter { .. } => {
+                    if !this.working {
+                        if this.preview.is_some() {
+                            this.begin_setup(&BeginSetup, window, cx);
+                        } else {
+                            this.preview_invitation(&PreviewInvitation, window, cx);
+                        }
+                    }
+                },
+            },
+        );
+        // A one-field form starts with the field focused, so the first thing
+        // the operator does is paste. The subscription is armed first: the
+        // focus flip below is what starts the chrome's fade.
+        invitation_input.update(cx, |state, cx| state.focus(window, cx));
         let focus_handle = cx.focus_handle();
-        focus_handle.focus(window);
         Self {
             runtime,
             open_operations,
@@ -114,6 +149,7 @@ impl Onboarding {
             selected_devices: HashSet::new(),
             focus_handle,
             _setup_task: setup_task,
+            _field_subscription: field_subscription,
         }
     }
 
@@ -170,7 +206,13 @@ impl Focusable for Onboarding {
 }
 
 impl Render for Onboarding {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The caption buttons ease their hover fill; this view owns them, so
+        // it keeps their frames coming. See the operations root for the other
+        // half of the loop.
+        if motion::hover_fades_live() {
+            window.request_animation_frame();
+        }
         let theme = cx.inari();
         let font = theme.font_sans.clone();
         let text = theme.text;
