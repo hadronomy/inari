@@ -3,24 +3,64 @@
 //! Every window this app opens draws its own titlebar, because the shell wants
 //! one continuous surface from the top of the window to the bottom of the
 //! content. That means every window is also responsible for the things a system
-//! titlebar would have given it for free — chiefly that dragging it moves the
-//! window.
+//! titlebar would have given it for free: dragging it moves the window, and the
+//! buttons at its trailing end minimise, maximise and close.
 //!
 //! Leaving that to each window is how the enrollment window shipped unmovable.
-//! So the drag region is not something a caller remembers to add: it is the
-//! part between the two ends, and a caller can only choose what sits at those
-//! ends.
+//! So neither job is something a caller remembers to add. A caller chooses what
+//! sits at the two ends; everything between and after them belongs here.
+//!
+//! ## Why these buttons carry no click handler on Windows
+//!
+//! Windows expects an app that extends into its caption to answer the
+//! non-client hit test, so the *system* owns what a caption button does —
+//! including the Snap Layouts flyout that appears when the pointer rests on
+//! maximise. GPUI exposes that through [`WindowControlArea`], and the correct
+//! use of it is to mark the region and then keep out of the way. Zed's
+//! maintainers put it plainly when asked why a custom titlebar's buttons did
+//! nothing: *you shouldn't handle the `on_mouse_down` event*
+//! (<https://github.com/zed-industries/zed/discussions/45012>).
+//!
+//! That is why the buttons below have no `on_click`, and why they call
+//! [`InteractiveElement::occlude`]. A press that reaches an ancestor's mouse
+//! handler is a press the system never sees: the ancestor arms a window move,
+//! the pointer twitches, and the drag eats the click. `gpui_component`'s own
+//! `TitleBar` has exactly that shape — its root binds `on_mouse_down` and its
+//! control icons never occlude — which is why this app draws its own caption
+//! instead of using it.
+//!
+//! Linux is the opposite case: GPUI's control-area hit testing is inert under
+//! client-side decorations, so there the buttons do carry handlers.
+//!
+//! macOS draws its own traffic lights over the transparent titlebar, so this
+//! component only leaves room for them.
 
+#[cfg(not(target_os = "macos"))]
+use gpui::StatefulInteractiveElement as _;
 use gpui::{
     AnyElement, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, RenderOnce,
-    Styled, WindowControlArea, div, px,
+    Styled, Window, WindowControlArea, div, px,
 };
-use gpui_component::{StyledExt as _, TitleBar};
+use gpui_component::StyledExt as _;
+#[cfg(not(target_os = "macos"))]
+use gpui_component::{Icon, IconName};
 
+#[cfg(not(target_os = "macos"))]
+use super::theme::ActiveTheme as _;
 use super::theme::Theme;
 use crate::infrastructure::platform;
 
-/// A window titlebar: something at each end, and a drag region between them.
+/// The room macOS needs at the leading edge for its traffic lights.
+#[cfg(target_os = "macos")]
+const TRAFFIC_LIGHTS: f32 = 80.0;
+
+/// Windows caption buttons are 36px wide at 100% scale, which is what makes a
+/// cluster drawn by an app sit at the size the eye expects from a system one.
+#[cfg(not(target_os = "macos"))]
+const CAPTION_BUTTON: f32 = 36.0;
+
+/// A window titlebar: something at each end, a drag region between them, and
+/// the window's own controls after both.
 #[derive(IntoElement)]
 pub struct WindowChrome {
     id: &'static str,
@@ -47,8 +87,8 @@ impl WindowChrome {
         self
     }
 
-    /// Right padding, for a window that wants its trailing content to line up
-    /// with something below it.
+    /// Padding between the trailing content and the controls, for a window that
+    /// wants that content to line up with something below it.
     pub fn trailing_pad(mut self, padding: f32) -> Self {
         self.trailing_pad = padding;
         self
@@ -56,17 +96,26 @@ impl WindowChrome {
 }
 
 impl RenderOnce for WindowChrome {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
-        TitleBar::new()
+    fn render(self, window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
+        let bar = div()
+            .h_flex()
+            .items_center()
+            .w_full()
             .h(px(Theme::TITLEBAR_HEIGHT))
-            // Transparent on both counts: the titlebar is not a bar, it is the
-            // top of whatever surface the window already paints.
-            .bg(gpui::transparent_black())
-            .border_color(gpui::transparent_black())
-            .pr(px(self.trailing_pad))
-            .children(self.leading)
+            .flex_none();
+
+        #[cfg(target_os = "macos")]
+        let bar = bar.pl(px(TRAFFIC_LIGHTS));
+
+        bar.children(self.leading)
             .child(drag_region(self.id))
-            .children(self.trailing)
+            .children(self.trailing.map(|trailing| {
+                div()
+                    .flex_none()
+                    .pr(px(self.trailing_pad))
+                    .child(trailing)
+            }))
+            .children(controls(window, cx))
     }
 }
 
@@ -75,11 +124,10 @@ impl RenderOnce for WindowChrome {
 /// It claims all the space between the two ends, so any gap a caller leaves is
 /// draggable rather than dead.
 ///
-/// The control area is declared on every platform, but gpui 0.2.2 only consumes
-/// it on Windows, and its caption press path still drops drags there (fixed
-/// upstream after this release). So movement actually goes through
-/// `platform::start_window_drag`, and the declaration is what keeps the window
-/// manager's own affordances — snap layouts, double-click to maximise — working.
+/// Unlike the caption buttons, the drag region does take a press. The control
+/// area alone is the documented path and it is declared here, but gpui 0.2.2
+/// drops the caption press for drags specifically, so the move is started
+/// directly as well.
 fn drag_region(id: &'static str) -> impl IntoElement {
     div()
         .id(id)
@@ -91,12 +139,100 @@ fn drag_region(id: &'static str) -> impl IntoElement {
         })
 }
 
+/// Minimise, maximise and close. Absent on macOS, which draws its own.
+#[cfg(target_os = "macos")]
+fn controls(_: &mut Window, _: &mut gpui::App) -> Option<gpui::Div> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn controls(window: &mut Window, cx: &mut gpui::App) -> Option<gpui::Div> {
+    let theme = cx.inari();
+    // The glyph reports what the button will do next, so a maximised window
+    // offers restore rather than claiming it can maximise again.
+    let (maximize_id, maximize_icon) = if window.is_maximized() {
+        ("window-restore", IconName::WindowRestore)
+    } else {
+        ("window-maximize", IconName::WindowMaximize)
+    };
+    Some(
+        div()
+            .h_flex()
+            .items_center()
+            .h_full()
+            .flex_none()
+            .child(caption(
+                "window-minimize",
+                IconName::WindowMinimize,
+                WindowControlArea::Min,
+                theme.wash_hover,
+                theme.text,
+            ))
+            .child(caption(
+                maximize_id,
+                maximize_icon,
+                WindowControlArea::Max,
+                theme.wash_hover,
+                theme.text,
+            ))
+            .child(caption(
+                "window-close",
+                IconName::WindowClose,
+                WindowControlArea::Close,
+                // The one control that ends the session says so in the colour
+                // every desktop already uses for it.
+                gpui::rgb(0xc42b1c).into(),
+                gpui::white(),
+            )),
+    )
+}
+
+/// One caption button.
+///
+/// No click handler on Windows by design — see the module note. `occlude` is
+/// what keeps the press away from the drag region beside it, so the system
+/// receives the non-client press it needs to act on.
+#[cfg(not(target_os = "macos"))]
+fn caption(
+    id: &'static str,
+    icon: IconName,
+    area: WindowControlArea,
+    hover_bg: gpui::Hsla,
+    hover_fg: gpui::Hsla,
+) -> impl IntoElement {
+    let button = div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(px(CAPTION_BUTTON))
+        .h_full()
+        .flex_none()
+        .occlude()
+        .window_control_area(area)
+        .hover(move |style| style.bg(hover_bg).text_color(hover_fg))
+        .child(Icon::new(icon).size(px(13.0)));
+
+    // Under client-side decorations GPUI's control-area hit testing never
+    // fires, so Linux is the one platform that has to act on the click itself.
+    #[cfg(target_os = "linux")]
+    let button = button.on_click(move |_, window, _| match area {
+        WindowControlArea::Min => window.minimize_window(),
+        WindowControlArea::Max => window.zoom_window(),
+        WindowControlArea::Close => window.remove_window(),
+        WindowControlArea::Drag => {},
+    });
+
+    button
+}
+
 /// A quiet window title, for a window with no brand lockup of its own.
 pub fn title(theme: &Theme, label: &'static str) -> impl IntoElement {
     div()
         .h_flex()
         .items_center()
         .h_full()
+        .pl(px(Theme::SPACE_MD))
         .text_xs()
         .text_color(theme.text_tertiary)
         .child(label)
