@@ -22,6 +22,7 @@ use super::{
     content::Typography as _,
     icon::{Glyph, Symbol},
     motion,
+    motion::CASCADE,
     status::{Status, StatusDot, Tone},
     theme::{ActiveTheme as _, Theme},
 };
@@ -44,15 +45,42 @@ const WIRE_TRAIL: [f32; 4] = [1.0, 0.55, 0.28, 0.12];
 /// line must never vanish — the traffic rides on a wire the operator can
 /// still see.
 const WIRE_REST: f32 = 0.3;
-/// A glitching stream quantises time into this many buckets per period, so
-/// the corruption pattern changes stepwise — digital, not soft.
-const GLITCH_TICKS: u32 = 14;
+/// A glitching stream quantises time, so the corruption pattern changes
+/// stepwise — digital, not soft.
+const TICKS_PER_SECOND: f32 = 7.4;
 /// Per cell per tick: the chance dead air replaces a cell, and the chance a
 /// live cell reports corruption in the danger tone.
 const GLITCH_DROPOUT: f32 = 0.07;
 const GLITCH_ERROR: f32 = 0.045;
 /// How long the last packet lives after the path fails.
 const LAST_BREATH: Duration = Duration::from_millis(700);
+const TAU: f32 = std::f32::consts::TAU;
+
+/// One flanking trace of the information field: a pixel sine on one side of
+/// the line, with its own frequency, amplitude, and travel speed.
+struct WakeLane {
+    /// Which side of the line: +1 above, -1 below.
+    direction: f32,
+    /// Frequency as a multiple of the base wavelength.
+    frequency: f32,
+    /// Peak offset from the trace's rest position, in pixels.
+    amplitude: f32,
+    /// Travel speed along the wire, in pixels per second.
+    speed: f32,
+}
+
+/// The two traces: above at a long, slow wavelength; below shorter and
+/// quicker. Different frequencies and amplitudes, as asked.
+const WAKE_LANES: [WakeLane; 2] = [
+    WakeLane { direction: 1.0, frequency: 1.0, amplitude: 4.0, speed: 55.0 },
+    WakeLane { direction: -1.0, frequency: 1.55, amplitude: 2.5, speed: 92.0 },
+];
+/// Each trace's rest offset from the line, in pixels.
+const WAKE_GAP: f32 = 3.0;
+/// What a trace cell rests at: present, quiet.
+const WAKE_REST: f32 = 0.13;
+/// The base wavelength of the field, in pixels.
+const WIRE_WAVELENGTH: f32 = 84.0;
 
 /// The live path from this computer to the devices.
 #[derive(IntoElement)]
@@ -304,51 +332,69 @@ fn connector(id: &'static str, tone: Tone, theme: &Theme) -> gpui::Div {
         })
 }
 
-/// The live wire at one moment: a dim carrier with discrete packets of light
-/// travelling source-wards.
+/// The live wire at time `t` seconds since the wire mounted.
 ///
 /// Painted rather than built from divs for the same reason the alert's wall
 /// is — a canvas answers to the width it is actually given, and a flexed
-/// connector's width is decided at layout time. Three packets run the line at
-/// different speeds, each a head with a comet trail behind it, so the traffic
-/// reads as discrete data rather than as one broad wave. On the caution tone
-/// the stream corrupts: cells drop out and some flash the danger tone.
+/// connector's width is decided at layout time. Everything the wire shows is
+/// a pure function of `t`, never of the animation's looping delta: a looping
+/// delta made the comet trails teleport at the wrap and the glitch pattern
+/// snap back to its start, which read as the wire rewinding.
 fn flowing_wire(id: &'static str, tone: Tone) -> impl IntoElement {
+    let started = std::time::Instant::now();
     let still = !motion::enabled();
-    wire_canvas(tone, if still { f32::NAN } else { 0.0 })
+    wire_canvas(tone, if still { None } else { Some(started) })
         .with_animation(
             gpui::SharedString::from(format!("gate-flow-{id}")),
+            // The cascade only drives repaint cadence here; the wire's math
+            // runs on its own clock so the loop boundary does not exist.
             motion::cascade(),
-            move |_, delta| wire_canvas(tone, delta),
+            move |_, _| wire_canvas(tone, Some(started)),
         )
         .into_any_element()
 }
 
-/// The wire at one instant. `NaN` delta paints the still form the reduced
-/// motion preference shows: every cell at carrier, no traffic.
-fn wire_canvas(tone: Tone, delta: f32) -> gpui::Canvas<()> {
+/// The wire at time `t`. `None` paints the still form the reduced motion
+/// preference shows: carrier and flanking traces at rest, no traffic.
+fn wire_canvas(tone: Tone, clock: Option<std::time::Instant>) -> gpui::Canvas<()> {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, cx| {
             let theme = cx.inari();
             let color = tone.color(theme);
-            let glitching = tone == Tone::Caution && !delta.is_nan();
+            let glitching = tone == Tone::Caution;
             let columns = (f32::from(bounds.size.width) / WIRE_PITCH).ceil() as usize;
-            let y = f32::from(bounds.origin.y) + (f32::from(bounds.size.height) - CELL) / 2.0;
+            let center = f32::from(bounds.origin.y) + f32::from(bounds.size.height) / 2.0;
+            let t = clock.map(|started| started.elapsed().as_secs_f32());
             for column in 0..columns {
-                let (mut alpha, corrupted) = wire_cell(column, columns, delta, glitching);
-                if alpha < 0.004 {
-                    continue;
-                }
+                let x = f32::from(bounds.origin.x) + column as f32 * WIRE_PITCH;
+                let (mut alpha, corrupted) = wire_cell(column, columns, t, glitching);
                 if corrupted {
                     alpha = WIRE_HEAD * 0.6;
                 }
-                let paint = if corrupted { theme.danger } else { color };
-                let x = f32::from(bounds.origin.x) + column as f32 * WIRE_PITCH;
-                window.paint_quad(fill(
-                    Bounds { origin: point(px(x), px(y)), size: size(px(CELL), px(CELL)) },
-                    Hsla { a: alpha, ..paint },
-                ));
+                if alpha > 0.004 {
+                    let paint = if corrupted { theme.danger } else { color };
+                    window.paint_quad(fill(
+                        Bounds {
+                            origin: point(px(x), px(center - CELL / 2.0)),
+                            size: size(px(CELL), px(CELL)),
+                        },
+                        Hsla { a: alpha, ..paint },
+                    ));
+                }
+                for (offset, alpha, corrupted) in wake_cells(column, columns, t, glitching) {
+                    if alpha < 0.004 {
+                        continue;
+                    }
+                    let paint = if corrupted { theme.danger } else { color };
+                    window.paint_quad(fill(
+                        Bounds {
+                            origin: point(px(x), px(center + offset - CELL / 2.0)),
+                            size: size(px(CELL), px(CELL)),
+                        },
+                        Hsla { a: alpha, ..paint },
+                    ));
+                }
             }
         },
     )
@@ -356,36 +402,50 @@ fn wire_canvas(tone: Tone, delta: f32) -> gpui::Canvas<()> {
     .inset_0()
 }
 
-/// One cell of the live wire at `delta`: its alpha, and whether it flashes as
-/// a corrupted byte.
+/// One cell of the live wire at time `t`: its alpha, and whether it flashes
+/// as a corrupted byte.
 ///
 /// The carrier is every cell resting lit — the link is up. Traffic rides on
-/// top as three packets, each a head with a two-cell comet trail, at
-/// different speeds so passing packets sum into brighter moments. On a
-/// glitching tone the stream quantises into time buckets and degrades
-/// digitally: cells drop out outright, packet positions jitter, and sparse
-/// cells report corruption. All of it is a pure function of the clock, so a
-/// dropped frame lands where the traffic actually is.
-fn wire_cell(column: usize, columns: usize, delta: f32, glitching: bool) -> (f32, bool) {
-    if delta.is_nan() {
+/// top as packets, each a head with a comet trail behind it, at different
+/// speeds so passing packets sum into brighter moments. Trails are clipped
+/// at the wire's ends rather than wrapped: a packet exits right and re-enters
+/// left empty, which is what makes the loop invisible. On a glitching tone
+/// the stream quantises into time buckets and degrades digitally — cells
+/// drop out outright, packet positions lurch, and sparse cells report
+/// corruption. All of it is a pure function of the clock, so a dropped frame
+/// lands where the traffic actually is.
+/// Deterministic white noise in [0, 1), so the glitch pattern is stable
+/// within a tick and different in the next — digital, not soft.
+fn noise(a: u32, b: u32) -> f32 {
+    let mut h = a.wrapping_mul(0x9E37_79B9) ^ b.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xC2B2_AE35);
+    h ^= h >> 16;
+    (h & 0x00FF_FFFF) as f32 / 0x0100_0000 as f32
+}
+
+fn wire_cell(column: usize, columns: usize, t: Option<f32>, glitching: bool) -> (f32, bool) {
+    let Some(t) = t else {
         return (WIRE_REST, false);
-    }
+    };
+    let period = CASCADE.as_secs_f32();
     let mut alpha = WIRE_REST;
-    let tick = (delta * GLITCH_TICKS as f32).floor() as u32;
+    let tick = (t * TICKS_PER_SECOND) as u32;
     for packet in 0..PACKETS {
-        let speed = WIRE_SPEEDS[packet];
-        let offset = WIRE_OFFSETS[packet];
-        let mut head = ((delta * speed + offset).rem_euclid(1.0)) * columns as f32;
+        let phase = (t / period * WIRE_SPEEDS[packet] + WIRE_OFFSETS[packet]).rem_euclid(1.0);
+        let mut head = phase * columns as f32;
         if glitching {
             // The link stutters: packets lurch a cell either way.
             head += (noise(packet as u32 + 7, tick) - 0.5) * 2.4;
         }
-        // How far this cell sits behind the packet's head, wrapping so a
-        // packet exiting the far end re-enters at the source.
-        let behind = (head - column as f32)
-            .rem_euclid(columns as f32)
-            .round() as usize;
-        alpha = alpha.max(WIRE_HEAD * WIRE_TRAIL[behind.min(WIRE_TRAIL.len() - 1)]);
+        // How far this cell sits behind the packet's head. Past the trail's
+        // reach the cell is just carrier; nothing wraps, so a packet exits
+        // the wire with its trail instead of teleporting it to the source.
+        let behind = (head - column as f32).round();
+        if behind < 0.0 || behind >= WIRE_TRAIL.len() as f32 {
+            continue;
+        }
+        alpha = alpha.max(WIRE_HEAD * WIRE_TRAIL[behind as usize]);
     }
     let mut corrupted = false;
     if glitching {
@@ -400,16 +460,50 @@ fn wire_cell(column: usize, columns: usize, delta: f32, glitching: bool) -> (f32
     (alpha, corrupted)
 }
 
-/// Deterministic white noise in [0, 1), so the glitch pattern is stable
-/// within a tick and different in the next — digital, not soft.
-fn noise(a: u32, b: u32) -> f32 {
-    let mut h = a.wrapping_mul(0x9E37_79B9) ^ b.wrapping_mul(0x85EB_CA6B);
-    h ^= h >> 13;
-    h = h.wrapping_mul(0xC2B2_AE35);
-    h ^= h >> 16;
-    (h & 0x00FF_FFFF) as f32 / 0x0100_0000 as f32
+/// The information field: two pixel sine traces flanking the line, above and
+/// below, each its own frequency, amplitude, and travel speed. Rows snap to
+/// the two-pixel grid — the termy hard-edge rule — so the waves read as
+/// stepped data, not as a curve. On a glitching tone the traces quantise in
+/// time (they jump between steps) and corrupt like the line does.
+fn wake_cells(
+    column: usize,
+    columns: usize,
+    t: Option<f32>,
+    glitching: bool,
+) -> [(f32, f32, bool); WAKE_LANES.len()] {
+    let mut cells = [(0.0, 0.0, false); WAKE_LANES.len()];
+    let Some(t) = t else {
+        for (cell, lane) in cells.iter_mut().zip(WAKE_LANES.iter()) {
+            *cell = (lane.direction * WAKE_GAP, WAKE_REST, false);
+        }
+        return cells;
+    };
+    // Fade the traces in from the wire's ends so they never hard-clip at
+    // the nodes.
+    let edge = ((column as f32 / 3.0).min(1.0)).min(((columns - 1 - column) as f32 / 3.0).min(1.0));
+    for (cell, lane) in cells.iter_mut().zip(WAKE_LANES.iter()) {
+        let wavelength = WIRE_WAVELENGTH / lane.frequency;
+        // On a glitching tone the traces quantise in time: they jump
+        // between ten shapes a second instead of flowing.
+        let step = if glitching { (t * 10.0).floor() / 10.0 } else { t };
+        let wave = (TAU * (column as f32 * WIRE_PITCH - step * lane.speed) / wavelength).sin();
+        let offset = lane.direction * (WAKE_GAP + lane.amplitude * wave);
+        let snapped = (offset / 2.0).round() * 2.0;
+        let tick = (t * TICKS_PER_SECOND) as u32;
+        if glitching {
+            if noise(column as u32 + 13, tick) < GLITCH_DROPOUT {
+                *cell = (0.0, 0.0, false);
+                continue;
+            }
+            if noise((column + 57) as u32, tick) < GLITCH_ERROR {
+                *cell = (snapped, WIRE_HEAD * 0.5, true);
+                continue;
+            }
+        }
+        *cell = (snapped, WAKE_REST * edge, false);
+    }
+    cells
 }
-
 /// The last packet: leaves the source and dies at the break.
 ///
 /// Played once when the path fails, keyed on the tone — the attempt the wire
@@ -488,8 +582,6 @@ mod tests {
             assert!((0.0..=1.0).contains(&a), "noise({seed}) = {a}");
             assert_eq!(a, noise(seed, seed * 7 + 1), "noise must be stable");
         }
-        // Two different inputs produce different values for at least some
-        // cells, or the glitch pattern would be uniform.
         let distinct = (0..32u32)
             .map(|i| noise(i, i / 2))
             .collect::<Vec<_>>();
@@ -501,26 +593,28 @@ mod tests {
     }
 
     #[test]
-    fn every_wire_cell_carries_the_carrier() {
-        // Even with no packets anywhere near, the cell rests lit: the link is
-        // up, and the wire must say so in its still form too.
+    fn the_still_form_carries_every_cell_and_rests_the_wake() {
         for column in 0..40usize {
-            let (alpha, corrupted) = wire_cell(column, 40, f32::NAN, false);
+            let (alpha, corrupted) = wire_cell(column, 40, None, false);
             assert_eq!(alpha, WIRE_REST);
             assert!(!corrupted);
+        }
+        for (offset, alpha, corrupted) in wake_cells(5, 40, None, false) {
+            assert_eq!(alpha, WAKE_REST);
+            assert!(!corrupted);
+            assert!(offset.abs() >= WAKE_GAP);
         }
     }
 
     #[test]
-    fn traffic_sweeps_the_whole_wire_and_stays_lit() {
-        // Over one full period, every cell is touched by a packet head at
-        // least once, and no cell ever exceeds the head's own alpha.
+    fn traffic_sweeps_the_whole_wire_over_one_period() {
         let columns = 40usize;
+        let period = CASCADE.as_secs_f32();
         let mut ever_lit = vec![false; columns];
-        for step in 0..60 {
-            let delta = step as f32 / 60.0;
+        for step in 0..80 {
+            let t = step as f32 / 80.0 * period;
             for (column, lit) in ever_lit.iter_mut().enumerate() {
-                let (alpha, _) = wire_cell(column, columns, delta, false);
+                let (alpha, _) = wire_cell(column, columns, Some(t), false);
                 assert!(alpha <= WIRE_HEAD + f32::EPSILON, "{alpha}");
                 if alpha > WIRE_REST {
                     *lit = true;
@@ -531,18 +625,28 @@ mod tests {
     }
 
     #[test]
-    fn a_glitching_wire_still_flows_but_corrupts() {
-        // Caution is not broken: most cells keep their carrier, some flash
-        // corruption, and dead air appears without taking whole cells away
-        // permanently.
+    fn a_steady_wire_never_corrupts_or_drops() {
+        let period = CASCADE.as_secs_f32();
+        for step in 0..40 {
+            let t = step as f32 / 40.0 * period;
+            for column in 0..30usize {
+                let (alpha, corrupted) = wire_cell(column, 30, Some(t), false);
+                assert!(!corrupted);
+                assert!(alpha >= WIRE_REST - f32::EPSILON, "{alpha}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_glitching_wire_corrupts_without_dying() {
         let columns = 60usize;
         let mut corrupted = 0;
         let mut dead_air = 0;
         let mut cells = 0;
-        for step in 0..20 {
-            let delta = step as f32 / 20.0;
+        for step in 0..30 {
+            let t = step as f32 / 30.0 * CASCADE.as_secs_f32();
             for column in 0..columns {
-                let (alpha, flash) = wire_cell(column, columns, delta, true);
+                let (alpha, flash) = wire_cell(column, columns, Some(t), true);
                 cells += 1;
                 if flash {
                     corrupted += 1;
@@ -558,13 +662,15 @@ mod tests {
     }
 
     #[test]
-    fn a_steady_wire_never_corrupts_or_drops() {
-        for step in 0..30 {
-            let delta = step as f32 / 30.0;
-            for column in 0..30usize {
-                let (alpha, corrupted) = wire_cell(column, 30, delta, false);
-                assert!(!corrupted);
-                assert!(alpha > 0.0, "a healthy wire dropped a cell");
+    fn wake_traces_stay_pixel_snapped_and_quiet() {
+        for step in 0..40 {
+            let t = step as f32 * 0.06;
+            for column in (0..30).step_by(3) {
+                for (offset, alpha, corrupted) in wake_cells(column, 30, Some(t), false) {
+                    assert_eq!(offset % 2.0, 0.0, "{offset} is not on the grid");
+                    assert!(!corrupted);
+                    assert!(alpha <= WAKE_REST + f32::EPSILON, "{alpha}");
+                }
             }
         }
     }
