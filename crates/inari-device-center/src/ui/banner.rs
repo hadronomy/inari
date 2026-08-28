@@ -51,11 +51,20 @@ const ROWS: usize = 9;
 /// How far apart two neighbouring columns sit in the wave. Small enough that
 /// the crest reads as one travelling band rather than as cells taking turns.
 const STAGGER: f32 = 0.055;
-/// What a cell sits at between crests. Never zero: the cascade has to describe
-/// the same edge when motion is off as when it is running.
-const REST: f32 = 0.10;
+/// What a cell dims to between crests, as a fraction of its lit alpha. Never
+/// zero: the cascade has to describe the same edge when motion is off as when
+/// it is running.
+const REST: f32 = 0.28;
+/// How opaque a cell is at the leading edge on the crest. The wall has to read
+/// against a tinted wash, so this is the cell's own alpha and the crest scales
+/// it — not the other way round, which leaves every cell at `REST` and the
+/// whole band invisible.
+const PEAK: f32 = 0.85;
 /// The width the cascade occupies, including its trailing gap.
 const BAND: f32 = COLUMNS as f32 * (CELL + GAP);
+/// The leading column of the alert: the cascade runs through it and the tone
+/// glyph sits centred in it, far enough in that the light has died away.
+const GUTTER: f32 = 48.0;
 
 #[derive(IntoElement)]
 pub struct Banner {
@@ -148,27 +157,40 @@ impl Banner {
         div()
             .id(self.id)
             .relative()
-            .h_flex()
-            .items_start()
-            .gap(px(Theme::SPACE_MD))
+            // A plain flex row rather than `h_flex`, which centres its items.
+            // Left at the default the children stretch, so the gutter is as
+            // tall as the alert however many lines the message runs to and its
+            // glyph stays on the centre line.
+            .flex()
+            .flex_row()
             .w_full()
-            .p(px(Theme::SPACE_MD + 2.0))
-            // Clears the cascade, so the glyph sits on the same left margin the
-            // text would have had without it.
-            .pl(px(Theme::SPACE_MD + 2.0 + BAND))
+            .py(px(Theme::SPACE_MD + 2.0))
+            .pr(px(Theme::SPACE_MD + 2.0))
             .rounded(px(Theme::RADIUS_CARD))
             // The container clips the cascade, so one radius serves both and
             // no cell needs a corner of its own.
             .overflow_hidden()
             .bg(self.tone.wash(theme))
-            .child(cascade(color))
             .children(top_lip(theme.is_dark()))
             .child(
-                Icon::from(Symbol::Component(self.tone.symbol()))
-                    .size(px(16.0))
+                // The leading column: the cascade lights its edge and the tone
+                // glyph sits centred in it, on both axes. The glyph lands where
+                // the light has already died away, so the two read as one
+                // gesture rather than as a badge stuck beside a bar.
+                div()
+                    .relative()
                     .flex_none()
-                    .mt(px(1.0))
-                    .text_color(color),
+                    .w(px(GUTTER))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(cascade(color))
+                    .child(
+                        Icon::from(Symbol::Component(self.tone.symbol()))
+                            .size(px(17.0))
+                            .flex_none()
+                            .text_color(color),
+                    ),
             )
             .child(
                 div()
@@ -176,6 +198,7 @@ impl Banner {
                     .v_flex()
                     .flex_1()
                     .gap(px(2.0))
+                    .py(px(1.0))
                     .child(
                         div()
                             .text_body()
@@ -194,6 +217,8 @@ impl Banner {
                 div()
                     .relative()
                     .flex_none()
+                    .flex()
+                    .items_center()
                     .child(action)
             }))
     }
@@ -241,7 +266,7 @@ fn cascade(color: Hsla) -> gpui::Div {
                         .h(px(CELL))
                         .mb(px(GAP))
                         .w_full()
-                        .bg(Hsla { a: REST * reach * spread, ..color })
+                        .bg(Hsla { a: PEAK * reach * spread, ..color })
                 }));
             if running {
                 column_element
@@ -259,7 +284,11 @@ fn cascade(color: Hsla) -> gpui::Div {
                     )
                     .into_any_element()
             } else {
-                column_element.into_any_element()
+                // Motion off: hold the wall at its resting light, so the edge
+                // still describes itself.
+                column_element
+                    .opacity(REST)
+                    .into_any_element()
             }
         }))
 }
@@ -267,14 +296,14 @@ fn cascade(color: Hsla) -> gpui::Div {
 /// A hairline of light along the top edge, stopping short of the corners.
 ///
 /// The same lip the surface ladder uses, so an alert and a card catch the light
-/// from the same direction. It starts after the cascade so the two do not meet
-/// in a corner and read as a drawn outline.
+/// from the same direction. It starts after the gutter so it never crosses the
+/// cascade, where two kinds of light meeting would read as a drawn outline.
 fn top_lip(dark: bool) -> Option<gpui::Div> {
     dark.then(|| {
         div()
             .absolute()
             .top_0()
-            .left(px(BAND + Theme::RADIUS_CARD))
+            .left(px(GUTTER))
             .right(px(Theme::RADIUS_CARD))
             .h(px(1.0))
             .bg(hsla(0.0, 0.0, 1.0, 0.07))
