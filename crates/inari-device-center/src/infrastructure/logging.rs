@@ -27,10 +27,21 @@ pub fn initialize_logging() -> anyhow::Result<WorkerGuard> {
 ///
 /// The windowed subsystem has no stderr, so an unhooked panic vanishes — the
 /// process fails fast and the event log records only an address. The hook
-/// writes the message and location to the same file as everything else,
-/// which is the difference between diagnosing a crash and guessing at one.
+/// appends to the log file directly and synchronously: the process aborts
+/// when the panic unwinds, so a buffered or backgrounded writer loses the
+/// message exactly when it matters.
 fn install_panic_hook() {
-    std::panic::set_hook(Box::new(|info| {
+    let directory =
+        directories::ProjectDirs::from("dev", "Inari", "Inari Device Center").map(|project| {
+            project
+                .data_local_dir()
+                .join("data")
+                .join("logs")
+        });
+    std::panic::set_hook(Box::new(move |info| {
+        let Some(directory) = &directory else {
+            return;
+        };
         let location = info
             .location()
             .map(|location| format!("{}:{}", location.file(), location.line()))
@@ -45,6 +56,15 @@ fn install_panic_hook() {
                     .cloned()
             })
             .unwrap_or_else(|| "no panic message".into());
-        tracing::error!(%location, %message, "panic");
+        let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f");
+        let entry = format!("[{stamp}] ERROR panic at {location}: {message}\n");
+        if let Ok(mut file) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(directory.join("panics.log"))
+        {
+            use std::io::Write as _;
+            let _ = file.write_all(entry.as_bytes());
+        }
     }));
 }
