@@ -96,10 +96,10 @@ pub fn start_window_drag(window: &Window) {
 #[cfg(windows)]
 fn start_window_drag_on_platform(window: &Window) {
     use windows::Win32::{
-        Foundation::WPARAM,
+        Foundation::{LPARAM, WPARAM},
         UI::{
             Input::KeyboardAndMouse::ReleaseCapture,
-            WindowsAndMessaging::{HTCAPTION, SendMessageW, WM_NCLBUTTONDOWN},
+            WindowsAndMessaging::{HTCAPTION, PostMessageW, WM_NCLBUTTONDOWN},
         },
     };
 
@@ -109,7 +109,12 @@ fn start_window_drag_on_platform(window: &Window) {
 
     unsafe {
         let _ = ReleaseCapture();
-        let _ = SendMessageW(handle, WM_NCLBUTTONDOWN, Some(WPARAM(HTCAPTION as usize)), None);
+        // Posted, not sent: SendMessage would start the modal move loop
+        // inside this dispatch, and the loop pumps messages — a pending task
+        // wakes and re-borrows the app mid-dispatch, which panics. Posting
+        // queues the caption press for the next pump iteration, where the
+        // loop starts on a clean stack.
+        let _ = PostMessageW(Some(handle), WM_NCLBUTTONDOWN, WPARAM(HTCAPTION as usize), LPARAM(0));
     }
 }
 
