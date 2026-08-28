@@ -44,10 +44,15 @@ use super::{
 
 /// One cascade cell, and the gap between cells.
 const CELL: f32 = 2.0;
-const GAP: f32 = 1.0;
-/// How far the cascade runs in from the edge, and how tall it stands.
-const COLUMNS: usize = 13;
-const ROWS: usize = 9;
+const GAP: f32 = 2.0;
+/// How far the cascade runs in from the leading edge. Past the glyph and a
+/// little way under the first words, by which point the squared falloff has
+/// taken it to almost nothing.
+const COLUMNS: usize = 21;
+/// Enough rows to overrun any alert this component produces. The wall is meant
+/// to run the full height, so it is built taller than it needs to be and the
+/// alert's own rounded clip decides where it ends.
+const ROWS: usize = 33;
 /// How far apart two neighbouring columns sit in the wave. Small enough that
 /// the crest reads as one travelling band rather than as cells taking turns.
 const STAGGER: f32 = 0.055;
@@ -171,12 +176,16 @@ impl Banner {
             // no cell needs a corner of its own.
             .overflow_hidden()
             .bg(self.tone.wash(theme))
+            // Behind everything and wider than the gutter: the wall runs the
+            // full height of the surface and reaches past the glyph, so the
+            // light is something the alert sits in rather than a bar bolted to
+            // its edge.
+            .child(cascade(color))
             .children(top_lip(theme.is_dark()))
             .child(
-                // The leading column: the cascade lights its edge and the tone
-                // glyph sits centred in it, on both axes. The glyph lands where
-                // the light has already died away, so the two read as one
-                // gesture rather than as a badge stuck beside a bar.
+                // The leading column. The glyph is centred in it on both axes
+                // and paints over the wall, at the point where the falloff has
+                // already taken the light down.
                 div()
                     .relative()
                     .flex_none()
@@ -184,7 +193,6 @@ impl Banner {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(cascade(color))
                     .child(
                         Icon::from(Symbol::Component(self.tone.symbol()))
                             .size(px(17.0))
@@ -236,6 +244,11 @@ impl Banner {
 /// someone faded out; a squared one keeps the light gathered at the edge and
 /// lets the tail go to almost nothing, which is what makes it read as light
 /// rather than as a shape.
+///
+/// It runs the full height of the alert. The column is built taller than any
+/// alert gets and centred, so the top and bottom rows fall outside the surface
+/// and the alert's rounded `overflow_hidden` cuts them — corners included,
+/// which is what keeps the wall inside the shape instead of squaring it off.
 fn cascade(color: Hsla) -> gpui::Div {
     let running = motion::enabled();
     div()
@@ -246,6 +259,7 @@ fn cascade(color: Hsla) -> gpui::Div {
         .w(px(BAND))
         .flex()
         .items_center()
+        .overflow_hidden()
         .children((0..COLUMNS).map(move |column| {
             let reach = 1.0 - (column as f32 / COLUMNS as f32);
             let reach = reach * reach;
@@ -256,17 +270,15 @@ fn cascade(color: Hsla) -> gpui::Div {
                 .flex()
                 .flex_col()
                 .justify_center()
-                .children((0..ROWS).map(move |row| {
-                    // The wall is brightest on its centre line and thins at the
-                    // top and bottom, so it reads as a band of light rather
-                    // than a rectangle of cells.
-                    let centre = (row as f32 - (ROWS as f32 - 1.0) / 2.0).abs();
-                    let spread = 1.0 - centre / ((ROWS as f32 - 1.0) / 2.0 + 1.0);
+                .children((0..ROWS).map(move |_| {
+                    // Even top to bottom: the light falls off across the wall,
+                    // not down it, so the edge reads as one surface rather than
+                    // as a band floating in the middle of the alert.
                     div()
                         .h(px(CELL))
                         .mb(px(GAP))
                         .w_full()
-                        .bg(Hsla { a: PEAK * reach * spread, ..color })
+                        .bg(Hsla { a: PEAK * reach, ..color })
                 }));
             if running {
                 column_element
