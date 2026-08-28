@@ -22,6 +22,8 @@ pub enum Glyph {
     Computer,
     /// The local agent service.
     Agent,
+    /// A credential carried by a link.
+    Link,
 }
 
 impl Glyph {
@@ -35,10 +37,11 @@ impl Glyph {
             Self::Support => "icons/life-buoy.svg",
             Self::Computer => "icons/monitor.svg",
             Self::Agent => "icons/server.svg",
+            Self::Link => "icons/link.svg",
         }
     }
 
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Printer,
         Self::Scale,
         Self::Scanner,
@@ -47,6 +50,7 @@ impl Glyph {
         Self::Support,
         Self::Computer,
         Self::Agent,
+        Self::Link,
     ];
 }
 
