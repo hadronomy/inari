@@ -121,31 +121,34 @@ fn entry_row(entry: Entry, now: DateTime<Utc>, theme: &Theme) -> impl IntoElemen
         .px(px(Theme::SPACE_MD + 2.0))
         .py(px(Theme::SPACE_MD))
         .child(
-            // The row is top-anchored (entries can grow), so each flank is
-            // set to the title line's optical centre: a 19px line box puts
-            // that centre at 9.5px, and the dot and the first time line are
-            // inset exactly enough to share it.
-            div()
-                .flex_none()
-                .mt(px(3.0))
-                .child(StatusDot::new(entry.tone).size(7.0)),
-        )
-        .child(
             div()
                 .v_flex()
                 .flex_1()
                 .min_w(px(0.0))
                 .gap(px(1.0))
                 .child(
+                    // Dot and title share one centred row, so the dot's
+                    // centre meets the title line's centre by flexbox —
+                    // no nudges to drift apart later.
                     div()
-                        .text_body()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(entry.title),
+                        .h_flex()
+                        .items_center()
+                        .gap(px(Theme::SPACE_SM))
+                        .child(StatusDot::new(entry.tone).size(7.0))
+                        .child(
+                            div()
+                                .text_body()
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .child(entry.title),
+                        ),
                 )
                 .child(
                     div()
                         .text_caption()
                         .text_color(theme.text_secondary)
+                        // Aligned under the title text, not under the dot:
+                        // the dot's box (7px + its 3px ring) plus the row gap.
+                        .pl(px(13.0 + Theme::SPACE_SM))
                         .child(entry.detail),
                 ),
         )
