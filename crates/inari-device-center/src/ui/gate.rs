@@ -56,6 +56,13 @@ const GLITCH_ERROR: f32 = 0.045;
 const LAST_BREATH: Duration = Duration::from_millis(700);
 const TAU: f32 = std::f32::consts::TAU;
 
+/// The wire's time source: one process-lifetime instant. A per-render
+/// `Instant::now` resets `t` to zero every frame, which froze the traffic in
+/// its opening position; a shared clock keeps every wire on one continuous
+/// timeline, wherever and whenever it is mounted.
+static WIRE_CLOCK: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
 /// One flanking trace of the information field: a pixel sine on one side of
 /// the line, with its own frequency, amplitude, and travel speed.
 struct WakeLane {
@@ -341,22 +348,23 @@ fn connector(id: &'static str, tone: Tone, theme: &Theme) -> gpui::Div {
 /// delta made the comet trails teleport at the wrap and the glitch pattern
 /// snap back to its start, which read as the wire rewinding.
 fn flowing_wire(id: &'static str, tone: Tone) -> impl IntoElement {
-    let started = std::time::Instant::now();
     let still = !motion::enabled();
-    wire_canvas(tone, if still { None } else { Some(started) })
+    let t = (!still).then(|| WIRE_CLOCK.elapsed().as_secs_f32());
+    wire_canvas(tone, t)
         .with_animation(
             gpui::SharedString::from(format!("gate-flow-{id}")),
             // The cascade only drives repaint cadence here; the wire's math
-            // runs on its own clock so the loop boundary does not exist.
+            // runs on the shared clock, so neither the loop boundary nor a
+            // re-render can rewind it.
             motion::cascade(),
-            move |_, _| wire_canvas(tone, Some(started)),
+            move |_, _| wire_canvas(tone, Some(WIRE_CLOCK.elapsed().as_secs_f32())),
         )
         .into_any_element()
 }
 
 /// The wire at time `t`. `None` paints the still form the reduced motion
 /// preference shows: carrier and flanking traces at rest, no traffic.
-fn wire_canvas(tone: Tone, clock: Option<std::time::Instant>) -> gpui::Canvas<()> {
+fn wire_canvas(tone: Tone, clock: Option<f32>) -> gpui::Canvas<()> {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, cx| {
@@ -365,7 +373,7 @@ fn wire_canvas(tone: Tone, clock: Option<std::time::Instant>) -> gpui::Canvas<()
             let glitching = tone == Tone::Caution;
             let columns = (f32::from(bounds.size.width) / WIRE_PITCH).ceil() as usize;
             let center = f32::from(bounds.origin.y) + f32::from(bounds.size.height) / 2.0;
-            let t = clock.map(|started| started.elapsed().as_secs_f32());
+            let t = clock;
             for column in 0..columns {
                 let x = f32::from(bounds.origin.x) + column as f32 * WIRE_PITCH;
                 let (mut alpha, corrupted) = wire_cell(column, columns, t, glitching);
