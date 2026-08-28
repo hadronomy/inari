@@ -9,7 +9,7 @@ pub fn initialize_logging() -> anyhow::Result<WorkerGuard> {
     let directory = project.data_local_dir().join("logs");
     fs::create_dir_all(&directory).context("could not create the Device Center log directory")?;
 
-    let file = tracing_appender::rolling::daily(directory, "device-center.log");
+    let file = tracing_appender::rolling::daily(&directory, "device-center.log");
     let (writer, guard) = tracing_appender::non_blocking(file);
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -19,7 +19,7 @@ pub fn initialize_logging() -> anyhow::Result<WorkerGuard> {
         .with_ansi(false)
         .with_writer(writer)
         .init();
-    install_panic_hook();
+    install_panic_hook(directory);
     Ok(guard)
 }
 
@@ -30,18 +30,8 @@ pub fn initialize_logging() -> anyhow::Result<WorkerGuard> {
 /// appends to the log file directly and synchronously: the process aborts
 /// when the panic unwinds, so a buffered or backgrounded writer loses the
 /// message exactly when it matters.
-fn install_panic_hook() {
-    let directory =
-        directories::ProjectDirs::from("dev", "Inari", "Inari Device Center").map(|project| {
-            project
-                .data_local_dir()
-                .join("data")
-                .join("logs")
-        });
+fn install_panic_hook(directory: std::path::PathBuf) {
     std::panic::set_hook(Box::new(move |info| {
-        let Some(directory) = &directory else {
-            return;
-        };
         let location = info
             .location()
             .map(|location| format!("{}:{}", location.file(), location.line()))
@@ -57,7 +47,7 @@ fn install_panic_hook() {
             })
             .unwrap_or_else(|| "no panic message".into());
         let stamp = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f");
-        let entry = format!("[{stamp}] ERROR panic at {location}: {message}\n");
+        let entry = format!("[{stamp}] panic at {location}: {message}\n");
         if let Ok(mut file) = fs::OpenOptions::new()
             .create(true)
             .append(true)
