@@ -19,5 +19,32 @@ pub fn initialize_logging() -> anyhow::Result<WorkerGuard> {
         .with_ansi(false)
         .with_writer(writer)
         .init();
+    install_panic_hook();
     Ok(guard)
+}
+
+/// Route panics into the log.
+///
+/// The windowed subsystem has no stderr, so an unhooked panic vanishes — the
+/// process fails fast and the event log records only an address. The hook
+/// writes the message and location to the same file as everything else,
+/// which is the difference between diagnosing a crash and guessing at one.
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|location| format!("{}:{}", location.file(), location.line()))
+            .unwrap_or_else(|| "unknown location".into());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|message| message.to_string())
+            .or_else(|| {
+                info.payload()
+                    .downcast_ref::<String>()
+                    .cloned()
+            })
+            .unwrap_or_else(|| "no panic message".into());
+        tracing::error!(%location, %message, "panic");
+    }));
 }
