@@ -224,8 +224,15 @@ fn rail_item(item: RailItem, active: bool, enabled: bool, theme: &Theme) -> Stat
                     row.focus(|style| style.border_color(theme.focus_ring))
                 })
                 .when(!active, |row| {
-                    row.hover(|row| row.bg(theme.wash_hover))
-                        .active(|row| row.bg(theme.wash_pressed))
+                    row.on_hover(move |hovered, window, _| {
+                        if motion::hover_set(item.id, *hovered) {
+                            // Refresh: request_animation_frame panics outside
+                            // paint (see hover_set).
+                            window.refresh();
+                        }
+                    })
+                    .bg(motion::hover_blend(item.id, theme.wash_hover))
+                    .active(|row| row.bg(theme.wash_pressed))
                 })
                 .on_click(move |_, window, cx| {
                     window.dispatch_action(click_action.boxed_clone(), cx);
