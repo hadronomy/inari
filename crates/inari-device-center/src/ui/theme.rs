@@ -201,7 +201,7 @@ impl Theme {
             danger_fill: hex(0xa8321f),
 
             font_sans: FONT_SANS.into(),
-            font_mono: mono_family(),
+            font_mono: FONT_MONO.into(),
         }
     }
 
@@ -249,7 +249,7 @@ impl Theme {
             danger_fill: hex(0xa83525),
 
             font_sans: FONT_SANS.into(),
-            font_mono: mono_family(),
+            font_mono: FONT_MONO.into(),
         }
     }
 
@@ -448,18 +448,17 @@ fn hex(value: u32) -> Hsla {
     gpui::rgb(value).into()
 }
 
-/// The platform monospace face, for identifiers and diagnostics. The brand's
-/// IBM Plex Mono ships as WOFF2 for the web, which the GPUI text system does
-/// not load, and the system face is the better native answer anyway.
-fn mono_family() -> SharedString {
-    if cfg!(target_os = "macos") {
-        "SF Mono".into()
-    } else if cfg!(target_os = "windows") {
-        "Cascadia Mono".into()
-    } else {
-        "monospace".into()
-    }
-}
+/// The technical face, for identifiers, endpoints, and diagnostics.
+///
+/// Departure Mono, embedded, so the readouts look the same on every platform
+/// instead of inheriting SF Mono, Cascadia Mono, and whatever `monospace`
+/// resolves to on a given Linux box.
+///
+/// It is a pixel face: every outline sits on a grid of 50 units in a 550-unit
+/// em, so it is only truly sharp at sizes where that grid lands on whole
+/// device pixels. [`super::content::Typography::text_technical`] carries the
+/// size that follows from that.
+const FONT_MONO: &str = "Departure Mono";
 
 #[cfg(test)]
 mod tests {
