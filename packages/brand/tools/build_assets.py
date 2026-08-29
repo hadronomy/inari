@@ -41,6 +41,7 @@ LUCIDE_ICONS = (
     "check",
     "circle-check",
     "circle-x",
+    "copy",
     "external-link",
     "file",
     "folder-open",
@@ -74,6 +75,11 @@ FONT_SOURCES = (
         "atkinson-hyperlegible-next-semibold.otf",
         "https://raw.githubusercontent.com/googlefonts/atkinson-hyperlegible-next/main/fonts/otf/AtkinsonHyperlegibleNext-SemiBold.otf",
         "3538b4251b554113c4f54f7f195f91661b3199049076c9d9ee6fa52adc55462b",
+    ),
+    FontSource(
+        "departure-mono-regular.otf",
+        "https://departuremono.com/assets/DepartureMono-Regular.otf",
+        "4d53f663155cf8bf7ffc8e688776e719625f7bbb80a8d90073438b249261a2e0",
     ),
     FontSource(
         "instrument-sans-latin.woff2",
