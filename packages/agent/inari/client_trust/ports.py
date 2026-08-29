@@ -27,12 +27,14 @@ class ClientTrustStore(Protocol):
 
     def save_grant(self, grant: ClientGrant) -> None: ...
 
-    def consume_pairing_assertion(self, assertion_jti: str, *, at: datetime) -> bool: ...
+    def consume_pairing_assertion(
+        self, assertion_jti: str, *, at: datetime
+    ) -> bool: ...
 
     def consume_dpop_jti(self, jti: str, *, expires_at: datetime) -> bool: ...
 
 
-class PairingAssertionVerifier(Protocol):
+class PairingAssertionVerifierPort(Protocol):
     """Verifies the company-signed Pairing Assertion at the trust seam."""
 
     def verify(
@@ -44,13 +46,13 @@ class PairingAssertionVerifier(Protocol):
     ) -> PairingAssertionClaims: ...
 
 
-class AccessTokenVerifier(Protocol):
+class AccessTokenVerifierPort(Protocol):
     """Verifies an access token and returns content-free claims."""
 
     def verify(self, token: str, *, at: datetime) -> AccessTokenClaims: ...
 
 
-class DPoPVerifier(Protocol):
+class DPoPVerifierPort(Protocol):
     """Verifies one DPoP proof after the request headers are available."""
 
     def verify(
@@ -65,7 +67,7 @@ class DPoPVerifier(Protocol):
     ) -> AcceptedDPoPProof: ...
 
 
-class AccessTokenIssuer(Protocol):
+class AccessTokenIssuerPort(Protocol):
     def issue(
         self,
         grant: ClientGrant,
@@ -84,11 +86,11 @@ class TrustClock(Protocol):
 
 
 __all__ = [
-    "AccessTokenIssuer",
-    "AccessTokenVerifier",
+    "AccessTokenIssuerPort",
+    "AccessTokenVerifierPort",
     "ClientTrustStore",
-    "DPoPVerifier",
-    "PairingAssertionVerifier",
+    "DPoPVerifierPort",
+    "PairingAssertionVerifierPort",
     "PermissionPolicy",
     "TrustClock",
 ]

@@ -8,6 +8,12 @@ from .errors import (
     ReplayDetectedError,
     ScopeMismatchError,
 )
+from .crypto import (
+    PairingAssertionSigner,
+    PairingAssertionVerifier,
+    jwk_thumbprint,
+    public_ed25519_jwk,
+)
 from .models import (
     AccessTokenClaims,
     AcceptedDPoPProof,
@@ -39,24 +45,30 @@ from .models import (
 )
 from .permissions import Permission, PermissionCatalog, PermissionSet
 from .ports import (
-    AccessTokenIssuer,
-    AccessTokenVerifier,
+    AccessTokenIssuerPort,
+    AccessTokenVerifierPort,
     ClientTrustStore,
-    DPoPVerifier,
-    PairingAssertionVerifier,
+    DPoPVerifierPort,
+    PairingAssertionVerifierPort,
     PermissionPolicy,
     TrustClock,
 )
+from .tokens import AccessTokenSigner, AccessTokenVerifier, DPoPProofVerifier
 
 __all__ = [
-    "AccessTokenIssuer",
+    "AccessTokenIssuerPort",
+    "AccessTokenSigner",
     "AccessTokenVerifier",
+    "AccessTokenVerifierPort",
     "ClientTrustError",
     "ClientTrustErrorCode",
     "ClientTrustStore",
-    "DPoPVerifier",
+    "DPoPProofVerifier",
+    "DPoPVerifierPort",
     "InvalidOriginError",
     "PairingAssertionVerifier",
+    "PairingAssertionVerifierPort",
+    "PairingAssertionSigner",
     "Permission",
     "PermissionCatalog",
     "PermissionDeniedError",
@@ -92,4 +104,6 @@ __all__ = [
     "RenewalResult",
     "RenewalResultState",
     "RequestTarget",
+    "jwk_thumbprint",
+    "public_ed25519_jwk",
 ]

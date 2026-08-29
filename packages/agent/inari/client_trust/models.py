@@ -50,7 +50,9 @@ def _permission_set(value: Any) -> PermissionSet:
     return PermissionCatalog.normalize(value)
 
 
-def _assert_order(first_name: str, first: datetime, second_name: str, second: datetime) -> None:
+def _assert_order(
+    first_name: str, first: datetime, second_name: str, second: datetime
+) -> None:
     if second <= first:
         raise ValueError(f"{second_name} must follow {first_name}")
 
@@ -103,11 +105,15 @@ class BoundOrigin:
             username = parsed.username
             password = parsed.password
         except ValueError as exc:
-            raise InvalidOriginError("The browser origin authority is invalid.") from exc
+            raise InvalidOriginError(
+                "The browser origin authority is invalid."
+            ) from exc
         if not hostname or username or password:
             raise InvalidOriginError()
         if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-            raise InvalidOriginError("The browser origin must not contain a path or query.")
+            raise InvalidOriginError(
+                "The browser origin must not contain a path or query."
+            )
         host = hostname.lower().rstrip(".")
         if not host or "*" in host or host == "null":
             raise InvalidOriginError()
@@ -137,7 +143,9 @@ class BoundOrigin:
 
     def matches(self, origin: str | BoundOrigin) -> bool:
         try:
-            candidate = origin if isinstance(origin, BoundOrigin) else BoundOrigin(origin)
+            candidate = (
+                origin if isinstance(origin, BoundOrigin) else BoundOrigin(origin)
+            )
         except InvalidOriginError:
             return False
         return candidate == self
@@ -228,7 +236,9 @@ class ClientPairing:
             _assert_order("created_at", created_at, "expires_at", expires_at)
             object.__setattr__(self, "expires_at", expires_at)
         if self.last_used_at is not None:
-            object.__setattr__(self, "last_used_at", _utc("last_used_at", self.last_used_at))
+            object.__setattr__(
+                self, "last_used_at", _utc("last_used_at", self.last_used_at)
+            )
         if not isinstance(self.lifecycle, PairingLifecycle):
             object.__setattr__(self, "lifecycle", PairingLifecycle(self.lifecycle))
 
@@ -239,11 +249,15 @@ class ClientPairing:
     def active_at(self, now: datetime) -> None:
         moment = _utc("now", now)
         if self.lifecycle is PairingLifecycle.REVOKED:
-            raise ClientTrustError(ClientTrustErrorCode.GRANT_REVOKED, "The Client Pairing is revoked.")
+            raise ClientTrustError(
+                ClientTrustErrorCode.GRANT_REVOKED, "The Client Pairing is revoked."
+            )
         if self.lifecycle is PairingLifecycle.EXPIRED or (
             self.expires_at is not None and self.expires_at <= moment
         ):
-            raise ClientTrustError(ClientTrustErrorCode.PAIRING_EXPIRED, "The Client Pairing is expired.")
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_EXPIRED, "The Client Pairing is expired."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,10 +298,14 @@ class ClientGrant:
         object.__setattr__(self, "expires_at", expires_at)
         if self.offline_renewal_until is not None:
             renewal_until = _utc("offline_renewal_until", self.offline_renewal_until)
-            _assert_order("expires_at", expires_at, "offline_renewal_until", renewal_until)
+            _assert_order(
+                "expires_at", expires_at, "offline_renewal_until", renewal_until
+            )
             object.__setattr__(self, "offline_renewal_until", renewal_until)
         if self.last_used_at is not None:
-            object.__setattr__(self, "last_used_at", _utc("last_used_at", self.last_used_at))
+            object.__setattr__(
+                self, "last_used_at", _utc("last_used_at", self.last_used_at)
+            )
         if not isinstance(self.lifecycle, GrantLifecycle):
             object.__setattr__(self, "lifecycle", GrantLifecycle(self.lifecycle))
 
@@ -302,9 +320,13 @@ class ClientGrant:
     def active_at(self, now: datetime) -> None:
         moment = _utc("now", now)
         if self.lifecycle is GrantLifecycle.REVOKED:
-            raise ClientTrustError(ClientTrustErrorCode.GRANT_REVOKED, "The Client Grant is revoked.")
+            raise ClientTrustError(
+                ClientTrustErrorCode.GRANT_REVOKED, "The Client Grant is revoked."
+            )
         if self.lifecycle is GrantLifecycle.EXPIRED or self.expires_at <= moment:
-            raise ClientTrustError(ClientTrustErrorCode.GRANT_EXPIRED, "The Client Grant is expired.")
+            raise ClientTrustError(
+                ClientTrustErrorCode.GRANT_EXPIRED, "The Client Grant is expired."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,7 +359,11 @@ def _https_url(name: str, value: str, *, allow_path: bool) -> SplitResult:
     parsed = urlsplit(value)
     if parsed.scheme.lower() != "https" or not parsed.hostname:
         raise ValueError(f"{name} must be an absolute HTTPS URL")
-    if parsed.username or parsed.password or (not allow_path and parsed.path not in {"", "/"}):
+    if (
+        parsed.username
+        or parsed.password
+        or (not allow_path and parsed.path not in {"", "/"})
+    ):
         raise ValueError(f"{name} contains unsupported URL components")
     try:
         parsed.port
@@ -367,19 +393,29 @@ class EndpointPolicy:
             raise ValueError("allowed_methods must contain HTTP methods")
         object.__setattr__(self, "allowed_methods", methods)
         paths = tuple(self.allowed_paths)
-        if any(not path.startswith("/") or "?" in path or "#" in path for path in paths):
+        if any(
+            not path.startswith("/") or "?" in path or "#" in path for path in paths
+        ):
             raise ValueError("allowed_paths must contain path-only values")
         object.__setattr__(self, "allowed_paths", paths)
 
     def accepts(self, target: RequestTarget) -> None:
         if target.method not in self.allowed_methods:
-            raise ScopeMismatchError("The request method is not allowed for this Agent Endpoint.")
-        target_origin = BoundOrigin(urlunsplit(("https", urlsplit(target.uri).netloc, "", "", "")))
+            raise ScopeMismatchError(
+                "The request method is not allowed for this Agent Endpoint."
+            )
+        target_origin = BoundOrigin(
+            urlunsplit(("https", urlsplit(target.uri).netloc, "", "", ""))
+        )
         if target_origin != self.origin:
-            raise ScopeMismatchError("The request origin does not match the Client Pairing.")
+            raise ScopeMismatchError(
+                "The request origin does not match the Client Pairing."
+            )
         path = urlsplit(target.uri).path or "/"
         if self.allowed_paths and path not in self.allowed_paths:
-            raise ScopeMismatchError("The request path is not allowed for this Agent Endpoint.")
+            raise ScopeMismatchError(
+                "The request path is not allowed for this Agent Endpoint."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +431,8 @@ class AccessTokenClaims:
     client_grant_id: str
     business: BusinessScope
     permissions: PermissionSet
+    generation: int
+    authorization_digest: str
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -404,8 +442,15 @@ class AccessTokenClaims:
             ("token_id", self.token_id),
             ("client_pairing_id", self.client_pairing_id),
             ("client_grant_id", self.client_grant_id),
+            ("authorization_digest", self.authorization_digest),
         ):
             _identifier(name, value)
+        if (
+            not isinstance(self.generation, int)
+            or isinstance(self.generation, bool)
+            or self.generation < 0
+        ):
+            raise ValueError("generation must be a non-negative integer")
         _jwk_thumbprint("cnf_jkt", self.cnf_jkt)
         if not isinstance(self.business, BusinessScope):
             raise TypeError("business must be a BusinessScope")
@@ -460,6 +505,8 @@ class AccessTokenClaims:
             "organization_id": self.business.organization_id,
             "site_id": self.business.site_id,
             "scope": tuple(sorted(permission.value for permission in self.permissions)),
+            "generation": self.generation,
+            "authorization_digest": self.authorization_digest,
         }
         if self.business.pos_configuration_id is not None:
             values["pos_configuration_id"] = self.business.pos_configuration_id
@@ -537,9 +584,13 @@ class AuthorizedRequest:
             or self.grant.scope.origin != self.endpoint.origin
             or self.grant.scope.business != self.endpoint.business
         ):
-            raise ScopeMismatchError("The Client Grant does not match the Agent Endpoint.")
+            raise ScopeMismatchError(
+                "The Client Grant does not match the Agent Endpoint."
+            )
         if self.dpop.target != self.target:
-            raise ScopeMismatchError("The DPoP proof does not match the request target.")
+            raise ScopeMismatchError(
+                "The DPoP proof does not match the request target."
+            )
         if self.dpop.jwk_thumbprint != self.grant.jwk_thumbprint:
             raise ScopeMismatchError("The DPoP key does not match the Client Grant.")
         self.endpoint.accepts(self.target)
@@ -645,7 +696,9 @@ class PairingRequest:
         if not isinstance(self.scope, PairingScope):
             raise TypeError("scope must be a PairingScope")
         _jwk_thumbprint("browser_jwk_thumbprint", self.browser_jwk_thumbprint)
-        object.__setattr__(self, "requested_permissions", _permission_set(self.requested_permissions))
+        object.__setattr__(
+            self, "requested_permissions", _permission_set(self.requested_permissions)
+        )
         _token_value("session_nonce", self.session_nonce)
         if not re.fullmatch(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+){2}", self.phrase):
             raise ValueError("phrase must contain three hyphen-separated words")
@@ -670,9 +723,13 @@ class PairingCommand:
             raise TypeError("assertion must be a PairingAssertion")
         claims = self.assertion.claims
         if claims.pairing_request_id != self.request.request_id:
-            raise ScopeMismatchError("The Pairing Assertion does not match the request.")
+            raise ScopeMismatchError(
+                "The Pairing Assertion does not match the request."
+            )
         if claims.jwk_thumbprint != self.request.browser_jwk_thumbprint:
-            raise ScopeMismatchError("The Pairing Assertion does not match the browser key.")
+            raise ScopeMismatchError(
+                "The Pairing Assertion does not match the browser key."
+            )
         if (
             claims.agent_id != self.request.scope.agent_id
             or claims.audience != self.request.scope.audience
@@ -680,7 +737,9 @@ class PairingCommand:
             or claims.scopes != self.request.requested_permissions
             or claims.session_nonce != self.request.session_nonce
         ):
-            raise ScopeMismatchError("The Pairing Assertion does not match the request scope.")
+            raise ScopeMismatchError(
+                "The Pairing Assertion does not match the request scope."
+            )
 
 
 PairClientCommand = PairingCommand
@@ -709,7 +768,9 @@ class RenewalCommand:
         _identifier("grant_id", self.grant_id)
         _jwk_thumbprint("jwk_thumbprint", self.jwk_thumbprint)
         _token_value("session_nonce", self.session_nonce)
-        object.__setattr__(self, "requested_at", _utc("requested_at", self.requested_at))
+        object.__setattr__(
+            self, "requested_at", _utc("requested_at", self.requested_at)
+        )
 
 
 GrantRenewalCommand = RenewalCommand
@@ -727,14 +788,18 @@ class RenewalResult:
         if not isinstance(self.claims, AccessTokenClaims):
             raise TypeError("claims must be AccessTokenClaims")
         if self.grant.jwk_thumbprint != self.claims.cnf_jkt:
-            raise ScopeMismatchError("The renewed token does not match the Client Grant.")
+            raise ScopeMismatchError(
+                "The renewed token does not match the Client Grant."
+            )
         if (
             self.claims.client_pairing_id != self.grant.pairing_id
             or self.claims.client_grant_id != self.grant.grant_id
             or self.claims.business != self.grant.scope.business
             or self.claims.permissions != self.grant.permissions
         ):
-            raise ScopeMismatchError("The renewed token does not match the Client Grant scope.")
+            raise ScopeMismatchError(
+                "The renewed token does not match the Client Grant scope."
+            )
         if not isinstance(self.state, RenewalResultState):
             object.__setattr__(self, "state", RenewalResultState(self.state))
 

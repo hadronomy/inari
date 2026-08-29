@@ -176,6 +176,8 @@ def test_access_claims_are_serializable_without_mutable_nested_values() -> None:
         client_grant_id="grant_1",
         business=BUSINESS,
         permissions=frozenset({Permission.RECEIPT_IMAGE}),
+        generation=1,
+        authorization_digest="authorization_digest_1",
     )
 
     serialized = value.claims()
@@ -277,6 +279,8 @@ def test_grant_admission_and_renewal_values_are_immutable() -> None:
             client_grant_id="grant_1",
             business=BUSINESS,
             permissions=frozenset({Permission.RECEIPT_IMAGE, Permission.DRAWER}),
+            generation=1,
+            authorization_digest="authorization_digest_1",
         ),
     )
     assert admission.jwk_thumbprint == renewal.jwk_thumbprint == result.claims.cnf_jkt
