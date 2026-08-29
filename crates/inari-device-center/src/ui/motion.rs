@@ -16,7 +16,15 @@ use std::{
 use gpui::{Animation, Hsla, SharedString, ease_in_out, linear, pulsating_between};
 
 /// A state change the user caused and is watching: a selection moving, a panel
-/// swapping. Long enough to read as motion, short enough to feel immediate.
+/// swapping, a copy button reporting. Long enough to read as motion, short
+/// enough to feel immediate.
+///
+/// One duration covers a control's glyph and its label together, rather than
+/// the web's two — transitions.dev tokens an icon swap at 250ms and a text
+/// swap at 150ms. Those are tokens for two separate components; on one button
+/// they leave the mark still fading after the word has already changed, and it
+/// stops reading as one thing changing its mind. This sits between them, and
+/// inside the 300ms ceiling Emil Kowalski holds UI motion to.
 pub const SWAP: Duration = Duration::from_millis(180);
 
 /// Ambient motion that reports live state, such as the connection pulse. Slow
@@ -28,6 +36,98 @@ pub const AMBIENT: Duration = Duration::from_millis(2600);
 /// `transition-colors` on a Tailwind default, which is the feel every desktop
 /// and web interface the operator already uses has trained into them.
 pub const HOVER: Duration = Duration::from_millis(150);
+
+/// How far a label travels as it leaves or arrives, in pixels.
+pub const SWAP_TRAVEL: f32 = 4.0;
+
+/// How small a glyph gets on its way out, and starts on its way in.
+///
+/// The web recipe takes it to 0.25 and hides the gap with a 2px blur. GPUI has
+/// no filter blur — the renderer's only blur is a shadow's — so a glyph shrunk
+/// that far would visibly wink out of nothing, which is the one thing Kowalski
+/// says never to animate from. Without the blur to bridge it the scale has to
+/// carry less: at 0.7 the mark keeps a readable shape the whole way and the
+/// swap still reads as a pop rather than a dissolve.
+pub const SWAP_SCALE: f32 = 0.7;
+
+/// The curve every swap runs on.
+///
+/// A glyph turning into another glyph is movement on screen rather than an
+/// entrance, which is the case for an ease-in-out. The built-in one is too
+/// weak to read as deliberate — this is the strong variant Kowalski's course
+/// hands out, the same `cubic-bezier(0.77, 0, 0.175, 1)` his CSS uses.
+pub const EASE_SWAP: CubicBezier = CubicBezier::new(0.77, 0.0, 0.175, 1.0);
+
+/// A CSS `cubic-bezier(x1, y1, x2, y2)` timing function.
+///
+/// GPUI ships `ease_in_out` and `ease_out_quint` and nothing else, so a curve
+/// borrowed from the web has to be solved here. The two control points define
+/// x and y as separate cubics in a parameter `t`; easing means inverting the x
+/// cubic for the `t` at a given progress, then reading y off it.
+#[derive(Clone, Copy, Debug)]
+pub struct CubicBezier {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+}
+
+impl CubicBezier {
+    pub const fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self { x1, y1, x2, y2 }
+    }
+
+    fn axis(a: f32, b: f32, t: f32) -> f32 {
+        let inverse = 1.0 - t;
+        3.0 * inverse * inverse * t * a + 3.0 * inverse * t * t * b + t * t * t
+    }
+
+    fn slope(a: f32, b: f32, t: f32) -> f32 {
+        let inverse = 1.0 - t;
+        3.0 * inverse * inverse * a + 6.0 * inverse * t * (b - a) + 3.0 * t * t * (1.0 - b)
+    }
+
+    /// The eased fraction at `progress`, both in 0..1.
+    ///
+    /// Newton-Raphson converges in a handful of steps for the curves used
+    /// here; the bisection fallback covers the flat spots where the slope goes
+    /// to nothing and Newton would stall or overshoot. The result is clamped
+    /// because f32 rounding can push it a hair outside the unit interval, and
+    /// every caller treats it as a fraction.
+    pub fn ease(&self, progress: f32) -> f32 {
+        let progress = progress.clamp(0.0, 1.0);
+        if progress <= 0.0 || progress >= 1.0 {
+            return progress;
+        }
+        let mut t = progress;
+        for _ in 0..8 {
+            let error = Self::axis(self.x1, self.x2, t) - progress;
+            if error.abs() < 1e-5 {
+                return Self::axis(self.y1, self.y2, t).clamp(0.0, 1.0);
+            }
+            let slope = Self::slope(self.x1, self.x2, t);
+            if slope.abs() < 1e-6 {
+                break;
+            }
+            t -= error / slope;
+        }
+        let (mut low, mut high) = (0.0_f32, 1.0_f32);
+        t = progress;
+        for _ in 0..24 {
+            let x = Self::axis(self.x1, self.x2, t);
+            if (x - progress).abs() < 1e-5 {
+                break;
+            }
+            if x > progress {
+                high = t
+            } else {
+                low = t
+            }
+            t = (low + high) / 2.0;
+        }
+        Self::axis(self.y1, self.y2, t).clamp(0.0, 1.0)
+    }
+}
 
 static REDUCED: AtomicBool = AtomicBool::new(false);
 
@@ -124,23 +224,32 @@ struct HoverFade {
     /// When this leg began. A leg is one unbroken run toward a target;
     /// reversing the pointer starts a new leg from wherever the old one was.
     started: Instant,
+    /// How long this leg runs, and on what curve. Carried per entry rather
+    /// than read from a constant, because one store now drives both the hover
+    /// washes and the slower glyph and label swaps.
+    duration: Duration,
+    ease: fn(f32) -> f32,
 }
 
 impl HoverFade {
     /// The washed fraction at `now`. Exactly `target` once the leg has run its
     /// duration, so a fade finishes on the clock rather than asymptotically.
     fn value(&self, now: Instant) -> f32 {
-        let progress = (now - self.started).as_secs_f32() / HOVER.as_secs_f32();
+        let progress = (now - self.started).as_secs_f32() / self.duration.as_secs_f32();
         if progress >= 1.0 {
             self.target
         } else {
-            self.from + (self.target - self.from) * ease_in_out(progress)
+            self.from + (self.target - self.from) * (self.ease)(progress)
         }
     }
 
     fn settled(&self, now: Instant) -> bool {
-        self.from == self.target || (now - self.started) >= HOVER
+        self.from == self.target || (now - self.started) >= self.duration
     }
+}
+
+fn ease_swap(progress: f32) -> f32 {
+    EASE_SWAP.ease(progress)
 }
 
 thread_local! {
@@ -157,8 +266,22 @@ thread_local! {
 /// The render-phase loops on the views hosting fading elements keep the
 /// started fade walking.
 pub fn hover_set(key: impl Into<SharedString>, hovered: bool) -> bool {
+    drive(key, hovered, HOVER, ease_in_out)
+}
+
+/// Aim a swap at `active`, running on the swap duration and curve.
+///
+/// Same store and same clock as the hover washes: a swap reversed halfway —
+/// a second copy landing while the tick is still leaving — continues from
+/// where it was instead of restarting, which is the property CSS transitions
+/// have and keyframes do not.
+pub fn swap_set(key: impl Into<SharedString>, active: bool, duration: Duration) -> bool {
+    drive(key, active, duration, ease_swap)
+}
+
+fn drive(key: impl Into<SharedString>, on: bool, duration: Duration, ease: fn(f32) -> f32) -> bool {
     let key = key.into();
-    let target = if hovered { 1.0 } else { 0.0 };
+    let target = if on { 1.0 } else { 0.0 };
     HOVER_FADES.with(|fades| {
         let mut fades = fades.borrow_mut();
         match fades.get_mut(&key) {
@@ -169,10 +292,15 @@ pub fn hover_set(key: impl Into<SharedString>, hovered: bool) -> bool {
                 fade.from = fade.value(Instant::now());
                 fade.target = target;
                 fade.started = Instant::now();
+                fade.duration = duration;
+                fade.ease = ease;
                 true
             },
             None => {
-                fades.insert(key, HoverFade { from: 0.0, target, started: Instant::now() });
+                fades.insert(
+                    key,
+                    HoverFade { from: 0.0, target, started: Instant::now(), duration, ease },
+                );
                 target > 0.0
             },
         }
@@ -230,12 +358,13 @@ pub fn fade_target(key: impl Into<SharedString>) -> f32 {
     })
 }
 
-/// Whether any wash is mid-flight and the window owes itself another frame.
+/// Whether any wash or swap is mid-flight and the window owes itself another
+/// frame.
 ///
 /// The root view calls this once per render and requests the next frame while
 /// it is true, which is what walks the fades forward. A window with nothing
-/// hovered schedules nothing at all.
-pub fn hover_fades_live() -> bool {
+/// hovered and nothing swapping schedules nothing at all.
+pub fn fades_live() -> bool {
     let now = Instant::now();
     HOVER_FADES.with(|fades| {
         fades

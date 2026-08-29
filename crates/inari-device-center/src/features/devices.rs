@@ -127,7 +127,7 @@ impl Render for DeviceDirectory {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Keep the hover fades in this view's rows walking; see the root
         // view for the other half of the loop.
-        if motion::hover_fades_live() {
+        if motion::fades_live() {
             window.request_animation_frame();
         }
         let theme = cx.inari();
