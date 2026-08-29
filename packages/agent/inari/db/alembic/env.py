@@ -3,9 +3,9 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, event, pool
 
-from inari.db.schema import metadata
+from inari.db.schema import configure_sqlite_dbapi_connection, metadata
 
 config = context.config
 
@@ -39,6 +39,20 @@ def run_migrations_online() -> None:
             poolclass=pool.NullPool,
         )
 
+        def configure_sqlite(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+            del connection_record
+            configure_sqlite_dbapi_connection(dbapi_connection)
+            # Alembic batch migrations replace whole SQLite tables. SQLite
+            # cannot replace a referenced table while foreign keys are live.
+            # Validate the complete graph after the migration instead.
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys = OFF")
+            finally:
+                cursor.close()
+
+        event.listen(connectable, "connect", configure_sqlite)
+
     if hasattr(connectable, "connect"):
         with connectable.connect() as connection:
             context.configure(
@@ -49,6 +63,14 @@ def run_migrations_online() -> None:
 
             with context.begin_transaction():
                 context.run_migrations()
+
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).fetchall()
+            if violations:
+                raise RuntimeError(
+                    f"Database migration created foreign-key violations: {violations!r}"
+                )
     else:
         context.configure(
             connection=connectable, target_metadata=target_metadata, compare_type=True
