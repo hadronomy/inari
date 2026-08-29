@@ -14,5 +14,6 @@ pub mod motion;
 pub mod readout;
 pub mod status;
 pub mod surface;
+pub mod swap;
 pub mod theme;
 pub mod titlebar;

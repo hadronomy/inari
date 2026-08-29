@@ -34,7 +34,7 @@ use super::{
     content::Typography as _,
     focus,
     icon::Symbol,
-    motion,
+    motion, swap,
     theme::{ActiveTheme as _, Theme, flatten, mix},
 };
 
@@ -66,6 +66,12 @@ pub struct Button {
     emphasis: Emphasis,
     disabled: bool,
     handler: Option<Handler>,
+    /// What the glyph and the label become while the button is reporting, and
+    /// whether it is reporting now. A button that answers a press by changing
+    /// what it says is the one case where its contents move.
+    reporting_icon: Option<Symbol>,
+    reporting_label: Option<SharedString>,
+    reporting: bool,
 }
 
 impl Button {
@@ -77,6 +83,9 @@ impl Button {
             emphasis: Emphasis::Outline,
             disabled: false,
             handler: None,
+            reporting_icon: None,
+            reporting_label: None,
+            reporting: false,
         }
     }
 
@@ -102,6 +111,23 @@ impl Button {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// The glyph this button shows while it is reporting a result, swapped in
+    /// over [`motion::SWAP`] rather than cut to.
+    pub fn reports_icon(mut self, icon: impl Into<Symbol>, reporting: bool) -> Self {
+        self.reporting_icon = Some(icon.into());
+        self.reporting = self.reporting || reporting;
+        self
+    }
+
+    /// The words this button shows while it is reporting a result. The resting
+    /// label holds the width, so the button does not resize and the controls
+    /// beside it stay put.
+    pub fn reports_label(mut self, label: impl Into<SharedString>, reporting: bool) -> Self {
+        self.reporting_label = Some(label.into());
+        self.reporting = self.reporting || reporting;
         self
     }
 
@@ -193,15 +219,37 @@ impl RenderOnce for Button {
                     })
             })
             .children(self.icon.map(|icon| {
-                Icon::from(icon)
-                    .size(px(ICON))
-                    .flex_none()
+                match self.reporting_icon {
+                    Some(reporting) => swap::icon(
+                        SharedString::from(format!("swap-icon:{}", self.id)),
+                        icon,
+                        reporting,
+                        self.reporting,
+                    )
+                    .size(ICON)
+                    .tones(paint.text, paint.text)
+                    .into_any_element(),
+                    None => Icon::from(icon)
+                        .size(px(ICON))
+                        .flex_none()
+                        .into_any_element(),
+                }
             }))
             .children(self.label.map(|label| {
-                div()
-                    .text_body()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .child(label)
+                match self.reporting_label {
+                    Some(reporting) => swap::label(
+                        SharedString::from(format!("swap-label:{}", self.id)),
+                        label,
+                        reporting,
+                        self.reporting,
+                    )
+                    .into_any_element(),
+                    None => div()
+                        .text_body()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .child(label)
+                        .into_any_element(),
+                }
             }))
     }
 }

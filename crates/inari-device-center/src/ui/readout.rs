@@ -37,7 +37,7 @@ use gpui::{
     ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window,
     canvas, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Icon, IconName, StyledExt as _};
+use gpui_component::{IconName, StyledExt as _};
 
 use super::{
     button::Button,
@@ -45,6 +45,7 @@ use super::{
     content::Typography as _,
     focus, motion,
     surface::card,
+    swap,
     theme::{ActiveTheme as _, Theme},
 };
 
@@ -368,7 +369,7 @@ fn row(id: &'static str, index: usize, fact: &Fact, theme: &Theme) -> AnyElement
                 }
             }
         })
-        .bg(motion::hover_blend(key, wash))
+        .bg(motion::hover_blend(key.clone(), wash))
         .on_click(move |_, window, cx| copy(window, cx))
         .on_key_down(move |event: &KeyDownEvent, window, cx| {
             if is_activation(event) {
@@ -393,7 +394,7 @@ fn row(id: &'static str, index: usize, fact: &Fact, theme: &Theme) -> AnyElement
                 .text_color(if fact.prose { theme.text_secondary } else { theme.text })
                 .child(breakable(&fact.value)),
         )
-        .child(marker(hover, copied, theme))
+        .child(marker(&key, hover, copied, theme))
         .into_any_element()
 }
 
@@ -403,7 +404,7 @@ fn row(id: &'static str, index: usize, fact: &Fact, theme: &Theme) -> AnyElement
 /// The tick ignores the hover fade and paints at full strength. An
 /// acknowledgement that dims as the pointer leaves is one the operator can
 /// walk away from before it has finished telling them anything.
-fn marker(hover: f32, acknowledged: bool, theme: &Theme) -> impl IntoElement {
+fn marker(key: &SharedString, hover: f32, acknowledged: bool, theme: &Theme) -> impl IntoElement {
     div()
         .flex()
         .flex_none()
@@ -413,15 +414,19 @@ fn marker(hover: f32, acknowledged: bool, theme: &Theme) -> impl IntoElement {
         // On the first line's optical centre, like the label opposite, rather
         // than in the middle of a value that may run to three lines.
         .mt(px(1.0))
-        .when(acknowledged, |slot| {
-            slot.text_color(theme.success)
-                .child(Icon::new(IconName::Check).size(px(13.0)))
-        })
-        .when(!acknowledged, |slot| {
-            slot.opacity(hover)
-                .text_color(theme.text_tertiary)
-                .child(Icon::new(IconName::Copy).size(px(13.0)))
-        })
+        .child(
+            swap::icon(
+                SharedString::from(format!("{key}/mark")),
+                IconName::Copy,
+                IconName::Check,
+                acknowledged,
+            )
+            .size(13.0)
+            .tones(theme.text_tertiary, theme.success)
+            // The hint only exists under the pointer; the tick it becomes does
+            // not, so the fade is carried by the resting half alone.
+            .resting_alpha(hover),
+        )
 }
 
 /// The one control that answers the whole question at once.
@@ -440,8 +445,10 @@ fn copy_all(id: &'static str, transcript: String) -> impl IntoElement {
     let copied = acknowledged(key.clone());
     Button::new(key.clone())
         .ghost()
-        .icon(if copied { IconName::Check } else { IconName::Copy })
+        .icon(IconName::Copy)
+        .reports_icon(IconName::Check, copied)
         .label("Copy all details")
+        .reports_label("Copied", copied)
         .on_click(move |window, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(transcript.clone()));
             acknowledge(key.clone());

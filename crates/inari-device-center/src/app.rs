@@ -381,7 +381,7 @@ impl Render for DeviceCenter {
         // on Support stays acknowledged for a moment after it. The root is
         // what keeps asking for frames while either is still running; an idle
         // window schedules nothing.
-        if motion::hover_fades_live() || readout::acknowledgements_live() {
+        if motion::fades_live() || readout::acknowledgements_live() {
             window.request_animation_frame();
         }
         let titlebar = self.titlebar(cx);
