@@ -215,7 +215,7 @@ impl Render for Onboarding {
         // The caption buttons ease their hover fill; this view owns them, so
         // it keeps their frames coming. See the operations root for the other
         // half of the loop.
-        if motion::hover_fades_live() {
+        if motion::fades_live() {
             window.request_animation_frame();
         }
         // The scroll handle persists in keyed state, so the enrollment
