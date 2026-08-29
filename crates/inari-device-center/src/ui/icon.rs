@@ -24,6 +24,8 @@ pub enum Glyph {
     Agent,
     /// A credential carried by a link.
     Link,
+    /// Present in the directory, not reachable.
+    Offline,
 }
 
 impl Glyph {
@@ -38,10 +40,11 @@ impl Glyph {
             Self::Computer => "icons/monitor.svg",
             Self::Agent => "icons/server.svg",
             Self::Link => "icons/link.svg",
+            Self::Offline => "icons/circle-dashed.svg",
         }
     }
 
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Printer,
         Self::Scale,
         Self::Scanner,
@@ -51,6 +54,7 @@ impl Glyph {
         Self::Computer,
         Self::Agent,
         Self::Link,
+        Self::Offline,
     ];
 }
 

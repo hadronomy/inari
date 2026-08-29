@@ -37,7 +37,6 @@ use gpui_component::{Icon, StyledExt as _};
 
 use super::{
     content::Typography as _,
-    icon::Symbol,
     motion,
     status::{StatusDot, Tone},
     theme::{ActiveTheme as _, Theme},
@@ -196,7 +195,7 @@ impl Banner {
                     .items_center()
                     .justify_center()
                     .child(
-                        Icon::from(Symbol::Component(self.tone.symbol()))
+                        Icon::from(self.tone.symbol())
                             .size(px(17.0))
                             .flex_none()
                             .text_color(color),
