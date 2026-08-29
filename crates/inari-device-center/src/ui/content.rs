@@ -2,7 +2,9 @@
 //!
 //! The type scale is small on purpose — a display size, a section size, a body
 //! size, and a caption. Every screen draws from those four, so hierarchy comes
-//! from position and weight rather than from a new size invented per view.
+//! from position and weight rather than from a new size invented per view. A
+//! fifth role sits outside that ladder: machine text, which is set on the
+//! technical face's own pixel grid rather than on the sans scale.
 
 use gpui::{
     AnyElement, App, Div, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
@@ -17,7 +19,7 @@ use super::{
     theme::{ActiveTheme as _, Theme},
 };
 
-/// The four type roles. Applied through [`Typography`] so a call site names the
+/// The type roles. Applied through [`Typography`] so a call site names the
 /// role and never a raw size.
 pub trait Typography: Styled + Sized {
     /// A page title. One per screen.
@@ -43,6 +45,26 @@ pub trait Typography: Styled + Sized {
     /// Metadata, timestamps, and helper text.
     fn text_caption(self) -> Self {
         self.text_size(px(12.0))
+            .line_height(px(16.0))
+    }
+
+    /// Machine text: identifiers, endpoints, paths, and diagnostics. Pair it
+    /// with `theme.font_mono`, which is the face this size exists for.
+    ///
+    /// Eleven pixels is not a free choice. Departure Mono is drawn on a grid
+    /// of 50 units inside a 550-unit em, so one grid step is one whole device
+    /// pixel only at multiples of 11px: there the advance lands on exactly
+    /// 7px and the cap on exactly 8px, and the face renders as the bitmap it
+    /// was drawn as. At 12px the same stems fall on 7.64px and the rasteriser
+    /// has to average them — the blur a pixel face is chosen to avoid.
+    ///
+    /// It is not a demotion in size, either. An 8px cap reads at the same
+    /// optical scale as the 8.7px cap of the 12.5px system mono it replaces,
+    /// so a readout gets sharper rather than smaller. The line box matches
+    /// [`Self::text_caption`], so a label and its value share one baseline
+    /// grid across a row.
+    fn text_technical(self) -> Self {
+        self.text_size(px(11.0))
             .line_height(px(16.0))
     }
 }
@@ -235,11 +257,7 @@ impl RenderOnce for Field {
                 div()
                     .text_body()
                     .text_color(theme.text)
-                    .when(self.mono, |value| {
-                        value
-                            .font_family(mono)
-                            .text_size(px(12.5))
-                    })
+                    .when(self.mono, |value| value.font_family(mono).text_technical())
                     .child(self.value),
             )
     }
