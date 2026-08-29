@@ -46,7 +46,7 @@ use crate::{
         field,
         gate::Gate,
         icon::Glyph,
-        material, motion,
+        material, motion, readout,
         status::Status,
         theme::{ActiveTheme as _, Appearance, Theme},
         titlebar::WindowChrome,
@@ -260,6 +260,13 @@ impl Focusable for DevTools {
 
 impl Render for DevTools {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        // The previews are for judging how the real components feel, so they
+        // owe them the same frame loop the app's own root keeps: without it a
+        // hover wash never eases and a copy's tick never expires here, and the
+        // preview reports a stiffness the shipped screen does not have.
+        if motion::hover_fades_live() || readout::acknowledgements_live() {
+            window.request_animation_frame();
+        }
         let page = self.page;
 
         let body: gpui::AnyElement = match page {
