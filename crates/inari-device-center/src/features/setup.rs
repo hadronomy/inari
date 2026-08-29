@@ -15,10 +15,7 @@ use gpui::{
     RenderOnce, Styled, WeakEntity, div, prelude::FluentBuilder as _, px, svg,
 };
 use gpui_component::{
-    Disableable as _, IconName, StyledExt as _,
-    button::{Button, ButtonVariants as _},
-    checkbox::Checkbox,
-    input::InputState,
+    Disableable as _, IconName, StyledExt as _, checkbox::Checkbox, input::InputState,
 };
 use inari_agent_client::{
     DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
@@ -32,6 +29,7 @@ use crate::{
     onboarding::Onboarding,
     ui::{
         banner::Banner,
+        button::Button,
         content::{Field, Section, Typography as _},
         field::CredentialField,
         motion,
@@ -389,16 +387,13 @@ fn action_button(
     action: impl gpui::Action,
     primary: bool,
 ) -> Button {
-    let action = Box::new(action);
     Button::new(id)
-        .when(primary, |button| button.primary())
         .when(!primary, |button| button.ghost())
+        .when(primary, |button| button.primary())
         .icon(icon)
         .label(label)
         .disabled(disabled)
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(action.boxed_clone(), cx);
-        })
+        .action(action)
 }
 
 /// What the operator is agreeing to. Rendered before the connect action, never
