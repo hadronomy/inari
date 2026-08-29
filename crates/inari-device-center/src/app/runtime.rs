@@ -294,12 +294,10 @@ pub(super) fn connection_label(connection: AgentConnection) -> &'static str {
 }
 
 fn open_logs() {
-    let Some(project) = directories::ProjectDirs::from("dev", "Inari", "Inari Device Center")
-    else {
+    let Some(directory) = crate::infrastructure::log_directory() else {
         tracing::warn!("could not determine the Device Center log directory");
         return;
     };
-    let directory = project.data_local_dir().join("logs");
     if let Err(error) = std::fs::create_dir_all(&directory) {
         tracing::warn!(%error, "could not create the Device Center log directory");
         return;

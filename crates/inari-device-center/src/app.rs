@@ -23,7 +23,7 @@ use crate::{
         content::Typography as _,
         focus,
         icon::{Glyph, Symbol},
-        material, motion,
+        material, motion, readout,
         status::{Status, StatusDot},
         theme::{ActiveTheme as _, Theme},
         titlebar::WindowChrome,
@@ -377,10 +377,11 @@ impl Focusable for DeviceCenter {
 
 impl Render for DeviceCenter {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Hover washes ease toward the pointer over a few frames. The root is
-        // what keeps asking for those frames while any fade is mid-flight; an
-        // idle window schedules nothing.
-        if motion::hover_fades_live() {
+        // Hover washes ease toward the pointer over a few frames, and a copy
+        // on Support stays acknowledged for a moment after it. The root is
+        // what keeps asking for frames while either is still running; an idle
+        // window schedules nothing.
+        if motion::hover_fades_live() || readout::acknowledgements_live() {
             window.request_animation_frame();
         }
         let titlebar = self.titlebar(cx);

@@ -1,12 +1,25 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use anyhow::Context as _;
 use tracing_appender::non_blocking::WorkerGuard;
 
+/// Where the Device Center writes its logs.
+///
+/// One owner for the path. The logging setup creates it, Support shows it, and
+/// the tray and the Support button open it — three call sites that were each
+/// deriving the same directory from the same three strings, which is a change
+/// that can only ever half-land.
+///
+/// `None` when the operating system provides no data directory: the one case
+/// where there is no answer to give rather than a wrong one.
+pub fn log_directory() -> Option<PathBuf> {
+    directories::ProjectDirs::from("dev", "Inari", "Inari Device Center")
+        .map(|project| project.data_local_dir().join("logs"))
+}
+
 pub fn initialize_logging() -> anyhow::Result<WorkerGuard> {
-    let project = directories::ProjectDirs::from("dev", "Inari", "Inari Device Center")
-        .context("the operating system did not provide a data directory")?;
-    let directory = project.data_local_dir().join("logs");
+    let directory =
+        log_directory().context("the operating system did not provide a data directory")?;
     fs::create_dir_all(&directory).context("could not create the Device Center log directory")?;
 
     let file = tracing_appender::rolling::daily(&directory, "device-center.log");
