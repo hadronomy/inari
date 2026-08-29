@@ -7,18 +7,27 @@ use rust_embed::RustEmbed;
 #[folder = "../../packages/brand/inari_brand/assets"]
 pub struct BrandAssets;
 
+/// The faces the interface is set in, embedded rather than resolved from the
+/// system.
+///
+/// Shipping the mono face matters as much as shipping the sans one: the
+/// technical readouts are set on Departure Mono's pixel grid, and a platform
+/// fallback would put those measurements on a face that does not share it.
+const EMBEDDED_FONTS: [&str; 3] = [
+    "fonts/atkinson-hyperlegible-next-regular.otf",
+    "fonts/atkinson-hyperlegible-next-semibold.otf",
+    "fonts/departure-mono-regular.otf",
+];
+
 pub fn install_fonts(cx: &App) -> gpui::Result<()> {
-    let fonts = [
-        "fonts/atkinson-hyperlegible-next-regular.otf",
-        "fonts/atkinson-hyperlegible-next-semibold.otf",
-    ]
-    .into_iter()
-    .map(|path| {
-        BrandAssets::get(path)
-            .unwrap_or_else(|| panic!("missing embedded font: {path}"))
-            .data
-    })
-    .collect();
+    let fonts = EMBEDDED_FONTS
+        .into_iter()
+        .map(|path| {
+            BrandAssets::get(path)
+                .unwrap_or_else(|| panic!("missing embedded font: {path}"))
+                .data
+        })
+        .collect();
     cx.text_system().add_fonts(fonts)
 }
 
@@ -38,6 +47,13 @@ impl AssetSource for BrandAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_interface_face_is_embedded() {
+        for path in EMBEDDED_FONTS {
+            assert!(BrandAssets::get(path).is_some(), "missing {path}");
+        }
+    }
 
     #[test]
     fn windows_titlebar_icons_are_embedded() {
