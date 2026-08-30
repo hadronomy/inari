@@ -13,6 +13,7 @@ pub mod icon;
 pub mod material;
 pub mod motion;
 pub mod readout;
+pub mod ripple;
 pub mod status;
 pub mod surface;
 pub mod swap;

@@ -63,7 +63,8 @@ actions!(
         ShowActivity,
         ShowSupport,
         ShowSetup,
-        ShowBanners
+        ShowBanners,
+        ShowEffects
     ]
 );
 
@@ -109,6 +110,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("alt-5", ShowSupport, Some(KEY_CONTEXT)),
         KeyBinding::new("alt-6", ShowSetup, Some(KEY_CONTEXT)),
         KeyBinding::new("alt-7", ShowBanners, Some(KEY_CONTEXT)),
+        KeyBinding::new("alt-8", ShowEffects, Some(KEY_CONTEXT)),
     ]);
     cx.on_action(|_: &ToggleDevTools, cx| toggle(cx));
 }
@@ -170,10 +172,11 @@ enum Page {
     Support,
     Setup,
     Banners,
+    Effects,
 }
 
 impl Page {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Overview,
         Self::Gate,
         Self::Devices,
@@ -181,6 +184,7 @@ impl Page {
         Self::Support,
         Self::Setup,
         Self::Banners,
+        Self::Effects,
     ];
 
     fn rail_item(self) -> RailItem {
@@ -201,6 +205,7 @@ impl Page {
             Self::Support => RailItem::new("dev-support", "Support", Glyph::Support, ShowSupport),
             Self::Setup => RailItem::new("dev-setup", "Setup", Glyph::Computer, ShowSetup),
             Self::Banners => RailItem::new("dev-banners", "Banners", Glyph::Scale, ShowBanners),
+            Self::Effects => RailItem::new("dev-effects", "Effects", Glyph::Activity, ShowEffects),
         }
     }
 
@@ -277,6 +282,7 @@ impl Render for DevTools {
             Page::Support => render_support(),
             Page::Setup => self.render_setup(cx),
             Page::Banners => render_banners(),
+            Page::Effects => render_effects(),
         };
 
         let theme = cx.inari();
@@ -306,6 +312,7 @@ impl Render for DevTools {
             .on_action(cx.listener(|this, _: &ShowSupport, _, cx| this.navigate(Page::Support, cx)))
             .on_action(cx.listener(|this, _: &ShowSetup, _, cx| this.navigate(Page::Setup, cx)))
             .on_action(cx.listener(|this, _: &ShowBanners, _, cx| this.navigate(Page::Banners, cx)))
+            .on_action(cx.listener(|this, _: &ShowEffects, _, cx| this.navigate(Page::Effects, cx)))
             .size_full()
             .v_flex()
             .font_family(font)
@@ -575,6 +582,21 @@ fn render_support() -> gpui::AnyElement {
             None,
             false,
         )))
+        .into_any_element()
+}
+
+fn render_effects() -> gpui::AnyElement {
+    use crate::ui::ripple;
+
+    page("dev-effects")
+        .child(
+            Section::new("Ripple wall — click it").child(
+                div()
+                    .h(px(420.0))
+                    .w_full()
+                    .child(ripple::wall("dev-ripple")),
+            ),
+        )
         .into_any_element()
 }
 
