@@ -176,17 +176,20 @@ class BusinessScope:
 
 @dataclass(frozen=True, slots=True)
 class PairingScope:
-    """The Agent, origin, and business scope that one Client Pairing binds."""
+    """The Agent, browser, endpoint, and business scope for one pairing."""
 
     agent_id: str
-    origin: BoundOrigin
+    browser_origin: BoundOrigin
+    agent_endpoint: BoundOrigin
     business: BusinessScope
     audience: str
 
     def __post_init__(self) -> None:
         _identifier("agent_id", self.agent_id)
-        if not isinstance(self.origin, BoundOrigin):
-            raise TypeError("origin must be a BoundOrigin")
+        if not isinstance(self.browser_origin, BoundOrigin):
+            raise TypeError("browser_origin must be a BoundOrigin")
+        if not isinstance(self.agent_endpoint, BoundOrigin):
+            raise TypeError("agent_endpoint must be a BoundOrigin")
         if not isinstance(self.business, BusinessScope):
             raise TypeError("business must be a BusinessScope")
         _identifier("audience", self.audience)
@@ -211,6 +214,7 @@ class PairingScope:
 @dataclass(frozen=True, slots=True)
 class ClientPairing:
     pairing_id: str
+    pairing_request_id: str
     jwk_thumbprint: str
     scope: PairingScope
     actor_id: str
@@ -223,6 +227,7 @@ class ClientPairing:
 
     def __post_init__(self) -> None:
         _identifier("pairing_id", self.pairing_id)
+        _identifier("pairing_request_id", self.pairing_request_id)
         _jwk_thumbprint("jwk_thumbprint", self.jwk_thumbprint)
         if not isinstance(self.scope, PairingScope):
             raise TypeError("scope must be a PairingScope")
@@ -270,7 +275,7 @@ class ClientGrant:
     role: str
     permissions: PermissionSet
     authorization_digest: str
-    token_id: str
+    generation: int
     issued_at: datetime
     expires_at: datetime
     offline_renewal_until: datetime | None = None
@@ -284,9 +289,14 @@ class ClientGrant:
             ("actor_id", self.actor_id),
             ("role", self.role),
             ("authorization_digest", self.authorization_digest),
-            ("token_id", self.token_id),
         ):
             _identifier(name, value)
+        if (
+            not isinstance(self.generation, int)
+            or isinstance(self.generation, bool)
+            or self.generation < 0
+        ):
+            raise ValueError("generation must be a non-negative integer")
         _jwk_thumbprint("jwk_thumbprint", self.jwk_thumbprint)
         if not isinstance(self.scope, PairingScope):
             raise TypeError("scope must be a PairingScope")
@@ -376,7 +386,8 @@ def _https_url(name: str, value: str, *, allow_path: bool) -> SplitResult:
 class EndpointPolicy:
     agent_id: str
     audience: str
-    origin: BoundOrigin
+    browser_origin: BoundOrigin
+    agent_endpoint: BoundOrigin
     business: BusinessScope
     allowed_methods: frozenset[str] = frozenset({"GET", "POST", "DELETE"})
     allowed_paths: tuple[str, ...] = ()
@@ -384,8 +395,10 @@ class EndpointPolicy:
     def __post_init__(self) -> None:
         _identifier("agent_id", self.agent_id)
         _identifier("audience", self.audience)
-        if not isinstance(self.origin, BoundOrigin):
-            raise TypeError("origin must be a BoundOrigin")
+        if not isinstance(self.browser_origin, BoundOrigin):
+            raise TypeError("browser_origin must be a BoundOrigin")
+        if not isinstance(self.agent_endpoint, BoundOrigin):
+            raise TypeError("agent_endpoint must be a BoundOrigin")
         if not isinstance(self.business, BusinessScope):
             raise TypeError("business must be a BusinessScope")
         methods = frozenset(method.upper() for method in self.allowed_methods)
@@ -407,9 +420,9 @@ class EndpointPolicy:
         target_origin = BoundOrigin(
             urlunsplit(("https", urlsplit(target.uri).netloc, "", "", ""))
         )
-        if target_origin != self.origin:
+        if target_origin != self.agent_endpoint:
             raise ScopeMismatchError(
-                "The request origin does not match the Client Pairing."
+                "The request target does not match the Agent Endpoint."
             )
         path = urlsplit(target.uri).path or "/"
         if self.allowed_paths and path not in self.allowed_paths:
@@ -546,6 +559,46 @@ class AcceptedDPoPProof:
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptedRenewalDPoPProof:
+    jwk_thumbprint: str
+    htm: str
+    htu: str
+    iat: datetime
+    nonce: str
+    jti: str
+    accepted_at: datetime
+
+    def __post_init__(self) -> None:
+        _jwk_thumbprint("jwk_thumbprint", self.jwk_thumbprint)
+        target = RequestTarget(self.htm, self.htu)
+        object.__setattr__(self, "htm", target.htm)
+        object.__setattr__(self, "htu", target.htu)
+        _token_value("nonce", self.nonce)
+        _token_value("jti", self.jti)
+        object.__setattr__(self, "iat", _utc("iat", self.iat))
+        object.__setattr__(self, "accepted_at", _utc("accepted_at", self.accepted_at))
+
+    @property
+    def target(self) -> RequestTarget:
+        return RequestTarget(self.htm, self.htu)
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedDPoPNonce:
+    nonce: str
+    issued_at: datetime
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        _token_value("nonce", self.nonce)
+        issued_at = _utc("issued_at", self.issued_at)
+        expires_at = _utc("expires_at", self.expires_at)
+        _assert_order("issued_at", issued_at, "expires_at", expires_at)
+        object.__setattr__(self, "issued_at", issued_at)
+        object.__setattr__(self, "expires_at", expires_at)
+
+
+@dataclass(frozen=True, slots=True)
 class GrantAdmissionProof:
     pairing_request_id: str
     assertion_jti: str
@@ -581,7 +634,8 @@ class AuthorizedRequest:
         if (
             self.grant.scope.agent_id != self.endpoint.agent_id
             or self.grant.scope.audience != self.endpoint.audience
-            or self.grant.scope.origin != self.endpoint.origin
+            or self.grant.scope.browser_origin != self.endpoint.browser_origin
+            or self.grant.scope.agent_endpoint != self.endpoint.agent_endpoint
             or self.grant.scope.business != self.endpoint.business
         ):
             raise ScopeMismatchError(
@@ -759,18 +813,16 @@ PairClientResult = PairingResult
 class RenewalCommand:
     pairing_id: str
     grant_id: str
-    jwk_thumbprint: str
-    session_nonce: str
-    requested_at: datetime
+    target: RequestTarget
+    dpop: str
 
     def __post_init__(self) -> None:
         _identifier("pairing_id", self.pairing_id)
         _identifier("grant_id", self.grant_id)
-        _jwk_thumbprint("jwk_thumbprint", self.jwk_thumbprint)
-        _token_value("session_nonce", self.session_nonce)
-        object.__setattr__(
-            self, "requested_at", _utc("requested_at", self.requested_at)
-        )
+        if not isinstance(self.target, RequestTarget):
+            raise TypeError("target must be a RequestTarget")
+        if not isinstance(self.dpop, str) or self.dpop.count(".") != 2:
+            raise ValueError("dpop must contain three encoded segments")
 
 
 GrantRenewalCommand = RenewalCommand
@@ -810,6 +862,7 @@ GrantRenewalResult = RenewalResult
 __all__ = [
     "AccessTokenClaims",
     "AcceptedDPoPProof",
+    "AcceptedRenewalDPoPProof",
     "AuthorizedRequest",
     "BoundOrigin",
     "BusinessScope",
@@ -818,6 +871,7 @@ __all__ = [
     "EndpointPolicy",
     "GrantAdmissionProof",
     "GrantLifecycle",
+    "IssuedDPoPNonce",
     "GrantRenewalCommand",
     "GrantRenewalResult",
     "PairClientCommand",

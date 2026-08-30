@@ -12,6 +12,7 @@ from sqlalchemy import (
     LargeBinary,
     Integer,
     MetaData,
+    PrimaryKeyConstraint,
     String,
     Table,
     Text,
@@ -1637,6 +1638,233 @@ Index(
     device_work_authority_proof_subjects_table.c.subject_digest,
 )
 
+pairing_requests_table = Table(
+    "client_trust_pairing_requests",
+    metadata,
+    Column("request_id", String, primary_key=True),
+    Column("agent_id", String, nullable=False),
+    Column("browser_origin", String, nullable=False),
+    Column("agent_endpoint", String, nullable=False),
+    Column("database", String, nullable=False),
+    Column("company_id", String, nullable=False),
+    Column("organization_id", String, nullable=False),
+    Column("site_id", String, nullable=False),
+    Column("pos_configuration_id", String),
+    Column("audience", String, nullable=False),
+    Column("browser_jwk_thumbprint", String, nullable=False),
+    Column("requested_permissions", Text, nullable=False),
+    Column("session_nonce", String, nullable=False),
+    Column("phrase", String, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("state", String, nullable=False),
+    CheckConstraint(
+        "length(request_id) BETWEEN 1 AND 256 AND length(agent_id) BETWEEN 1 AND 256 AND "
+        "length(database) BETWEEN 1 AND 256 AND length(company_id) BETWEEN 1 AND 256 AND "
+        "length(organization_id) BETWEEN 1 AND 256 AND length(site_id) BETWEEN 1 AND 256 AND "
+        "length(audience) BETWEEN 1 AND 256 AND length(browser_jwk_thumbprint) BETWEEN 8 AND 512 AND "
+        "length(session_nonce) BETWEEN 1 AND 512 AND length(phrase) BETWEEN 5 AND 256",
+        name="ck_client_trust_pairing_requests_identity",
+    ),
+    CheckConstraint(
+        "length(browser_origin) > 8 AND browser_origin LIKE 'https://%' AND length(browser_origin) - length(replace(browser_origin, '/', '')) = 2 AND browser_origin NOT LIKE '%?%' AND browser_origin NOT LIKE '%#%' AND browser_origin NOT LIKE '%@%' AND browser_origin NOT LIKE '%*%' AND length(agent_endpoint) > 8 AND agent_endpoint LIKE 'https://%' AND length(agent_endpoint) - length(replace(agent_endpoint, '/', '')) = 2 AND agent_endpoint NOT LIKE '%?%' AND agent_endpoint NOT LIKE '%#%' AND agent_endpoint NOT LIKE '%@%' AND agent_endpoint NOT LIKE '%*%'",
+        name="ck_client_trust_pairing_requests_origin",
+    ),
+    CheckConstraint(
+        "(pos_configuration_id IS NULL) OR length(pos_configuration_id) BETWEEN 1 AND 256",
+        name="ck_client_trust_pairing_requests_scope",
+    ),
+    CheckConstraint(
+        "json_valid(requested_permissions) AND json_type(requested_permissions) = 'array' AND requested_permissions = json(requested_permissions)",
+        name="ck_client_trust_pairing_requests_permissions",
+    ),
+    CheckConstraint(
+        "expires_at > created_at",
+        name="ck_client_trust_pairing_requests_validity",
+    ),
+    CheckConstraint(
+        "state IN ('pending', 'approved', 'denied', 'canceled', 'expired', 'completed')",
+        name="ck_client_trust_pairing_requests_state",
+    ),
+)
+Index(
+    "idx_client_trust_pairing_requests_state_expires_at",
+    pairing_requests_table.c.state,
+    pairing_requests_table.c.expires_at,
+)
+
+client_pairings_table = Table(
+    "client_trust_pairings",
+    metadata,
+    Column("pairing_id", String, primary_key=True),
+    Column(
+        "pairing_request_id",
+        String,
+        ForeignKey("client_trust_pairing_requests.request_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("jwk_thumbprint", String, nullable=False),
+    Column("agent_id", String, nullable=False),
+    Column("browser_origin", String, nullable=False),
+    Column("agent_endpoint", String, nullable=False),
+    Column("database", String, nullable=False),
+    Column("company_id", String, nullable=False),
+    Column("organization_id", String, nullable=False),
+    Column("site_id", String, nullable=False),
+    Column("pos_configuration_id", String),
+    Column("audience", String, nullable=False),
+    Column("actor_id", String, nullable=False),
+    Column("role", String, nullable=False),
+    Column("permissions", Text, nullable=False),
+    Column("created_at", String, nullable=False),
+    Column("expires_at", String),
+    Column("lifecycle", String, nullable=False),
+    Column("last_used_at", String),
+    CheckConstraint(
+        "length(pairing_id) BETWEEN 1 AND 256 AND length(pairing_request_id) BETWEEN 1 AND 256 AND length(jwk_thumbprint) BETWEEN 8 AND 512 AND "
+        "length(agent_id) BETWEEN 1 AND 256 AND length(database) BETWEEN 1 AND 256 AND "
+        "length(company_id) BETWEEN 1 AND 256 AND length(organization_id) BETWEEN 1 AND 256 AND "
+        "length(site_id) BETWEEN 1 AND 256 AND length(audience) BETWEEN 1 AND 256 AND "
+        "length(actor_id) BETWEEN 1 AND 256 AND length(role) BETWEEN 1 AND 256",
+        name="ck_client_trust_pairings_identity",
+    ),
+    CheckConstraint(
+        "length(browser_origin) > 8 AND browser_origin LIKE 'https://%' AND length(browser_origin) - length(replace(browser_origin, '/', '')) = 2 AND browser_origin NOT LIKE '%?%' AND browser_origin NOT LIKE '%#%' AND browser_origin NOT LIKE '%@%' AND browser_origin NOT LIKE '%*%' AND length(agent_endpoint) > 8 AND agent_endpoint LIKE 'https://%' AND length(agent_endpoint) - length(replace(agent_endpoint, '/', '')) = 2 AND agent_endpoint NOT LIKE '%?%' AND agent_endpoint NOT LIKE '%#%' AND agent_endpoint NOT LIKE '%@%' AND agent_endpoint NOT LIKE '%*%'",
+        name="ck_client_trust_pairings_origin",
+    ),
+    CheckConstraint(
+        "pos_configuration_id IS NULL OR length(pos_configuration_id) BETWEEN 1 AND 256",
+        name="ck_client_trust_pairings_scope",
+    ),
+    CheckConstraint(
+        "json_valid(permissions) AND json_type(permissions) = 'array' AND permissions = json(permissions)",
+        name="ck_client_trust_pairings_permissions",
+    ),
+    CheckConstraint(
+        "expires_at IS NULL OR expires_at > created_at",
+        name="ck_client_trust_pairings_validity",
+    ),
+    CheckConstraint(
+        "lifecycle IN ('active', 'revoked', 'expired')",
+        name="ck_client_trust_pairings_lifecycle",
+    ),
+)
+Index(
+    "idx_client_trust_pairings_scope",
+    client_pairings_table.c.agent_id,
+    client_pairings_table.c.database,
+    client_pairings_table.c.organization_id,
+    client_pairings_table.c.site_id,
+    client_pairings_table.c.pos_configuration_id,
+)
+
+client_grants_table = Table(
+    "client_trust_grants",
+    metadata,
+    Column("grant_id", String, primary_key=True),
+    Column(
+        "pairing_id",
+        String,
+        ForeignKey("client_trust_pairings.pairing_id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("jwk_thumbprint", String, nullable=False),
+    Column("agent_id", String, nullable=False),
+    Column("browser_origin", String, nullable=False),
+    Column("agent_endpoint", String, nullable=False),
+    Column("database", String, nullable=False),
+    Column("company_id", String, nullable=False),
+    Column("organization_id", String, nullable=False),
+    Column("site_id", String, nullable=False),
+    Column("pos_configuration_id", String),
+    Column("audience", String, nullable=False),
+    Column("actor_id", String, nullable=False),
+    Column("role", String, nullable=False),
+    Column("permissions", Text, nullable=False),
+    Column("authorization_digest", String, nullable=False),
+    Column("generation", Integer, nullable=False),
+    Column("issued_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("offline_renewal_until", String),
+    Column("lifecycle", String, nullable=False),
+    Column("last_used_at", String),
+    CheckConstraint(
+        "length(grant_id) BETWEEN 1 AND 256 AND length(pairing_id) BETWEEN 1 AND 256 AND "
+        "length(jwk_thumbprint) BETWEEN 8 AND 512 AND length(agent_id) BETWEEN 1 AND 256 AND "
+        "length(database) BETWEEN 1 AND 256 AND length(company_id) BETWEEN 1 AND 256 AND "
+        "length(organization_id) BETWEEN 1 AND 256 AND length(site_id) BETWEEN 1 AND 256 AND "
+        "length(audience) BETWEEN 1 AND 256 AND length(actor_id) BETWEEN 1 AND 256 AND "
+        "length(role) BETWEEN 1 AND 256 AND length(authorization_digest) BETWEEN 1 AND 256 AND "
+        "generation >= 0",
+        name="ck_client_trust_grants_identity",
+    ),
+    CheckConstraint(
+        "length(browser_origin) > 8 AND browser_origin LIKE 'https://%' AND length(browser_origin) - length(replace(browser_origin, '/', '')) = 2 AND browser_origin NOT LIKE '%?%' AND browser_origin NOT LIKE '%#%' AND browser_origin NOT LIKE '%@%' AND browser_origin NOT LIKE '%*%' AND length(agent_endpoint) > 8 AND agent_endpoint LIKE 'https://%' AND length(agent_endpoint) - length(replace(agent_endpoint, '/', '')) = 2 AND agent_endpoint NOT LIKE '%?%' AND agent_endpoint NOT LIKE '%#%' AND agent_endpoint NOT LIKE '%@%' AND agent_endpoint NOT LIKE '%*%'",
+        name="ck_client_trust_grants_origin",
+    ),
+    CheckConstraint(
+        "pos_configuration_id IS NULL OR length(pos_configuration_id) BETWEEN 1 AND 256",
+        name="ck_client_trust_grants_scope",
+    ),
+    CheckConstraint(
+        "json_valid(permissions) AND json_type(permissions) = 'array' AND permissions = json(permissions)",
+        name="ck_client_trust_grants_permissions",
+    ),
+    CheckConstraint(
+        "expires_at > issued_at AND (offline_renewal_until IS NULL OR offline_renewal_until > expires_at)",
+        name="ck_client_trust_grants_validity",
+    ),
+    CheckConstraint(
+        "lifecycle IN ('active', 'revoked', 'expired')",
+        name="ck_client_trust_grants_lifecycle",
+    ),
+)
+Index(
+    "idx_client_trust_grants_pairing_id",
+    client_grants_table.c.pairing_id,
+    client_grants_table.c.expires_at,
+)
+
+client_trust_replays_table = Table(
+    "client_trust_replays",
+    metadata,
+    Column("kind", String, nullable=False),
+    Column("jti", String, nullable=False),
+    Column("consumed_at", String, nullable=False),
+    Column("expires_at", String),
+    CheckConstraint(
+        "kind IN ('pairing_assertion', 'dpop') AND length(jti) BETWEEN 1 AND 512",
+        name="ck_client_trust_replays_identity",
+    ),
+    CheckConstraint(
+        "(kind = 'pairing_assertion' AND expires_at IS NULL) OR (kind = 'dpop' AND expires_at IS NOT NULL AND expires_at > consumed_at)",
+        name="ck_client_trust_replays_kind_shape",
+    ),
+    PrimaryKeyConstraint("kind", "jti"),
+)
+Index(
+    "idx_client_trust_replays_expiry",
+    client_trust_replays_table.c.expires_at,
+)
+
+client_trust_nonces_table = Table(
+    "client_trust_nonces",
+    metadata,
+    Column("nonce", String, primary_key=True),
+    Column("issued_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("consumed_at", String),
+    CheckConstraint(
+        "length(nonce) BETWEEN 8 AND 512",
+        name="ck_client_trust_nonces_identity",
+    ),
+    CheckConstraint(
+        "expires_at > issued_at AND (consumed_at IS NULL OR consumed_at >= issued_at)",
+        name="ck_client_trust_nonces_validity",
+    ),
+)
+Index("idx_client_trust_nonces_expiry", client_trust_nonces_table.c.expires_at)
+
 MANAGED_TABLE_NAMES = frozenset(
     {
         devices_table.name,
@@ -1669,6 +1897,11 @@ MANAGED_TABLE_NAMES = frozenset(
         device_binding_authority_state_table.name,
         device_work_authority_proofs_table.name,
         device_work_authority_proof_subjects_table.name,
+        pairing_requests_table.name,
+        client_pairings_table.name,
+        client_grants_table.name,
+        client_trust_replays_table.name,
+        client_trust_nonces_table.name,
     }
 )
 

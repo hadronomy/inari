@@ -49,7 +49,9 @@ class PermissionDeniedError(ClientTrustError):
 
 
 class ScopeMismatchError(ClientTrustError):
-    def __init__(self, message: str = "The request is outside the Client Grant scope.") -> None:
+    def __init__(
+        self, message: str = "The request is outside the Client Grant scope."
+    ) -> None:
         super().__init__(ClientTrustErrorCode.SCOPE_MISMATCH, message)
 
 

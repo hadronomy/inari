@@ -38,6 +38,7 @@ from inari.client_trust import (
 
 NOW = datetime(2026, 8, 30, 12, tzinfo=UTC)
 ORIGIN = BoundOrigin("https://POS.Example:443/")
+AGENT_ENDPOINT = BoundOrigin("https://agent.example")
 BUSINESS = BusinessScope(
     database="odoo_prod",
     company_id="company_1",
@@ -47,7 +48,8 @@ BUSINESS = BusinessScope(
 )
 SCOPE = PairingScope(
     agent_id="agent_1",
-    origin=ORIGIN,
+    browser_origin=ORIGIN,
+    agent_endpoint=AGENT_ENDPOINT,
     business=BUSINESS,
     audience="inari-agent",
 )
@@ -57,6 +59,7 @@ THUMBPRINT = "A" * 43
 def pairing(*, lifecycle: PairingLifecycle = PairingLifecycle.ACTIVE) -> ClientPairing:
     return ClientPairing(
         pairing_id="pairing_1",
+        pairing_request_id="pairing_request_1",
         jwk_thumbprint=THUMBPRINT,
         scope=SCOPE,
         actor_id="user_1",
@@ -78,7 +81,7 @@ def grant(*, lifecycle: GrantLifecycle = GrantLifecycle.ACTIVE) -> ClientGrant:
         role="device_operator",
         permissions=frozenset({Permission.RECEIPT_IMAGE, Permission.DRAWER}),
         authorization_digest="authorization_digest_1",
-        token_id="token_1",
+        generation=1,
         issued_at=NOW,
         expires_at=NOW + timedelta(minutes=15),
         offline_renewal_until=NOW + timedelta(days=7),
@@ -188,7 +191,7 @@ def test_access_claims_are_serializable_without_mutable_nested_values() -> None:
 
 
 def test_authorized_request_checks_dpop_and_endpoint_scope() -> None:
-    target = RequestTarget("post", "https://pos.example/v1/device-work?ignored=true")
+    target = RequestTarget("post", "https://agent.example/v1/device-work?ignored=true")
     proof = AcceptedDPoPProof(
         jwk_thumbprint=THUMBPRINT,
         htm="post",
@@ -202,7 +205,8 @@ def test_authorized_request_checks_dpop_and_endpoint_scope() -> None:
     endpoint = EndpointPolicy(
         agent_id="agent_1",
         audience="inari-agent",
-        origin=ORIGIN,
+        browser_origin=ORIGIN,
+        agent_endpoint=AGENT_ENDPOINT,
         business=BUSINESS,
         allowed_paths=("/v1/device-work",),
     )
@@ -261,9 +265,8 @@ def test_grant_admission_and_renewal_values_are_immutable() -> None:
     renewal = RenewalCommand(
         pairing_id="pairing_1",
         grant_id="grant_1",
-        jwk_thumbprint=THUMBPRINT,
-        session_nonce="session_nonce_1",
-        requested_at=NOW,
+        target=RequestTarget("POST", "https://agent.example/v1/client-grants/renew"),
+        dpop="header.payload.signature",
     )
     result = RenewalResult(
         grant=grant(),
@@ -283,4 +286,5 @@ def test_grant_admission_and_renewal_values_are_immutable() -> None:
             authorization_digest="authorization_digest_1",
         ),
     )
-    assert admission.jwk_thumbprint == renewal.jwk_thumbprint == result.claims.cnf_jkt
+    assert admission.jwk_thumbprint == result.claims.cnf_jkt
+    assert renewal.target.method == "POST"

@@ -29,6 +29,7 @@ from inari.client_trust.tokens import (
     AccessTokenSigner,
     AccessTokenVerifier,
     DPoPProofVerifier,
+    RenewalDPoPProofVerifier,
 )
 
 
@@ -102,10 +103,11 @@ def test_public_jwk_rejects_private_material_and_wrong_curve(key: OKPKey) -> Non
 def test_access_token_round_trip_requires_generation_and_digest(key: OKPKey) -> None:
     public = public_ed25519_jwk(key)
     scope = PairingScope(
-        "agent-1",
-        BoundOrigin("https://pos.example"),
-        BusinessScope("odoo", "company", "org", "site", "pos"),
-        "agent-audience",
+        agent_id="agent-1",
+        browser_origin=BoundOrigin("https://pos.example"),
+        agent_endpoint=BoundOrigin("https://agent.example"),
+        business=BusinessScope("odoo", "company", "org", "site", "pos"),
+        audience="agent-audience",
     )
     grant = ClientGrant(
         grant_id="grant-1",
@@ -116,12 +118,12 @@ def test_access_token_round_trip_requires_generation_and_digest(key: OKPKey) -> 
         role="cashier",
         permissions=frozenset({Permission.RECEIPT_IMAGE}),
         authorization_digest="auth-digest",
-        token_id="token-1",
+        generation=3,
         issued_at=NOW,
         expires_at=NOW + timedelta(minutes=15),
     )
     token, claims = AccessTokenSigner(
-        signing_key=key, issuer="agent-1", audience="agent-audience", generation=3
+        signing_key=key, issuer="agent-1", audience="agent-audience"
     ).issue(
         grant, issued_at=NOW, expires_at=NOW + timedelta(minutes=15), token_id="token-1"
     )
@@ -130,8 +132,6 @@ def test_access_token_round_trip_requires_generation_and_digest(key: OKPKey) -> 
         verification_key=public,
         issuer="agent-1",
         audience="agent-audience",
-        generation=3,
-        authorization_digest="auth-digest",
     ).verify(token, at=NOW)
     assert verified.client_grant_id == grant.grant_id
 
@@ -181,7 +181,6 @@ def test_dpop_proof_binds_key_method_uri_token_and_nonce(key: OKPKey) -> None:
         target=target,
         claims=claims,
         access_token=access_token,
-        nonce=nonce,
         at=NOW,
     )
     assert accepted.jwk_thumbprint == claims.cnf_jkt
@@ -225,7 +224,30 @@ def test_dpop_rejects_wrong_token_hash_and_clock(key: OKPKey) -> None:
             target=target,
             claims=claims,
             access_token="access-token",
-            nonce="nonce-1234",
             at=NOW,
         )
     assert error.value.code is ClientTrustErrorCode.INVALID_DPOP_PROOF
+
+
+def test_renewal_dpop_binds_browser_key_and_target(key: OKPKey) -> None:
+    public = public_ed25519_jwk(key)
+    target = RequestTarget("POST", "https://agent.example/v1/client-grants/renew")
+    proof = jwt.encode(
+        {"typ": "dpop+jwt", "alg": "Ed25519", "jwk": public},
+        {
+            "htm": target.method,
+            "htu": target.htu,
+            "iat": int(NOW.timestamp()),
+            "nonce": "nonce-1234",
+            "jti": "renewal-proof-1",
+        },
+        key,
+        algorithms=["Ed25519"],
+    )
+    accepted = RenewalDPoPProofVerifier().verify(
+        proof,
+        target=target,
+        jwk_thumbprint=jwk_thumbprint(public),
+        at=NOW,
+    )
+    assert accepted.nonce == "nonce-1234"

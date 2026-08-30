@@ -108,7 +108,9 @@ def test_normalize_origin_rejects_non_exact_origins(value: str | None) -> None:
         [("Authorization", "DPoP\r\n one")],
     ],
 )
-def test_security_headers_have_exact_cardinality(headers: list[tuple[str, str]]) -> None:
+def test_security_headers_have_exact_cardinality(
+    headers: list[tuple[str, str]],
+) -> None:
     with pytest.raises(RequestTargetError):
         normalize_headers(headers)
 

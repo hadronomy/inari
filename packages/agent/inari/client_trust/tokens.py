@@ -13,7 +13,13 @@ from joserfc import jwt
 
 from .crypto import _decode_jws, _ensure_public_ed25519, _invalid, _private_ed25519
 from .errors import ClientTrustError, ClientTrustErrorCode
-from .models import AccessTokenClaims, AcceptedDPoPProof, ClientGrant, RequestTarget
+from .models import (
+    AccessTokenClaims,
+    AcceptedDPoPProof,
+    AcceptedRenewalDPoPProof,
+    ClientGrant,
+    RequestTarget,
+)
 
 
 _ACCESS_TOKEN_TYPE: Final = "at+jwt"
@@ -54,7 +60,6 @@ def _access_payload(
     token_id: str,
     issued_at: datetime,
     expires_at: datetime,
-    generation: int,
 ) -> dict[str, Any]:
     values: dict[str, Any] = {
         "iss": issuer,
@@ -71,7 +76,7 @@ def _access_payload(
         "organization_id": grant.scope.business.organization_id,
         "site_id": grant.scope.business.site_id,
         "scope": sorted(permission.value for permission in grant.permissions),
-        "generation": generation,
+        "generation": grant.generation,
         "authorization_digest": grant.authorization_digest,
     }
     if grant.scope.business.pos_configuration_id is not None:
@@ -88,22 +93,14 @@ class AccessTokenSigner:
         signing_key: object,
         issuer: str,
         audience: str,
-        generation: int = 0,
     ) -> None:
         self._key = _private_ed25519(signing_key)
         if not isinstance(issuer, str) or not issuer:
             raise ValueError("issuer must be non-empty")
         if not isinstance(audience, str) or not audience:
             raise ValueError("audience must be non-empty")
-        if (
-            not isinstance(generation, int)
-            or isinstance(generation, bool)
-            or generation < 0
-        ):
-            raise ValueError("generation must be a non-negative integer")
         self.issuer = issuer
         self.audience = audience
-        self.generation = generation
 
     def issue(
         self,
@@ -112,7 +109,6 @@ class AccessTokenSigner:
         issued_at: datetime,
         expires_at: datetime,
         token_id: str | None = None,
-        generation: int | None = None,
     ) -> tuple[str, AccessTokenClaims]:
         if not isinstance(grant, ClientGrant):
             raise TypeError("grant must be a ClientGrant")
@@ -120,13 +116,6 @@ class AccessTokenSigner:
         expires_at = _utc(expires_at, "expires_at")
         if expires_at <= issued_at:
             raise ValueError("expires_at must follow issued_at")
-        actual_generation = self.generation if generation is None else generation
-        if (
-            not isinstance(actual_generation, int)
-            or isinstance(actual_generation, bool)
-            or actual_generation < 0
-        ):
-            raise ValueError("generation must be a non-negative integer")
         token_id = token_id or _b64url(
             sha256(f"{grant.grant_id}:{issued_at.timestamp()}".encode()).digest()[:18]
         )
@@ -137,7 +126,6 @@ class AccessTokenSigner:
             token_id=token_id,
             issued_at=issued_at,
             expires_at=expires_at,
-            generation=actual_generation,
         )
         token = jwt.encode(
             {"alg": _ALGORITHM, "typ": _ACCESS_TOKEN_TYPE},
@@ -158,16 +146,12 @@ class AccessTokenVerifier:
         verification_key: object,
         issuer: str,
         audience: str,
-        generation: int | None = None,
-        authorization_digest: str | None = None,
     ) -> None:
         self._key, _ = _ensure_public_ed25519(
             verification_key, code=ClientTrustErrorCode.INVALID_VALUE
         )
         self.issuer = issuer
         self.audience = audience
-        self.generation = generation
-        self.authorization_digest = authorization_digest
 
     def verify(self, token: str, *, at: datetime) -> AccessTokenClaims:
         if not isinstance(token, str):
@@ -233,21 +217,8 @@ class AccessTokenVerifier:
                 ClientTrustErrorCode.INVALID_VALUE,
                 "The access credential is outside its validity period.",
             )
-        generation = _required_integer(claims, "generation")
-        if self.generation is not None and generation != self.generation:
-            raise _invalid(
-                ClientTrustErrorCode.INVALID_VALUE,
-                "The access credential generation is stale.",
-            )
-        authorization_digest = _required_string(claims, "authorization_digest")
-        if (
-            self.authorization_digest is not None
-            and authorization_digest != self.authorization_digest
-        ):
-            raise _invalid(
-                ClientTrustErrorCode.INVALID_VALUE,
-                "The access credential authorization is stale.",
-            )
+        _required_integer(claims, "generation")
+        _required_string(claims, "authorization_digest")
         cnf = claims.get("cnf")
         if not isinstance(cnf, Mapping) or set(cnf) != {"jkt"}:
             raise _invalid(
@@ -328,7 +299,6 @@ class DPoPProofVerifier:
         target: RequestTarget,
         claims: AccessTokenClaims,
         access_token: str,
-        nonce: str,
         at: datetime,
     ) -> AcceptedDPoPProof:
         code = ClientTrustErrorCode.INVALID_DPOP_PROOF
@@ -364,7 +334,8 @@ class DPoPProofVerifier:
         moment = _utc(at, "at")
         if abs(moment - issued_at) > _DPOP_WINDOW:
             raise _invalid(code, "The DPoP proof is outside the clock window.")
-        if not isinstance(nonce, str) or not nonce or payload.get("nonce") != nonce:
+        nonce = payload.get("nonce")
+        if not isinstance(nonce, str) or not nonce:
             raise _invalid(code, "The DPoP nonce is invalid.")
         access_hash = _b64url(sha256(access_token.encode("utf-8")).digest())
         if not isinstance(payload.get("ath"), str) or not compare_digest(
@@ -383,6 +354,57 @@ class DPoPProofVerifier:
             htu=target.htu,
             iat=issued_at,
             ath=access_hash,
+            nonce=nonce,
+            jti=jti,
+            accepted_at=moment,
+        )
+
+
+class RenewalDPoPProofVerifier:
+    """Verifies a DPoP proof for the offline Client Grant renewal endpoint."""
+
+    def verify(
+        self,
+        proof: str,
+        *,
+        target: RequestTarget,
+        jwk_thumbprint: str,
+        at: datetime,
+    ) -> AcceptedRenewalDPoPProof:
+        code = ClientTrustErrorCode.INVALID_DPOP_PROOF
+        header = _header(proof, code=code)
+        if (
+            set(header) != {"typ", "alg", "jwk"}
+            or header.get("typ") != _DPOP_TYPE
+            or header.get("alg") != _ALGORITHM
+        ):
+            raise _invalid(code, "The DPoP protected header is invalid.")
+        key, public_jwk = _ensure_public_ed25519(header.get("jwk"), code=code)
+        payload = _decode_jws(proof, key, code=code).claims
+        if not isinstance(payload, Mapping):
+            raise _invalid(code, "The DPoP payload is invalid.")
+        if set(payload) != {"htm", "htu", "iat", "nonce", "jti"}:
+            raise _invalid(code, "The DPoP payload has unsupported claims.")
+        if payload.get("htm") != target.method or payload.get("htu") != target.htu:
+            raise _invalid(code, "The DPoP target does not match the request.")
+        issued_at = datetime.fromtimestamp(_required_integer(payload, "iat"), tz=UTC)
+        moment = _utc(at, "at")
+        if abs(moment - issued_at) > _DPOP_WINDOW:
+            raise _invalid(code, "The DPoP proof is outside the clock window.")
+        nonce = payload.get("nonce")
+        if not isinstance(nonce, str) or not nonce:
+            raise _invalid(code, "The DPoP nonce is invalid.")
+        jti = payload.get("jti")
+        if not isinstance(jti, str) or not jti:
+            raise _invalid(code, "The DPoP replay identity is invalid.")
+        thumbprint = _b64url(sha256(_canonical_jwk(public_jwk)).digest())
+        if not compare_digest(thumbprint, jwk_thumbprint):
+            raise _invalid(code, "The DPoP key does not match the Client Pairing.")
+        return AcceptedRenewalDPoPProof(
+            jwk_thumbprint=thumbprint,
+            htm=target.method,
+            htu=target.htu,
+            iat=issued_at,
             nonce=nonce,
             jti=jti,
             accepted_at=moment,
@@ -423,4 +445,9 @@ def _utc(value: datetime, name: str) -> datetime:
     return value.astimezone(UTC)
 
 
-__all__ = ["AccessTokenSigner", "AccessTokenVerifier", "DPoPProofVerifier"]
+__all__ = [
+    "AccessTokenSigner",
+    "AccessTokenVerifier",
+    "DPoPProofVerifier",
+    "RenewalDPoPProofVerifier",
+]

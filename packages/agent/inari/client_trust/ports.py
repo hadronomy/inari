@@ -6,6 +6,7 @@ from typing import Protocol
 from .models import (
     AccessTokenClaims,
     AcceptedDPoPProof,
+    AcceptedRenewalDPoPProof,
     ClientGrant,
     ClientPairing,
     PairingAssertion,
@@ -19,6 +20,10 @@ from .permissions import Permission
 class ClientTrustStore(Protocol):
     """Durable seam for Client Pairing, grants, and one-time proof identities."""
 
+    def get_pairing_request(self, request_id: str) -> PairingRequest | None: ...
+
+    def save_pairing_request(self, request: PairingRequest) -> None: ...
+
     def get_pairing(self, pairing_id: str) -> ClientPairing | None: ...
 
     def save_pairing(self, pairing: ClientPairing) -> None: ...
@@ -27,11 +32,28 @@ class ClientTrustStore(Protocol):
 
     def save_grant(self, grant: ClientGrant) -> None: ...
 
-    def consume_pairing_assertion(
-        self, assertion_jti: str, *, at: datetime
+    def complete_pairing(
+        self,
+        *,
+        request: PairingRequest,
+        pairing: ClientPairing,
+        grant: ClientGrant,
+        assertion_jti: str,
+        at: datetime,
     ) -> bool: ...
 
-    def consume_dpop_jti(self, jti: str, *, expires_at: datetime) -> bool: ...
+    def save_dpop_nonce(
+        self, nonce: str, *, issued_at: datetime, expires_at: datetime
+    ) -> None: ...
+
+    def consume_dpop_nonce(
+        self,
+        nonce: str,
+        *,
+        jti: str,
+        at: datetime,
+        replay_expires_at: datetime,
+    ) -> bool: ...
 
 
 class PairingAssertionVerifierPort(Protocol):
@@ -62,9 +84,21 @@ class DPoPVerifierPort(Protocol):
         target: RequestTarget,
         claims: AccessTokenClaims,
         access_token: str,
-        nonce: str,
         at: datetime,
     ) -> AcceptedDPoPProof: ...
+
+
+class RenewalDPoPVerifierPort(Protocol):
+    """Verifies a key-bound DPoP proof for offline Grant renewal."""
+
+    def verify(
+        self,
+        proof: str,
+        *,
+        target: RequestTarget,
+        jwk_thumbprint: str,
+        at: datetime,
+    ) -> AcceptedRenewalDPoPProof: ...
 
 
 class AccessTokenIssuerPort(Protocol):
@@ -92,5 +126,6 @@ __all__ = [
     "DPoPVerifierPort",
     "PairingAssertionVerifierPort",
     "PermissionPolicy",
+    "RenewalDPoPVerifierPort",
     "TrustClock",
 ]

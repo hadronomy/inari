@@ -17,6 +17,7 @@ from .crypto import (
 from .models import (
     AccessTokenClaims,
     AcceptedDPoPProof,
+    AcceptedRenewalDPoPProof,
     AuthorizedRequest,
     BoundOrigin,
     BusinessScope,
@@ -25,6 +26,7 @@ from .models import (
     EndpointPolicy,
     GrantAdmissionProof,
     GrantLifecycle,
+    IssuedDPoPNonce,
     GrantRenewalCommand,
     GrantRenewalResult,
     PairClientCommand,
@@ -51,9 +53,17 @@ from .ports import (
     DPoPVerifierPort,
     PairingAssertionVerifierPort,
     PermissionPolicy,
+    RenewalDPoPVerifierPort,
     TrustClock,
 )
-from .tokens import AccessTokenSigner, AccessTokenVerifier, DPoPProofVerifier
+from .service import ClientTrustService
+from .store import SqliteClientTrustStore
+from .tokens import (
+    AccessTokenSigner,
+    AccessTokenVerifier,
+    DPoPProofVerifier,
+    RenewalDPoPProofVerifier,
+)
 
 __all__ = [
     "AccessTokenIssuerPort",
@@ -62,9 +72,12 @@ __all__ = [
     "AccessTokenVerifierPort",
     "ClientTrustError",
     "ClientTrustErrorCode",
+    "ClientTrustService",
     "ClientTrustStore",
     "DPoPProofVerifier",
     "DPoPVerifierPort",
+    "RenewalDPoPProofVerifier",
+    "RenewalDPoPVerifierPort",
     "InvalidOriginError",
     "PairingAssertionVerifier",
     "PairingAssertionVerifierPort",
@@ -76,9 +89,11 @@ __all__ = [
     "PermissionSet",
     "ReplayDetectedError",
     "ScopeMismatchError",
+    "SqliteClientTrustStore",
     "TrustClock",
     "AccessTokenClaims",
     "AcceptedDPoPProof",
+    "AcceptedRenewalDPoPProof",
     "AuthorizedRequest",
     "BoundOrigin",
     "BusinessScope",
@@ -87,6 +102,7 @@ __all__ = [
     "EndpointPolicy",
     "GrantAdmissionProof",
     "GrantLifecycle",
+    "IssuedDPoPNonce",
     "GrantRenewalCommand",
     "GrantRenewalResult",
     "PairClientCommand",

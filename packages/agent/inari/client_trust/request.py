@@ -179,8 +179,14 @@ def normalize_origin(value: str | bytes | None) -> str:
     if scheme not in {"http", "https"} or not parsed.netloc:
         raise RequestTargetError("The Origin header must use HTTP or HTTPS.")
     if parsed.path or parsed.query or parsed.fragment or "?" in origin or "#" in origin:
-        raise RequestTargetError("The Origin header cannot contain a path, query, or fragment.")
-    if parsed.username is not None or parsed.password is not None or "@" in parsed.netloc:
+        raise RequestTargetError(
+            "The Origin header cannot contain a path, query, or fragment."
+        )
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or "@" in parsed.netloc
+    ):
         raise RequestTargetError("The Origin header cannot contain user information.")
     try:
         authority = _normalize_authority(parsed.netloc, scheme=scheme)
@@ -205,8 +211,13 @@ def build_request_target(
     authority = _normalize_server(server, scheme=normalized_scheme)
     normalized_headers = normalize_headers(headers)
     host = normalized_headers.get("host")
-    if host is not None and _normalize_authority(host, scheme=normalized_scheme) != authority:
-        raise RequestTargetError("The Host header does not match the connection authority.")
+    if (
+        host is not None
+        and _normalize_authority(host, scheme=normalized_scheme) != authority
+    ):
+        raise RequestTargetError(
+            "The Host header does not match the connection authority."
+        )
     normalized_path = _normalize_path(path, raw_path=raw_path)
     return RequestTarget(normalized_scheme, authority, normalized_path)
 
@@ -249,7 +260,9 @@ def _reject_browser_credentials(
     query_string: str | bytes,
 ) -> None:
     if headers.get("cookie") is not None:
-        raise RequestTargetError("Cookies are not accepted on browser protected routes.")
+        raise RequestTargetError(
+            "Cookies are not accepted on browser protected routes."
+        )
     if isinstance(query_string, bytes):
         try:
             raw_query = query_string.decode("ascii")
@@ -274,7 +287,9 @@ def _reject_browser_credentials(
     except (UnicodeDecodeError, ValueError) as exc:
         raise RequestTargetError("The request query is invalid.") from exc
     if query_names.intersection(_QUERY_CREDENTIAL_NAMES):
-        raise RequestTargetError("Query credentials are not accepted on browser protected routes.")
+        raise RequestTargetError(
+            "Query credentials are not accepted on browser protected routes."
+        )
 
 
 def _normalize_server(server: ServerAddress, *, scheme: str) -> str:
@@ -328,7 +343,9 @@ def _normalize_authority(value: str, *, scheme: str) -> str:
     if port is not None and not 1 <= port <= 65535:
         raise RequestTargetError("The authority port is invalid.")
     default_port = 80 if scheme == "http" else 443
-    return normalized_host if port in {None, default_port} else f"{normalized_host}:{port}"
+    return (
+        normalized_host if port in {None, default_port} else f"{normalized_host}:{port}"
+    )
 
 
 def _normalize_host(host: str) -> str:
@@ -400,7 +417,9 @@ def _normalize_path(path: str, *, raw_path: bytes | None) -> str:
             or normalized[index + 1] not in "0123456789abcdefABCDEF"
             or normalized[index + 2] not in "0123456789abcdefABCDEF"
         ):
-            raise RequestTargetError("The request path contains an invalid percent escape.")
+            raise RequestTargetError(
+                "The request path contains an invalid percent escape."
+            )
     return normalized or "/"
 
 
@@ -419,6 +438,8 @@ def _decode_header_part(
         decoded = value
     else:
         raise RequestTargetError(f"The {field} header is invalid.")
-    if any((ord(char) < 0x20 and char != "\t") or ord(char) == 0x7F for char in decoded):
+    if any(
+        (ord(char) < 0x20 and char != "\t") or ord(char) == 0x7F for char in decoded
+    ):
         raise RequestTargetError(f"The {field} header is invalid.")
     return decoded.strip(" \t") if strip_ows else decoded
