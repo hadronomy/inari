@@ -21,7 +21,7 @@ use crate::{
     app::DeviceCenter,
     assets::BrandAssets,
     infrastructure::{AgentRuntime, TrayCommand, TrayController, initialize_logging, platform},
-    ui::{material, motion, theme::Theme},
+    ui::{effect, material, motion, theme::Theme},
 };
 
 /// The operations window, built at startup and shown only once enrollment is
@@ -110,6 +110,9 @@ fn main() {
     let _log_guard = initialize_logging().expect("failed to initialize Device Center logging");
     material::init_from_environment();
     motion::init_from_environment();
+    // Registering up front means the renderer never compiles a shader during
+    // the first frame that draws one.
+    effect::register_all();
 
     let runtime = AgentRuntime::start().expect("failed to start the local-agent runtime");
     Application::new()

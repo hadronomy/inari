@@ -188,3 +188,25 @@ opt-level     = "z"
 # invalid-offset decompression advisory (CVE-2026-32829 / RustSec / Dependabot
 # alert #7).
 zenoh-transport = { path = "patches/zenoh-transport" }
+
+# GPUI carries the GPU-effects mechanism, because none of it can live outside
+# the renderer: `Scene` and every primitive are `pub(crate)` upstream, and the
+# only routes for application pixels are a CPU image or a macOS-only surface.
+# See docs/device-center-gpu-effects-architecture.md.
+#
+# hadronomy/zed, branch `inari/gpu-effects`: upstream 69e2130 (the `gpui 0.2.2`
+# release commit, so `gpui-component` still resolves) plus 40ca5a0, which
+# promotes naga to a runtime dependency and adds `gpui::effect` — a registry and
+# a WGSL-to-MSL/HLSL translator, with `effect/{preamble,epilogue}.wgsl` as the
+# shader ABI. Effects themselves stay in this repository; the fork ships only
+# the mechanism.
+#
+# Forking the whole monorepo rather than vendoring the crate is what Zeron and
+# Zed's own 25 forks do. Cargo finds `crates/gpui` by name anywhere in the
+# repository, so GPUI's workspace inheritance resolves verbatim and there is no
+# manifest to keep in step.
+#
+# Zed's own `[patch.crates-io]` does not travel through a git dependency. At
+# 69e2130 it pins notify, notify-types and windows-capture; none reach GPUI in
+# our feature set. Re-check when moving the base.
+gpui = { git = "https://github.com/hadronomy/zed", rev = "40ca5a061a88881079dcd63bc52e1d829895a70d" }
