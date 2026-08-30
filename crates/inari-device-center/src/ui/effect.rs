@@ -10,6 +10,7 @@
 //! that would have been a black rectangle on a customer's Windows machine is a
 //! failing `mbx test` here instead.
 
+use gpui::Hsla;
 use gpui::effect::Effect;
 
 /// Film grain, to dither the banding out of large fills and long gradients.
@@ -35,12 +36,42 @@ impl Default for Grain {
     }
 }
 
+/// A wall of pixel cells that carries a shock outward from where it was struck.
+///
+/// Exists to exercise the effect path rather than to ship: it animates, it
+/// reacts to input, and it uses every parameter kind, so a backend that gets any
+/// of that wrong shows it immediately.
+#[derive(Effect, Copy, Clone, Debug, PartialEq)]
+#[effect(name = "inari.ripple", source = "effect/ripple.wgsl")]
+pub struct Ripple {
+    /// Seconds the wall has been on screen, for the idle shimmer.
+    pub time: f32,
+    /// Cell size in logical pixels.
+    pub cell: f32,
+    /// Where the wall was struck, in logical pixels from its top-left corner.
+    pub strike_x: f32,
+    /// The other half of the strike position.
+    pub strike_y: f32,
+    /// Seconds since the strike. Negative before the wall has been struck,
+    /// which keeps a wave from firing at the origin on the first frame.
+    pub age: f32,
+    /// The colour the wall lights up in.
+    pub tint: Hsla,
+}
+
+impl Default for Ripple {
+    fn default() -> Self {
+        Self { time: 0.0, cell: 9.0, strike_x: 0.0, strike_y: 0.0, age: -1.0, tint: gpui::blue() }
+    }
+}
+
 /// Register every effect the application owns.
 ///
 /// Call this at startup so the renderer never has to compile a shader during the
 /// first frame that draws one.
 pub fn register_all() {
     gpui::effect::register(Grain::definition());
+    gpui::effect::register(Ripple::definition());
 }
 
 #[cfg(test)]
