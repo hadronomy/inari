@@ -91,6 +91,9 @@ class AdmissionAccepted:
 class AdmissionGrantScope:
     """The exact content-free scope persisted with an admitted work item."""
 
+    grant_id: str
+    pairing_id: str
+    generation: int
     organization_id: str
     site_id: str
     database: str
@@ -107,6 +110,9 @@ class AdmissionGrantScope:
 class AdmissionGrant:
     """One fail-closed grant for one exact Device Work scope."""
 
+    grant_id: str
+    pairing_id: str
+    generation: int
     organization_id: str
     site_id: str
     database: str
@@ -120,6 +126,9 @@ class AdmissionGrant:
 
     def scope(self) -> AdmissionGrantScope:
         return AdmissionGrantScope(
+            grant_id=self.grant_id,
+            pairing_id=self.pairing_id,
+            generation=self.generation,
             organization_id=self.organization_id,
             site_id=self.site_id,
             database=self.database,

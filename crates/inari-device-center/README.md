@@ -17,7 +17,7 @@ uv run --directory packages/agent inari serve
 cargo run -p inari-device-center
 ```
 
-The committed contract in `contracts/local-agent.openapi.json` generates the
+The committed projection in `contracts/local-agent.codegen.openapi.json` generates the
 private HTTP transport at build time. Curated Rust types form the public client
 boundary, so generated models do not leak into feature state.
 

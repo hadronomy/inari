@@ -358,6 +358,12 @@ device_work_admissions_table = Table(
     Column("media_type", String, nullable=False),
     Column("normalized_options_digest", LargeBinary, nullable=False),
     Column("grant_scope_digest", LargeBinary, nullable=False),
+    # The exact Client Grant used for admission. These fields let execution
+    # recheck the same grant after queueing without storing bearer material.
+    Column("grant_id", String),
+    Column("grant_pairing_id", String),
+    Column("grant_generation", Integer),
+    Column("grant_authorization_digest", LargeBinary),
     Column("origin_submission_key", String, nullable=False),
     Column("origin_kind", String, nullable=False),
     Column("origin_json", Text, nullable=False),
@@ -745,10 +751,8 @@ Index(
     & spool_reservations_table.c.state.in_(["held", "committed"]),
 )
 Index(
-    "uq_spool_reservations_execution_owner_active",
-    spool_reservations_table.c.job_id,
-    spool_reservations_table.c.owner_id,
-    spool_reservations_table.c.owner_generation,
+    "uq_spool_reservations_execution_device_active",
+    spool_reservations_table.c.device_id,
     unique=True,
     sqlite_where=(spool_reservations_table.c.reservation_kind == "execution_temp")
     & spool_reservations_table.c.state
@@ -954,6 +958,74 @@ Index(
 Index(
     "idx_public_print_job_events_sequence",
     public_print_job_events_table.c.sequence,
+)
+
+# Private execution authority. Public Print Job state does not identify the
+# worker that owns a lease, so stale workers cannot fence one another without
+# this separate ledger.
+physical_execution_attempts_table = Table(
+    "physical_execution_attempts",
+    metadata,
+    Column("attempt_id", String, primary_key=True),
+    Column(
+        "job_id",
+        String,
+        ForeignKey("public_print_jobs.id", ondelete="RESTRICT"),
+        nullable=False,
+    ),
+    Column("lease_id", String, nullable=False, unique=True),
+    Column("owner_id", String, nullable=False),
+    Column("owner_generation", Integer, nullable=False),
+    Column("attempt_number", Integer, nullable=False),
+    Column("state_version", Integer, nullable=False),
+    Column("phase", String, nullable=False),
+    Column("lease_expires_at", String, nullable=False),
+    Column("marker_id", String),
+    Column("marker_at", String),
+    Column("marker_sequence", Integer),
+    Column("io_permission_issued", Boolean, nullable=False),
+    Column("execution_id", String, nullable=False),
+    Column("platform_job_id", String),
+    Column("result_json", Text),
+    Column("error_code", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Column("finished_at", String),
+    CheckConstraint(
+        "length(attempt_id) BETWEEN 1 AND 128 AND length(job_id) BETWEEN 1 AND 128 AND "
+        "length(lease_id) BETWEEN 1 AND 128 AND length(owner_id) BETWEEN 1 AND 256 AND "
+        "owner_generation > 0 AND attempt_number > 0 AND state_version > 0 AND "
+        "length(execution_id) BETWEEN 1 AND 128",
+        name="ck_physical_execution_attempts_identity",
+    ),
+    CheckConstraint(
+        "phase IN ('claimed', 'prepared', 'marker_committed', 'permission_delivered', 'finished', 'retryable', 'recovered')",
+        name="ck_physical_execution_attempts_phase",
+    ),
+    CheckConstraint(
+        "(marker_id IS NULL AND marker_at IS NULL AND marker_sequence IS NULL) OR "
+        "(marker_id IS NOT NULL AND marker_at IS NOT NULL AND marker_sequence IS NOT NULL AND marker_sequence > 0)",
+        name="ck_physical_execution_attempts_marker",
+    ),
+)
+Index(
+    "idx_physical_execution_attempts_job_phase",
+    physical_execution_attempts_table.c.job_id,
+    physical_execution_attempts_table.c.phase,
+)
+Index(
+    "idx_physical_execution_attempts_owner",
+    physical_execution_attempts_table.c.owner_id,
+    physical_execution_attempts_table.c.owner_generation,
+    physical_execution_attempts_table.c.phase,
+)
+Index(
+    "uq_physical_execution_attempts_active_job",
+    physical_execution_attempts_table.c.job_id,
+    unique=True,
+    sqlite_where=physical_execution_attempts_table.c.phase.in_(
+        ("claimed", "prepared", "marker_committed", "permission_delivered")
+    ),
 )
 
 device_authority_signer_keys_table = Table(
@@ -1553,6 +1625,12 @@ device_work_authority_proofs_table = Table(
     Column("options_digest", LargeBinary, nullable=False),
     Column("issued_at", String, nullable=False),
     Column("valid_until", String, nullable=False),
+    # Device Capability proof and Client Grant proof share one admission row.
+    # Grant data stays content-free and is only an identity for rechecking.
+    Column("grant_id", String),
+    Column("grant_pairing_id", String),
+    Column("grant_generation", Integer),
+    Column("grant_authorization_digest", LargeBinary),
     CheckConstraint(
         "length(proof_id) BETWEEN 1 AND 256 AND authority_revision_number > 0 AND "
         "length(authority_revision_digest) = 32 AND length(snapshot_digest) = 32 AND "
@@ -1885,6 +1963,7 @@ MANAGED_TABLE_NAMES = frozenset(
         spool_nonce_reservations_table.name,
         spool_artifacts_table.name,
         public_print_job_events_table.name,
+        physical_execution_attempts_table.name,
         device_authority_signer_keys_table.name,
         device_authority_revisions_table.name,
         device_authority_state_table.name,

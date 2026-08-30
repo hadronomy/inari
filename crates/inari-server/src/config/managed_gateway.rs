@@ -32,7 +32,6 @@ impl Default for ManagedGatewayConfig {
                 "system:read",
                 "devices:read",
                 "events:read",
-                "jobs:create",
                 "jobs:cancel",
                 "commands:execute",
             ]

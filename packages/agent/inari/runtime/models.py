@@ -47,7 +47,6 @@ class DeviceClass(StrEnum):
 
 
 class JobKind(StrEnum):
-    PRINT = "print_job"
     COMMAND = "device_command"
 
 
@@ -81,12 +80,13 @@ class RuntimeEventKind(StrEnum):
 
 
 INARI_DEVICE_NAMESPACE = UUID("efdbfb52-14ac-5c5c-a01c-b2a846f71d76")
+DEVICE_ID_ENCODING_VERSION = "device-id-v1"
 
 
-def build_device_id(
-    *, kind: DeviceKind, driver_key: str, identity: DeviceIdentity
-) -> str:
-    identity_key = f"{kind.value}\0{driver_key}\0{identity.stable_key()}"
+def build_device_id(*, kind: DeviceKind, identity: DeviceIdentity) -> str:
+    identity_key = "\0".join(
+        (DEVICE_ID_ENCODING_VERSION, kind.value, identity.stable_key())
+    )
     return f"dev_{uuid5(INARI_DEVICE_NAMESPACE, identity_key).hex}"
 
 
@@ -140,7 +140,6 @@ class DeviceRecord:
         return cls(
             id=build_device_id(
                 kind=DeviceKind.PRINTER,
-                driver_key=printer.driver_key,
                 identity=printer.identity,
             ),
             kind=DeviceKind.PRINTER,

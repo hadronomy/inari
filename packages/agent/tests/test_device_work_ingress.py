@@ -17,17 +17,19 @@ from inari.local_api.ingress import (
 
 def _multipart(
     boundary: str,
-    parts: list[tuple[str, str, bytes]],
+    parts: list[tuple[str, str, bytes] | tuple[str, str, bytes, str]],
 ) -> bytes:
     chunks: list[bytes] = []
-    for name, media_type, content in parts:
+    for part in parts:
+        name, media_type, content = part[:3]
+        filename = part[3] if len(part) == 4 else None
+        disposition = f'Content-Disposition: form-data; name="{name}"'
+        if filename is not None:
+            disposition += f'; filename="{filename}"'
         chunks.extend(
             [
                 f"--{boundary}\r\n".encode(),
-                (
-                    f'Content-Disposition: form-data; name="{name}"\r\n'
-                    f"Content-Type: {media_type}\r\n\r\n"
-                ).encode(),
+                f"{disposition}\r\nContent-Type: {media_type}\r\n\r\n".encode(),
                 content,
                 b"\r\n",
             ]
@@ -103,6 +105,21 @@ async def test_ingress_parses_the_two_contract_parts() -> None:
 
     assert parsed.envelope["operation"] == "receipt_image"
     assert parsed.envelope_bytes == _envelope()
+    assert parsed.document == b"\xff\xd8jpeg\xff\xd9"
+
+
+@pytest.mark.anyio
+async def test_ingress_accepts_a_document_filename() -> None:
+    body = _multipart(
+        "inari-test",
+        [
+            ("envelope", "application/json", _envelope()),
+            ("document", "image/jpeg", b"\xff\xd8jpeg\xff\xd9", "receipt.jpg"),
+        ],
+    )
+
+    parsed = await DeviceWorkIngress().parse(_request(body, content_length=len(body)))
+
     assert parsed.document == b"\xff\xd8jpeg\xff\xd9"
 
 

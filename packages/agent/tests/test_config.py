@@ -45,10 +45,8 @@ def test_load_settings_reads_new_nested_toml_shape(tmp_path: Path) -> None:
             database_path = "./runtime/data/agent.sqlite3"
             security_state_dir = "./runtime/security"
 
-            [devices.printing]
-            default_printer = "Kitchen Printer"
-            default_transport = "raw"
-            enable_html = false
+[devices.printing]
+default_printer = "Kitchen Printer"
 
             [controller]
             base_url = "https://controller.example.com"
@@ -86,8 +84,6 @@ def test_load_settings_reads_new_nested_toml_shape(tmp_path: Path) -> None:
     )
     assert settings.security_state_dir == (tmp_path / "runtime/security").resolve()
     assert settings.default_printer_name == "Kitchen Printer"
-    assert settings.default_printer_mode == "raw"
-    assert settings.html_print_enabled is False
     assert settings.upstream_base_url == "https://controller.example.com"
     assert settings.upstream_auth_mode.value == "zitadel_service_account"
     assert settings.upstream_mutual_tls_mode.value == "required"
@@ -159,9 +155,6 @@ def test_load_settings_reads_network_printers_from_toml(tmp_path: Path) -> None:
     config_path.write_text(
         textwrap.dedent(
             """
-            [devices.printing]
-            default_transport = "auto"
-
             [[devices.printing.printers]]
             name = "Kitchen LAN Printer"
             host = "192.168.1.40"

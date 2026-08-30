@@ -13,7 +13,6 @@ from ..protocols.types import (
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
-    RenderedDocument,
 )
 from ...drivers.base import DeviceIdentity, DeviceKind, DeviceTransport, DriverMetadata
 from .base import PrinterDriver
@@ -204,7 +203,6 @@ def _load_win32print_api() -> Win32PrintAPI | None:
 @dataclass(slots=True)
 class WindowsPrinterDriver(PrinterDriver):
     spooler: WindowsSpooler
-    default_transport: PrinterTransport = PrinterTransport.AUTO
     raw_name_hints: frozenset[str] = field(
         default_factory=lambda: RECEIPT_RAW_NAME_HINTS
     )
@@ -238,21 +236,6 @@ class WindowsPrinterDriver(PrinterDriver):
     def get_default_device_name(self) -> str | None:
         return self.spooler.get_default_printer_name(optional=True)
 
-    def resolve_transport(
-        self,
-        printer: PrinterDevice,
-        requested: PrinterTransport,
-    ) -> PrinterTransport:
-        if requested is not PrinterTransport.AUTO:
-            self._ensure_transport_supported(printer, requested)
-            return requested
-
-        if self.default_transport is not PrinterTransport.AUTO:
-            self._ensure_transport_supported(printer, self.default_transport)
-            return self.default_transport
-
-        return printer.preferred_transport
-
     def submit_raw_job(
         self,
         printer: PrinterDevice,
@@ -271,49 +254,6 @@ class WindowsPrinterDriver(PrinterDriver):
         return PrintJobResult(
             printer=printer,
             transport=PrinterTransport.RAW,
-            bytes_written=result.bytes_written,
-            job_id=result.job_id,
-        )
-
-    def submit_text_job(
-        self,
-        printer: PrinterDevice,
-        text: str,
-        *,
-        document_name: str,
-    ) -> PrintJobResult:
-        self._ensure_transport_supported(printer, PrinterTransport.TEXT)
-        payload = text.replace("\n", "\r\n").encode("mbcs", errors="replace")
-        result = self.spooler.write_job(
-            printer_name=printer.name,
-            payload=payload,
-            data_type="TEXT",
-            document_name=document_name,
-            use_page_calls=False,
-        )
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.TEXT,
-            bytes_written=result.bytes_written,
-            job_id=result.job_id,
-        )
-
-    def submit_document_job(
-        self,
-        printer: PrinterDevice,
-        document: RenderedDocument,
-    ) -> PrintJobResult:
-        self._ensure_transport_supported(printer, PrinterTransport.DOCUMENT)
-        result = self.spooler.write_job(
-            printer_name=printer.name,
-            payload=document.content,
-            data_type=document.data_type,
-            document_name=document.document_name,
-            use_page_calls=document.data_type.upper() == "RAW",
-        )
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.DOCUMENT,
             bytes_written=result.bytes_written,
             job_id=result.job_id,
         )
@@ -367,19 +307,9 @@ class WindowsPrinterDriver(PrinterDriver):
     def _ensure_transport_supported(
         printer: PrinterDevice, transport: PrinterTransport
     ) -> None:
-        match transport:
-            case PrinterTransport.RAW if not printer.supports_raw:
-                raise PrinterServiceError(
-                    "RAW_NOT_SUPPORTED",
-                    f"Printer {printer.name!r} does not support RAW receipt printing.",
-                )
-            case PrinterTransport.TEXT if not printer.supports_text:
-                raise PrinterServiceError(
-                    "TEXT_NOT_SUPPORTED",
-                    f"Printer {printer.name!r} does not support text printing.",
-                )
-            case PrinterTransport.DOCUMENT if not printer.supports_documents:
-                raise PrinterServiceError(
-                    "DOCUMENT_NOT_SUPPORTED",
-                    f"Printer {printer.name!r} does not support rendered document printing.",
-                )
+        if transport is PrinterTransport.RAW and printer.supports_raw:
+            return
+        raise PrinterServiceError(
+            "RAW_NOT_SUPPORTED",
+            f"Printer {printer.name!r} does not support RAW receipt printing.",
+        )

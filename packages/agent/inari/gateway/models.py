@@ -76,7 +76,6 @@ class ControllerAction(StrEnum):
     SYSTEM_READ = "system:read"
     DEVICES_READ = "devices:read"
     EVENTS_READ = "events:read"
-    JOBS_CREATE = "jobs:create"
     JOBS_CANCEL = "jobs:cancel"
     COMMANDS_EXECUTE = "commands:execute"
 
@@ -85,7 +84,6 @@ SUPPORTED_CONTROLLER_ACTIONS = (
     ControllerAction.SYSTEM_READ,
     ControllerAction.DEVICES_READ,
     ControllerAction.EVENTS_READ,
-    ControllerAction.JOBS_CREATE,
     ControllerAction.JOBS_CANCEL,
     ControllerAction.COMMANDS_EXECUTE,
 )
@@ -362,15 +360,6 @@ class GatewayOutboxRecord:
     last_error: str | None = None
 
 
-_LEGACY_SCOPE_TO_CONTROLLER_ACTIONS = {
-    "system:read": (ControllerAction.SYSTEM_READ,),
-    "devices:read": (ControllerAction.DEVICES_READ,),
-    "events:read": (ControllerAction.EVENTS_READ,),
-    "jobs:submit": (ControllerAction.JOBS_CREATE, ControllerAction.JOBS_CANCEL),
-    "commands:execute": (ControllerAction.COMMANDS_EXECUTE,),
-}
-
-
 def resolve_mutual_tls_policy(
     configured_mode: MutualTlsMode,
     *,
@@ -423,10 +412,6 @@ def parse_controller_actions(values: object) -> tuple[ControllerAction, ...]:
         try:
             action = ControllerAction(str(value))
         except ValueError:
-            for mapped in _LEGACY_SCOPE_TO_CONTROLLER_ACTIONS.get(str(value), ()):
-                if mapped not in seen:
-                    seen.add(mapped)
-                    ordered.append(mapped)
             continue
         if action not in seen:
             seen.add(action)

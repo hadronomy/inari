@@ -107,6 +107,9 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
         "site_id": grant.site_id,
     }
     return AdmissionManifest(
+        grant_id=grant.grant_id,
+        grant_pairing_id=grant.pairing_id,
+        grant_generation=grant.generation,
         idempotency_key=work.idempotency_key,
         database=origin.database,
         organization_id=context.organization_id,
@@ -140,6 +143,9 @@ def manifest_from_row(
     row: DatabaseRow, authority_proof: AuthorityProof
 ) -> AdmissionManifest:
     return AdmissionManifest(
+        grant_id=row["grant_id"],
+        grant_pairing_id=row["grant_pairing_id"],
+        grant_generation=row["grant_generation"],
         idempotency_key=row["idempotency_key"],
         database=row["database"],
         organization_id=row["organization_id"],
@@ -191,6 +197,9 @@ def same_origin_submission(row: DatabaseRow, manifest: AdmissionManifest) -> boo
 
 def manifest_comparison(manifest: AdmissionManifest) -> dict[str, object]:
     return {
+        "grant_id": manifest.grant_id,
+        "grant_pairing_id": manifest.grant_pairing_id,
+        "grant_generation": manifest.grant_generation,
         "actor_id": manifest.actor_id,
         "authorization_digest": manifest.authorization_digest,
         "binding_revision_id": manifest.binding_revision_id,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Protocol
 
 from cryptography.exceptions import InvalidTag
@@ -134,6 +134,37 @@ class SpoolCrypto:
         except (TypeError, ValueError):
             raise ArtifactMalformedError from None
 
+    def decrypt_artifact_chunks(
+        self,
+        *,
+        data_key: bytes,
+        artifact: EncryptedArtifact,
+        max_plaintext_bytes: int,
+        chunk_bytes: int = 64 * 1024,
+    ) -> Iterator[bytes]:
+        """Yield authenticated plaintext in bounded chunks.
+
+        Format version one uses one authenticated AES-GCM record. The record
+        is decrypted before the first chunk is yielded, so callers never see
+        unauthenticated plaintext. The explicit bound prevents an artifact
+        from turning this seam into an unbounded allocation.
+        """
+
+        if (
+            isinstance(max_plaintext_bytes, bool)
+            or not isinstance(max_plaintext_bytes, int)
+            or max_plaintext_bytes < 1
+            or isinstance(chunk_bytes, bool)
+            or not isinstance(chunk_bytes, int)
+            or chunk_bytes < 1
+        ):
+            raise ArtifactMalformedError
+        plaintext = self.decrypt_artifact(data_key=data_key, artifact=artifact)
+        if len(plaintext) > max_plaintext_bytes:
+            raise ArtifactMalformedError
+        for offset in range(0, len(plaintext), chunk_bytes):
+            yield plaintext[offset : offset + chunk_bytes]
+
     def wrap_data_key(
         self,
         *,
@@ -240,9 +271,7 @@ def wrapped_key_aad(*, job_id: str, intent_id: str, root_key_version: int) -> by
 
 
 def _job_aad(*, job_id: str, intent_id: str) -> bytes:
-    return (
-        _AAD_PREFIX + bytes((FORMAT_VERSION,)) + _field(job_id) + _field(intent_id)
-    )
+    return _AAD_PREFIX + bytes((FORMAT_VERSION,)) + _field(job_id) + _field(intent_id)
 
 
 def _field(value: str) -> bytes:

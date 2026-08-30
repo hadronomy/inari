@@ -413,22 +413,89 @@ class EndpointPolicy:
         object.__setattr__(self, "allowed_paths", paths)
 
     def accepts(self, target: RequestTarget) -> None:
-        if target.method not in self.allowed_methods:
-            raise ScopeMismatchError(
-                "The request method is not allowed for this Agent Endpoint."
-            )
-        target_origin = BoundOrigin(
-            urlunsplit(("https", urlsplit(target.uri).netloc, "", "", ""))
+        _accept_endpoint_target(
+            target,
+            agent_endpoint=self.agent_endpoint,
+            allowed_methods=self.allowed_methods,
+            allowed_paths=self.allowed_paths,
         )
-        if target_origin != self.agent_endpoint:
-            raise ScopeMismatchError(
-                "The request target does not match the Agent Endpoint."
-            )
-        path = urlsplit(target.uri).path or "/"
-        if self.allowed_paths and path not in self.allowed_paths:
-            raise ScopeMismatchError(
-                "The request path is not allowed for this Agent Endpoint."
-            )
+
+
+@dataclass(frozen=True, slots=True)
+class EndpointBinding:
+    """Static Agent Endpoint facts known before Client Grant verification."""
+
+    agent_id: str
+    audience: str
+    agent_endpoint: BoundOrigin
+    allowed_methods: frozenset[str]
+    allowed_paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _identifier("agent_id", self.agent_id)
+        _identifier("audience", self.audience)
+        if not isinstance(self.agent_endpoint, BoundOrigin):
+            raise TypeError("agent_endpoint must be a BoundOrigin")
+        methods = frozenset(method.upper() for method in self.allowed_methods)
+        if not methods or any(
+            not re.fullmatch(r"[A-Z][A-Z0-9-]{0,19}", method) for method in methods
+        ):
+            raise ValueError("allowed_methods must contain HTTP methods")
+        object.__setattr__(self, "allowed_methods", methods)
+        paths = tuple(self.allowed_paths)
+        if not paths or any(
+            not path.startswith("/") or "?" in path or "#" in path for path in paths
+        ):
+            raise ValueError("allowed_paths must contain path-only values")
+        object.__setattr__(self, "allowed_paths", paths)
+
+    def accepts(self, target: RequestTarget) -> None:
+        _accept_endpoint_target(
+            target,
+            agent_endpoint=self.agent_endpoint,
+            allowed_methods=self.allowed_methods,
+            allowed_paths=self.allowed_paths,
+        )
+
+    def complete(self, grant: ClientGrant) -> EndpointPolicy:
+        """Complete the policy with authority from one durable Client Grant."""
+
+        if not isinstance(grant, ClientGrant):
+            raise TypeError("grant must be a ClientGrant")
+        return EndpointPolicy(
+            agent_id=self.agent_id,
+            audience=self.audience,
+            browser_origin=grant.scope.browser_origin,
+            agent_endpoint=self.agent_endpoint,
+            business=grant.scope.business,
+            allowed_methods=self.allowed_methods,
+            allowed_paths=self.allowed_paths,
+        )
+
+
+def _accept_endpoint_target(
+    target: RequestTarget,
+    *,
+    agent_endpoint: BoundOrigin,
+    allowed_methods: frozenset[str],
+    allowed_paths: tuple[str, ...],
+) -> None:
+    if target.method not in allowed_methods:
+        raise ScopeMismatchError(
+            "The request method is not allowed for this Agent Endpoint."
+        )
+    target_origin = BoundOrigin(
+        urlunsplit(("https", urlsplit(target.uri).netloc, "", "", ""))
+    )
+    if target_origin != agent_endpoint:
+        raise ScopeMismatchError(
+            "The request target does not match the Agent Endpoint."
+        )
+    path = urlsplit(target.uri).path or "/"
+    if allowed_paths and path not in allowed_paths:
+        raise ScopeMismatchError(
+            "The request path is not allowed for this Agent Endpoint."
+        )
 
 
 @dataclass(frozen=True, slots=True)

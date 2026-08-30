@@ -55,13 +55,6 @@ class PrinterDevice:
 
 
 @dataclass(slots=True, frozen=True)
-class RenderedDocument:
-    content: bytes
-    data_type: str = "RAW"
-    document_name: str = "Document"
-
-
-@dataclass(slots=True, frozen=True)
 class PrintJobResult:
     printer: PrinterDevice
     transport: PrinterTransport

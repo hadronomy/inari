@@ -128,7 +128,16 @@ class DeviceWorkIngress:
                 ) from exc
 
             name = options.get(b"name")
-            if disposition != b"form-data" or name is None or set(options) != {b"name"}:
+            allowed_options = (
+                {b"name", b"filename"}
+                if name == b"document" and b"filename" in options
+                else {b"name"}
+            )
+            if (
+                disposition != b"form-data"
+                or name is None
+                or set(options) != allowed_options
+            ):
                 raise IngressError(
                     "invalid_device_work_parts",
                     "Device Work must contain named form-data parts.",

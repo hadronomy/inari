@@ -25,7 +25,6 @@ from .protocol import (
     AgentStatusSnapshotMessage,
     ControllerCancelJobMessage,
     ControllerExecuteDeviceCommandMessage,
-    ControllerSubmitPrintJobMessage,
     GatewaySnapshotPayload,
 )
 from .repositories import GatewayRepository
@@ -245,11 +244,7 @@ class GatewayConnector:
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None:
             return
-        if isinstance(message, ControllerSubmitPrintJobMessage):
-            await self.command_dispatcher.handle_submit_print_job(
-                message, enrollment=enrollment
-            )
-        elif isinstance(message, ControllerExecuteDeviceCommandMessage):
+        if isinstance(message, ControllerExecuteDeviceCommandMessage):
             await self.command_dispatcher.handle_execute_device_command(
                 message, enrollment=enrollment
             )

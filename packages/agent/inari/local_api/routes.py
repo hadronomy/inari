@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    Query,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from .dependencies import (
     get_authorization_service,
     get_device_catalog,
+    get_device_work_submission,
     get_event_hub,
     get_gateway_service,
     get_job_service,
@@ -17,7 +26,7 @@ from ..core.exceptions import AgentError
 from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..printing.commands import DeviceCommandKind
-from ..printing.jobs import PrintContentKind
+from ..documents import DocumentKind
 from ..runtime.events import EventHub
 from ..runtime.models import JobState
 from ..runtime.devices.service import DeviceCatalog
@@ -52,7 +61,7 @@ from .schemas import (
     JobResourceResponse,
     JobResponse,
     PrincipalResponse,
-    PrintJobRequest,
+    DeviceWorkAcceptedResponse,
     QueueSummaryResponse,
     RuntimeEventResponse,
     ManagedOnboardingDeviceConfirmationRequest,
@@ -65,6 +74,8 @@ from .schemas import (
     TokenResponse,
     TrustedLocalClientResponse,
 )
+from .device_work import DeviceWorkSubmission, authorized_device_work_request
+from .problem_handlers import problem_responses
 
 router = APIRouter()
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -75,8 +86,41 @@ devices_router = APIRouter(prefix="/devices", tags=["devices"])
 jobs_router = APIRouter(tags=["jobs"])
 events_router = APIRouter(tags=["events"])
 
+_DEVICE_WORK_OPENAPI = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "envelope": {
+                            "type": "string",
+                            "description": "RFC 8785 canonical receipt-image envelope.",
+                        },
+                        "document": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": "Exact JPEG receipt image.",
+                        },
+                    },
+                    "required": ["envelope", "document"],
+                },
+                "encoding": {
+                    "envelope": {"contentType": "application/json"},
+                    "document": {"contentType": "image/jpeg"},
+                },
+            }
+        },
+    }
+}
+
 DeviceCatalogDependency = Annotated[DeviceCatalog, Depends(get_device_catalog)]
 JobServiceDependency = Annotated[JobService, Depends(get_job_service)]
+DeviceWorkSubmissionDependency = Annotated[
+    DeviceWorkSubmission, Depends(get_device_work_submission)
+]
 EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
 AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
@@ -99,7 +143,7 @@ def build_system_status_response(
         service=ServiceDescriptorResponse(name=SERVICE_NAME, version=API_VERSION),
         devices=DeviceDirectorySummaryResponse.from_devices(devices),
         queue=QueueSummaryResponse.from_counts(dict(job_service.queue_counts())),
-        supported_content_kinds=tuple(PrintContentKind),
+        supported_document_kinds=(DocumentKind.RECEIPT_IMAGE,),
         supported_device_commands=tuple(DeviceCommandKind),
     )
 
@@ -435,17 +479,43 @@ async def list_device_events(
     )
 
 
-@jobs_router.post("/print-jobs", response_model=JobResourceResponse, status_code=202)
-async def submit_print_job(
-    request: PrintJobRequest,
-    job_service: JobServiceDependency,
-    authorization_service: AuthorizationServiceDependency,
+@jobs_router.post(
+    "/v1/device-work",
+    response_model=DeviceWorkAcceptedResponse,
+    status_code=202,
+    responses=problem_responses(
+        400,
+        401,
+        403,
+        409,
+        410,
+        413,
+        415,
+        422,
+        429,
+        500,
+        503,
+        507,
+    ),
+    openapi_extra=_DEVICE_WORK_OPENAPI,
+)
+async def submit_device_work(
+    response: Response,
     connection: Request,
-) -> JobResourceResponse:
-    principal = _current_principal(authorization_service, connection)
-    _require_scopes(authorization_service, principal, AccessScope.JOBS_SUBMIT)
-    job = await job_service.enqueue_print(request.to_operation())
-    return JobResourceResponse(job=JobResponse.from_domain(job))
+    submission: DeviceWorkSubmissionDependency,
+) -> DeviceWorkAcceptedResponse:
+    authorization = authorized_device_work_request(connection)
+    accepted = await submission.submit(connection, authorization)
+    if accepted.replayed:
+        response.status_code = 200
+    return DeviceWorkAcceptedResponse(
+        print_intent_id=accepted.print_intent_id,
+        print_job_id=accepted.print_job_id,
+        device_id=accepted.device_id,
+        state_version=accepted.state_version,
+        accepted_at=accepted.accepted_at,
+        replayed=accepted.replayed,
+    )
 
 
 @jobs_router.post(

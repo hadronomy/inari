@@ -83,6 +83,9 @@ def receipt_work() -> DocumentWork:
 
 def admission_grant() -> AdmissionGrant:
     return AdmissionGrant(
+        grant_id="grant_1",
+        pairing_id="pairing_1",
+        generation=1,
         organization_id="org_1",
         site_id="site_1",
         database="odoo",

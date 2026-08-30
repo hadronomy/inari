@@ -13,41 +13,18 @@ if TYPE_CHECKING:
         OpenCashDrawer,
         PrintTestPage,
     )
-    from .jobs import (
-        HtmlDocumentContent,
-        PdfDocumentContent,
-        PrintContent,
-        PrintContentKind,
-        PrintJob,
-        RawDocumentContent,
-        ReceiptImageContent,
-        StructuredReceiptContent,
-        TextDocumentContent,
-    )
-    from .payloads import BinaryPayload, DetectedMediaType
     from .service import PrinterService
 
 __all__ = [
     "AnyDeviceCommand",
-    "BinaryPayload",
     "CutPaper",
-    "DetectedMediaType",
     "DeviceCommand",
     "DeviceCommandKind",
     "FeedDots",
     "FeedLines",
-    "HtmlDocumentContent",
     "OpenCashDrawer",
-    "PdfDocumentContent",
-    "PrintContent",
-    "PrintContentKind",
-    "PrintJob",
     "PrintTestPage",
     "PrinterService",
-    "RawDocumentContent",
-    "ReceiptImageContent",
-    "StructuredReceiptContent",
-    "TextDocumentContent",
 ]
 
 _COMMAND_EXPORTS = {
@@ -60,33 +37,12 @@ _COMMAND_EXPORTS = {
     "OpenCashDrawer",
     "PrintTestPage",
 }
-_JOB_EXPORTS = {
-    "HtmlDocumentContent",
-    "PdfDocumentContent",
-    "PrintContent",
-    "PrintContentKind",
-    "PrintJob",
-    "RawDocumentContent",
-    "ReceiptImageContent",
-    "StructuredReceiptContent",
-    "TextDocumentContent",
-}
-_PAYLOAD_EXPORTS = {"BinaryPayload", "DetectedMediaType"}
-
 
 def __getattr__(name: str) -> Any:
     if name in _COMMAND_EXPORTS:
         from . import commands
 
         value = getattr(commands, name)
-    elif name in _JOB_EXPORTS:
-        from . import jobs
-
-        value = getattr(jobs, name)
-    elif name in _PAYLOAD_EXPORTS:
-        from . import payloads
-
-        value = getattr(payloads, name)
     elif name == "PrinterService":
         from .service import PrinterService
 

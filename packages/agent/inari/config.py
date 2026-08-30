@@ -138,10 +138,6 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("devices", "printing", "default_printer"): (
         "Preferred printer label when jobs do not target a specific device.",
     ),
-    ("devices", "printing", "default_transport"): (
-        "Default transport strategy when a driver supports more than one mode.",
-    ),
-    ("devices", "printing", "enable_html"): ("Allow HTML receipt/document rendering.",),
     ("devices", "labels"): (
         "Friendly labels keyed by stable Inari device id. These do not rename operating-system devices.",
     ),
@@ -511,8 +507,6 @@ class DevicesPrintingConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     default_printer: str | None = None
-    default_transport: PrinterMode = "auto"
-    enable_html: bool = True
     printers: list[ManagedPrinterConfig] = Field(default_factory=list)
 
 
@@ -755,8 +749,6 @@ class AgentConfigFile(BaseModel):
             "security_state_dir": security_state_dir,
             "default_printer_name": self.devices.printing.default_printer,
             "device_labels": dict(self.devices.labels),
-            "default_printer_mode": self.devices.printing.default_transport,
-            "html_print_enabled": self.devices.printing.enable_html,
             "network_printers": [
                 {
                     "name": printer.name,
@@ -933,8 +925,6 @@ class AgentSettings(BaseModel):
     default_printer_name: str | None = None
     device_labels: dict[str, str] = Field(default_factory=dict)
     log_level: LogLevel = "INFO"
-    html_print_enabled: bool = True
-    default_printer_mode: PrinterMode = "auto"
     network_printers: list[NetworkPrinterConfig] = Field(default_factory=list)
     data_dir: Path | None = None
     temp_dir: Path | None = None

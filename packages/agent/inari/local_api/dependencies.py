@@ -5,6 +5,7 @@ from starlette.requests import HTTPConnection
 
 from ..config import AgentSettings
 from ..application.container import AgentContainer, get_default_container
+from .device_work import DeviceWorkSubmission
 from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..runtime.events import EventHub
@@ -35,6 +36,12 @@ def get_device_catalog(
 
 def get_job_service(container: AgentContainer = Depends(get_container)) -> JobService:
     return container.job_service
+
+
+def get_device_work_submission(
+    container: AgentContainer = Depends(get_container),
+) -> DeviceWorkSubmission:
+    return container.device_work_submission
 
 
 def get_event_hub(container: AgentContainer = Depends(get_container)) -> EventHub:

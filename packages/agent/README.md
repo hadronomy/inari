@@ -37,7 +37,7 @@ The API is organized around a small set of resources:
 | Local trust | `/auth/local-challenge`, `/auth/local-token`, `/auth/pairing/*`, `/auth/me` |
 | Agent state | `/system/status`, `/gateway/identity`, `/gateway/upstream/status` |
 | Devices | `/devices`, `/devices/{device_id}`, `/devices/{device_id}/events` |
-| Work | `/print-jobs`, `/device-commands`, `/jobs`, `/jobs/{job_id}` |
+| Work | `/v1/device-work`, `/device-commands`, `/jobs`, `/jobs/{job_id}` |
 | Live updates | `WS /events` |
 
 Operational routes require a scoped local token. Device Center pairs, signs a
@@ -63,47 +63,51 @@ Failures use an RFC 9457-style problem document:
 Validation errors add field pointers so clients can place feedback beside the
 input that needs attention.
 
-## Submit print work
+## Submit Device Work
 
-`POST /print-jobs` accepts a discriminated content model rather than an
-unstructured payload. Supported kinds are:
+`POST /v1/device-work` accepts one `multipart/form-data` request with exactly
+two parts:
 
-- `structured_receipt`
-- `receipt_image`
-- `text`
-- `html`
-- `pdf`
-- `raw`
+- `envelope` contains the Contract Major 1 JSON metadata;
+- `document` contains the binary document.
 
-Binary content uses base64 with an explicit MIME type. A receipt-image request
-looks like this:
+The caller must send a stable `Idempotency-Key` header. Contract Major 1
+currently advertises only JPEG `receipt_image` work. The request always targets
+one stable `device_id`. It does not accept printer names, transport choices,
+raw commands, HTML, text, or base64 content.
+
+The envelope has this shape:
 
 ```json
 {
-  "content": {
-    "kind": "receipt_image",
-    "binary": {
-      "base64": "data:image/png;base64,...",
-      "declared_mime_type": "image/png"
+  "contract_major": 1,
+  "operation": "receipt_image",
+  "media_type": "image/jpeg",
+  "context": {
+    "contract_major": 1,
+    "print_intent_id": "pi_01J...",
+    "origin_submission_key": "osk_01J...",
+    "origin": {
+      "pos_session_id": "pos_session_42",
+      "offline_order_id": "order-1",
+      "server_order_id": null,
+      "document_kind": "customer_receipt",
+      "content_revision": "revision-1"
     },
-    "document_name": "POS receipt"
-  },
-  "target": {
-    "device_id": "dev_..."
-  },
-  "options": {
-    "transport": "auto",
-    "open_cash_drawer": false
-  },
-  "metadata": {
-    "source": "pos"
+    "binding_revision_id": "binding_revision_9",
+    "device_id": "dev_...",
+    "copy_ordinal": 1
   }
 }
 ```
 
-The response is a durable job resource. Follow it through `/jobs/{job_id}` or
-the live event stream. Prefer a stable `device_id`; printer names are a
-human-facing fallback, not a durable automation key.
+The accepted Client Grant supplies the database, company, organization, site,
+POS configuration, operator, pairing, generation, and authorization digest.
+The request body cannot override these authority values.
+
+The Agent returns `202 Accepted` only after durable admission. An exact replay
+returns the same Print Job with `200 OK`. Follow the Print Job through
+`/jobs/{job_id}` or the live event stream.
 
 ## Runtime and drivers
 

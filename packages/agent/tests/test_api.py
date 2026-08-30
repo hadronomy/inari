@@ -16,6 +16,18 @@ from httpx import ASGITransport, AsyncClient
 
 from inari.config import AgentSettings
 from inari.application.container import AgentContainer
+from inari.client_trust import (
+    AcceptedDPoPProof,
+    AuthorizedRequest,
+    BoundOrigin,
+    BusinessScope,
+    ClientGrant,
+    EndpointPolicy,
+    PairingScope,
+    Permission,
+    RequestTarget,
+)
+from inari.documents import AdmissionAccepted, AdmissionRequest, DocumentWork
 from inari.drivers import (
     DeviceIdentity,
     DeviceKind,
@@ -26,6 +38,13 @@ from inari.drivers import (
 from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.local_api.app import create_app
+from inari.local_api.device_work import DeviceWorkSubmission
+from inari.local_api.header_authorization import (
+    AuthorizationDecision,
+    AuthorizationFailure,
+    EndpointAuthorizationPolicy,
+    HeaderAuthorizationRequest,
+)
 from inari.local_api.schemas import RuntimeEventResponse
 from inari.printing.protocols import (
     PrinterCapabilities,
@@ -115,12 +134,6 @@ class StubJobService:
     submitted_print_operation: object | None = None
     submitted_command_operation: object | None = None
 
-    async def enqueue_print(self, operation):
-        if self.enqueue_print_error is not None:
-            raise self.enqueue_print_error
-        self.submitted_print_operation = operation
-        return next(iter(self.jobs.values()))
-
     async def enqueue_command(self, operation):
         if self.enqueue_command_error is not None:
             raise self.enqueue_command_error
@@ -152,6 +165,46 @@ class StubJobService:
         )
         self.jobs[job_id] = cancelled
         return cancelled
+
+
+@dataclass(slots=True)
+class StubDocumentAdmission:
+    accepted_at: datetime
+    error: Exception | None = None
+    submitted_request: AdmissionRequest | None = None
+    submitted_work: DocumentWork | None = None
+
+    async def admit(self, request: AdmissionRequest) -> AdmissionAccepted:
+        if self.error is not None:
+            raise self.error
+        self.submitted_request = request
+        work = request.work
+        self.submitted_work = work
+        return AdmissionAccepted(
+            print_intent_id=work.context.print_intent_id,
+            print_job_id="job_123",
+            device_id=work.context.device_id,
+            accepted_at=self.accepted_at,
+            state_version=1,
+            replayed=False,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StubClientTrustAuthorizer:
+    authorization: AuthorizedRequest
+    error: Exception | None = None
+
+    def authorize(
+        self,
+        request: HeaderAuthorizationRequest,
+        policy: EndpointAuthorizationPolicy,
+    ) -> AuthorizationDecision:
+        del request
+        assert policy.permission is Permission.RECEIPT_IMAGE
+        if self.error is not None:
+            raise self.error
+        return AuthorizationDecision.authorized(self.authorization)
 
 
 @dataclass(slots=True)
@@ -296,7 +349,7 @@ async def test_system_status_reports_device_and_queue_summary(mocker) -> None:
         "name": "Kitchen Printer",
     }
     assert payload["queue"]["queued"] == 1
-    assert "receipt_image" in payload["supported_content_kinds"]
+    assert "receipt_image" in payload["supported_document_kinds"]
     assert "cut_paper" in payload["supported_device_commands"]
 
 
@@ -391,36 +444,96 @@ def test_committed_event_fixture_matches_the_python_contract() -> None:
 
 
 @pytest.mark.anyio
-async def test_submit_print_job_returns_queued_job_resource(mocker) -> None:
+async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
     container = make_test_container(mocker=mocker)
+    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
+    envelope = {
+        "contract_major": 1,
+        "operation": "receipt_image",
+        "media_type": "image/jpeg",
+        "context": {
+            "contract_major": 1,
+            "print_intent_id": "pi_v1_test",
+            "origin_submission_key": "osk_v1_test",
+            "origin": {
+                "pos_session_id": "pos_session_42",
+                "offline_order_id": "order-1",
+                "server_order_id": None,
+                "document_kind": "customer_receipt",
+                "content_revision": "revision-1",
+            },
+            "binding_revision_id": "binding_revision_9",
+            "device_id": device_id,
+            "copy_ordinal": 1,
+        },
+    }
 
     async with async_client_for(container) as client:
+        headers = await auth_headers(client)
+        headers["Idempotency-Key"] = "pi_v1_test"
         response = await client.post(
-            "/print-jobs",
-            json={
-                "content": {
-                    "kind": "text",
-                    "text": "Hello printer",
-                    "document_name": "Greeting",
-                },
-                "target": {"printer_name": "Kitchen Printer"},
-                "options": {"transport": "text"},
+            "/v1/device-work",
+            files={
+                "envelope": (
+                    None,
+                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    "application/json",
+                ),
+                "document": (
+                    "receipt.jpg",
+                    b"\xff\xd8receipt\xff\xd9",
+                    "image/jpeg",
+                ),
             },
-            headers=await auth_headers(client),
+            headers=headers,
         )
 
     assert response.status_code == 202
     payload = response.json()
-    job_service = cast(StubJobService, container.job_service)
     assert payload["ok"] is True
-    assert payload["job"]["kind"] == "print_job"
-    assert payload["job"]["state"] == "queued"
-    assert payload["job"]["target"]["device_name"] == "Kitchen Printer"
-    assert job_service.submitted_print_operation is not None
+    assert payload["state"] == "accepted"
+    assert payload["print_job_id"] == "job_123"
+    admission = cast(StubDocumentAdmission, container.document_admission)
+    assert admission.submitted_work is not None
+    assert admission.submitted_request is not None
+    assert admission.submitted_work.idempotency_key == "pi_v1_test"
+    assert admission.submitted_work.context.device_id == device_id
+    assert admission.submitted_work.context.organization_id == "org_1"
+    assert admission.submitted_work.context.site_id == "site_1"
+    assert admission.submitted_work.context.paired_client_id == "pairing_1"
+    assert admission.submitted_work.context.actor_id == "res.users:7"
+    assert admission.submitted_request.grant.grant_id == "grant_1"
+    assert admission.submitted_request.grant.generation == 1
     assert (
-        cast(Any, job_service.submitted_print_operation).target.printer_name
-        == "Kitchen Printer"
+        admission.submitted_request.grant.authorization_digest
+        == "authorization_digest_1"
     )
+
+
+@pytest.mark.anyio
+async def test_device_work_trust_failure_keeps_browser_cors_headers(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    authorization = authorized_device_work()
+    container = replace(
+        container,
+        device_work_authorizer=StubClientTrustAuthorizer(
+            authorization,
+            error=AuthorizationFailure(
+                "missing_client_grant",
+                "The request needs a Client Grant.",
+            ),
+        ),
+    )
+
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/device-work",
+            content=b"body-must-not-be-read",
+            headers={"Origin": "http://127.0.0.1:8069"},
+        )
+
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == ("http://127.0.0.1:8069")
 
 
 @pytest.mark.anyio
@@ -436,7 +549,11 @@ async def test_submit_device_command_returns_queued_job_resource(mocker) -> None
         response = await client.post(
             "/device-commands",
             json={
-                "target": {"printer_name": "Kitchen Printer"},
+                "target": {
+                    "device_id": next(
+                        iter(cast(StubDeviceCatalog, container.device_catalog).devices)
+                    ).id
+                },
                 "command": {"kind": "cut_paper", "mode": "full"},
             },
             headers=await auth_headers(client),
@@ -542,38 +659,70 @@ def test_events_websocket_streams_snapshot_backed_updates(mocker) -> None:
 @pytest.mark.anyio
 async def test_validation_errors_use_unified_problem_details_shape(mocker) -> None:
     async with async_client_for(make_test_container(mocker=mocker)) as client:
-        response = await client.post("/print-jobs", json={})
+        response = await client.post("/v1/device-work")
 
-    assert response.status_code == 422
+    assert response.status_code == 400
     payload = response.json()
-    assert payload["ok"] is False
-    assert payload["code"] == "REQUEST_VALIDATION_FAILED"
-    assert payload["type"] == "urn:inari:error:request-validation-failed"
-    assert payload["errors"][0]["source"]["pointer"] == "/content"
+    assert payload["error_code"] == "request_malformed"
+    assert payload["type"] == "urn:inari:problem:v1:request_malformed"
+    assert payload["status"] == 400
 
 
 @pytest.mark.anyio
 async def test_agent_errors_use_unified_problem_details_shape(mocker) -> None:
     container = make_test_container(mocker=mocker)
-    cast(StubJobService, container.job_service).enqueue_print_error = AgentError(
+    cast(StubDocumentAdmission, container.document_admission).error = AgentError(
         "DEVICE_NOT_FOUND",
         "Device 'dev_missing' was not found.",
         status_code=404,
     )
+    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
+    envelope = {
+        "contract_major": 1,
+        "operation": "receipt_image",
+        "media_type": "image/jpeg",
+        "context": {
+            "contract_major": 1,
+            "print_intent_id": "pi_v1_missing",
+            "origin_submission_key": "osk_v1_missing",
+            "origin": {
+                "pos_session_id": "pos_session_42",
+                "offline_order_id": "order-1",
+                "server_order_id": None,
+                "document_kind": "customer_receipt",
+                "content_revision": "revision-1",
+            },
+            "binding_revision_id": "binding_revision_9",
+            "device_id": device_id,
+            "copy_ordinal": 1,
+        },
+    }
 
     async with async_client_for(container) as client:
+        headers = await auth_headers(client)
+        headers["Idempotency-Key"] = "pi_v1_missing"
         response = await client.post(
-            "/print-jobs",
-            json={"content": {"kind": "text", "text": "Hello printer"}},
-            headers=await auth_headers(client),
+            "/v1/device-work",
+            files={
+                "envelope": (
+                    None,
+                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    "application/json",
+                ),
+                "document": (
+                    "receipt.jpg",
+                    b"\xff\xd8receipt\xff\xd9",
+                    "image/jpeg",
+                ),
+            },
+            headers=headers,
         )
 
     assert response.status_code == 404
     payload = response.json()
-    assert payload["ok"] is False
-    assert payload["code"] == "DEVICE_NOT_FOUND"
-    assert payload["title"] == "Device Not Found"
-    assert payload["type"] == "urn:inari:error:device-not-found"
+    assert payload["error_code"] == "resource_not_found"
+    assert payload["title"] == "Resource not found"
+    assert payload["type"] == "urn:inari:problem:v1:resource_not_found"
 
 
 @pytest.mark.anyio
@@ -583,9 +732,8 @@ async def test_framework_http_errors_use_unified_problem_details_shape(mocker) -
 
     assert response.status_code == 404
     payload = response.json()
-    assert payload["ok"] is False
-    assert payload["code"] == "HTTP_404"
-    assert payload["details"]["path"] == "/missing-route"
+    assert payload["error_code"] == "resource_not_found"
+    assert payload["status"] == 404
 
 
 @pytest.mark.anyio
@@ -596,6 +744,7 @@ async def test_removed_endpoints_are_not_exposed(mocker) -> None:
             ("get", "/printers"),
             ("get", "/devices/printers"),
             ("post", "/printer-commands"),
+            ("post", "/print-jobs"),
             ("post", "/print"),
             ("post", "/print_receipt"),
         ):
@@ -626,7 +775,7 @@ async def test_protected_routes_require_bearer_token(mocker) -> None:
         response = await client.get("/devices")
 
     assert response.status_code == 401
-    assert response.json()["code"] == "AUTHENTICATION_REQUIRED"
+    assert response.json()["error_code"] == "trust_required"
 
 
 @pytest.mark.anyio
@@ -636,7 +785,7 @@ async def test_insufficient_scope_returns_forbidden(mocker) -> None:
         response = await client.get("/devices", headers=headers)
 
     assert response.status_code == 403
-    assert response.json()["code"] == "INSUFFICIENT_SCOPE"
+    assert response.json()["error_code"] == "permission_denied"
 
 
 @pytest.mark.anyio
@@ -662,11 +811,71 @@ def test_lan_exposure_requires_tls_material() -> None:
         )
 
 
+def authorized_device_work() -> AuthorizedRequest:
+    now = datetime.now(tz=UTC)
+    browser_origin = BoundOrigin("https://odoo.example")
+    agent_endpoint = BoundOrigin("https://agent.example")
+    business = BusinessScope(
+        database="odoo",
+        company_id="company_1",
+        organization_id="org_1",
+        site_id="site_1",
+        pos_configuration_id="pos_config_7",
+    )
+    scope = PairingScope(
+        agent_id="agent_1",
+        browser_origin=browser_origin,
+        agent_endpoint=agent_endpoint,
+        business=business,
+        audience="inari.local",
+    )
+    target = RequestTarget("POST", "https://agent.example/v1/device-work")
+    grant = ClientGrant(
+        grant_id="grant_1",
+        pairing_id="pairing_1",
+        jwk_thumbprint="thumbprint_1",
+        scope=scope,
+        actor_id="res.users:7",
+        role="device_operator",
+        permissions=frozenset({Permission.RECEIPT_IMAGE}),
+        authorization_digest="authorization_digest_1",
+        generation=1,
+        issued_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(minutes=14),
+    )
+    proof = AcceptedDPoPProof(
+        jwk_thumbprint=grant.jwk_thumbprint,
+        htm=target.method,
+        htu=target.uri,
+        iat=now,
+        ath="access_hash_1",
+        nonce="nonce_value_1",
+        jti="proof_value_1",
+        accepted_at=now,
+    )
+    endpoint = EndpointPolicy(
+        agent_id=scope.agent_id,
+        audience=scope.audience,
+        browser_origin=browser_origin,
+        agent_endpoint=agent_endpoint,
+        business=business,
+        allowed_methods=frozenset({"POST"}),
+        allowed_paths=("/v1/device-work",),
+    )
+    return AuthorizedRequest(
+        target=target,
+        grant=grant,
+        dpop=proof,
+        endpoint=endpoint,
+        accepted_at=now,
+    )
+
+
 def make_test_container(
     *,
-    job_kind: JobKind = JobKind.PRINT,
-    operation: str = "print_job",
-    command_kind: str | None = None,
+    job_kind: JobKind = JobKind.COMMAND,
+    operation: str = "cut_paper",
+    command_kind: str | None = "cut_paper",
     devices: tuple[DeviceRecord, ...] | None = None,
     mocker,
 ) -> AgentContainer:
@@ -703,9 +912,9 @@ def make_test_container(
         device_kind=device.kind,
         device_name=device.name,
         state=JobState.QUEUED,
-        request_payload={"job": {"content": {"kind": "text", "text": "Hello printer"}}},
+        request_payload={"command": {"kind": "cut_paper", "mode": "full"}},
         request_metadata={"source": "test"},
-        content_kind="text" if job_kind is JobKind.PRINT else None,
+        content_kind=None,
         command_kind=command_kind,
         attempt_count=0,
         max_attempts=3,
@@ -745,6 +954,8 @@ def make_test_container(
         job_attempts=(attempt,),
         job_events=(event,),
     )
+    admission = StubDocumentAdmission(accepted_at=now)
+    authorization = authorized_device_work()
     return AgentContainer(
         settings=settings,
         database_migrator=cast(Any, StubDatabaseMigrator()),
@@ -754,6 +965,10 @@ def make_test_container(
         device_catalog=cast(Any, device_catalog),
         job_service=cast(Any, job_service),
         runtime_supervisor=cast(Any, StubRuntimeSupervisor()),
+        document_admission=cast(Any, admission),
+        device_work_submission=DeviceWorkSubmission(admission=admission),
+        physical_execution=cast(Any, object()),
+        device_work_authorizer=StubClientTrustAuthorizer(authorization),
         authorization_service=cast(Any, StubAuthorizationService()),
         gateway_service=cast(Any, StubGatewayService(settings=settings)),
         application_supervisor=cast(Any, StubApplicationSupervisor()),

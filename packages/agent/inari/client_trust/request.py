@@ -53,6 +53,7 @@ _QUERY_CREDENTIAL_NAMES = frozenset(
     }
 )
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_METHOD = re.compile(r"^[A-Z][A-Z0-9-]{0,19}$")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*$")
 _PORT = re.compile(r"^[0-9]+$")
 _PATH_SAFE = "/:@-._~!$&'()*+,;=%"
@@ -80,6 +81,7 @@ class NormalizedHeaders(Mapping[str, str]):
 class RequestTarget:
     """The canonical scheme, authority, and path used by DPoP `htu`."""
 
+    method: str
     scheme: str
     authority: str
     path: str
@@ -104,6 +106,7 @@ class RequestTarget:
         raw_path = scope.get("raw_path")
         headers = normalize_headers(cast(HeaderInput, scope.get("headers", ())))
         return build_request_target(
+            method=cast(str, scope.get("method")),
             scheme=scheme,
             server=server,
             path=path,
@@ -199,6 +202,7 @@ def normalize_origin(value: str | bytes | None) -> str:
 
 def build_request_target(
     *,
+    method: str,
     scheme: str,
     server: ServerAddress,
     path: str,
@@ -207,6 +211,7 @@ def build_request_target(
 ) -> RequestTarget:
     """Build a trusted target and compare, but never trust, the Host header."""
 
+    normalized_method = _normalize_method(method)
     normalized_scheme = _normalize_scheme(scheme)
     authority = _normalize_server(server, scheme=normalized_scheme)
     normalized_headers = normalize_headers(headers)
@@ -219,11 +224,14 @@ def build_request_target(
             "The Host header does not match the connection authority."
         )
     normalized_path = _normalize_path(path, raw_path=raw_path)
-    return RequestTarget(normalized_scheme, authority, normalized_path)
+    return RequestTarget(
+        normalized_method, normalized_scheme, authority, normalized_path
+    )
 
 
 def build_browser_request(
     *,
+    method: str,
     scheme: str,
     server: ServerAddress,
     path: str,
@@ -235,6 +243,7 @@ def build_browser_request(
 
     normalized_headers = normalize_headers(headers)
     target = build_request_target(
+        method=method,
         scheme=scheme,
         server=server,
         path=path,
@@ -391,6 +400,15 @@ def _normalize_scheme(value: str) -> str:
     if scheme not in {"http", "https"}:
         raise RequestTargetError("The request scheme must be HTTP or HTTPS.")
     return scheme
+
+
+def _normalize_method(value: str) -> str:
+    if not isinstance(value, str):
+        raise RequestTargetError("The request method is invalid.")
+    method = value.upper()
+    if value != method or not _METHOD.fullmatch(method):
+        raise RequestTargetError("The request method is invalid.")
+    return method
 
 
 def _normalize_path(path: str, *, raw_path: bytes | None) -> str:

@@ -86,6 +86,9 @@ def receipt_work(document: object = None, **context_changes: object) -> Document
 
 def grant(**changes: object) -> AdmissionGrant:
     values: dict[str, object] = {
+        "grant_id": "grant_1",
+        "pairing_id": "pairing_1",
+        "generation": 1,
         "organization_id": "org_1",
         "site_id": "site_1",
         "database": "odoo",

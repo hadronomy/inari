@@ -21,7 +21,7 @@ from .models import (
     BoundOrigin,
     ClientGrant,
     ClientPairing,
-    EndpointPolicy,
+    EndpointBinding,
     GrantAdmissionProof,
     GrantLifecycle,
     IssuedDPoPNonce,
@@ -287,16 +287,13 @@ class ClientTrustService:
         self,
         request: object,
         *,
-        endpoint: EndpointPolicy,
+        binding: EndpointBinding,
         permission: Permission | str | None = None,
     ) -> AuthorizedRequest:
         """Authorize one exact-origin request with an access token and DPoP proof."""
 
         target, origin, authorization, proof = self._request_values(request)
-        if not endpoint.browser_origin.matches(origin):
-            raise ScopeMismatchError(
-                "The request origin does not match the Client Pairing."
-            )
+        binding.accepts(target)
         token = self._access_token(authorization)
         now = self._now()
         claims = self.access_token_verifier.verify(token, at=now)
@@ -309,7 +306,8 @@ class ClientTrustService:
         grant.active_at(now)
         pairing.active_at(now)
         if (
-            claims.client_pairing_id != grant.pairing_id
+            claims.issuer != binding.agent_id
+            or claims.client_pairing_id != grant.pairing_id
             or claims.client_grant_id != grant.grant_id
             or claims.subject != grant.actor_id
             or claims.audience != grant.scope.audience
@@ -324,15 +322,18 @@ class ClientTrustService:
             )
         if (
             grant.scope != pairing.scope
-            or endpoint.agent_id != pairing.scope.agent_id
-            or endpoint.audience != pairing.scope.audience
-            or endpoint.browser_origin != pairing.scope.browser_origin
-            or endpoint.agent_endpoint != pairing.scope.agent_endpoint
-            or endpoint.business != pairing.scope.business
+            or binding.agent_id != pairing.scope.agent_id
+            or binding.audience != pairing.scope.audience
+            or binding.agent_endpoint != pairing.scope.agent_endpoint
         ):
             raise ScopeMismatchError(
                 "The Client Grant does not match the Agent Endpoint."
             )
+        if not pairing.scope.browser_origin.matches(origin):
+            raise ScopeMismatchError(
+                "The request origin does not match the Client Pairing."
+            )
+        endpoint = binding.complete(grant)
         accepted = self.dpop_verifier.verify(
             proof,
             target=target,

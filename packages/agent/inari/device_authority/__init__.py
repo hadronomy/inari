@@ -37,6 +37,7 @@ from .models import (
     SignerState,
 )
 from .ports import AuthorityProjectionReader, DeviceObservationReader
+from .sqlite import SqliteDeviceAuthorityReader
 from .errors import AuthorityError, AuthorityErrorCode
 
 __all__ = [
@@ -74,6 +75,7 @@ __all__ = [
     "SignedDriverProfile",
     "SignedHardwareCertificationMatrixRow",
     "SignerPurpose",
+    "SqliteDeviceAuthorityReader",
     "SignerRecord",
     "SignerState",
 ]

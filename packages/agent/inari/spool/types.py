@@ -7,6 +7,9 @@ from ..device_authority import AuthorityProof
 
 @dataclass(frozen=True, slots=True)
 class AdmissionManifest:
+    grant_id: str
+    grant_pairing_id: str
+    grant_generation: int
     idempotency_key: str
     database: str
     organization_id: str

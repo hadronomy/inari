@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from inari.client_trust import Permission
 from inari.local_api.header_authorization import (
     AUTHORIZATION_RESULT_STATE_KEY,
     PAIRING_PERMIT_STATE_KEY,
@@ -119,7 +120,7 @@ async def test_authorization_failure_is_problem_json_without_reading_body() -> N
             {
                 ("POST", "/v1/device-work"): EndpointAuthorizationPolicy(
                     AuthorizationMode.CLIENT_GRANT,
-                    required_scopes=frozenset({"device_work.submit"}),
+                    permission=Permission.RECEIPT_IMAGE,
                 )
             }
         ),
@@ -170,7 +171,8 @@ async def test_success_passes_the_same_scope_and_receive_and_stores_grant() -> N
         catalog=ExplicitEndpointPolicyCatalog(
             {
                 ("post", "/v1/device-work"): EndpointAuthorizationPolicy(
-                    AuthorizationMode.CLIENT_GRANT
+                    AuthorizationMode.CLIENT_GRANT,
+                    permission=Permission.RECEIPT_IMAGE,
                 )
             }
         ),
@@ -212,7 +214,6 @@ async def test_pairing_policy_stores_only_pairing_permit_and_receives_exact_poli
     app = RecordingApplication()
     policy = EndpointAuthorizationPolicy(
         AuthorizationMode.PAIRING,
-        required_scopes=frozenset({"pairing.approve"}),
         name="pairing assertion",
     )
     authorizer = RecordingAuthorizer(decision=AuthorizationDecision.paired("permit"))

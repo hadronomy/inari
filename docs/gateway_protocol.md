@@ -142,7 +142,6 @@ details with `Content-Type: application/problem+json`.
       "system:read",
       "devices:read",
       "events:read",
-      "jobs:create",
       "jobs:cancel",
       "commands:execute"
     ]
@@ -244,30 +243,10 @@ Every controller command has:
 - an optional `issued_at` time;
 - a discriminating `type`.
 
-### Submit a print job
-
-```json
-{
-  "type": "controller.command.submit_print_job",
-  "message_id": "msg_100",
-  "command_id": "cmd_100",
-  "sequence": 105,
-  "issued_at": "2026-07-15T10:05:00Z",
-  "payload": {
-    "content": {
-      "kind": "text",
-      "text": "Hello printer",
-      "document_name": "Greeting"
-    },
-    "target": { "device_id": "dev_123" },
-    "options": {
-      "transport": "auto",
-      "open_cash_drawer": false
-    },
-    "metadata": { "source": "controller" }
-  }
-}
-```
+Managed document delivery does not use a broad print command. The gateway
+command union does not accept raw, text, HTML, structured receipt, base64,
+printer-name, or transport-selection fields. Encrypted Managed Device Work is
+outside this protocol version until its dispatch contract is implemented.
 
 ### Execute a device command
 
@@ -303,8 +282,7 @@ checks the granted `commands:execute` authority before dispatch.
 }
 ```
 
-Controllers SHOULD target a stable `device_id`. `printer_name` is a convenience
-for manual diagnostics and should not become a durable automation key.
+Controllers MUST target one stable `device_id`.
 
 ## Agent publications
 
@@ -346,7 +324,6 @@ The current controller-action vocabulary is:
 - `system:read`
 - `devices:read`
 - `events:read`
-- `jobs:create`
 - `jobs:cancel`
 - `commands:execute`
 
@@ -356,10 +333,9 @@ the controller an action.
 
 ## Payload size
 
-Small text, receipts, and device commands may be inline. Large PDFs, HTML, and
-images should move to a future typed `content_ref` flow so command replay does
-not carry unbounded bodies. Until that contract exists, deployments must enforce
-their configured request and message limits.
+Device commands contain no document bytes. Managed Device Work uses its own
+bounded, encrypted payload contract. Command replay never carries document
+content.
 
 ## Controller compatibility
 

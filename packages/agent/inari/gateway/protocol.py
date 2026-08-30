@@ -16,7 +16,7 @@ from ..gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
-from ..printing.protocols import CutMode, PrinterTransport
+from ..printing.protocols import CutMode
 from ..security.models import GatewayExposure, GatewayMode
 from ..core.version import GATEWAY_PROTOCOL_VERSION, SUPPORTED_GATEWAY_PROTOCOL_VERSIONS
 
@@ -30,7 +30,6 @@ JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 
 
 class GatewayMessageType(StrEnum):
-    CONTROLLER_SUBMIT_PRINT_JOB = "controller.command.submit_print_job"
     CONTROLLER_EXECUTE_DEVICE_COMMAND = "controller.command.execute_device_command"
     CONTROLLER_CANCEL_JOB = "controller.command.cancel_job"
     AGENT_COMMAND_ACCEPTED = "agent.command.accepted"
@@ -46,7 +45,6 @@ class GatewayProtocolDescriptor(GatewayProtocolModel):
 
 
 class GatewayCapabilityDescriptor(GatewayProtocolModel):
-    supported_content_kinds: tuple[str, ...]
     supported_device_commands: tuple[str, ...]
     supported_controller_actions: tuple[ControllerAction, ...]
     features: tuple[str, ...]
@@ -233,77 +231,7 @@ class EnrollmentResponsePayload(GatewayProtocolModel):
 
 
 class GatewayCommandTargetPayload(GatewayProtocolModel):
-    device_id: str | None = None
-    printer_name: str | None = None
-
-
-class GatewayPrintOptionsPayload(GatewayProtocolModel):
-    transport: PrinterTransport = PrinterTransport.AUTO
-    open_cash_drawer: bool = False
-
-
-class GatewayBinaryContentPayload(GatewayProtocolModel):
-    base64: str
-    declared_mime_type: str | None = None
-
-
-class GatewayStructuredReceiptContentPayload(GatewayProtocolModel):
-    kind: Literal["structured_receipt"] = "structured_receipt"
-    data: JsonObject
-    document_name: str = "Receipt"
-
-
-class GatewayReceiptImageContentPayload(GatewayProtocolModel):
-    kind: Literal["receipt_image"] = "receipt_image"
-    binary: GatewayBinaryContentPayload
-    document_name: str = "Receipt"
-
-
-class GatewayTextDocumentContentPayload(GatewayProtocolModel):
-    kind: Literal["text"] = "text"
-    text: str
-    document_name: str = "Text Document"
-
-
-class GatewayHtmlDocumentContentPayload(GatewayProtocolModel):
-    kind: Literal["html"] = "html"
-    html: str
-    document_name: str = "HTML Document"
-
-
-class GatewayPdfDocumentContentPayload(GatewayProtocolModel):
-    kind: Literal["pdf"] = "pdf"
-    binary: GatewayBinaryContentPayload
-    document_name: str = "PDF Document"
-
-
-class GatewayRawDocumentContentPayload(GatewayProtocolModel):
-    kind: Literal["raw"] = "raw"
-    binary: GatewayBinaryContentPayload
-    data_type: str = "RAW"
-    document_name: str = "Raw Document"
-
-
-GatewayPrintContentPayload = Annotated[
-    GatewayStructuredReceiptContentPayload
-    | GatewayReceiptImageContentPayload
-    | GatewayTextDocumentContentPayload
-    | GatewayHtmlDocumentContentPayload
-    | GatewayPdfDocumentContentPayload
-    | GatewayRawDocumentContentPayload,
-    Field(discriminator="kind"),
-]
-
-
-class ControllerSubmitPrintJobPayload(GatewayProtocolModel):
-    content: GatewayPrintContentPayload
-    target: GatewayCommandTargetPayload = Field(
-        default_factory=GatewayCommandTargetPayload
-    )
-    options: GatewayPrintOptionsPayload = Field(
-        default_factory=GatewayPrintOptionsPayload
-    )
-    metadata: JsonObject = Field(default_factory=dict)
+    device_id: str = Field(min_length=1, max_length=256)
 
 
 class GatewayOpenCashDrawerCommandPayload(GatewayProtocolModel):
@@ -312,7 +240,6 @@ class GatewayOpenCashDrawerCommandPayload(GatewayProtocolModel):
 
 class GatewayPrintTestPageCommandPayload(GatewayProtocolModel):
     kind: Literal["print_test_page"] = "print_test_page"
-    transport: PrinterTransport = PrinterTransport.AUTO
 
 
 class GatewayFeedLinesCommandPayload(GatewayProtocolModel):
@@ -341,22 +268,9 @@ GatewayDeviceCommandPayload = Annotated[
 
 
 class ControllerExecuteDeviceCommandPayload(GatewayProtocolModel):
-    target: GatewayCommandTargetPayload = Field(
-        default_factory=GatewayCommandTargetPayload
-    )
+    target: GatewayCommandTargetPayload
     command: GatewayDeviceCommandPayload
     metadata: JsonObject = Field(default_factory=dict)
-
-
-class ControllerSubmitPrintJobMessage(GatewayProtocolModel):
-    type: Literal[GatewayMessageType.CONTROLLER_SUBMIT_PRINT_JOB] = (
-        GatewayMessageType.CONTROLLER_SUBMIT_PRINT_JOB
-    )
-    message_id: str
-    command_id: str
-    sequence: int = Field(ge=1)
-    issued_at: datetime | None = None
-    payload: ControllerSubmitPrintJobPayload
 
 
 class ControllerExecuteDeviceCommandMessage(GatewayProtocolModel):
@@ -382,8 +296,7 @@ class ControllerCancelJobMessage(GatewayProtocolModel):
 
 
 ControllerCommandMessage = Annotated[
-    ControllerSubmitPrintJobMessage
-    | ControllerExecuteDeviceCommandMessage
+    ControllerExecuteDeviceCommandMessage
     | ControllerCancelJobMessage,
     Field(discriminator="type"),
 ]

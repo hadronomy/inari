@@ -140,6 +140,10 @@ class SpoolAdmissionLedger:
                     media_type=manifest.media_type,
                     normalized_options_digest=manifest.normalized_options_digest,
                     grant_scope_digest=manifest.grant_scope_digest,
+                    grant_id=manifest.grant_id,
+                    grant_pairing_id=manifest.grant_pairing_id,
+                    grant_generation=manifest.grant_generation,
+                    grant_authorization_digest=manifest.authorization_digest,
                     origin_submission_key=manifest.origin_submission_key,
                     origin_kind=manifest.origin_kind,
                     origin_json=manifest.origin_json,
@@ -151,6 +155,10 @@ class SpoolAdmissionLedger:
                 connection,
                 admission_id=plan.admission_id,
                 proof=manifest.authority_proof,
+                grant_id=manifest.grant_id,
+                grant_pairing_id=manifest.grant_pairing_id,
+                grant_generation=manifest.grant_generation,
+                grant_authorization_digest=manifest.authorization_digest,
             )
             self.hold_reservation(
                 connection,
@@ -169,12 +177,16 @@ class SpoolAdmissionLedger:
     ) -> AdmissionPlan:
         proof = read_authority_proof(connection, admission_id=row["id"])
         manifest = manifest_from_row(row, proof)
-        active = connection.execute(
-            select(spool_reservations_table).where(
-                spool_reservations_table.c.admission_id == row["id"],
-                spool_reservations_table.c.state.in_(("held", "committed")),
+        active = (
+            connection.execute(
+                select(spool_reservations_table).where(
+                    spool_reservations_table.c.admission_id == row["id"],
+                    spool_reservations_table.c.state.in_(("held", "committed")),
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         if active is None:
             persistent_bytes = self.capacity.persistent_bytes(manifest)
             self.capacity.assert_quota(
@@ -290,12 +302,16 @@ class SpoolAdmissionLedger:
         self, admission_id: str, *, connection: Connection | None = None
     ) -> RowMapping | None:
         if connection is not None:
-            return connection.execute(
-                select(spool_artifacts_table).where(
-                    spool_artifacts_table.c.admission_id == admission_id,
-                    spool_artifacts_table.c.artifact_kind == "original",
+            return (
+                connection.execute(
+                    select(spool_artifacts_table).where(
+                        spool_artifacts_table.c.admission_id == admission_id,
+                        spool_artifacts_table.c.artifact_kind == "original",
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
         with self.store.connection() as read_connection:
             return self.original_artifact(admission_id, connection=read_connection)
 
@@ -303,12 +319,16 @@ class SpoolAdmissionLedger:
         self, admission: RowMapping, artifact: RowMapping
     ) -> AdmissionPlan:
         with self.store.connection() as connection:
-            reservation = connection.execute(
-                select(spool_reservations_table).where(
-                    spool_reservations_table.c.admission_id == admission["id"],
-                    spool_reservations_table.c.state.in_(("held", "committed")),
+            reservation = (
+                connection.execute(
+                    select(spool_reservations_table).where(
+                        spool_reservations_table.c.admission_id == admission["id"],
+                        spool_reservations_table.c.state.in_(("held", "committed")),
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             proof = read_authority_proof(connection, admission_id=admission["id"])
         if reservation is None:
             raise SpoolAdmissionError(ProblemCode.RECOVERY_UNCERTAIN)
@@ -436,9 +456,7 @@ class SpoolAdmissionLedger:
                 update(device_work_admissions_table)
                 .where(
                     device_work_admissions_table.c.id == admission_id,
-                    device_work_admissions_table.c.state.in_(
-                        ("staging", "finalizing")
-                    ),
+                    device_work_admissions_table.c.state.in_(("staging", "finalizing")),
                 )
                 .values(
                     state="aborted",
@@ -452,38 +470,46 @@ class SpoolAdmissionLedger:
     def find_idempotency(
         self, connection: Connection, manifest: AdmissionManifest
     ) -> RowMapping | None:
-        return connection.execute(
-            select(device_work_admissions_table).where(
-                device_work_admissions_table.c.scope_kind == "paired_client",
-                device_work_admissions_table.c.organization_id
-                == manifest.organization_id,
-                device_work_admissions_table.c.site_id == manifest.site_id,
-                device_work_admissions_table.c.pos_configuration_id
-                == manifest.pos_configuration_id,
-                device_work_admissions_table.c.paired_client_id
-                == manifest.paired_client_id,
-                device_work_admissions_table.c.idempotency_key
-                == manifest.idempotency_key,
+        return (
+            connection.execute(
+                select(device_work_admissions_table).where(
+                    device_work_admissions_table.c.scope_kind == "paired_client",
+                    device_work_admissions_table.c.organization_id
+                    == manifest.organization_id,
+                    device_work_admissions_table.c.site_id == manifest.site_id,
+                    device_work_admissions_table.c.pos_configuration_id
+                    == manifest.pos_configuration_id,
+                    device_work_admissions_table.c.paired_client_id
+                    == manifest.paired_client_id,
+                    device_work_admissions_table.c.idempotency_key
+                    == manifest.idempotency_key,
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
 
     def find_origin(
         self, connection: Connection, manifest: AdmissionManifest
     ) -> RowMapping | None:
-        return connection.execute(
-            select(device_work_admissions_table).where(
-                device_work_admissions_table.c.scope_kind == "paired_client",
-                device_work_admissions_table.c.organization_id
-                == manifest.organization_id,
-                device_work_admissions_table.c.site_id == manifest.site_id,
-                device_work_admissions_table.c.pos_configuration_id
-                == manifest.pos_configuration_id,
-                device_work_admissions_table.c.paired_client_id
-                == manifest.paired_client_id,
-                device_work_admissions_table.c.origin_submission_key
-                == manifest.origin_submission_key,
+        return (
+            connection.execute(
+                select(device_work_admissions_table).where(
+                    device_work_admissions_table.c.scope_kind == "paired_client",
+                    device_work_admissions_table.c.organization_id
+                    == manifest.organization_id,
+                    device_work_admissions_table.c.site_id == manifest.site_id,
+                    device_work_admissions_table.c.pos_configuration_id
+                    == manifest.pos_configuration_id,
+                    device_work_admissions_table.c.paired_client_id
+                    == manifest.paired_client_id,
+                    device_work_admissions_table.c.origin_submission_key
+                    == manifest.origin_submission_key,
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
 
     def new_id(self) -> str:
         value = self.id_factory()

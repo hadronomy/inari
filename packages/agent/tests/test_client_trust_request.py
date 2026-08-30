@@ -13,6 +13,7 @@ from inari.client_trust.request import (
 
 def test_request_target_uses_trusted_server_and_strips_query_from_htu() -> None:
     target = build_request_target(
+        method="GET",
         scheme="HTTPS",
         server=("Agent.Example", 443),
         path="/local/v1/device-work",
@@ -24,6 +25,7 @@ def test_request_target_uses_trusted_server_and_strips_query_from_htu() -> None:
 
 def test_request_target_drops_http_default_port() -> None:
     target = build_request_target(
+        method="GET",
         scheme="http",
         server=("agent.example", 80),
         path="/health",
@@ -36,6 +38,7 @@ def test_request_target_drops_http_default_port() -> None:
 
 def test_request_target_uses_raw_path_without_query_or_fragment() -> None:
     target = build_request_target(
+        method="POST",
         scheme="https",
         server=("agent.example", 8443),
         path="/ignored",
@@ -47,6 +50,7 @@ def test_request_target_uses_raw_path_without_query_or_fragment() -> None:
 
 def test_ipv6_authority_and_default_port_are_normalized() -> None:
     target = build_request_target(
+        method="GET",
         scheme="https",
         server=("2001:0DB8:0:0:0:0:0:1", 443),
         path="/health",
@@ -123,6 +127,7 @@ def test_forwarded_host_is_rejected() -> None:
 def test_host_must_match_trusted_server_authority() -> None:
     with pytest.raises(RequestTargetError):
         build_request_target(
+            method="GET",
             scheme="https",
             server=("agent.example", 443),
             path="/health",
@@ -138,6 +143,7 @@ def test_browser_request_rejects_query_credentials_and_cookies() -> None:
     ]
     with pytest.raises(RequestTargetError):
         build_browser_request(
+            method="POST",
             scheme="https",
             server=("agent.example", 443),
             path="/local/v1/device-work",
@@ -146,6 +152,7 @@ def test_browser_request_rejects_query_credentials_and_cookies() -> None:
         )
     with pytest.raises(RequestTargetError):
         build_browser_request(
+            method="POST",
             scheme="https",
             server=("agent.example", 443),
             path="/local/v1/device-work",
@@ -153,6 +160,7 @@ def test_browser_request_rejects_query_credentials_and_cookies() -> None:
         )
     with pytest.raises(RequestTargetError):
         build_browser_request(
+            method="POST",
             scheme="https",
             server=("agent.example", 443),
             path="/local/v1/device-work",
@@ -163,6 +171,7 @@ def test_browser_request_rejects_query_credentials_and_cookies() -> None:
 
 def test_browser_request_accepts_non_sensitive_query() -> None:
     request = build_browser_request(
+        method="POST",
         scheme="https",
         server=("agent.example", 443),
         path="/local/v1/device-work",
@@ -183,6 +192,7 @@ def test_browser_request_accepts_non_sensitive_query() -> None:
 def test_browser_request_requires_exact_origin_authorization_and_dpop() -> None:
     with pytest.raises(RequestTargetError):
         build_browser_request(
+            method="POST",
             scheme="https",
             server=("agent.example", 443),
             path="/local/v1/device-work",

@@ -14,7 +14,7 @@ from inari.client_trust.models import (
     BusinessScope,
     ClientGrant,
     ClientPairing,
-    EndpointPolicy,
+    EndpointBinding,
     PairingAssertion,
     PairingAssertionClaims,
     PairingCommand,
@@ -292,12 +292,11 @@ def test_authorization_requires_exact_origin_and_replays_are_rejected() -> None:
         generation=1,
         authorization_digest=grant.authorization_digest,
     )
-    endpoint = EndpointPolicy(
+    binding = EndpointBinding(
         agent_id=SCOPE.agent_id,
         audience=SCOPE.audience,
-        browser_origin=SCOPE.browser_origin,
         agent_endpoint=SCOPE.agent_endpoint,
-        business=SCOPE.business,
+        allowed_methods=frozenset({"POST"}),
         allowed_paths=("/v1/device-work",),
     )
     request = SimpleNamespace(
@@ -308,7 +307,7 @@ def test_authorization_requires_exact_origin_and_replays_are_rejected() -> None:
     )
     service.issue_dpop_nonce()
     authorized = service.authorize_request(
-        request, endpoint=endpoint, permission=Permission.RECEIPT_IMAGE
+        request, binding=binding, permission=Permission.RECEIPT_IMAGE
     )
     assert authorized.grant.grant_id == grant.grant_id
     with pytest.raises(ClientTrustError) as error:
@@ -319,12 +318,12 @@ def test_authorization_requires_exact_origin_and_replays_are_rejected() -> None:
                 authorization=request.authorization,
                 dpop=request.dpop,
             ),
-            endpoint=endpoint,
+            binding=binding,
         )
     assert error.value.code is ClientTrustErrorCode.SCOPE_MISMATCH
     with pytest.raises(ClientTrustError) as error:
         service.authorize_request(
-            request, endpoint=endpoint, permission=Permission.DRAWER
+            request, binding=binding, permission=Permission.DRAWER
         )
     assert error.value.code is ClientTrustErrorCode.REPLAY_DETECTED
 

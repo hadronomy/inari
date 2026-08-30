@@ -9,6 +9,11 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Protocol, cast
 
+from ..client_trust import Permission
+from ..client_trust.errors import ClientTrustError, ClientTrustErrorCode
+from ..core.failures import DomainFailure, ProblemCode
+from ..core.problems import problem_from_failure
+
 
 ASGIMessage = MutableMapping[str, Any]
 ASGIReceive = Callable[[], Awaitable[ASGIMessage]]
@@ -31,8 +36,15 @@ class AuthorizationMode(StrEnum):
 @dataclass(frozen=True, slots=True)
 class EndpointAuthorizationPolicy:
     mode: AuthorizationMode
-    required_scopes: frozenset[str] = frozenset()
+    permission: Permission | None = None
     name: str = ""
+
+    def __post_init__(self) -> None:
+        if self.mode is AuthorizationMode.CLIENT_GRANT:
+            if not isinstance(self.permission, Permission):
+                raise ValueError("Client Grant policies require one permission")
+        elif self.permission is not None:
+            raise ValueError("only Client Grant policies can require a permission")
 
 
 class EndpointPolicyCatalog(Protocol):
@@ -152,6 +164,7 @@ class AuthorizationProblem:
     title: str
     status: int
     detail: str
+    instance: str | None = None
     extensions: Mapping[str, object] = field(default_factory=dict)
     headers: Mapping[str, str] = field(default_factory=dict)
 
@@ -159,13 +172,49 @@ class AuthorizationProblem:
         reserved = {"type", "title", "status", "detail", "instance"}
         if reserved.intersection(self.extensions):
             raise ValueError("problem extensions cannot override RFC 9457 members")
-        return {
+        document: dict[str, object] = {
             "type": self.type_uri,
             "title": self.title,
             "status": self.status,
             "detail": self.detail,
             **dict(self.extensions),
         }
+        if self.instance is not None:
+            document["instance"] = self.instance
+        return document
+
+
+class ProblemAuthorizationErrorMapper:
+    """Map header-only authorization failures to the public problem catalog."""
+
+    def map_error(
+        self,
+        error: Exception,
+        request: HeaderAuthorizationRequest,
+    ) -> AuthorizationProblem:
+        code = _authorization_problem_code(error)
+        correlation_id = _correlation_id(request)
+        problem = problem_from_failure(
+            DomainFailure(code), correlation_id=correlation_id
+        )
+        document = problem.to_dict()
+        extensions = {
+            name: value
+            for name, value in document.items()
+            if name not in {"type", "title", "status", "detail", "instance"}
+        }
+        headers = {"X-Correlation-ID": problem.correlation_id}
+        if problem.status == 401:
+            headers["WWW-Authenticate"] = 'DPoP realm="inari"'
+        return AuthorizationProblem(
+            type_uri=problem.type,
+            title=problem.title,
+            status=problem.status,
+            detail=problem.detail,
+            instance=problem.instance,
+            extensions=extensions,
+            headers=headers,
+        )
 
 
 class AuthorizationErrorMapper(Protocol):
@@ -295,3 +344,29 @@ async def _send_problem(send: ASGISend, problem: AuthorizationProblem) -> None:
         {"type": "http.response.start", "status": problem.status, "headers": headers}
     )
     await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
+def _authorization_problem_code(error: Exception) -> ProblemCode:
+    if isinstance(error, ClientTrustError):
+        if error.code in {
+            ClientTrustErrorCode.PERMISSION_DENIED,
+            ClientTrustErrorCode.SCOPE_MISMATCH,
+        }:
+            return ProblemCode.PERMISSION_DENIED
+        return ProblemCode.TRUST_REQUIRED
+    if isinstance(error, AuthorizationFailure):
+        if error.status == 403:
+            return ProblemCode.PERMISSION_DENIED
+        if error.status >= 500:
+            return ProblemCode.INTERNAL_ERROR
+    return ProblemCode.TRUST_REQUIRED
+
+
+def _correlation_id(request: HeaderAuthorizationRequest) -> str | None:
+    for name, value in request.headers:
+        if name.lower() in {b"x-correlation-id", b"x-request-id"}:
+            try:
+                return value.decode("ascii")
+            except UnicodeDecodeError:
+                return None
+    return None

@@ -23,6 +23,7 @@ from .models import (
     BusinessScope,
     ClientGrant,
     ClientPairing,
+    EndpointBinding,
     EndpointPolicy,
     GrantAdmissionProof,
     GrantLifecycle,
@@ -57,6 +58,11 @@ from .ports import (
     TrustClock,
 )
 from .service import ClientTrustService
+from .clock import SystemTrustClock
+from .signing_keys import (
+    ClientTrustSigningKeyStore,
+    ClientTrustSigningKeyUnavailable,
+)
 from .store import SqliteClientTrustStore
 from .tokens import (
     AccessTokenSigner,
@@ -73,6 +79,8 @@ __all__ = [
     "ClientTrustError",
     "ClientTrustErrorCode",
     "ClientTrustService",
+    "ClientTrustSigningKeyStore",
+    "ClientTrustSigningKeyUnavailable",
     "ClientTrustStore",
     "DPoPProofVerifier",
     "DPoPVerifierPort",
@@ -91,6 +99,7 @@ __all__ = [
     "ScopeMismatchError",
     "SqliteClientTrustStore",
     "TrustClock",
+    "SystemTrustClock",
     "AccessTokenClaims",
     "AcceptedDPoPProof",
     "AcceptedRenewalDPoPProof",
@@ -99,6 +108,7 @@ __all__ = [
     "BusinessScope",
     "ClientGrant",
     "ClientPairing",
+    "EndpointBinding",
     "EndpointPolicy",
     "GrantAdmissionProof",
     "GrantLifecycle",

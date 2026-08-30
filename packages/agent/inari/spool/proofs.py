@@ -19,15 +19,30 @@ def insert_authority_proof(
     *,
     admission_id: str,
     proof: AuthorityProof,
+    grant_id: str | None = None,
+    grant_pairing_id: str | None = None,
+    grant_generation: int | None = None,
+    grant_authorization_digest: bytes | None = None,
 ) -> None:
     """Store one immutable content-free proof and its revocation subjects."""
 
-    values = _proof_values(admission_id, proof)
-    existing = connection.execute(
-        select(device_work_authority_proofs_table).where(
-            device_work_authority_proofs_table.c.admission_id == admission_id
+    values = _proof_values(
+        admission_id,
+        proof,
+        grant_id=grant_id,
+        grant_pairing_id=grant_pairing_id,
+        grant_generation=grant_generation,
+        grant_authorization_digest=grant_authorization_digest,
+    )
+    existing = (
+        connection.execute(
+            select(device_work_authority_proofs_table).where(
+                device_work_authority_proofs_table.c.admission_id == admission_id
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if existing is not None:
         if {name: existing[name] for name in values} != values:
             raise SpoolAdmissionError(ProblemCode.IDEMPOTENCY_CONFLICT)
@@ -45,11 +60,15 @@ def read_authority_proof(
     *,
     admission_id: str,
 ) -> AuthorityProof:
-    row = connection.execute(
-        select(device_work_authority_proofs_table).where(
-            device_work_authority_proofs_table.c.admission_id == admission_id
+    row = (
+        connection.execute(
+            select(device_work_authority_proofs_table).where(
+                device_work_authority_proofs_table.c.admission_id == admission_id
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         raise SpoolAdmissionError(ProblemCode.RECOVERY_UNCERTAIN)
     try:
@@ -58,7 +77,15 @@ def read_authority_proof(
         raise SpoolAdmissionError(ProblemCode.RECOVERY_UNCERTAIN) from None
 
 
-def _proof_values(admission_id: str, proof: AuthorityProof) -> dict[str, object]:
+def _proof_values(
+    admission_id: str,
+    proof: AuthorityProof,
+    *,
+    grant_id: str | None,
+    grant_pairing_id: str | None,
+    grant_generation: int | None,
+    grant_authorization_digest: bytes | None,
+) -> dict[str, object]:
     return {
         "proof_id": proof.proof_id,
         "admission_id": admission_id,
@@ -87,6 +114,10 @@ def _proof_values(admission_id: str, proof: AuthorityProof) -> dict[str, object]
         "options_digest": bytes.fromhex(proof.options_digest),
         "issued_at": _timestamp(proof.issued_at),
         "valid_until": _timestamp(proof.valid_until),
+        "grant_id": grant_id,
+        "grant_pairing_id": grant_pairing_id,
+        "grant_generation": grant_generation,
+        "grant_authorization_digest": grant_authorization_digest,
     }
 
 
@@ -166,7 +197,9 @@ def _digest(value: object) -> str:
 
 
 def _timestamp(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    return (
+        value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+    )
 
 
 def _parse_timestamp(value: object) -> datetime:

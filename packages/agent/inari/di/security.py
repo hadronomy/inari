@@ -4,7 +4,20 @@ import sys
 
 from dishka import Provider, Scope, provide
 
+from ..client_trust import (
+    AccessTokenSigner,
+    AccessTokenVerifier,
+    ClientTrustService,
+    ClientTrustSigningKeyStore,
+    DPoPProofVerifier,
+    PairingAssertionVerifier,
+    RenewalDPoPProofVerifier,
+    SqliteClientTrustStore,
+    SystemTrustClock,
+)
 from ..config import AgentSettings
+from ..local_api.client_trust_authorizer import BrowserClientTrustAuthorizer
+from ..local_api.header_authorization import ClientTrustAuthorizer
 from ..gateway.enrollment.auth import (
     UpstreamAuthProvider,
     build_upstream_auth_provider,
@@ -22,6 +35,7 @@ from ..security.policies import SecurityPolicyService
 from ..security.models import GatewayMode
 from ..security.secrets import FileSecretStore, KeyringSecretStore, ProtectedSecretStore
 from ..security.tls import TlsContextFactory
+from ..runtime.store import RuntimeStore
 from ..security.tokens import TokenService
 from ..security.windows_secrets import WindowsMachineSecretStore
 
@@ -79,6 +93,65 @@ class SecurityProvider(Provider):
     @provide
     def local_trust_store(self, secret_store: ProtectedSecretStore) -> LocalTrustStore:
         return LocalTrustStore(secret_store)
+
+    @provide
+    def client_trust_store(self, store: RuntimeStore) -> SqliteClientTrustStore:
+        return SqliteClientTrustStore(store.database_path)
+
+    @provide
+    def client_trust_signing_keys(
+        self, secret_store: ProtectedSecretStore
+    ) -> ClientTrustSigningKeyStore:
+        return ClientTrustSigningKeyStore(secret_store)
+
+    @provide
+    def client_trust_service(
+        self,
+        settings: AgentSettings,
+        store: SqliteClientTrustStore,
+        signing_keys: ClientTrustSigningKeyStore,
+        identity_service: AgentIdentityService,
+    ) -> ClientTrustService:
+        identity = identity_service.get_or_create_identity()
+        signing_key = signing_keys.get_or_create()
+        verification_key = {
+            name: value for name, value in signing_key.items() if name != "d"
+        }
+        token_signer = AccessTokenSigner(
+            signing_key=signing_key,
+            issuer=identity.agent_id,
+            audience=settings.token_audience,
+        )
+        return ClientTrustService(
+            store=store,
+            assertion_verifier=PairingAssertionVerifier(
+                verification_keys={},
+                agent_id=identity.agent_id,
+            ),
+            access_token_verifier=AccessTokenVerifier(
+                verification_key=verification_key,
+                issuer=identity.agent_id,
+                audience=settings.token_audience,
+            ),
+            dpop_verifier=DPoPProofVerifier(),
+            renewal_dpop_verifier=RenewalDPoPProofVerifier(),
+            access_token_issuer=token_signer,
+            clock=SystemTrustClock(),
+        )
+
+    @provide
+    def client_trust_authorizer(
+        self,
+        settings: AgentSettings,
+        trust: ClientTrustService,
+        identity_service: AgentIdentityService,
+    ) -> ClientTrustAuthorizer:
+        identity = identity_service.get_or_create_identity()
+        return BrowserClientTrustAuthorizer(
+            trust=trust,
+            agent_id=identity.agent_id,
+            audience=settings.token_audience,
+        )
 
     @provide
     def standalone_trust_service(

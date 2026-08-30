@@ -382,6 +382,9 @@ def _admission(work: DocumentWork) -> DurableAdmission:
     return DurableAdmission(
         work=work,
         grant_scope=AdmissionGrantScope(
+            grant_id="grant-1",
+            pairing_id="pairing-1",
+            generation=1,
             organization_id=work.context.organization_id,
             site_id=work.context.site_id,
             database=work.context.origin.database,

@@ -1,147 +1,111 @@
 from __future__ import annotations
 
-import base64
-
 import pytest
 from pydantic import ValidationError
 
+from inari.local_api.schemas import DeviceCommandRequest, ReceiptImageEnvelope
 from inari.printing.commands import CutPaper
-from inari.printing.payloads import coerce_image_payload, coerce_pdf_payload
-from inari.core.exceptions import PrinterServiceError
-from inari.local_api.schemas import DeviceCommandRequest, PrintJobRequest
-from inari.printing.jobs import ReceiptImageContent, TextDocumentContent
 
 
-def test_image_payload_accepts_data_url_and_detects_mime() -> None:
-    png_base64 = (
-        "data:image/png;base64,"
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-    )
-
-    payload = coerce_image_payload(png_base64, label="receipt image")
-
-    assert payload.source == "data_url"
-    assert "image/png" in payload.declared_mime_types
-    assert payload.mime_type == "image/png"
-
-
-def test_pdf_payload_rejects_non_pdf_bytes() -> None:
-    encoded = base64.b64encode(b"not a pdf").decode("ascii")
-
-    with pytest.raises(PrinterServiceError, match="PDF document"):
-        coerce_pdf_payload(encoded, label="PDF document")
-
-
-def test_image_payload_rejects_conflicting_declared_mime_types() -> None:
-    png_base64 = (
-        "data:image/png;base64,"
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-    )
-
-    with pytest.raises(PrinterServiceError, match="Conflicting MIME type declarations"):
-        coerce_image_payload(
-            png_base64,
-            label="receipt image",
-            declared_mime_type="image/jpeg",
-        )
-
-
-def test_generic_print_request_accepts_nested_target_and_options() -> None:
-    request = PrintJobRequest.model_validate(
-        {
-            "content": {
-                "kind": "text",
-                "text": "Hello printer",
-                "document_name": "Greeting",
+def receipt_envelope() -> dict[str, object]:
+    return {
+        "contract_major": 1,
+        "operation": "receipt_image",
+        "media_type": "image/jpeg",
+        "context": {
+            "contract_major": 1,
+            "print_intent_id": "pi_v1_test",
+            "origin_submission_key": "osk_v1_test",
+            "origin": {
+                "pos_session_id": "pos_session_42",
+                "offline_order_id": "01991a84-d0c2-7a49-89ad-2fd14bdbe501",
+                "server_order_id": None,
+                "document_kind": "customer_receipt",
+                "content_revision": "sha256:receipt-revision",
             },
-            "target": {"printer_name": "Office Printer"},
-            "options": {"transport": "text", "open_cash_drawer": True},
-        }
-    )
-
-    operation = request.to_operation()
-    job = operation.job
-
-    assert isinstance(job.content, TextDocumentContent)
-    assert job.content.text == "Hello printer"
-    assert job.content.document_name == "Greeting"
-    assert job.printer_name == "Office Printer"
-    assert job.transport == "text"
-    assert job.open_drawer is True
-    assert operation.target.printer_name == "Office Printer"
+            "binding_revision_id": "binding_revision_9",
+            "device_id": "dev_receipt_1",
+            "copy_ordinal": 1,
+        },
+    }
 
 
-def test_generic_print_request_accepts_binary_wrapper() -> None:
-    request = PrintJobRequest.model_validate(
-        {
-            "content": {
-                "kind": "receipt_image",
-                "binary": {
-                    "base64": (
-                        "data:image/png;base64,"
-                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-                    ),
-                    "declared_mime_type": "image/png",
-                },
-                "document_name": "POS Ticket",
-            }
-        }
-    )
+def test_receipt_envelope_accepts_only_work_specific_values() -> None:
+    envelope = ReceiptImageEnvelope.model_validate(receipt_envelope())
 
-    operation = request.to_operation()
-    job = operation.job
-
-    assert isinstance(job.content, ReceiptImageContent)
-    assert job.content.document_name == "POS Ticket"
-    assert job.content.mime_type == "image/png"
+    assert envelope.context.print_intent_id == "pi_v1_test"
+    assert envelope.context.device_id == "dev_receipt_1"
+    assert envelope.context.origin.pos_session_id == "pos_session_42"
 
 
-def test_generic_print_request_rejects_legacy_option_alias() -> None:
+@pytest.mark.parametrize(
+    "obsolete_field, value",
+    (
+        ("printer_name", "Kitchen Printer"),
+        ("transport", "raw"),
+        ("open_cash_drawer", True),
+        ("base64", "Zm9v"),
+    ),
+)
+def test_receipt_envelope_rejects_obsolete_print_fields(
+    obsolete_field: str,
+    value: object,
+) -> None:
+    payload = receipt_envelope()
+    payload[obsolete_field] = value
+
     with pytest.raises(ValidationError):
-        PrintJobRequest.model_validate(
-            {
-                "content": {
-                    "kind": "text",
-                    "text": "Hello printer",
-                },
-                "options": {"open_drawer": True},
-            }
-        )
+        ReceiptImageEnvelope.model_validate(payload)
 
 
-def test_generic_print_request_rejects_legacy_binary_alias() -> None:
+@pytest.mark.parametrize(
+    "authority_field",
+    (
+        "organization_id",
+        "site_id",
+        "database",
+        "pos_configuration_id",
+        "paired_client_id",
+        "actor_id",
+        "grant_id",
+        "authorization_digest",
+    ),
+)
+def test_receipt_context_rejects_client_supplied_authority(
+    authority_field: str,
+) -> None:
+    payload = receipt_envelope()
+    context = payload["context"]
+    assert isinstance(context, dict)
+    context[authority_field] = "untrusted"
+
     with pytest.raises(ValidationError):
-        PrintJobRequest.model_validate(
-            {
-                "content": {
-                    "kind": "receipt_image",
-                    "binary": {
-                        "base64": (
-                            "data:image/png;base64,"
-                            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2pQe0AAAAASUVORK5CYII="
-                        ),
-                        "mime_type": "image/png",
-                    },
-                }
-            }
-        )
+        ReceiptImageEnvelope.model_validate(payload)
 
 
-def test_device_command_request_accepts_typed_command() -> None:
+def test_device_command_targets_only_a_stable_device_id() -> None:
     request = DeviceCommandRequest.model_validate(
         {
-            "target": {"device_id": "dev_test", "printer_name": "Kitchen Printer"},
-            "command": {
-                "kind": "cut_paper",
-                "mode": "full",
-            },
+            "target": {"device_id": "dev_test"},
+            "command": {"kind": "cut_paper", "mode": "full"},
         }
     )
 
     operation = request.to_operation()
 
     assert operation.target.device_id == "dev_test"
-    assert operation.target.printer_name == "Kitchen Printer"
     assert isinstance(operation.command, CutPaper)
-    assert operation.command.kind == "cut_paper"
     assert operation.command.mode == "full"
+
+
+def test_device_command_rejects_printer_name_target() -> None:
+    with pytest.raises(ValidationError):
+        DeviceCommandRequest.model_validate(
+            {
+                "target": {
+                    "device_id": "dev_test",
+                    "printer_name": "Kitchen Printer",
+                },
+                "command": {"kind": "cut_paper", "mode": "full"},
+            }
+        )
