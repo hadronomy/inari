@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
+
+if TYPE_CHECKING:
+    from .models import IssuedDPoPNonce
 
 
 class ClientTrustErrorCode(StrEnum):
@@ -58,3 +61,14 @@ class ScopeMismatchError(ClientTrustError):
 class ReplayDetectedError(ClientTrustError):
     def __init__(self, message: str = "The proof was already accepted.") -> None:
         super().__init__(ClientTrustErrorCode.REPLAY_DETECTED, message)
+
+
+class DPoPNonceRequiredError(ClientTrustError):
+    """Challenge an otherwise valid proof with a fresh one-time nonce."""
+
+    def __init__(self, nonce: IssuedDPoPNonce) -> None:
+        super().__init__(
+            ClientTrustErrorCode.INVALID_DPOP_PROOF,
+            "A fresh DPoP nonce is required.",
+        )
+        self.nonce = nonce

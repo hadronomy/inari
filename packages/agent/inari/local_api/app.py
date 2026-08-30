@@ -93,6 +93,7 @@ def create_app(
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["DPoP-Nonce", "Date", "X-Correlation-ID"],
     )
     app.include_router(router)
     install_problem_handlers(app)

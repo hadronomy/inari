@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol
 
 from .models import (
@@ -15,6 +16,12 @@ from .models import (
     RequestTarget,
 )
 from .permissions import Permission
+
+
+class DPoPNonceConsumption(StrEnum):
+    ACCEPTED = "accepted"
+    INVALID = "invalid"
+    REPLAY = "replay"
 
 
 class ClientTrustStore(Protocol):
@@ -53,7 +60,7 @@ class ClientTrustStore(Protocol):
         jti: str,
         at: datetime,
         replay_expires_at: datetime,
-    ) -> bool: ...
+    ) -> DPoPNonceConsumption: ...
 
 
 class PairingAssertionVerifierPort(Protocol):
@@ -123,6 +130,7 @@ __all__ = [
     "AccessTokenIssuerPort",
     "AccessTokenVerifierPort",
     "ClientTrustStore",
+    "DPoPNonceConsumption",
     "DPoPVerifierPort",
     "PairingAssertionVerifierPort",
     "PermissionPolicy",

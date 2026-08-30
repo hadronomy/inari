@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass, field
 from collections.abc import MutableMapping
 from typing import Any
 
 import pytest
 
-from inari.client_trust import Permission
+from inari.client_trust import (
+    DPoPNonceRequiredError,
+    IssuedDPoPNonce,
+    Permission,
+)
 from inari.local_api.header_authorization import (
     AUTHORIZATION_RESULT_STATE_KEY,
     PAIRING_PERMIT_STATE_KEY,
@@ -19,6 +24,7 @@ from inari.local_api.header_authorization import (
     ExplicitEndpointPolicyCatalog,
     HeaderAuthorizationMiddleware,
     HeaderAuthorizationRequest,
+    ProblemAuthorizationErrorMapper,
 )
 
 
@@ -308,3 +314,24 @@ def test_problem_extensions_cannot_override_rfc9457_members() -> None:
 
     with pytest.raises(ValueError, match="RFC 9457"):
         problem.document()
+
+
+def test_nonce_challenge_uses_the_rfc_9449_response_headers() -> None:
+    issued_at = datetime(2026, 8, 30, 12, tzinfo=UTC)
+    nonce = IssuedDPoPNonce(
+        nonce="nonce_1234567890",
+        issued_at=issued_at,
+        expires_at=issued_at + timedelta(minutes=2),
+    )
+
+    problem = ProblemAuthorizationErrorMapper().map_error(
+        DPoPNonceRequiredError(nonce),
+        HeaderAuthorizationRequest.from_scope(_scope()),
+    )
+
+    assert problem.status == 401
+    assert problem.headers["WWW-Authenticate"] == (
+        'DPoP realm="inari", error="use_dpop_nonce"'
+    )
+    assert problem.headers["DPoP-Nonce"] == nonce.nonce
+    assert problem.headers["Cache-Control"] == "no-store"

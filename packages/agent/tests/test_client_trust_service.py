@@ -5,7 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from inari.client_trust.errors import ClientTrustError, ClientTrustErrorCode
+from inari.client_trust.errors import (
+    ClientTrustError,
+    ClientTrustErrorCode,
+    DPoPNonceRequiredError,
+)
 from inari.client_trust.models import (
     AccessTokenClaims,
     AcceptedDPoPProof,
@@ -25,6 +29,7 @@ from inari.client_trust.models import (
     RequestTarget,
 )
 from inari.client_trust.permissions import Permission
+from inari.client_trust.ports import DPoPNonceConsumption
 from inari.client_trust.service import ClientTrustService
 
 
@@ -95,18 +100,15 @@ class Store:
         jti: str,
         at: datetime,
         replay_expires_at: datetime,
-    ) -> bool:
+    ) -> DPoPNonceConsumption:
+        if jti in self.proofs:
+            return DPoPNonceConsumption.REPLAY
         value = self.nonces.get(nonce)
-        if (
-            value is None
-            or value[0] <= at
-            or value[1] is not None
-            or jti in self.proofs
-        ):
-            return False
+        if value is None or value[0] <= at or value[1] is not None:
+            return DPoPNonceConsumption.INVALID
         self.proofs.add(jti)
         self.nonces[nonce] = (value[0], at)
-        return True
+        return DPoPNonceConsumption.ACCEPTED
 
 
 class AssertionVerifier:
@@ -305,7 +307,15 @@ def test_authorization_requires_exact_origin_and_replays_are_rejected() -> None:
         authorization="DPoP signed-access-token",
         dpop="signed-proof",
     )
-    service.issue_dpop_nonce()
+    verifier = service.dpop_verifier
+    assert isinstance(verifier, DPoPVerifier)
+    verifier.nonce = "client-placeholder"
+    with pytest.raises(DPoPNonceRequiredError) as challenge:
+        service.authorize_request(
+            request, binding=binding, permission=Permission.RECEIPT_IMAGE
+        )
+    assert store.nonces[challenge.value.nonce.nonce][1] is None
+    verifier.nonce = challenge.value.nonce.nonce
     authorized = service.authorize_request(
         request, binding=binding, permission=Permission.RECEIPT_IMAGE
     )

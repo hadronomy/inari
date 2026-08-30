@@ -31,6 +31,7 @@ from .models import (
     BoundOrigin,
 )
 from .permissions import PermissionCatalog, PermissionSet
+from .ports import DPoPNonceConsumption
 
 
 class SqliteClientTrustStore:
@@ -183,7 +184,7 @@ class SqliteClientTrustStore:
         jti: str,
         at: datetime,
         replay_expires_at: datetime,
-    ) -> bool:
+    ) -> DPoPNonceConsumption:
         connection = self.engine.connect()
         transaction = connection.begin()
         try:
@@ -192,15 +193,6 @@ class SqliteClientTrustStore:
                     client_trust_replays_table.c.kind == "dpop",
                     client_trust_replays_table.c.expires_at <= _timestamp(at),
                 )
-            )
-            consumed = connection.execute(
-                update(client_trust_nonces_table)
-                .where(
-                    client_trust_nonces_table.c.nonce == nonce,
-                    client_trust_nonces_table.c.consumed_at.is_(None),
-                    client_trust_nonces_table.c.expires_at > _timestamp(at),
-                )
-                .values(consumed_at=_timestamp(at))
             )
             replay = connection.execute(
                 sqlite_insert(client_trust_replays_table)
@@ -212,11 +204,23 @@ class SqliteClientTrustStore:
                 )
                 .prefix_with("OR IGNORE")
             )
-            if consumed.rowcount != 1 or replay.rowcount != 1:
+            if replay.rowcount != 1:
                 transaction.rollback()
-                return False
+                return DPoPNonceConsumption.REPLAY
+            consumed = connection.execute(
+                update(client_trust_nonces_table)
+                .where(
+                    client_trust_nonces_table.c.nonce == nonce,
+                    client_trust_nonces_table.c.consumed_at.is_(None),
+                    client_trust_nonces_table.c.expires_at > _timestamp(at),
+                )
+                .values(consumed_at=_timestamp(at))
+            )
+            if consumed.rowcount != 1:
+                transaction.rollback()
+                return DPoPNonceConsumption.INVALID
             transaction.commit()
-            return True
+            return DPoPNonceConsumption.ACCEPTED
         except BaseException:
             transaction.rollback()
             raise

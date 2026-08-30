@@ -12,6 +12,7 @@ from uuid import uuid4
 from .errors import (
     ClientTrustError,
     ClientTrustErrorCode,
+    DPoPNonceRequiredError,
     ReplayDetectedError,
     ScopeMismatchError,
 )
@@ -40,6 +41,7 @@ from .ports import (
     AccessTokenIssuerPort,
     AccessTokenVerifierPort,
     ClientTrustStore,
+    DPoPNonceConsumption,
     DPoPVerifierPort,
     PairingAssertionVerifierPort,
     PermissionPolicy,
@@ -341,13 +343,12 @@ class ClientTrustService:
             access_token=token,
             at=now,
         )
-        if not self.store.consume_dpop_nonce(
+        self._consume_dpop_nonce(
             accepted.nonce,
             jti=accepted.jti,
             at=now,
             replay_expires_at=claims.expires_at,
-        ):
-            raise ReplayDetectedError()
+        )
         authorized = AuthorizedRequest(
             target=target,
             grant=grant,
@@ -384,13 +385,12 @@ class ClientTrustService:
             jwk_thumbprint=pairing.jwk_thumbprint,
             at=now,
         )
-        if not self.store.consume_dpop_nonce(
+        self._consume_dpop_nonce(
             proof.nonce,
             jti=proof.jti,
             at=now,
             replay_expires_at=now + self.dpop_nonce_ttl,
-        ):
-            raise ReplayDetectedError()
+        )
         pairing.active_at(now)
         if grant.lifecycle is GrantLifecycle.REVOKED:
             raise ClientTrustError(
@@ -442,6 +442,28 @@ class ClientTrustService:
         if not isinstance(value, datetime) or value.tzinfo is None:
             raise _invalid("The trust clock returned an invalid time.")
         return value.astimezone(UTC)
+
+    def _consume_dpop_nonce(
+        self,
+        nonce: str,
+        *,
+        jti: str,
+        at: datetime,
+        replay_expires_at: datetime,
+    ) -> None:
+        outcome = self.store.consume_dpop_nonce(
+            nonce,
+            jti=jti,
+            at=at,
+            replay_expires_at=replay_expires_at,
+        )
+        if outcome is DPoPNonceConsumption.ACCEPTED:
+            return
+        if outcome is DPoPNonceConsumption.REPLAY:
+            raise ReplayDetectedError()
+        if outcome is DPoPNonceConsumption.INVALID:
+            raise DPoPNonceRequiredError(self.issue_dpop_nonce())
+        raise _invalid("The DPoP nonce store returned an invalid result.")
 
     def _stored_request(self, request_id: str) -> PairingRequest:
         request = self.store.get_pairing_request(request_id)

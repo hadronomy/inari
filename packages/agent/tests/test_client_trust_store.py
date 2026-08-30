@@ -18,6 +18,7 @@ from inari.client_trust import (
     PairingScope,
     PairingRequestState,
     Permission,
+    DPoPNonceConsumption,
 )
 from inari.client_trust.store import SqliteClientTrustStore
 from inari.db.migrations import DatabaseMigrator
@@ -99,13 +100,31 @@ def test_store_round_trips_content_free_trust_values(tmp_path: Path) -> None:
         jti="dpop_1",
         at=NOW,
         replay_expires_at=NOW + timedelta(minutes=15),
-    )
-    assert not store.consume_dpop_nonce(
+    ) is DPoPNonceConsumption.ACCEPTED
+    assert store.consume_dpop_nonce(
         "nonce_1234",
         jti="dpop_1",
         at=NOW,
         replay_expires_at=NOW + timedelta(minutes=15),
+    ) is DPoPNonceConsumption.REPLAY
+
+    assert store.consume_dpop_nonce(
+        "unknown_nonce",
+        jti="dpop_after_invalid_nonce",
+        at=NOW,
+        replay_expires_at=NOW + timedelta(minutes=15),
+    ) is DPoPNonceConsumption.INVALID
+    store.save_dpop_nonce(
+        "nonce_after_invalid_nonce",
+        issued_at=NOW,
+        expires_at=nonce_expires_at,
     )
+    assert store.consume_dpop_nonce(
+        "nonce_after_invalid_nonce",
+        jti="dpop_after_invalid_nonce",
+        at=NOW,
+        replay_expires_at=NOW + timedelta(minutes=15),
+    ) is DPoPNonceConsumption.ACCEPTED
 
     with sqlite3.connect(path) as connection:
         columns = {

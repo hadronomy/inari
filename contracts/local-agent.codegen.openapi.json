@@ -3284,7 +3284,30 @@
                 }
               }
             },
-            "description": "RFC 9457 Problem Details"
+            "description": "RFC 9457 Problem Details",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents storage of the nonce challenge.",
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "DPoP-Nonce": {
+                "description": "Fresh single-use nonce for an RFC 9449 retry.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "WWW-Authenticate": {
+                "description": "DPoP challenge with the `use_dpop_nonce` error.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "403": {
             "content": {

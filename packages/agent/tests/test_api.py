@@ -22,7 +22,9 @@ from inari.client_trust import (
     BoundOrigin,
     BusinessScope,
     ClientGrant,
+    DPoPNonceRequiredError,
     EndpointPolicy,
+    IssuedDPoPNonce,
     PairingScope,
     Permission,
     RequestTarget,
@@ -533,6 +535,44 @@ async def test_device_work_trust_failure_keeps_browser_cors_headers(mocker) -> N
         )
 
     assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == ("http://127.0.0.1:8069")
+    assert response.headers["access-control-expose-headers"] == (
+        "DPoP-Nonce, Date, X-Correlation-ID"
+    )
+
+
+@pytest.mark.anyio
+async def test_device_work_returns_browser_visible_dpop_nonce_challenge(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    authorization = authorized_device_work()
+    issued_at = datetime(2026, 8, 30, 12, tzinfo=UTC)
+    container = replace(
+        container,
+        device_work_authorizer=StubClientTrustAuthorizer(
+            authorization,
+            error=DPoPNonceRequiredError(
+                IssuedDPoPNonce(
+                    nonce="nonce_1234567890",
+                    issued_at=issued_at,
+                    expires_at=issued_at + timedelta(minutes=2),
+                )
+            ),
+        ),
+    )
+
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/device-work",
+            content=b"body-must-not-be-read",
+            headers={"Origin": "http://127.0.0.1:8069"},
+        )
+
+    assert response.status_code == 401
+    assert response.headers["dpop-nonce"] == "nonce_1234567890"
+    assert response.headers["www-authenticate"] == (
+        'DPoP realm="inari", error="use_dpop_nonce"'
+    )
+    assert response.headers["cache-control"] == "no-store"
     assert response.headers["access-control-allow-origin"] == ("http://127.0.0.1:8069")
 
 

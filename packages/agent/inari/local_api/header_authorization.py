@@ -10,7 +10,11 @@ from types import MappingProxyType
 from typing import Any, Protocol, cast
 
 from ..client_trust import Permission
-from ..client_trust.errors import ClientTrustError, ClientTrustErrorCode
+from ..client_trust.errors import (
+    ClientTrustError,
+    ClientTrustErrorCode,
+    DPoPNonceRequiredError,
+)
 from ..core.failures import DomainFailure, ProblemCode
 from ..core.problems import problem_from_failure
 
@@ -204,7 +208,17 @@ class ProblemAuthorizationErrorMapper:
             if name not in {"type", "title", "status", "detail", "instance"}
         }
         headers = {"X-Correlation-ID": problem.correlation_id}
-        if problem.status == 401:
+        if isinstance(error, DPoPNonceRequiredError):
+            headers.update(
+                {
+                    "WWW-Authenticate": (
+                        'DPoP realm="inari", error="use_dpop_nonce"'
+                    ),
+                    "DPoP-Nonce": error.nonce.nonce,
+                    "Cache-Control": "no-store",
+                }
+            )
+        elif problem.status == 401:
             headers["WWW-Authenticate"] = 'DPoP realm="inari"'
         return AuthorizationProblem(
             type_uri=problem.type,

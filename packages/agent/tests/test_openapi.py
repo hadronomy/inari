@@ -41,3 +41,9 @@ def test_contract_exposes_only_the_explicit_device_work_submission(
         assert isinstance(operation, dict)
         request_body = operation["post"]["requestBody"]
         assert "multipart/form-data" in request_body["content"]
+        challenge_headers = operation["post"]["responses"]["401"]["headers"]
+        assert set(challenge_headers) == {
+            "Cache-Control",
+            "DPoP-Nonce",
+            "WWW-Authenticate",
+        }

@@ -115,6 +115,34 @@ _DEVICE_WORK_OPENAPI = {
         },
     }
 }
+_DEVICE_WORK_PROBLEM_RESPONSES = problem_responses(
+    400,
+    401,
+    403,
+    409,
+    410,
+    413,
+    415,
+    422,
+    429,
+    500,
+    503,
+    507,
+)
+_DEVICE_WORK_PROBLEM_RESPONSES[401]["headers"] = {
+    "DPoP-Nonce": {
+        "description": "Fresh single-use nonce for an RFC 9449 retry.",
+        "schema": {"type": "string"},
+    },
+    "WWW-Authenticate": {
+        "description": "DPoP challenge with the `use_dpop_nonce` error.",
+        "schema": {"type": "string"},
+    },
+    "Cache-Control": {
+        "description": "Prevents storage of the nonce challenge.",
+        "schema": {"type": "string", "enum": ["no-store"]},
+    },
+}
 
 DeviceCatalogDependency = Annotated[DeviceCatalog, Depends(get_device_catalog)]
 JobServiceDependency = Annotated[JobService, Depends(get_job_service)]
@@ -483,20 +511,7 @@ async def list_device_events(
     "/v1/device-work",
     response_model=DeviceWorkAcceptedResponse,
     status_code=202,
-    responses=problem_responses(
-        400,
-        401,
-        403,
-        409,
-        410,
-        413,
-        415,
-        422,
-        429,
-        500,
-        503,
-        507,
-    ),
+    responses=_DEVICE_WORK_PROBLEM_RESPONSES,
     openapi_extra=_DEVICE_WORK_OPENAPI,
 )
 async def submit_device_work(

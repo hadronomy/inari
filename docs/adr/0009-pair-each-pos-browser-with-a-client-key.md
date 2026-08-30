@@ -23,6 +23,14 @@ The Client Grant contains the same actor and business scope. The access token
 contains `cnf.jkt`. The Agent checks `htm`, `htu`, `iat`, `ath`, nonce, and
 `jti` on every DPoP proof.
 
+The Agent issues a nonce through the RFC 9449 resource-server challenge. A
+proof with an unknown, expired, or consumed nonce receives `401`,
+`WWW-Authenticate: DPoP error="use_dpop_nonce"`, and one `DPoP-Nonce` header.
+The Agent validates the token, key, method, URI, token hash, and signature
+before it issues this challenge. A repeated `jti` fails without a new nonce.
+The browser retries the same idempotent request once with a new proof and the
+challenge nonce. It does not share the single-use nonce between POS tabs.
+
 During a Controller outage, a Policy Snapshot can authorize new pairing for 24
 hours while Odoo remains reachable. An Odoo outage blocks new pairing.
 Existing Client Grants continue within their offline limit.
