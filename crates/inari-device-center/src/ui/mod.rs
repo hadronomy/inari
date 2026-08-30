@@ -5,6 +5,7 @@ pub mod banner;
 pub mod button;
 pub mod chrome;
 pub mod content;
+pub mod effect;
 pub mod field;
 pub mod focus;
 pub mod gate;
