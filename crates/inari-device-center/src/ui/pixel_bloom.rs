@@ -21,10 +21,13 @@ struct Wall {
     /// For the idle breath of lit cells.
     opened: Instant,
     /// Where the pointer was when it last entered, which is where the bloom
-    /// starts. Held in window coordinates; the canvas knows the bounds.
-    origin: Point<Pixels>,
+    /// starts. Held in window coordinates; the canvas knows the bounds. `None`
+    /// means the wall's centre.
+    origin: Option<Point<Pixels>>,
     /// The pointer's latest position, so an entry has an origin to freeze.
-    pointer: Point<Pixels>,
+    /// `None` until the pointer has been over the wall, in which case the bloom
+    /// starts from the wall's own centre.
+    pointer: Option<Point<Pixels>>,
     /// When the pointer last entered or left.
     turned: Instant,
     /// `1` inside, `-1` after leaving, `0` before the wall has been pointed at.
@@ -35,10 +38,12 @@ impl Default for Wall {
     fn default() -> Self {
         Self {
             opened: Instant::now(),
-            origin: Point::default(),
-            pointer: Point::default(),
+            origin: None,
+            pointer: None,
             turned: Instant::now(),
-            direction: 0.0,
+            // The wall introduces itself: it blooms in from its centre when it
+            // first appears, rather than waiting to be pointed at.
+            direction: 1.0,
         }
     }
 }
@@ -57,7 +62,7 @@ fn with_wall<R>(key: SharedString, act: impl FnOnce(&mut Wall) -> R) -> R {
 }
 
 fn track(key: SharedString, position: Point<Pixels>) {
-    with_wall(key, |wall| wall.pointer = position);
+    with_wall(key, |wall| wall.pointer = Some(position));
 }
 
 /// Returns whether anything changed, so the caller only redraws when it did.
@@ -116,7 +121,8 @@ impl RenderOnce for PixelWall {
                         let (time, origin, age, direction) = with_wall(key.clone(), |wall| {
                             (
                                 wall.opened.elapsed().as_secs_f32(),
-                                wall.origin,
+                                wall.origin
+                                    .unwrap_or_else(|| bounds.center()),
                                 wall.turned.elapsed().as_secs_f32(),
                                 wall.direction,
                             )
