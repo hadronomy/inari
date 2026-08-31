@@ -1,0 +1,68 @@
+<odoo>
+    <record id="privilege_inari_devices" model="res.groups.privilege">
+        <field name="name">Inari Devices</field>
+        <field name="category_id" ref="base.module_category_operations"/>
+        <field name="sequence">40</field>
+    </record>
+    <record id="privilege_inari_system" model="res.groups.privilege">
+        <field name="name">Inari System</field>
+        <field name="category_id" ref="base.module_category_hidden"/>
+        <field name="sequence">50</field>
+    </record>
+
+    <record id="group_inari_operator" model="res.groups">
+        <field name="name">Operator</field>
+        <field name="privilege_id" ref="inari_devices.privilege_inari_devices"/>
+        <field name="sequence">10</field>
+    </record>
+    <record id="group_inari_manager" model="res.groups">
+        <field name="name">Manager</field>
+        <field name="privilege_id" ref="inari_devices.privilege_inari_devices"/>
+        <field name="sequence">20</field>
+        <field name="implied_ids" eval="[(4, ref('inari_devices.group_inari_operator'))]"/>
+    </record>
+    <record id="group_inari_admin" model="res.groups">
+        <field name="name">System Administrator</field>
+        <field name="privilege_id" ref="inari_devices.privilege_inari_devices"/>
+        <field name="sequence">30</field>
+        <field name="implied_ids" eval="[(4, ref('inari_devices.group_inari_manager'))]"/>
+    </record>
+    <record id="group_inari_sync" model="res.groups">
+        <field name="name">Projection Sync</field>
+        <field name="privilege_id" ref="inari_devices.privilege_inari_system"/>
+    </record>
+
+    <record id="rule_inari_company_operator" model="ir.rule">
+        <field name="name">Inari records: company</field>
+        <field name="model_id" ref="model_inari_device"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+        <field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/>
+    </record>
+    <record id="rule_inari_company_organization" model="ir.rule"><field name="name">Inari Organizations: company</field><field name="model_id" ref="model_inari_organization"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_site" model="ir.rule"><field name="name">Inari Sites: company</field><field name="model_id" ref="model_inari_site"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_agent" model="ir.rule"><field name="name">Inari Agents: company</field><field name="model_id" ref="model_inari_agent"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_work" model="ir.rule"><field name="name">Inari Managed Work: company</field><field name="model_id" ref="model_inari_managed_work"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_capability" model="ir.rule"><field name="name">Inari Capabilities: company</field><field name="model_id" ref="model_inari_device_capability"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_webhook" model="ir.rule"><field name="name">Inari Webhooks: company</field><field name="model_id" ref="model_inari_webhook_delivery"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_sync'))]"/></record>
+    <record id="rule_inari_company_binding" model="ir.rule"><field name="name">Inari Bindings: company</field><field name="model_id" ref="model_inari_device_binding"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_revision" model="ir.rule"><field name="name">Inari Revisions: company</field><field name="model_id" ref="model_inari_device_binding_revision"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_test" model="ir.rule"><field name="name">Inari Tests: company</field><field name="model_id" ref="model_inari_device_test_result"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_report" model="ir.rule"><field name="name">Inari Report Bindings: company</field><field name="model_id" ref="model_inari_report_binding"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_sequence" model="ir.rule"><field name="name">Inari Report Sequences: company</field><field name="model_id" ref="model_inari_report_sequence"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_sequence_document" model="ir.rule"><field name="name">Inari Report Documents: company</field><field name="model_id" ref="model_inari_report_sequence_document"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_intent" model="ir.rule"><field name="name">Inari Print Intents: company</field><field name="model_id" ref="model_inari_print_intent"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_audit" model="ir.rule"><field name="name">Inari Print Audit: company</field><field name="model_id" ref="model_inari_print_audit"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_recovery" model="ir.rule"><field name="name">Inari Recovery: company</field><field name="model_id" ref="model_inari_recovery_task"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_pairing" model="ir.rule"><field name="name">Inari Pairing: company</field><field name="model_id" ref="model_inari_client_pairing"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_request" model="ir.rule"><field name="name">Inari Pairing Requests: company</field><field name="model_id" ref="model_inari_pairing_request"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_grant" model="ir.rule"><field name="name">Inari Grants: company</field><field name="model_id" ref="model_inari_client_grant"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_endpoint" model="ir.rule"><field name="name">Inari Endpoints: company</field><field name="model_id" ref="model_inari_agent_endpoint"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_cursor" model="ir.rule"><field name="name">Inari Cursors: company</field><field name="model_id" ref="model_inari_reconciliation_cursor"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_decommission" model="ir.rule"><field name="name">Inari Decommission: company</field><field name="model_id" ref="model_inari_decommission_run"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_evidence" model="ir.rule"><field name="name">Inari Evidence: company</field><field name="model_id" ref="model_inari_decommission_evidence"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+    <record id="rule_inari_company_purge" model="ir.rule"><field name="name">Inari Purge Authorities: company</field><field name="model_id" ref="model_inari_decommission_purge_authority"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_manager'))]"/></record>
+    <record id="rule_inari_company_setup" model="ir.rule"><field name="name">Inari Setup: company</field><field name="model_id" ref="model_inari_setup_state"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_admin'))]"/></record>
+    <record id="rule_inari_company_identity" model="ir.rule"><field name="name">Inari Identity: company</field><field name="model_id" ref="model_inari_workload_identity"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_admin'))]"/></record>
+    <record id="rule_inari_company_release" model="ir.rule"><field name="name">Inari Release Sets: company</field><field name="model_id" ref="model_inari_release_set"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_admin'))]"/></record>
+    <record id="rule_inari_company_alert" model="ir.rule"><field name="name">Inari Alerts: company</field><field name="model_id" ref="model_inari_alert"/><field name="domain_force">[('company_id', 'in', company_ids)]</field><field name="groups" eval="[(4, ref('inari_devices.group_inari_operator'))]"/></record>
+</odoo>
