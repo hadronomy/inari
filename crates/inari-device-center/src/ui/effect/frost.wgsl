@@ -22,12 +22,20 @@ fn effect(input: EffectInput) -> vec4<f32> {
             // at this radius, and costs one multiply.
             let falloff = (1.0 - abs(f32(x)) / f32(TAPS + 1))
                 * (1.0 - abs(f32(y)) / f32(TAPS + 1));
-            total += source(input.uv + offset) * falloff;
+            // Premultiplied, because a weighted sum of straight alpha pulls
+            // the black of transparent texels in and rings the content with a
+            // dark halo.
+            total += source_premultiplied(input.uv + offset) * falloff;
             weight += falloff;
         }
     }
 
-    let blurred = total / max(weight, 0.0001);
+    let summed = total / max(weight, 0.0001);
+    let blurred = select(
+        vec4<f32>(summed.rgb / max(summed.a, 0.0001), summed.a),
+        vec4<f32>(0.0),
+        summed.a <= 0.0,
+    );
     let colour = tint(input);
     // Both sides converted before mixing. `tint()` hands back sRGB-encoded
     // colour like every other accessor, and mixing it against linear content
