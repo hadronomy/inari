@@ -116,6 +116,17 @@ fn turn(key: SharedString, hovered: bool) -> bool {
     })
 }
 
+/// Bloom the wall again from wherever its origin now is.
+///
+/// A tuning control that changes the origin has nothing to show until the next
+/// bloom, because the origin only sets each dot's delay while one is running.
+pub fn restart(key: impl Into<SharedString>) {
+    with_wall(key.into(), |wall| {
+        wall.turned = Instant::now();
+        wall.direction = 1.0;
+    });
+}
+
 /// A wall of pixel cells that blooms outward from wherever the pointer enters.
 #[derive(IntoElement)]
 pub struct PixelWall {
