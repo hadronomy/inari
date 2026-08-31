@@ -586,15 +586,15 @@ fn render_support() -> gpui::AnyElement {
 }
 
 fn render_effects() -> gpui::AnyElement {
-    use crate::ui::ripple;
+    use crate::ui::pixel_bloom;
 
     page("dev-effects")
         .child(
-            Section::new("Ripple wall — click it").child(
+            Section::new("Pixel wall — point at it").child(
                 div()
                     .h(px(420.0))
                     .w_full()
-                    .child(ripple::wall("dev-ripple")),
+                    .child(pixel_bloom::wall("dev-pixel-bloom")),
             ),
         )
         .into_any_element()
