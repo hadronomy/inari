@@ -1,19 +1,30 @@
-// A wall of pixel cells that blooms outward from a point and stays lit.
+// A field of pixels that blooms out from the centre and then shimmers.
 //
-// After Ryan Mulligan's pixel-canvas: each cell grows in from nothing, delayed
-// by its distance from the origin, so the wall fills from one point to its
-// edges. Leaving unwinds the same order, so the bloom retreats the way it came
-// rather than collapsing at once.
+// After Ryan Mulligan's pixel-canvas. Three things give it its texture, and all
+// three are per-cell draws from one hash:
 //
-// `time`, `cell`, `origin_x`, `origin_y`, `age`, `direction`, `near` and `far`
+//   - a dot is small against its cell, so the field reads as scattered points
+//     rather than as a grid of tiles;
+//   - every dot has its own maximum size and its own opacity;
+//   - once a dot has arrived it never stops moving, oscillating its size at its
+//     own speed. That is the shimmer the effect is named for.
+//
+// Two things here deliberately differ from the reference, because they read
+// better: the bloom starts where the pointer entered rather than always at the
+// centre, and leaving unwinds in the same staggered order rather than
+// collapsing the whole field at once.
+//
+// `time`, `gap`, `origin_x`, `origin_y`, `age`, `direction`, `near` and `far`
 // are generated from the fields of `PixelBloom`.
 
-// Fraction of a cell left empty around a fully grown pixel.
-const GUTTER: f32 = 0.28;
+// A dot's size as a fraction of its cell. The reference draws at most 2px on a
+// 5px grid, so a dot covers well under half its cell even at full size.
+const MIN_EXTENT: f32 = 0.08;
+const MAX_EXTENT: f32 = 0.40;
 // Device pixels the bloom front travels per second.
-const SPREAD: f32 = 1100.0;
-// Seconds one cell takes to grow, before its own jitter is applied.
-const DURATION: f32 = 0.34;
+const SPREAD: f32 = 1400.0;
+// Seconds one dot takes to grow, before its own jitter is applied.
+const DURATION: f32 = 0.22;
 
 fn bloom_hash(point: vec2<f32>) -> f32 {
     let scattered = fract(point * vec2<f32>(0.1031, 0.1030));
@@ -22,51 +33,57 @@ fn bloom_hash(point: vec2<f32>) -> f32 {
 }
 
 fn effect(input: EffectInput) -> vec4<f32> {
-    let edge = max(cell(input), 2.0) * input.scale;
+    let edge = max(gap(input), 3.0) * input.scale;
 
-    // Everything is measured from the cell's centre, so one cell carries one
-    // value and the bloom advances cell by cell rather than sweeping a smooth
-    // circle across them.
     let index = floor(input.position / edge);
     let centre = (index + 0.5) * edge;
 
-    // Two independent draws per cell: when it moves, and what colour it is.
-    let jitter = 0.75 + 0.5 * bloom_hash(index);
-    let pick = bloom_hash(index + vec2<f32>(17.3, 5.1));
+    // Four independent draws per cell: how big it gets, how fast it shimmers,
+    // how opaque it is, and which end of the palette it sits at.
+    let size_seed = bloom_hash(index);
+    let speed_seed = bloom_hash(index + vec2<f32>(11.7, 3.3));
+    let alpha_seed = bloom_hash(index + vec2<f32>(29.1, 17.9));
+    let colour_seed = bloom_hash(index + vec2<f32>(5.4, 41.2));
 
+    let ceiling = mix(MIN_EXTENT, MAX_EXTENT, size_seed);
+
+    // A jittered delay, so the front of the bloom is ragged rather than a clean
+    // expanding circle.
+    let jitter = 0.75 + 0.5 * bloom_hash(index + vec2<f32>(2.6, 7.1));
     let origin = vec2<f32>(origin_x(input), origin_y(input)) * input.scale;
     let delay = length(centre - origin) / SPREAD * jitter;
-    let span = DURATION * jitter;
+    let travel = clamp((age(input) - delay) / (DURATION * jitter), 0.0, 1.0);
 
-    // `direction` is +1 while the pointer is inside, -1 after it leaves, and 0
-    // before the wall has ever been pointed at.
-    let travel = clamp((age(input) - delay) / span, 0.0, 1.0);
     let heading = direction(input);
-    var progress = 0.0;
+    var reach = 0.0;
     if heading > 0.0 {
-        progress = travel;
+        reach = travel;
     } else if heading < 0.0 {
-        progress = 1.0 - travel;
+        reach = 1.0 - travel;
     }
-    if progress <= 0.0 {
+    if reach <= 0.0 {
         return vec4<f32>(0.0);
     }
 
-    // The pixel is a square inset by the gutter, grown from its own centre.
-    // Antialiased against one device pixel, or the growing edge crawls.
+    // Arrived dots oscillate between their floor and their ceiling forever, each
+    // on its own phase and speed, so a settled field is never a still image.
+    let beat = time(input) * (0.9 + 2.6 * speed_seed) + colour_seed * 6.2831853;
+    let shimmering = mix(MIN_EXTENT, ceiling, 0.5 + 0.5 * sin(beat));
+    let wanted = select(ceiling, shimmering, reach >= 1.0);
+    let extent = wanted * reach;
+
+    // Square dots, like the reference's `fillRect`, but with a soft shoulder so
+    // a two-pixel dot does not crawl as it grows.
     let within = abs(fract(input.position / edge) - 0.5);
-    let extent = (0.5 - GUTTER * 0.5) * progress;
+    let distance = max(within.x, within.y);
     let feather = 1.0 / edge;
-    let inside = (1.0 - smoothstep(extent - feather, extent + feather, within.x))
-        * (1.0 - smoothstep(extent - feather, extent + feather, within.y));
+    let core = 1.0 - smoothstep(extent - feather, extent + feather, distance);
+    // The glow: a short exponential skirt outside the dot. Without it the field
+    // reads as flat confetti rather than as something lit.
+    let glow = exp(-max(distance - extent, 0.0) * 34.0) * 0.45;
 
-    // A lit cell breathes on its own phase, so a settled wall is not a still
-    // image.
-    let breath = 0.86 + 0.14 * sin(time(input) * 1.9 + pick * 6.2831853);
-
-    // Mixed in linear light: mixing the encoded values darkens the midtones,
-    // and a palette of two close tones is almost entirely midtones.
-    let colour = mix(near(input), far(input), pick);
-    let lit = to_encoded(to_linear(colour.rgb) * breath);
-    return vec4<f32>(lit, inside * colour.a);
+    let colour = mix(near(input), far(input), colour_seed);
+    // Per-cell opacity is what keeps the field from reading as one flat tone.
+    let weight = clamp(core + glow, 0.0, 1.0) * mix(0.28, 1.0, alpha_seed);
+    return vec4<f32>(colour.rgb, weight * colour.a);
 }
