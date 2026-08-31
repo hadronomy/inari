@@ -36,6 +36,10 @@ tray-icon.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
   "Win32_Foundation",
+  # `effect::validate_all_direct3d` puts every shader through the same fxc
+  # call the renderer makes, so a rejected effect fails a test rather than
+  # drawing nothing on a customer's machine.
+  "Win32_Graphics_Direct3D_Fxc",
   "Win32_System_Com",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
