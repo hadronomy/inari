@@ -448,11 +448,41 @@ The assertion is compact JWS with `iss`, `sub`, `aud`, `iat`, `exp`, and `jti`
 claims. The company Pairing Assertion key signs through OpenBao Transit. Its
 private key never enters Odoo memory or the Controller.
 
+The browser requests the Pairing Assertion from
+`POST /inari_devices/pairing/v1/assertion`. This same-origin Odoo JSON-RPC route
+requires an authenticated Device Operator and an active POS session. Odoo
+validates the complete approved Pairing Request against the active receipt
+Binding Revision before it signs anything. It issues one assertion for each
+Pairing Request and safely replays the same result for an identical request.
+The route enables no CORS policy. Odoo's JSON-RPC dispatcher does not process
+CSRF tokens, and browsers cannot submit its JSON content type across origins
+without CORS approval.
+
+The Odoo pod authenticates to OpenBao with its Kubernetes workload identity.
+Odoo stores no OpenBao token or private signing key in its database. Each
+database and company uses the deterministic Transit key
+`inari-odoo-pairing-<database>-<company_id>`. Odoo reads the current Ed25519 key
+version first. It places that exact version in the protected `kid`, signs the
+compact JWS input through Transit, and rejects a different key type or a
+malformed signature.
+
+The Odoo deployment supplies `INARI_OPENBAO_ADDR` and
+`INARI_OPENBAO_KUBERNETES_ROLE`. It can also set the Kubernetes auth mount,
+Transit mount, OpenBao namespace, service-account token file, CA certificate,
+and client certificate files. OpenBao access uses HTTPS and a bounded request
+timeout.
+
 The Agent checks the assertion through the Odoo signing key in Controller
 policy. The Client Grant contains the same actor and business scope.
 
 The Agent stores the one-time assertion `jti` before it issues the Client
 Grant. A replay cannot create another grant after a restart.
+
+One browser pairing module owns the non-exportable Ed25519 key, IndexedDB
+record, DPoP proofs, Agent nonce retry, approval polling, Pairing Assertion
+request, Client Grant admission, renewal, and cancellation. POS printing sees
+only the resulting credential interface. If a ticket starts pairing, the same
+ticket resumes after the Agent issues the Client Grant.
 
 If Client Pairing is absent, the POS status control opens one guided flow. It
 covers Device Center, certificate trust, request review, manager approval, and

@@ -4,6 +4,8 @@ import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 
 import { InariAgentClient, InariAgentError } from "./agent_client";
+import { ClientPairingManager } from "./client_pairing";
+import { ClientPairingDialog } from "./client_pairing_dialog";
 import { IndexedDbContextStore } from "./context_store";
 import { InariReceiptPrinter } from "./inari_printer";
 import { createReceiptPlan } from "./submission_context";
@@ -29,14 +31,20 @@ function activeBinding(pos) {
 export class InariDeviceService {
     constructor({
         notification,
+        dialog = null,
+        rpc = null,
         credentials = null,
+        pairingManagerFactory = (options) => new ClientPairingManager(options),
         clientFactory = (options) => new InariAgentClient(options),
         contextStoreFactory = () => new IndexedDbContextStore(),
         printerFactory = (options) => new InariReceiptPrinter(options),
         randomUUID = () => crypto.randomUUID(),
     } = {}) {
         this.notification = notification;
+        this.dialog = dialog;
+        this.rpc = rpc;
         this.credentials = credentials;
+        this.pairingManagerFactory = pairingManagerFactory;
         this.clientFactory = clientFactory;
         this.contextStoreFactory = contextStoreFactory;
         this.printerFactory = printerFactory;
@@ -46,12 +54,24 @@ export class InariDeviceService {
         this.client = null;
         this.printer = null;
         this.contextStore = null;
+        this.pairing = null;
         this.lastResult = null;
     }
 
-    attachPos(pos) {
+    async attachPos(pos) {
         this.pos = pos;
         this.binding = activeBinding(pos);
+        this.pairing = null;
+        if (this.binding?.agent_endpoint && this.rpc) {
+            this.pairing = this.pairingManagerFactory({
+                binding: this.binding,
+                posSessionId: this.pos.session.id,
+                rpc: this.rpc,
+            });
+            if (await this.pairing.restore()) {
+                this.credentials = this.pairing;
+            }
+        }
         this.configureTransport();
     }
 
@@ -104,7 +124,7 @@ export class InariDeviceService {
         if (!this.binding?.agent_endpoint) {
             return this.fail("agent_endpoint_required");
         }
-        if (!this.credentials || !this.printer) {
+        if ((!this.credentials || !this.printer) && !(await this.ensurePairing())) {
             return this.fail("pairing_required");
         }
         const result = await this.printer.printReceipt(element, plan);
@@ -115,6 +135,26 @@ export class InariDeviceService {
             return this.fail(code, result.error, result);
         }
         return result;
+    }
+
+    async ensurePairing() {
+        if (!this.pairing) {
+            return false;
+        }
+        const close = this.dialog?.add(ClientPairingDialog, {
+            manager: this.pairing,
+        });
+        try {
+            await this.pairing.begin();
+            this.setCredentials(this.pairing);
+            close?.();
+            this.notification?.add(_t("Browser paired. Sending the ticket now."), {
+                type: "success",
+            });
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     fail(code, error = null, result = null) {
@@ -135,9 +175,9 @@ export class InariDeviceService {
 }
 
 export const inariDeviceService = {
-    dependencies: ["notification"],
-    start(_env, { notification }) {
-        return new InariDeviceService({ notification });
+    dependencies: ["dialog", "notification", "rpc"],
+    start(_env, { dialog, notification, rpc }) {
+        return new InariDeviceService({ dialog, notification, rpc });
     },
 };
 

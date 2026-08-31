@@ -24,9 +24,7 @@ access_inari_report_document,Inari Report Document,model_inari_report_sequence_d
 access_inari_intent_operator,Inari Print Intent,model_inari_print_intent,inari_devices.group_inari_operator,1,1,1,0
 access_inari_audit_operator,Inari Print Audit,model_inari_print_audit,inari_devices.group_inari_operator,1,0,1,0
 access_inari_recovery_operator,Inari Recovery Task,model_inari_recovery_task,inari_devices.group_inari_operator,1,1,1,0
-access_inari_pairing_manager,Inari Pairing,model_inari_client_pairing,inari_devices.group_inari_manager,1,1,1,0
-access_inari_request_manager,Inari Pairing Request,model_inari_pairing_request,inari_devices.group_inari_manager,1,1,1,0
-access_inari_grant_manager,Inari Client Grant,model_inari_client_grant,inari_devices.group_inari_manager,1,1,1,0
+access_inari_assertion_manager,Inari Pairing Assertion,model_inari_pairing_assertion,inari_devices.group_inari_manager,1,0,0,0
 access_inari_endpoint_manager,Inari Agent Endpoint,model_inari_agent_endpoint,inari_devices.group_inari_manager,1,1,1,0
 access_inari_webhook_sync,Inari Webhook,model_inari_webhook_delivery,inari_devices.group_inari_sync,1,1,1,0
 access_inari_cursor_sync,Inari Cursor,model_inari_reconciliation_cursor,inari_devices.group_inari_sync,1,1,1,0

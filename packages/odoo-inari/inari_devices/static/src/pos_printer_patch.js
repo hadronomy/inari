@@ -64,6 +64,6 @@ patch(PosPrinterService.prototype, {
 patch(PosStore.prototype, {
     async setup(env, services) {
         await super.setup(...arguments);
-        services.inari_device.attachPos(this);
+        await services.inari_device.attachPos(this);
     },
 });

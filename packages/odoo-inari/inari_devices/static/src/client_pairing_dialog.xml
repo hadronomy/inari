@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="inari_devices.ClientPairingDialog">
+        <div class="inari-pairing" aria-live="polite">
+            <t t-if="state.name === 'securing' || state.name === 'idle'">
+                <h3>Securing this browser</h3>
+                <p>Inari is creating a protected browser key. The private key cannot leave this browser.</p>
+                <div class="inari-pairing__activity" role="status">Preparing Pairing Request…</div>
+            </t>
+            <t t-elif="state.name === 'awaiting_approval'">
+                <h3>Approve this browser in Device Center</h3>
+                <p>Open the Pairing Request on the Agent Host. Confirm this phrase before you approve it.</p>
+                <div class="inari-pairing__phrase" aria-label="Pairing phrase">
+                    <t t-esc="state.phrase"/>
+                </div>
+                <ol class="inari-pairing__steps">
+                    <li>Open Inari Device Center.</li>
+                    <li>Review the POS and Agent shown there.</li>
+                    <li>Confirm the phrase, then select Approve.</li>
+                </ol>
+                <p class="inari-pairing__expiry">Request valid until <t t-esc="expiresAt"/>.</p>
+            </t>
+            <t t-elif="state.name === 'finalizing'">
+                <h3>Approval received</h3>
+                <p>Odoo is signing the exact POS scope. Inari will finish pairing next.</p>
+                <div class="inari-pairing__activity" role="status">Finishing secure pairing…</div>
+            </t>
+            <t t-elif="state.name === 'ready'">
+                <h3>Browser paired</h3>
+                <p>This browser can now send receipts to the assigned Inari Device.</p>
+            </t>
+            <t t-elif="state.name === 'failed' || state.name === 'expired'">
+                <h3>Pairing did not finish</h3>
+                <p t-esc="state.error?.message || 'The Client Grant expired. Pair this browser again.'"/>
+                <button type="button" class="btn btn-primary" t-on-click="retry">Try again</button>
+            </t>
+            <t t-else="">
+                <h3>Pairing stopped</h3>
+                <p>Create a new Pairing Request when this browser needs the Device.</p>
+            </t>
+            <button
+                t-if="state.name !== 'ready' &amp;&amp; state.name !== 'canceled'"
+                type="button"
+                class="inari-pairing__cancel btn btn-link"
+                t-on-click="cancel"
+            >Cancel</button>
+        </div>
+    </t>
+</templates>
