@@ -6,16 +6,51 @@
 use std::{cell::RefCell, collections::HashMap, time::Instant};
 
 use gpui::{
-    App, InteractiveElement as _, IntoElement, MouseMoveEvent, PaintEffect, ParentElement as _,
-    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window,
-    canvas, div, px,
+    App, AppContext as _, Entity, InteractiveElement as _, IntoElement, MouseMoveEvent,
+    PaintEffect, ParentElement as _, Pixels, Point, RenderOnce, SharedString,
+    StatefulInteractiveElement as _, Styled, Window, canvas, div, px,
 };
+use gpui_component::StyledExt as _;
+use gpui_component::slider::{Slider, SliderState, SliderValue};
 
 use super::{
+    content::Typography as _,
     effect::PixelBloom,
     motion,
     theme::{ActiveTheme as _, Theme},
 };
+
+/// What the wall looks like, separated from what it is doing, so a dev page can
+/// turn the knobs while the animation runs.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Tuning {
+    /// Bloom from where the pointer entered, rather than always from the centre.
+    pub from_pointer: bool,
+    /// Grid spacing in logical pixels.
+    pub gap: f32,
+    /// The largest a dot grows, as a fraction of its cell.
+    pub dot_size: f32,
+    /// Device pixels the bloom front travels per second.
+    pub spread: f32,
+    /// How fast an arrived dot oscillates its size.
+    pub shimmer: f32,
+    /// Strength of the halo outside each dot.
+    pub glow: f32,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        let resting = PixelBloom::default();
+        Self {
+            from_pointer: true,
+            gap: resting.gap,
+            dot_size: resting.dot_size,
+            spread: resting.spread,
+            shimmer: resting.shimmer,
+            glow: resting.glow,
+        }
+    }
+}
 
 struct Wall {
     /// For the idle breath of lit cells.
@@ -85,10 +120,18 @@ fn turn(key: SharedString, hovered: bool) -> bool {
 #[derive(IntoElement)]
 pub struct PixelWall {
     id: SharedString,
+    tuning: Tuning,
 }
 
 pub fn wall(id: impl Into<SharedString>) -> PixelWall {
-    PixelWall { id: id.into() }
+    PixelWall { id: id.into(), tuning: Tuning::default() }
+}
+
+impl PixelWall {
+    pub fn tuning(mut self, tuning: Tuning) -> Self {
+        self.tuning = tuning;
+        self
+    }
 }
 
 impl RenderOnce for PixelWall {
@@ -100,6 +143,7 @@ impl RenderOnce for PixelWall {
         let key = self.id.clone();
         let mover = key.clone();
         let hoverer = key.clone();
+        let tuning = self.tuning;
 
         div()
             .id(self.id)
@@ -134,9 +178,13 @@ impl RenderOnce for PixelWall {
                                 // A still wall under reduced motion: no breath,
                                 // and a bloom already at its destination.
                                 time: if reduced { 0.0 } else { time },
-                                gap: 7.0,
+                                gap: tuning.gap,
                                 origin_x: f32::from(origin.x - bounds.origin.x),
                                 origin_y: f32::from(origin.y - bounds.origin.y),
+                                dot_size: tuning.dot_size,
+                                spread: tuning.spread,
+                                shimmer: if reduced { 0.0 } else { tuning.shimmer },
+                                glow: tuning.glow,
                                 age: if reduced { f32::MAX } else { age },
                                 direction,
                                 near,
@@ -154,5 +202,104 @@ impl RenderOnce for PixelWall {
                 )
                 .size_full(),
             )
+    }
+}
+
+/// The sliders and the switch that drive a wall's [`Tuning`].
+///
+/// Owned by whatever page shows the wall, because a slider needs entity state
+/// and the wall itself deliberately does not.
+pub struct WallControls {
+    from_pointer: bool,
+    gap: Entity<SliderState>,
+    dot_size: Entity<SliderState>,
+    spread: Entity<SliderState>,
+    shimmer: Entity<SliderState>,
+    glow: Entity<SliderState>,
+}
+
+impl WallControls {
+    pub fn new(cx: &mut App) -> Self {
+        let resting = Tuning::default();
+        let slider = |min: f32, max: f32, step: f32, value: f32, cx: &mut App| {
+            cx.new(|_| {
+                SliderState::new()
+                    .min(min)
+                    .max(max)
+                    .step(step)
+                    .default_value(value)
+            })
+        };
+        Self {
+            from_pointer: resting.from_pointer,
+            gap: slider(4.0, 24.0, 1.0, resting.gap, cx),
+            dot_size: slider(0.1, 0.9, 0.02, resting.dot_size, cx),
+            spread: slider(200.0, 4000.0, 50.0, resting.spread, cx),
+            shimmer: slider(0.0, 8.0, 0.1, resting.shimmer, cx),
+            glow: slider(0.0, 1.0, 0.05, resting.glow, cx),
+        }
+    }
+
+    /// The wall's settings as the sliders currently stand.
+    pub fn tuning(&self, cx: &App) -> Tuning {
+        let read = |state: &Entity<SliderState>| match state.read(cx).value() {
+            SliderValue::Single(value) => value,
+            // A range slider cannot be built here, so its start is as good an
+            // answer as any and better than refusing to draw.
+            SliderValue::Range(start, _) => start,
+        };
+        Tuning {
+            from_pointer: self.from_pointer,
+            gap: read(&self.gap),
+            dot_size: read(&self.dot_size),
+            spread: read(&self.spread),
+            shimmer: read(&self.shimmer),
+            glow: read(&self.glow),
+        }
+    }
+
+    pub fn toggle_origin(&mut self) {
+        self.from_pointer = !self.from_pointer;
+    }
+
+    /// Whether the bloom starts at the pointer rather than the centre.
+    pub fn blooms_from_pointer(&self) -> bool {
+        self.from_pointer
+    }
+
+    pub fn render(&self, cx: &App) -> impl IntoElement {
+        let theme = cx.inari();
+        let tuning = self.tuning(cx);
+        let row = |name: &'static str, reading: String, slider: Slider| {
+            div()
+                .h_flex()
+                .items_center()
+                .gap(px(Theme::SPACE_MD))
+                .child(
+                    div()
+                        .w(px(76.0))
+                        .text_caption()
+                        .text_color(theme.text_secondary)
+                        .child(name),
+                )
+                .child(div().flex_1().child(slider))
+                .child(
+                    div()
+                        .w(px(56.0))
+                        .text_technical()
+                        .text_color(theme.text_tertiary)
+                        .child(reading),
+                )
+        };
+
+        div()
+            .v_flex()
+            .gap(px(Theme::SPACE_SM))
+            .w_full()
+            .child(row("Gap", format!("{:.0}px", tuning.gap), Slider::new(&self.gap)))
+            .child(row("Dot size", format!("{:.2}", tuning.dot_size), Slider::new(&self.dot_size)))
+            .child(row("Spread", format!("{:.0}", tuning.spread), Slider::new(&self.spread)))
+            .child(row("Shimmer", format!("{:.1}", tuning.shimmer), Slider::new(&self.shimmer)))
+            .child(row("Glow", format!("{:.2}", tuning.glow), Slider::new(&self.glow)))
     }
 }
