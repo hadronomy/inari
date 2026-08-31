@@ -19,9 +19,9 @@
 use chrono::{Duration, Utc};
 use gpui::{
     App, AppContext as _, BorrowAppContext as _, Entity, FocusHandle, Focusable, Global,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions, div,
-    point, px, size,
+    InteractiveElement as _, IntoElement, KeyBinding, PaintEffect, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions, canvas,
+    div, point, px, size,
 };
 use gpui_component::{
     Root, StyledExt as _,
@@ -43,6 +43,7 @@ use crate::{
         banner::Banner,
         chrome::{NavigationRail, RailItem, content_panel},
         content::{Section, page},
+        effect::Frost,
         field,
         gate::Gate,
         icon::Glyph,
@@ -343,6 +344,30 @@ impl DevTools {
                     pixel_bloom::wall("dev-pixel-bloom").tuning(self.wall_controls.tuning(cx)),
                 ),
             ))
+            .child(
+                Section::new("Frost — reads what it is applied to").child(
+                    div().h(px(96.0)).w_full().child(
+                        canvas(
+                            |_, _, _| (),
+                            |bounds, _, window: &mut Window, _| {
+                                // Painted without a capture on purpose: the
+                                // source is then a transparent pixel, so what
+                                // shows is the tint alone. A shader that failed
+                                // to compile shows nothing, which is the whole
+                                // point of having it here.
+                                window.paint_effect(
+                                    PaintEffect::new(
+                                        bounds,
+                                        &Frost { radius: 6.0, tint: gpui::rgba(0x6ea8fe66).into() },
+                                    )
+                                    .corner_radii(px(Theme::RADIUS_CARD)),
+                                );
+                            },
+                        )
+                        .size_full(),
+                    ),
+                ),
+            )
             .child(
                 Section::new("Tuning").child(
                     card(cx.inari())

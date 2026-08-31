@@ -93,6 +93,19 @@ impl Default for PixelBloom {
     }
 }
 
+/// A blur of whatever it is applied to, with a tint over the top.
+///
+/// The first effect that reads `source()`, so it is the one that proves a
+/// filtered read survives translation to every backend.
+#[derive(Effect, Copy, Clone, Debug, PartialEq)]
+#[effect(name = "inari.frost", source = "effect/frost.wgsl")]
+pub struct Frost {
+    /// Blur radius in logical pixels.
+    pub radius: f32,
+    /// Laid over the blurred content; its alpha is how much glass there is.
+    pub tint: Hsla,
+}
+
 /// Register every effect the application owns.
 ///
 /// Call this at startup so the renderer never has to compile a shader during the
@@ -100,6 +113,7 @@ impl Default for PixelBloom {
 pub fn register_all() {
     gpui::effect::register(Grain::definition());
     gpui::effect::register(PixelBloom::definition());
+    gpui::effect::register(Frost::definition());
 }
 
 #[cfg(test)]
@@ -229,16 +243,33 @@ fn effect(input: EffectInput) -> vec4<f32> {
     }
 
     #[test]
-    fn no_effect_declares_a_sampler() {
-        // naga's HLSL backend emits samplers as a Direct3D 12 heap, indexed
-        // through `space255`, which Direct3D 11 cannot load — and it offers no
-        // option to ask for a plain one. One sampler anywhere in the preamble
-        // would break every effect on Windows, not only the ones that read the
-        // source, so `source()` uses `textureLoad`.
+    fn no_hlsl_reaches_fxc_with_a_register_space() {
+        // naga emits samplers as a Direct3D 12 heap addressed with register
+        // spaces, which is Shader Model 5.1 syntax that fxc rejects at 5.0
+        // (gfx-rs/wgpu#8120). GPUI flattens it back to a plain binding, and this
+        // is what proves the flattening still matches naga's output: the day it
+        // stops, this fails here rather than on a customer's machine.
         for def in [SAMPLE, OVER_SAMPLE] {
             let hlsl = effect::translate(&def, ShaderTarget::Hlsl).unwrap();
-            assert!(!hlsl.contains("nagaSamplerHeap"), "`{}` pulled in the sampler heap", def.name);
+            assert!(!hlsl.contains("nagaSamplerHeap"), "`{}` kept the sampler heap", def.name);
+            assert!(
+                !hlsl.contains(", space"),
+                "`{}` kept a register space, which fxc rejects below 5.1",
+                def.name
+            );
         }
+    }
+
+    #[test]
+    fn a_sampling_effect_gets_a_plain_sampler_binding() {
+        use gpui::effect::slots;
+
+        let hlsl = effect::translate(&OVER_SAMPLE, ShaderTarget::Hlsl).unwrap();
+        assert!(
+            hlsl.contains(&format!("register(s{})", slots::HLSL_SOURCE_SAMPLER_REGISTER)),
+            "the sampler is not on s{}",
+            slots::HLSL_SOURCE_SAMPLER_REGISTER
+        );
     }
 
     #[test]
