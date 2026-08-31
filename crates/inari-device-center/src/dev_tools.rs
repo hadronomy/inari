@@ -67,8 +67,7 @@ actions!(
         ShowSupport,
         ShowSetup,
         ShowBanners,
-        ShowEffects,
-        ToggleWallOrigin
+        ShowEffects
     ]
 );
 
@@ -319,10 +318,6 @@ impl Render for DevTools {
             .on_action(cx.listener(|this, _: &ShowSetup, _, cx| this.navigate(Page::Setup, cx)))
             .on_action(cx.listener(|this, _: &ShowBanners, _, cx| this.navigate(Page::Banners, cx)))
             .on_action(cx.listener(|this, _: &ShowEffects, _, cx| this.navigate(Page::Effects, cx)))
-            .on_action(cx.listener(|this, _: &ToggleWallOrigin, _, cx| {
-                this.wall_controls.toggle_origin();
-                cx.notify();
-            }))
             .size_full()
             .v_flex()
             .font_family(font)
@@ -365,9 +360,15 @@ impl DevTools {
                                 .child(
                                     Switch::new("wall-from-pointer")
                                         .checked(self.wall_controls.blooms_from_pointer())
-                                        .on_click(|_, window, cx| {
-                                            window.dispatch_action(Box::new(ToggleWallOrigin), cx);
-                                        }),
+                                        // Bound to the entity rather than
+                                        // dispatched as an action: a switch does
+                                        // not take focus, so an action has no
+                                        // path to travel.
+                                        .on_click(cx.listener(|this, _: &bool, _, cx| {
+                                            this.wall_controls.toggle_origin();
+                                            pixel_bloom::restart("dev-pixel-bloom");
+                                            cx.notify();
+                                        })),
                                 ),
                         )
                         .child(self.wall_controls.render(cx)),
