@@ -46,8 +46,9 @@ impl Default for Grain {
 pub struct PixelBloom {
     /// Seconds the wall has been on screen, for the idle breath of lit cells.
     pub time: f32,
-    /// Cell size in logical pixels.
-    pub cell: f32,
+    /// Grid spacing in logical pixels. A dot is a fraction of this, so the
+    /// field reads as scattered points rather than as tiles.
+    pub gap: f32,
     /// Where the bloom starts, in logical pixels from the wall's top-left.
     pub origin_x: f32,
     /// The other half of the origin.
@@ -69,7 +70,7 @@ impl Default for PixelBloom {
     fn default() -> Self {
         Self {
             time: 0.0,
-            cell: 9.0,
+            gap: 7.0,
             origin_x: 0.0,
             origin_y: 0.0,
             age: 0.0,

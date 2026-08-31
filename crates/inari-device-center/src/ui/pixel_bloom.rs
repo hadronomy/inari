@@ -134,7 +134,7 @@ impl RenderOnce for PixelWall {
                                 // A still wall under reduced motion: no breath,
                                 // and a bloom already at its destination.
                                 time: if reduced { 0.0 } else { time },
-                                cell: 9.0,
+                                gap: 7.0,
                                 origin_x: f32::from(origin.x - bounds.origin.x),
                                 origin_y: f32::from(origin.y - bounds.origin.y),
                                 age: if reduced { f32::MAX } else { age },
