@@ -35,7 +35,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
     let sigma = max(radius(input) * input.scale * 0.5, 0.25);
 
     // One texel along the axis being blurred, in uv.
-    let direction = select(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0), axis(input) > 0.5);
+    let direction = select(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0), axis(input));
     let texel = direction / max(input.size, vec2<f32>(1.0));
 
     // Three sigma covers 99.7% of the kernel, and each pair reaches two texels,

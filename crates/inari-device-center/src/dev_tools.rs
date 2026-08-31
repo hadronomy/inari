@@ -20,8 +20,8 @@ use chrono::{Duration, Utc};
 use gpui::{
     App, AppContext as _, BorrowAppContext as _, Entity, FocusHandle, Focusable, Global,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions, div,
-    point, px, size,
+    Pixels, StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions,
+    div, point, px, size,
 };
 use gpui_component::{
     Root, StyledExt as _,
@@ -361,7 +361,7 @@ impl DevTools {
                         .items_start()
                         .gap(px(Theme::SPACE_LG))
                         .w_full()
-                        .children([0.0, 1.0, 2.0, 6.0, 16.0].map(blurred_sample)),
+                        .children([0.0, 1.0, 2.0, 6.0, 16.0].map(|radius| blurred_sample(px(radius)))),
                 ),
             )
             .child(
@@ -839,7 +839,7 @@ fn frosted(label: &'static str, radius: f32) -> impl IntoElement {
 /// Text rather than a shape on purpose. A glyph is the hardest thing to blur
 /// correctly — it is mostly edge, so premultiplication mistakes show up as a
 /// dark rim, and it is the case the copy button actually uses.
-fn blurred_sample(radius: f32) -> impl IntoElement {
+fn blurred_sample(radius: Pixels) -> impl IntoElement {
     use crate::ui::content::Typography as _;
 
     let sample = div()
@@ -852,7 +852,7 @@ fn blurred_sample(radius: f32) -> impl IntoElement {
     div()
         .v_flex()
         .gap(px(Theme::SPACE_SM))
-        .child(div().text_caption().child(format!("blur({radius}px)")))
+        .child(div().text_caption().child(format!("blur({}px)", f32::from(radius))))
         .child(effect::blurred(radius, sample))
 }
 

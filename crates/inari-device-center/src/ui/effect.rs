@@ -10,8 +10,8 @@
 //! that would have been a black rectangle on a customer's Windows machine is a
 //! failing `mbx test` here instead.
 
-use gpui::effect::Effect;
-use gpui::{Hsla, IntoElement, Pixels, effect_layer, px};
+use gpui::effect::{Effect, ParameterKind};
+use gpui::{Hsla, IntoElement, Pixels, Point, effect_layer, px};
 
 /// Film grain, to dither the banding out of large fills and long gradients.
 ///
@@ -46,13 +46,11 @@ impl Default for Grain {
 pub struct PixelBloom {
     /// Seconds the wall has been on screen, for the idle breath of lit cells.
     pub time: f32,
-    /// Grid spacing in logical pixels. A dot is a fraction of this, so the
-    /// field reads as scattered points rather than as tiles.
-    pub gap: f32,
-    /// Where the bloom starts, in logical pixels from the wall's top-left.
-    pub origin_x: f32,
-    /// The other half of the origin.
-    pub origin_y: f32,
+    /// Grid spacing. A dot is a fraction of this, so the field reads as
+    /// scattered points rather than as tiles.
+    pub gap: Pixels,
+    /// Where the bloom starts, from the wall's top-left.
+    pub origin: Point<Pixels>,
     /// The largest a dot grows, as a fraction of its cell.
     pub dot_size: f32,
     /// Device pixels the bloom front travels per second.
@@ -63,10 +61,9 @@ pub struct PixelBloom {
     pub glow: f32,
     /// Seconds since the pointer last entered or left.
     pub age: f32,
-    /// `1` while the pointer is inside, `-1` after it leaves, `0` before the
-    /// wall has ever been pointed at. Two floats rather than a signed `age`,
-    /// because "never" and "left just now" are not the same state.
-    pub direction: f32,
+    /// What the pointer last did. Beside `age` rather than folded into its
+    /// sign, because "never" and "left just now" are not the same state.
+    pub pointer: Pointer,
     /// The colour of cells nearest the origin.
     pub near: Hsla,
     /// The colour cells drift towards, picked per cell rather than by distance,
@@ -78,18 +75,41 @@ impl Default for PixelBloom {
     fn default() -> Self {
         Self {
             time: 0.0,
-            gap: 7.0,
-            origin_x: 0.0,
-            origin_y: 0.0,
+            gap: px(7.0),
+            origin: Point::default(),
             dot_size: 0.4,
             spread: 1400.0,
             shimmer: 2.4,
             glow: 0.45,
             age: 0.0,
-            direction: 0.0,
+            pointer: Pointer::Never,
             near: gpui::blue(),
             far: gpui::blue(),
         }
+    }
+}
+
+/// What the pointer has last done to a wall.
+///
+/// The shader compares against these as plain numbers, so the discriminants are
+/// the shared spelling: change one and change `pixel_bloom.wgsl` with it.
+/// `the_shader_and_the_pointer_agree` holds them to it.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Pointer {
+    /// The wall has never been pointed at, so nothing has bloomed.
+    Never = 0,
+    /// The pointer is inside, and the bloom is running out from its origin.
+    Inside = 1,
+    /// The pointer has left, and the field is unwinding in the order it arrived.
+    Left = 2,
+}
+
+impl gpui::effect::Parameter for Pointer {
+    const KIND: ParameterKind = ParameterKind::Index;
+
+    fn write(&self, slots: &mut [f32]) {
+        slots[0] = *self as u8 as f32;
     }
 }
 
@@ -106,23 +126,40 @@ pub struct Frost {
     pub tint: Hsla,
 }
 
+/// Which way a separable pass runs.
+///
+/// A Gaussian is separable, so a blur is two passes over one axis each. Nothing
+/// else is a direction, and an axis between the two is not a slower blur — it
+/// is a value the shader would have to round.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum Axis {
+    Across,
+    Down,
+}
+
+impl gpui::effect::Parameter for Axis {
+    const KIND: ParameterKind = ParameterKind::Flag;
+
+    fn write(&self, slots: &mut [f32]) {
+        slots[0] = matches!(self, Axis::Down) as u8 as f32;
+    }
+}
+
 /// One axis of a Gaussian blur. Use [`blurred`]; this is half of it.
 #[derive(Effect, Copy, Clone, Debug, PartialEq)]
 #[effect(name = "inari.blur", source = "effect/blur.wgsl")]
 struct Blur {
-    /// The CSS `blur()` radius in logical pixels, which the shader halves to
-    /// get a sigma.
-    radius: f32,
-    /// `0` across, `1` down.
-    axis: f32,
+    /// The CSS `blur()` radius, which the shader halves to get a sigma.
+    radius: Pixels,
+    axis: Axis,
 }
 
 impl Blur {
-    /// Three sigma, in logical pixels: how far the kernel reads and how far the
-    /// result spreads. Both are the same number, and it is what [`blurred`]
-    /// hands each layer as its outset.
-    fn reach(radius: f32) -> Pixels {
-        px(radius * 1.5)
+    /// Three sigma: how far the kernel reads and how far the result spreads.
+    /// Both are the same number, and it is what [`blurred`] hands each layer as
+    /// its outset.
+    fn reach(radius: Pixels) -> Pixels {
+        radius * 1.5
     }
 }
 
@@ -141,10 +178,10 @@ impl Blur {
 ///
 /// `radius` is the CSS number. Costs two textures the size of the child plus its
 /// spread, so it is a thing to put on a glyph or a card, not on a scrolling list.
-pub fn blurred(radius: f32, child: impl IntoElement) -> impl IntoElement {
+pub fn blurred(radius: Pixels, child: impl IntoElement) -> impl IntoElement {
     let outset = Blur::reach(radius);
-    let across = Blur { radius, axis: 0.0 };
-    let down = Blur { radius, axis: 1.0 };
+    let across = Blur { radius, axis: Axis::Across };
+    let down = Blur { radius, axis: Axis::Down };
     effect_layer(&down, effect_layer(&across, child).outset(outset)).outset(outset)
 }
 
@@ -162,7 +199,7 @@ pub fn register_all() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::effect::{self, EffectDef, Parameter, ParameterKind, ShaderTarget};
+    use gpui::effect::{self, EffectDef, ParameterDef, ParameterKind, ShaderTarget};
 
     /// Exercises the parts of the ABI an effect is most likely to touch, so a
     /// change to the preamble that breaks one of them fails here rather than in
@@ -170,8 +207,8 @@ mod tests {
     const SAMPLE: EffectDef = EffectDef {
         name: "inari.abi-sample",
         parameters: &[
-            Parameter { name: "tint", kind: ParameterKind::Color },
-            Parameter { name: "blend", kind: ParameterKind::Scalar },
+            ParameterDef { name: "tint", kind: ParameterKind::Color },
+            ParameterDef { name: "blend", kind: ParameterKind::Scalar },
         ],
         wgsl: r#"
 fn effect(input: EffectInput) -> vec4<f32> {
@@ -187,7 +224,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
     /// a generative effect never touches.
     const OVER_SAMPLE: EffectDef = EffectDef {
         name: "inari.over-sample",
-        parameters: &[Parameter { name: "amount", kind: ParameterKind::Scalar }],
+        parameters: &[ParameterDef { name: "amount", kind: ParameterKind::Scalar }],
         wgsl: r#"
 fn effect(input: EffectInput) -> vec4<f32> {
     let shifted = source(input.uv + vec2<f32>(amount(input), 0.0));
@@ -214,8 +251,41 @@ fn effect(input: EffectInput) -> vec4<f32> {
         // than that and the tail is cut off at the element's edge, which is
         // the exact artefact the outset exists to remove.
         for radius in [0.5, 2.0, 8.0, 40.0] {
-            assert_eq!(Blur::reach(radius), px(3.0 * (radius / 2.0)), "at radius {radius}");
+            assert_eq!(
+                Blur::reach(px(radius)),
+                px(3.0 * (radius / 2.0)),
+                "at radius {radius}"
+            );
         }
+    }
+
+    #[test]
+    fn the_shader_and_the_pointer_agree() {
+        // The shader compares against these as plain numbers, because a `u32`
+        // is all a parameter slot can carry. Nothing in either language ties
+        // the two spellings together, so this is the tie.
+        let wgsl = include_str!("effect/pixel_bloom.wgsl");
+        for (variant, name) in
+            [(Pointer::Never, "NEVER"), (Pointer::Inside, "INSIDE")]
+        {
+            assert!(
+                wgsl.contains(&format!("const {name}: u32 = {}u;", variant as u8)),
+                "`pixel_bloom.wgsl` disagrees about {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_axis_is_the_only_thing_a_blur_pass_can_run_along() {
+        // The whole reason `axis` is not an `f32`. Both variants have to reach
+        // the shader as something `select` can branch on, and there is no third
+        // value to reach it at all.
+        let mut across = [f32::NAN; 1];
+        let mut down = [f32::NAN; 1];
+        gpui::effect::Parameter::write(&Axis::Across, &mut across);
+        gpui::effect::Parameter::write(&Axis::Down, &mut down);
+        assert_eq!(across, [0.0]);
+        assert_eq!(down, [1.0]);
     }
 
     #[test]
@@ -360,7 +430,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
         // translation error rather than a wrong pixel.
         const STALE: EffectDef = EffectDef {
             name: "inari.stale-sample",
-            parameters: &[Parameter { name: "amount", kind: ParameterKind::Scalar }],
+            parameters: &[ParameterDef { name: "amount", kind: ParameterKind::Scalar }],
             wgsl: "fn effect(input: EffectInput) -> vec4<f32> { return vec4<f32>(renamed(input)); }",
         };
         let message = format!("{:#}", effect::translate(&STALE, ShaderTarget::Wgsl).unwrap_err());
@@ -378,7 +448,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
     fn more_parameters_than_slots_is_reported_against_the_effect() {
         const TOO_MANY: EffectDef = EffectDef {
             name: "inari.too-many-sample",
-            parameters: &[Parameter { name: "tint", kind: ParameterKind::Color }; 5],
+            parameters: &[ParameterDef { name: "tint", kind: ParameterKind::Color }; 5],
             wgsl: "fn effect(input: EffectInput) -> vec4<f32> { return tint(input); }",
         };
         let message =
