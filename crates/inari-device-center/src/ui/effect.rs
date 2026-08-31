@@ -126,6 +126,19 @@ fn effect(input: EffectInput) -> vec4<f32> {
 "#,
     };
 
+    /// An effect that reads what it was applied to, which is the half of the ABI
+    /// a generative effect never touches.
+    const OVER_SAMPLE: EffectDef = EffectDef {
+        name: "inari.over-sample",
+        parameters: &[Parameter { name: "amount", kind: ParameterKind::Scalar }],
+        wgsl: r#"
+fn effect(input: EffectInput) -> vec4<f32> {
+    let shifted = source(input.uv + vec2<f32>(amount(input), 0.0));
+    return mix(source(input.uv), shifted, 0.5);
+}
+"#,
+    };
+
     const TARGETS: [ShaderTarget; 3] = [ShaderTarget::Wgsl, ShaderTarget::Msl, ShaderTarget::Hlsl];
 
     /// Every effect the application owns.
@@ -192,6 +205,40 @@ fn effect(input: EffectInput) -> vec4<f32> {
             "instances are not on Metal buffer {}",
             slots::MSL_INSTANCES_BUFFER
         );
+    }
+
+    #[test]
+    fn an_effect_can_read_what_it_is_applied_to() {
+        for target in TARGETS {
+            let source = effect::translate(&OVER_SAMPLE, target)
+                .unwrap_or_else(|error| panic!("{target:?}: {error:#}"));
+            assert!(!source.is_empty(), "{target:?} produced nothing");
+        }
+    }
+
+    #[test]
+    fn the_source_texture_lands_on_the_slot_the_renderers_bind() {
+        use gpui::effect::slots;
+
+        let hlsl = effect::translate(&OVER_SAMPLE, ShaderTarget::Hlsl).unwrap();
+        assert!(
+            hlsl.contains(&format!("register(t{})", slots::HLSL_SOURCE_REGISTER)),
+            "the source texture is not on t{}",
+            slots::HLSL_SOURCE_REGISTER
+        );
+    }
+
+    #[test]
+    fn no_effect_declares_a_sampler() {
+        // naga's HLSL backend emits samplers as a Direct3D 12 heap, indexed
+        // through `space255`, which Direct3D 11 cannot load — and it offers no
+        // option to ask for a plain one. One sampler anywhere in the preamble
+        // would break every effect on Windows, not only the ones that read the
+        // source, so `source()` uses `textureLoad`.
+        for def in [SAMPLE, OVER_SAMPLE] {
+            let hlsl = effect::translate(&def, ShaderTarget::Hlsl).unwrap();
+            assert!(!hlsl.contains("nagaSamplerHeap"), "`{}` pulled in the sampler heap", def.name);
+        }
     }
 
     #[test]
