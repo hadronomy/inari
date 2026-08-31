@@ -43,7 +43,7 @@ use crate::{
         banner::Banner,
         chrome::{NavigationRail, RailItem, content_panel},
         content::{Section, page},
-        effect::Frost,
+        effect::{self, Frost},
         field,
         gate::Gate,
         icon::Glyph,
@@ -352,6 +352,16 @@ impl DevTools {
                         .w_full()
                         .child(frosted("Blurred", 6.0))
                         .child(frosted("Untouched", 0.0)),
+                ),
+            )
+            .child(
+                Section::new("Blur — a separable Gaussian over real text").child(
+                    div()
+                        .h_flex()
+                        .items_start()
+                        .gap(px(Theme::SPACE_LG))
+                        .w_full()
+                        .children([0.0, 1.0, 2.0, 6.0, 16.0].map(blurred_sample)),
                 ),
             )
             .child(
@@ -822,6 +832,28 @@ fn frosted(label: &'static str, radius: f32) -> impl IntoElement {
             ),
     )
     .corner_radii(px(Theme::RADIUS_CARD))
+}
+
+/// One column of the blur story: the same text at one radius.
+///
+/// Text rather than a shape on purpose. A glyph is the hardest thing to blur
+/// correctly — it is mostly edge, so premultiplication mistakes show up as a
+/// dark rim, and it is the case the copy button actually uses.
+fn blurred_sample(radius: f32) -> impl IntoElement {
+    use crate::ui::content::Typography as _;
+
+    let sample = div()
+        .v_flex()
+        .gap(px(Theme::SPACE_XS))
+        .w(px(150.0))
+        .child(div().text_body().child("Copied"))
+        .child(div().text_caption().child("A halo here means the taps are summing straight alpha."));
+
+    div()
+        .v_flex()
+        .gap(px(Theme::SPACE_SM))
+        .child(div().text_caption().child(format!("blur({radius}px)")))
+        .child(effect::blurred(radius, sample))
 }
 
 #[cfg(test)]

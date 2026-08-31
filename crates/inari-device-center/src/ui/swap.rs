@@ -11,29 +11,26 @@
 //! label leaves upward and arrives from below, and a 2px blur bridges the
 //! moment when both are half-present.
 //!
-//! Two things had to change on the way over.
+//! One thing had to change on the way over. **There is no scale transform for
+//! a div.** GPUI can scale an SVG, about its own centre, and nothing else — so
+//! the glyph is painted through [`gpui::svg`] rather than as a styled box, and
+//! the label moves instead of scaling, which is what the web recipe does for
+//! text anyway.
 //!
-//! **There is no blur.** GPUI's only blur is a shadow's; the renderer has no
-//! filter and no backdrop pass. Blur is what lets the web version shrink a
-//! glyph to a quarter of its size without it reading as a wink out of nothing,
-//! so without it the scale has to be gentler — see [`motion::SWAP_SCALE`] —
-//! and the two halves are offset in time so they are never both solid at once.
-//! That offset is doing the job the blur did: hiding the frame where you would
-//! otherwise see two distinct marks overlapping.
-//!
-//! **There is no scale transform for a div.** GPUI can scale an SVG, about its
-//! own centre, and nothing else — so the glyph is painted through [`gpui::svg`]
-//! rather than as a styled box, and the label moves instead of scaling, which
-//! is what the web recipe does for text anyway.
+//! The blur is a real Gaussian, through [`effect::blurred`]: the half that is
+//! leaving goes out of focus as it shrinks, and the half arriving comes into
+//! focus as it grows. It is what lets the two halves cross at half strength
+//! each without reading as two marks stacked on one another, and what lets
+//! [`motion::SWAP_SCALE`] be small enough for the swap to have a pop in it.
 
 use gpui::{
-    App, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled, Transformation,
-    Window, div, px, size, svg,
+    AnyElement, App, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled,
+    Transformation, Window, div, px, size, svg,
 };
 
-use super::{content::Typography as _, icon::Symbol, motion};
+use super::{content::Typography as _, effect, icon::Symbol, motion};
 
-/// Where a swap has got to, as the two fractions its halves need.
+/// Where a swap has got to, as the fractions its two halves need.
 struct Phase {
     /// How present the state being left behind still is.
     leaving: f32,
@@ -44,18 +41,14 @@ struct Phase {
 }
 
 impl Phase {
-    /// Split `eased` into two offset halves.
+    /// A straight crossfade: the two halves always sum to one.
     ///
-    /// The outgoing state is gone by 55% and the incoming one starts at 45%,
-    /// so they overlap for a tenth of the transition instead of crossing at
-    /// half strength each. On the web a blur covers that crossing; here the
-    /// offset keeps it from happening.
+    /// They cross at half strength each, which only works because the blur is
+    /// deepest at exactly that moment. Without it the middle of the swap shows
+    /// two distinct marks at 50% and the whole thing reads as a stack rather
+    /// than as one mark becoming another.
     fn new(eased: f32) -> Self {
-        Self {
-            leaving: (1.0 - eased / 0.55).clamp(0.0, 1.0),
-            arriving: ((eased - 0.45) / 0.55).clamp(0.0, 1.0),
-            eased,
-        }
+        Self { leaving: 1.0 - eased, arriving: eased, eased }
     }
 }
 
@@ -154,33 +147,76 @@ impl RenderOnce for IconSwap {
         let arriving_scale = motion::SWAP_SCALE + (1.0 - motion::SWAP_SCALE) * phase.eased;
         let leaving = phase.leaving * self.resting_alpha;
 
+        // Each half is as far out of focus as it is far from resting, so the
+        // blur is deepest where the two cross and gone by the time either one
+        // is alone on screen.
+        let leaving_blur = motion::SWAP_BLUR * phase.eased;
+        let arriving_blur = motion::SWAP_BLUR * (1.0 - phase.eased);
+
         div()
             .relative()
             .flex_none()
             .size(px(self.edge))
             .children((leaving > 0.004).then(|| {
-                glyph(self.resting, self.edge, self.resting_color, leaving, leaving_scale)
+                glyph(
+                    self.resting,
+                    self.edge,
+                    self.resting_color,
+                    leaving,
+                    leaving_scale,
+                    leaving_blur,
+                )
             }))
             .children((phase.arriving > 0.004).then(|| {
-                glyph(self.active, self.edge, self.active_color, phase.arriving, arriving_scale)
+                glyph(
+                    self.active,
+                    self.edge,
+                    self.active_color,
+                    phase.arriving,
+                    arriving_scale,
+                    arriving_blur,
+                )
             }))
     }
 }
 
-/// One glyph in the slot, at an opacity and a scale.
+/// One glyph in the slot, at an opacity, a scale and a blur.
 ///
 /// Painted through `svg` rather than through the icon component because the
 /// scale has to reach the mark itself: GPUI applies a transformation to an
 /// SVG's own matrix, about its centre, and offers a div no equivalent.
-fn glyph(symbol: Symbol, edge: f32, color: Hsla, alpha: f32, scale: f32) -> impl IntoElement {
-    svg()
+fn glyph(
+    symbol: Symbol,
+    edge: f32,
+    color: Hsla,
+    alpha: f32,
+    scale: f32,
+    blur: f32,
+) -> impl IntoElement {
+    let mark = svg()
         .absolute()
         .inset_0()
         .size(px(edge))
         .path(symbol.path())
         .text_color(color)
         .opacity(alpha)
-        .with_transformation(Transformation::scale(size(scale, scale)))
+        .with_transformation(Transformation::scale(size(scale, scale)));
+    // A blur costs two textures, and at the ends of a swap it would be two
+    // textures to soften something by less than a pixel. `blurred` cannot know
+    // that the radius it was handed is about to be zero; the caller can.
+    soften(blur, mark)
+}
+
+/// Below this a blur moves no pixel anyone can see, and still costs two
+/// textures and two composites to do it.
+const VISIBLE_BLUR: f32 = 0.1;
+
+/// Blur `content`, unless the radius is too small to see.
+fn soften(radius: f32, content: impl IntoElement) -> AnyElement {
+    if radius < VISIBLE_BLUR {
+        return content.into_any_element();
+    }
+    effect::blurred(radius, content).into_any_element()
 }
 
 /// Two labels in one slot, the second replacing the first.
@@ -218,7 +254,8 @@ impl RenderOnce for LabelSwap {
         div()
             .relative()
             .flex_none()
-            .child(
+            .child(soften(
+                motion::SWAP_BLUR * phase.eased,
                 div()
                     .text_body()
                     .font_weight(gpui::FontWeight::MEDIUM)
@@ -229,8 +266,9 @@ impl RenderOnce for LabelSwap {
                     .relative()
                     .top(px(-travel * phase.eased))
                     .child(self.resting),
-            )
-            .child(
+            ))
+            .child(soften(
+                motion::SWAP_BLUR * (1.0 - phase.eased),
                 div()
                     .absolute()
                     .inset_0()
@@ -247,7 +285,7 @@ impl RenderOnce for LabelSwap {
                     .opacity(phase.arriving)
                     .top(px(travel * (1.0 - phase.eased)))
                     .child(self.active),
-            )
+            ))
     }
 }
 
@@ -256,21 +294,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_halves_never_overlap_at_full_strength() {
-        // The frame where two solid marks sit on top of each other is the one
-        // the web recipe hides with a blur, and the one this has to avoid by
-        // timing instead.
+    fn the_two_halves_always_sum_to_one_state() {
+        // A crossfade that dips below one shows the background through the
+        // middle of the swap, and one that rises above it stacks two marks.
         for step in 0..=100 {
             let phase = Phase::new(step as f32 / 100.0);
             assert!(
-                phase.leaving < 0.999 || phase.arriving < 0.001,
-                "both halves solid at {step}%"
-            );
-            assert!(
-                phase.arriving < 0.999 || phase.leaving < 0.001,
-                "both halves solid at {step}%"
+                (phase.leaving + phase.arriving - 1.0).abs() < 1e-6,
+                "the halves sum to {} at {step}%",
+                phase.leaving + phase.arriving
             );
         }
+    }
+
+    #[test]
+    fn the_blur_is_deepest_where_the_halves_cross_and_gone_at_both_ends() {
+        // The blur exists to cover the crossing. If it were not at its deepest
+        // there, the halves would meet as two sharp marks at half strength —
+        // and if it were not gone at the ends, a resting control would sit
+        // permanently out of focus, and pay for two textures to do it.
+        let blur = |eased: f32| motion::SWAP_BLUR * eased;
+        let counter = |eased: f32| motion::SWAP_BLUR * (1.0 - eased);
+
+        assert_eq!(blur(0.0), 0.0, "the leaving half starts blurred");
+        assert_eq!(counter(1.0), 0.0, "the arriving half ends blurred");
+        assert_eq!(blur(0.5), counter(0.5), "the halves are not equally soft at the crossing");
+        assert!(
+            blur(0.5) > 0.0 && blur(0.5) < motion::SWAP_BLUR,
+            "the crossing is not blurred: {}",
+            blur(0.5)
+        );
     }
 
     #[test]

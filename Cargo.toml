@@ -195,12 +195,13 @@ zenoh-transport = { path = "patches/zenoh-transport" }
 # See docs/device-center-gpu-effects-architecture.md.
 #
 # hadronomy/zed, branch `inari/gpu-effects`: upstream 69e2130 (the `gpui 0.2.2`
-# release commit, so `gpui-component` still resolves), plus 40ca5a0, which adds
-# `gpui::effect` — a registry and a WGSL-to-MSL/HLSL translator with
-# `effect/{preamble,epilogue}.wgsl` as the shader ABI — and 2e07bd4, which adds
-# the `EffectQuad` primitive, `Window::paint_effect`, `#[derive(Effect)]`, and a
-# per-effect pipeline in the Metal and Direct3D renderers. Effects themselves
-# stay in this repository; the fork ships only the mechanism.
+# release commit, so `gpui-component` still resolves), plus `gpui::effect` — a
+# registry, a WGSL-to-MSL/HLSL translator, and `effect/{preamble,epilogue}.wgsl`
+# as the shader ABI — the `EffectQuad` primitive and its capture, the
+# `paint_effect` pair on `Window`, `#[derive(Effect)]`, and a per-effect
+# pipeline in the Metal and Direct3D renderers. Read the branch for the list;
+# naming commits here only produces a comment that goes stale. Effects
+# themselves stay in this repository; the fork ships only the mechanism.
 #
 # Forking the whole monorepo rather than vendoring the crate is what Zeron and
 # Zed's own 25 forks do. Cargo finds `crates/gpui` by name anywhere in the
@@ -210,4 +211,4 @@ zenoh-transport = { path = "patches/zenoh-transport" }
 # Zed's own `[patch.crates-io]` does not travel through a git dependency. At
 # 69e2130 it pins notify, notify-types and windows-capture; none reach GPUI in
 # our feature set. Re-check when moving the base.
-gpui = { git = "https://github.com/hadronomy/zed", rev = "46e1890ba759396d958a9176f156f8db35b82bb4" }
+gpui = { git = "https://github.com/hadronomy/zed", rev = "5736663122c644eb90d7fa35757361d4eb018eff" }

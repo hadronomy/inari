@@ -10,8 +10,8 @@
 //! that would have been a black rectangle on a customer's Windows machine is a
 //! failing `mbx test` here instead.
 
-use gpui::Hsla;
 use gpui::effect::Effect;
+use gpui::{Hsla, IntoElement, Pixels, effect_layer, px};
 
 /// Film grain, to dither the banding out of large fills and long gradients.
 ///
@@ -106,6 +106,48 @@ pub struct Frost {
     pub tint: Hsla,
 }
 
+/// One axis of a Gaussian blur. Use [`blurred`]; this is half of it.
+#[derive(Effect, Copy, Clone, Debug, PartialEq)]
+#[effect(name = "inari.blur", source = "effect/blur.wgsl")]
+struct Blur {
+    /// The CSS `blur()` radius in logical pixels, which the shader halves to
+    /// get a sigma.
+    radius: f32,
+    /// `0` across, `1` down.
+    axis: f32,
+}
+
+impl Blur {
+    /// Three sigma, in logical pixels: how far the kernel reads and how far the
+    /// result spreads. Both are the same number, and it is what [`blurred`]
+    /// hands each layer as its outset.
+    fn reach(radius: f32) -> Pixels {
+        px(radius * 1.5)
+    }
+}
+
+/// Blur `child`, the way `filter: blur(radius)` blurs a box on the web.
+///
+/// The child paints normally — real text, real glyphs, real everything — into a
+/// texture, and the blur is applied to the result. It keeps its place in the
+/// layout and its neighbours do not move; the blur spreads outside its bounds
+/// the way a shadow does.
+///
+/// Two nested layers, because a Gaussian is separable: blurring across and then
+/// down gives the same picture as one square kernel for a fraction of the reads,
+/// and the fraction gets better the wider the blur. That the two compose without
+/// anything special is the point — a capture is just a scene, so a capture of a
+/// capture is too.
+///
+/// `radius` is the CSS number. Costs two textures the size of the child plus its
+/// spread, so it is a thing to put on a glyph or a card, not on a scrolling list.
+pub fn blurred(radius: f32, child: impl IntoElement) -> impl IntoElement {
+    let outset = Blur::reach(radius);
+    let across = Blur { radius, axis: 0.0 };
+    let down = Blur { radius, axis: 1.0 };
+    effect_layer(&down, effect_layer(&across, child).outset(outset)).outset(outset)
+}
+
 /// Register every effect the application owns.
 ///
 /// Call this at startup so the renderer never has to compile a shader during the
@@ -114,6 +156,7 @@ pub fn register_all() {
     gpui::effect::register(Grain::definition());
     gpui::effect::register(PixelBloom::definition());
     gpui::effect::register(Frost::definition());
+    gpui::effect::register(Blur::definition());
 }
 
 #[cfg(test)]
@@ -162,6 +205,31 @@ fn effect(input: EffectInput) -> vec4<f32> {
             .into_iter()
             .map(|(_, def)| def)
             .collect()
+    }
+
+    #[test]
+    fn the_outset_is_the_distance_the_kernel_reads() {
+        // A Gaussian is spent by three sigma, and CSS defines `blur(r)` as
+        // sigma = r/2, so a blur reads and spreads 1.5r. Give the layer less
+        // than that and the tail is cut off at the element's edge, which is
+        // the exact artefact the outset exists to remove.
+        for radius in [0.5, 2.0, 8.0, 40.0] {
+            assert_eq!(Blur::reach(radius), px(3.0 * (radius / 2.0)), "at radius {radius}");
+        }
+    }
+
+    #[test]
+    fn the_blur_never_sums_straight_alpha() {
+        // Averaging `source` drags the colour of transparent texels into the
+        // result, and a transparent texel is black, so every blurred mark comes
+        // out ringed in a dark halo. It looks like a bad blur rather than like a
+        // wrong function, so nothing else would catch the swap back.
+        let wgsl = include_str!("effect/blur.wgsl");
+        assert!(
+            !wgsl.contains("source("),
+            "the blur reads straight alpha somewhere; it must sum premultiplied"
+        );
+        assert!(wgsl.contains("source_premultiplied("), "the blur reads nothing at all");
     }
 
     #[test]
