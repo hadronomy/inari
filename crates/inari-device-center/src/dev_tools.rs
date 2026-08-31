@@ -19,9 +19,9 @@
 use chrono::{Duration, Utc};
 use gpui::{
     App, AppContext as _, BorrowAppContext as _, Entity, FocusHandle, Focusable, Global,
-    InteractiveElement as _, IntoElement, KeyBinding, PaintEffect, ParentElement as _, Render,
-    StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions, canvas,
-    div, point, px, size,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions, div,
+    point, px, size,
 };
 use gpui_component::{
     Root, StyledExt as _,
@@ -345,27 +345,13 @@ impl DevTools {
                 ),
             ))
             .child(
-                Section::new("Frost — reads what it is applied to").child(
-                    div().h(px(96.0)).w_full().child(
-                        canvas(
-                            |_, _, _| (),
-                            |bounds, _, window: &mut Window, _| {
-                                // Painted without a capture on purpose: the
-                                // source is then a transparent pixel, so what
-                                // shows is the tint alone. A shader that failed
-                                // to compile shows nothing, which is the whole
-                                // point of having it here.
-                                window.paint_effect(
-                                    PaintEffect::new(
-                                        bounds,
-                                        &Frost { radius: 6.0, tint: gpui::rgba(0x6ea8fe66).into() },
-                                    )
-                                    .corner_radii(px(Theme::RADIUS_CARD)),
-                                );
-                            },
-                        )
-                        .size_full(),
-                    ),
+                Section::new("Frost — an effect over what is under it").child(
+                    div()
+                        .h_flex()
+                        .gap(px(Theme::SPACE_LG))
+                        .w_full()
+                        .child(frosted("Blurred", 6.0))
+                        .child(frosted("Untouched", 0.0)),
                 ),
             )
             .child(
@@ -812,6 +798,30 @@ fn mock_devices() -> Vec<Device> {
         device("Archive printer", DeviceKind::Printer, DeviceState::Offline),
         device("Pallet scale", DeviceKind::Scale, DeviceState::Blocked),
     ]
+}
+
+/// A card of real content with a blur over it, so a capture that resolved and
+/// one that did not look different.
+fn frosted(label: &'static str, radius: f32) -> impl IntoElement {
+    use crate::ui::content::Typography as _;
+    use gpui::effect_layer;
+
+    effect_layer(
+        &Frost { radius, tint: gpui::rgba(0x6ea8fe22).into() },
+        div()
+            .v_flex()
+            .gap(px(Theme::SPACE_SM))
+            .w(px(220.0))
+            .p(px(Theme::SPACE_LG))
+            .bg(gpui::rgb(0x1c1f26))
+            .child(div().text_body().child(label))
+            .child(
+                div().text_caption().child(
+                    "Small text is the honest test: a blur that is not running still reads.",
+                ),
+            ),
+    )
+    .corner_radii(px(Theme::RADIUS_CARD))
 }
 
 #[cfg(test)]
