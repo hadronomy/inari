@@ -14,7 +14,7 @@ use gpui_component::{Icon, IconName, StyledExt as _};
 use inari_agent_client::{AgentConnection, DeviceState, JobState, ServiceState};
 
 use super::{
-    icon::Symbol,
+    icon::{Glyph, Symbol},
     theme::{ActiveTheme as _, Theme},
 };
 
@@ -55,13 +55,16 @@ impl Tone {
     }
 
     /// The glyph that carries this tone when color cannot.
-    pub fn symbol(self) -> IconName {
+    pub fn symbol(self) -> Symbol {
         match self {
-            Self::Positive => IconName::CircleCheck,
-            Self::Busy => IconName::LoaderCircle,
-            Self::Neutral => IconName::Minus,
-            Self::Caution => IconName::TriangleAlert,
-            Self::Critical => IconName::CircleX,
+            Self::Positive => Symbol::Component(IconName::CircleCheck),
+            Self::Busy => Symbol::Component(IconName::LoaderCircle),
+            // Offline is not "nothing to say" (a minus reads as no icon at
+            // all): the dashed outline is the device's shape with the
+            // substance missing.
+            Self::Neutral => Symbol::House(Glyph::Offline),
+            Self::Caution => Symbol::Component(IconName::TriangleAlert),
+            Self::Critical => Symbol::Component(IconName::CircleX),
         }
     }
 }
@@ -221,7 +224,7 @@ impl RenderOnce for StatusChip {
             .h_flex()
             .flex_none()
             .items_center()
-            .gap(px(Theme::SPACE_XS + 2.0))
+            .gap(px(Theme::SPACE_XS))
             .h(px(24.0))
             .px(px(Theme::SPACE_SM))
             .rounded_full()
@@ -229,13 +232,17 @@ impl RenderOnce for StatusChip {
             .border_1()
             .border_color(Hsla { a: 0.22, ..color })
             .child(
-                Icon::from(Symbol::Component(tone.symbol()))
+                Icon::from(tone.symbol())
                     .size(px(13.0))
                     .text_color(color),
             )
             .child(
                 div()
                     .text_size(px(12.0))
+                    // Pin the line box to the glyphs: a default 1.5em line
+                    // box is taller than the text, and centring that box
+                    // against the icon leaves the label reading low.
+                    .line_height(px(16.0))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(color)
                     .child(self.status.label),
@@ -281,10 +288,7 @@ mod tests {
         let tones = [Tone::Positive, Tone::Busy, Tone::Neutral, Tone::Caution, Tone::Critical];
         for (index, tone) in tones.iter().enumerate() {
             for other in &tones[index + 1..] {
-                assert_ne!(
-                    gpui_component::IconNamed::path(tone.symbol()),
-                    gpui_component::IconNamed::path(other.symbol())
-                );
+                assert_ne!(tone.symbol().path(), other.symbol().path());
             }
         }
     }

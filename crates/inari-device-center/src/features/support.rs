@@ -1,19 +1,18 @@
 //! Support: recover the agent, then hand an administrator the facts.
 //!
-//! The recovery control offered is the one that matches the current state, and
-//! only that one. A row of Start / Restart / Check buttons where two are
-//! always wrong makes an operator guess during the exact moment they are least
-//! able to.
+//! The screen answers two questions in the order they get asked. *Can I fix
+//! this myself?* — one recovery control, the one that matches the current
+//! state, and only that one. A row of Start / Restart / Check buttons where
+//! two are always wrong makes an operator guess during the exact moment they
+//! are least able to. Then: *what do I tell the person who can?* — a readout
+//! where every fact is one press from the clipboard, so the answer arrives in
+//! the ticket as text rather than as a photograph of a window.
 
 use gpui::{
     IntoElement, ParentElement as _, RenderOnce, SharedString, Styled, div,
     prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Disableable as _, IconName, StyledExt as _,
-    button::{Button, ButtonVariants as _},
-    switch::Switch,
-};
+use gpui_component::{Disableable as _, IconName, StyledExt as _, switch::Switch};
 use inari_agent_client::{AgentClientOptions, ServiceState};
 
 use crate::{
@@ -23,8 +22,10 @@ use crate::{
     },
     ui::{
         banner::Banner,
-        content::{Field, PageTitle, Section, Typography as _, page},
+        button::Button,
+        content::{PageTitle, Section, Typography as _, page},
         material, motion,
+        readout::readout,
         status::{Status, Tone},
         surface::card,
         theme::{ActiveTheme as _, Theme},
@@ -84,38 +85,28 @@ impl RenderOnce for SupportView {
                 ),
             )
             .child(
-                Section::new("Technical details")
-                    .child(
-                        card(theme)
-                            .gap(px(Theme::SPACE_MD))
-                            .w_full()
-                            .p(px(Theme::SPACE_LG))
-                            .child(
-                                Field::new("Device Center version", env!("CARGO_PKG_VERSION"))
-                                    .technical(),
-                            )
-                            .child(Field::new("Agent API", endpoint).technical())
-                            .child(Field::new("Latest error", breakable(diagnostic)).technical()),
-                    )
-                    .child(
-                        div()
-                            .h_flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap(px(Theme::SPACE_SM))
-                            .child(action_button(
-                                "open-logs",
-                                "Open local logs",
-                                IconName::FolderOpen,
-                                OpenLogs,
-                            ))
-                            .child(action_button(
-                                "open-api-reference",
-                                "Open API reference",
-                                IconName::ExternalLink,
-                                OpenApiReference,
-                            )),
-                    ),
+                Section::new("Technical details").child(
+                    readout("technical-details")
+                        .fact("Device Center", env!("CARGO_PKG_VERSION"))
+                        .fact("Platform", platform())
+                        .fact("Agent API", endpoint)
+                        .fact("Log folder", log_folder())
+                        .diagnostic("Latest error", diagnostic)
+                        .action(
+                            Button::new("open-logs")
+                                .ghost()
+                                .icon(IconName::FolderOpen)
+                                .label("Open local logs")
+                                .action(OpenLogs),
+                        )
+                        .action(
+                            Button::new("open-api-reference")
+                                .ghost()
+                                .icon(IconName::ExternalLink)
+                                .label("Open API reference")
+                                .action(OpenApiReference),
+                        ),
+                ),
             )
             .child(
                 Section::new("Display")
@@ -151,6 +142,7 @@ impl RenderOnce for SupportView {
                     )
                     .child(
                         div()
+                            .max_w(px(Theme::MEASURE))
                             .text_caption()
                             .text_color(theme.text_tertiary)
                             .child(
@@ -160,6 +152,26 @@ impl RenderOnce for SupportView {
                     ),
             )
     }
+}
+
+/// This build's operating system and architecture.
+///
+/// Two facts the platform can always answer for itself, which is why they are
+/// here and a marketing OS version is not: a wrong build number in a ticket
+/// costs more than a missing one.
+fn platform() -> String {
+    format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// Where the logs are, in the same words the operating system would use.
+///
+/// Shown as well as opened. "Open local logs" is the faster route for the
+/// person at the keyboard; the path is the only route for the person who is
+/// not, and it is the thing a remote administrator asks for first.
+fn log_folder() -> SharedString {
+    crate::infrastructure::log_directory()
+        .map(|directory| SharedString::from(directory.display().to_string()))
+        .unwrap_or_else(|| "This system provides no data directory.".into())
 }
 
 /// The single recovery action that matches the current service state.
@@ -189,24 +201,21 @@ impl Recovery {
 
     fn button(self) -> Button {
         match self {
-            Self::Start => primary_button(
-                "start-agent-service",
-                "Start service",
-                IconName::ArrowRight,
-                StartAgentService,
-            ),
-            Self::Restart => primary_button(
-                "restart-agent-service",
-                "Restart service",
-                IconName::Redo2,
-                RestartAgentService,
-            ),
-            Self::Check => primary_button(
-                "refresh-agent-service",
-                "Check again",
-                IconName::Redo2,
-                RefreshAgentService,
-            ),
+            Self::Start => Button::new("start-agent-service")
+                .primary()
+                .icon(IconName::ArrowRight)
+                .label("Start service")
+                .action(StartAgentService),
+            Self::Restart => Button::new("restart-agent-service")
+                .primary()
+                .icon(IconName::Redo2)
+                .label("Restart service")
+                .action(RestartAgentService),
+            Self::Check => Button::new("refresh-agent-service")
+                .primary()
+                .icon(IconName::Redo2)
+                .label("Check again")
+                .action(RefreshAgentService),
         }
     }
 }
@@ -250,52 +259,6 @@ fn preference_row(
         )
 }
 
-fn primary_button(
-    id: &'static str,
-    label: &'static str,
-    icon: IconName,
-    action: impl gpui::Action,
-) -> Button {
-    let action = Box::new(action);
-    Button::new(id)
-        .primary()
-        .icon(icon)
-        .label(label)
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(action.boxed_clone(), cx);
-        })
-}
-
-fn action_button(
-    id: &'static str,
-    label: &'static str,
-    icon: IconName,
-    action: impl gpui::Action,
-) -> Button {
-    let action = Box::new(action);
-    Button::new(id)
-        .outline()
-        .icon(icon)
-        .label(label)
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(action.boxed_clone(), cx);
-        })
-}
-
-/// Insert zero-width spaces after URL and path punctuation so a long
-/// diagnostic wraps inside its card instead of forcing the card wider than the
-/// panel.
-fn breakable(message: String) -> SharedString {
-    let mut wrapped = String::with_capacity(message.len());
-    for character in message.chars() {
-        wrapped.push(character);
-        if matches!(character, '/' | ':' | '?' | '&' | '=' | ')' | ']') {
-            wrapped.push('\u{200b}');
-        }
-    }
-    wrapped.into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,5 +299,14 @@ mod tests {
         for state in [ServiceState::Checking, ServiceState::Starting] {
             assert_eq!(Recovery::for_state(state, Tone::Busy, false), None);
         }
+    }
+
+    #[test]
+    fn the_platform_fact_names_both_halves_of_the_target() {
+        // An architecture without an OS, or the reverse, sends somebody to
+        // check the wrong build.
+        let platform = platform();
+        assert!(platform.contains(std::env::consts::OS), "{platform}");
+        assert!(platform.contains(std::env::consts::ARCH), "{platform}");
     }
 }

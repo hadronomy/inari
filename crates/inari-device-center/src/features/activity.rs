@@ -122,26 +122,33 @@ fn entry_row(entry: Entry, now: DateTime<Utc>, theme: &Theme) -> impl IntoElemen
         .py(px(Theme::SPACE_MD))
         .child(
             div()
-                .flex_none()
-                .mt(px(4.0))
-                .child(StatusDot::new(entry.tone).size(7.0)),
-        )
-        .child(
-            div()
                 .v_flex()
                 .flex_1()
                 .min_w(px(0.0))
                 .gap(px(1.0))
                 .child(
+                    // Dot and title share one centred row, so the dot's
+                    // centre meets the title line's centre by flexbox —
+                    // no nudges to drift apart later.
                     div()
-                        .text_body()
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .child(entry.title),
+                        .h_flex()
+                        .items_center()
+                        .gap(px(Theme::SPACE_SM))
+                        .child(StatusDot::new(entry.tone).size(7.0))
+                        .child(
+                            div()
+                                .text_body()
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .child(entry.title),
+                        ),
                 )
                 .child(
                     div()
                         .text_caption()
                         .text_color(theme.text_secondary)
+                        // Aligned under the title text, not under the dot:
+                        // the dot's box (7px + its 3px ring) plus the row gap.
+                        .pl(px(13.0 + Theme::SPACE_SM))
                         .child(entry.detail),
                 ),
         )
@@ -150,6 +157,7 @@ fn entry_row(entry: Entry, now: DateTime<Utc>, theme: &Theme) -> impl IntoElemen
                 .v_flex()
                 .items_end()
                 .flex_none()
+                .mt(px(1.5))
                 .gap(px(1.0))
                 .child(
                     div()

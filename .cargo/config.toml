@@ -2,5 +2,11 @@
 # Keep direct `cargo run` builds aligned with cargo-leptos' generated asset names.
 LEPTOS_OUTPUT_NAME = "inari-web"
 
+# rust-lld links MSVC binaries several times faster than link.exe, and
+# linking dominates an incremental rebuild of a gpui app. It ships with the
+# toolchain, so developers and CI need no extra install.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
 [target.wasm32-unknown-unknown]
 rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

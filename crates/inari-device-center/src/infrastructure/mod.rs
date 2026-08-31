@@ -3,7 +3,7 @@ pub mod platform;
 mod runtime;
 mod tray;
 
-pub use logging::initialize_logging;
+pub use logging::{initialize_logging, log_directory};
 pub(crate) use runtime::agent_failure_message;
 pub use runtime::{AgentRuntime, AgentRuntimeUpdate, SetupResult};
 pub use tray::{TrayCommand, TrayController};

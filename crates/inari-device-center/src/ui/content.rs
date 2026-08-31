@@ -2,12 +2,16 @@
 //!
 //! The type scale is small on purpose — a display size, a section size, a body
 //! size, and a caption. Every screen draws from those four, so hierarchy comes
-//! from position and weight rather than from a new size invented per view.
+//! from position and weight rather than from a new size invented per view. A
+//! fifth role sits outside that ladder: machine text, which is set on the
+//! technical face's own pixel grid rather than on the sans scale.
 
 use gpui::{
-    AnyElement, Div, InteractiveElement as _, IntoElement, ParentElement, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Div, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
+    SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
+use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::{Icon, StyledExt as _};
 
 use super::{
@@ -15,7 +19,7 @@ use super::{
     theme::{ActiveTheme as _, Theme},
 };
 
-/// The four type roles. Applied through [`Typography`] so a call site names the
+/// The type roles. Applied through [`Typography`] so a call site names the
 /// role and never a raw size.
 pub trait Typography: Styled + Sized {
     /// A page title. One per screen.
@@ -41,6 +45,26 @@ pub trait Typography: Styled + Sized {
     /// Metadata, timestamps, and helper text.
     fn text_caption(self) -> Self {
         self.text_size(px(12.0))
+            .line_height(px(16.0))
+    }
+
+    /// Machine text: identifiers, endpoints, paths, and diagnostics. Pair it
+    /// with `theme.font_mono`, which is the face this size exists for.
+    ///
+    /// Eleven pixels is not a free choice. Departure Mono is drawn on a grid
+    /// of 50 units inside a 550-unit em, so one grid step is one whole device
+    /// pixel only at multiples of 11px: there the advance lands on exactly
+    /// 7px and the cap on exactly 8px, and the face renders as the bitmap it
+    /// was drawn as. At 12px the same stems fall on 7.64px and the rasteriser
+    /// has to average them — the blur a pixel face is chosen to avoid.
+    ///
+    /// It is not a demotion in size, either. An 8px cap reads at the same
+    /// optical scale as the 8.7px cap of the 12.5px system mono it replaces,
+    /// so a readout gets sharper rather than smaller. The line box matches
+    /// [`Self::text_caption`], so a label and its value share one baseline
+    /// grid across a row.
+    fn text_technical(self) -> Self {
+        self.text_size(px(11.0))
             .line_height(px(16.0))
     }
 }
@@ -70,26 +94,46 @@ impl ParentElement for Page {
 }
 
 impl RenderOnce for Page {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // The scroll handle persists in keyed element state: the offset and
+        // the scrollbar survive every re-render of the page, and the
+        // scrollbar itself is the library's overlay thumb — shown while
+        // scrolling, fading after idle, themed by the tokens in theme.rs.
+        let scroll = window
+            .use_keyed_state(SharedString::from(format!("{}-scroll", self.id)), cx, |_, _| {
+                gpui::ScrollHandle::new()
+            })
+            .read(cx)
+            .clone();
         div()
             .id(self.id)
+            .relative()
             .size_full()
-            .overflow_y_scroll()
             .child(
                 div()
-                    .v_flex()
-                    .w_full()
-                    .max_w(px(Theme::CONTENT_WIDTH + Theme::SPACE_2XL * 2.0))
-                    .mx_auto()
-                    .gap(px(Theme::SPACE_XL))
-                    .px(px(Theme::SPACE_2XL))
-                    .pt(px(Theme::SPACE_2XL))
-                    // A deep bottom inset, not a symmetric one: scrolled to the
-                    // end, the last line should sit clear of the panel edge
-                    // rather than against it.
-                    .pb(px(Theme::SPACE_2XL + Theme::SPACE_LG))
-                    .children(self.children),
+                    .id(SharedString::from(format!("{}-area", self.id)))
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .child(
+                        div()
+                            .v_flex()
+                            .w_full()
+                            .max_w(px(Theme::CONTENT_WIDTH + Theme::SPACE_2XL * 2.0))
+                            .mx_auto()
+                            .gap(px(Theme::SPACE_XL))
+                            .px(px(Theme::SPACE_2XL))
+                            .pt(px(Theme::SPACE_2XL))
+                            // A deep bottom inset, not a symmetric one: scrolled to the
+                            // end, the last line should sit clear of the panel edge
+                            // rather than against it.
+                            .pb(px(Theme::SPACE_2XL + Theme::SPACE_LG))
+                            .children(self.children),
+                    ),
             )
+            // A sibling of the scroll area, never inside it: an overlay that
+            // scrolls away with the content is no scrollbar at all.
+            .vertical_scrollbar(&scroll)
     }
 }
 
@@ -213,11 +257,7 @@ impl RenderOnce for Field {
                 div()
                     .text_body()
                     .text_color(theme.text)
-                    .when(self.mono, |value| {
-                        value
-                            .font_family(mono)
-                            .text_size(px(12.5))
-                    })
+                    .when(self.mono, |value| value.font_family(mono).text_technical())
                     .child(self.value),
             )
     }

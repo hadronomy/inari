@@ -63,11 +63,36 @@ fn read_native_pairing_grant() -> AgentClientResult<PairingGrant> {
         .and_then(|()| pipe.flush())
         .map_err(AgentClientError::pairing_unavailable)?;
 
-    let mut payload = String::new();
-    pipe.take(RESPONSE_LIMIT)
-        .read_to_string(&mut payload)
-        .map_err(AgentClientError::pairing_unavailable)?;
+    // Read the reply message rather than draining to end of stream. The server
+    // disconnects as soon as it has flushed, and a disconnect turns a still
+    // pending read into ERROR_PIPE_NOT_CONNECTED instead of a clean end. Once
+    // the reply is in hand that disconnect is the expected close, so only an
+    // empty payload counts as having lost the answer.
+    let mut payload = Vec::new();
+    let mut chunk = [0u8; 512];
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => {
+                payload.extend_from_slice(&chunk[..read]);
+                if payload.len() as u64 > RESPONSE_LIMIT {
+                    return Err(AgentClientError::MalformedIdentity);
+                }
+            },
+            Err(error) if is_peer_closed(&error) && !payload.is_empty() => break,
+            Err(error) => return Err(AgentClientError::pairing_unavailable(error)),
+        }
+    }
+    let payload = String::from_utf8(payload).map_err(AgentClientError::invalid_response)?;
     decode_pairing_grant(&payload)
+}
+
+/// Whether the server hung up, by either of the two codes Windows uses.
+#[cfg(windows)]
+fn is_peer_closed(error: &std::io::Error) -> bool {
+    const ERROR_BROKEN_PIPE: i32 = 109;
+    const ERROR_PIPE_NOT_CONNECTED: i32 = 233;
+    matches!(error.raw_os_error(), Some(ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED))
 }
 
 #[cfg(windows)]

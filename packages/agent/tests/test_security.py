@@ -388,3 +388,77 @@ def _paired_tray_service(
         private_key_pem=key_pair.private_key_pem,
         client_id=key_pair.client_id,
     )
+
+
+def test_pairing_accepts_any_product_prefix_bound_to_the_presented_key() -> None:
+    """The client id names the product; only its fingerprint carries weight.
+
+    Device Center generates `device_center_<fingerprint>`. Pinning one product
+    word here silently rejected every native pairing when the tray was renamed.
+    """
+
+    service = StandaloneTrustService(
+        settings=AgentSettings(), store=LocalTrustStore(MemorySecretStore())
+    )
+    key_pair = generate_local_client_key_pair(prefix="device_center")
+    pairing = service.start_pairing()
+    challenge = service.issue_challenge(
+        purpose=LocalChallengePurpose.PAIRING, client_id=key_pair.client_id
+    )
+
+    client = service.complete_pairing(
+        client_id=key_pair.client_id,
+        client_name="Inari Device Center",
+        public_key_pem=key_pair.public_key_pem,
+        pairing_secret=pairing.secret,
+        attestation=LocalClientAttestation(
+            client_id=key_pair.client_id,
+            challenge_id=challenge.id,
+            signature=sign_local_challenge(
+                private_key_pem=key_pair.private_key_pem,
+                purpose=LocalChallengePurpose.PAIRING,
+                challenge=challenge.challenge,
+            ),
+        ),
+        origin=None,
+    )
+
+    assert client.client_id == key_pair.client_id
+
+
+def test_pairing_refuses_a_client_id_not_derived_from_the_presented_key() -> None:
+    """A valid signature is not enough; the id has to name the same key.
+
+    Otherwise a caller could prove it holds one key and pair under an id
+    derived from someone else's.
+    """
+
+    service = StandaloneTrustService(
+        settings=AgentSettings(), store=LocalTrustStore(MemorySecretStore())
+    )
+    key_pair = generate_local_client_key_pair(prefix="device_center")
+    borrowed_id = "device_center_" + ("0" * 24)
+    pairing = service.start_pairing()
+    challenge = service.issue_challenge(
+        purpose=LocalChallengePurpose.PAIRING, client_id=borrowed_id
+    )
+
+    with pytest.raises(AgentError) as failure:
+        service.complete_pairing(
+            client_id=borrowed_id,
+            client_name="Inari Device Center",
+            public_key_pem=key_pair.public_key_pem,
+            pairing_secret=pairing.secret,
+            attestation=LocalClientAttestation(
+                client_id=borrowed_id,
+                challenge_id=challenge.id,
+                signature=sign_local_challenge(
+                    private_key_pem=key_pair.private_key_pem,
+                    purpose=LocalChallengePurpose.PAIRING,
+                    challenge=challenge.challenge,
+                ),
+            ),
+            origin=None,
+        )
+
+    assert failure.value.code == "LOCAL_CLIENT_ID_INVALID"

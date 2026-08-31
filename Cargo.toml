@@ -80,6 +80,10 @@ reqwest = { version = "0.13", default-features = false, features = [
 rust-embed = "8"
 secrecy = "0.10"
 service-manager = "=0.11.0"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_Services",
+] }
 sea-orm = { version = "=2.0.0-rc.42", default-features = false, features = [
   "macros",
   "runtime-tokio-rustls",
@@ -137,6 +141,31 @@ zeroize = { version = "1", features = ["derive"] }
 zenoh = "1"
 
 
+# Development builds must both compile fast and *run* fast: an unoptimized
+# gpui turns every interaction into visible lag, which pushes the dev loop
+# onto release builds where nothing is incremental. Two sources set this
+# recipe. Comet (zeronsh/comet) optimizes every dependency at opt-level = 2
+# in dev for exactly that reason ("gpui is slow unoptimized"), and the Cargo
+# book's build-performance guide caps debuginfo: line tables keep panic
+# backtraces readable while making codegen and linking cheaper, and
+# dependencies drop debuginfo entirely. The workspace rebuilds alone in
+# seconds after the one-time dependency compile; `--profile debugging`
+# restores full debuginfo when a debugger is actually needed.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.debugging.package."*"]
+opt-level = 0
+debug = true
+
 [profile.release]
 debug       = 1
 incremental = true
@@ -159,3 +188,27 @@ opt-level     = "z"
 # invalid-offset decompression advisory (CVE-2026-32829 / RustSec / Dependabot
 # alert #7).
 zenoh-transport = { path = "patches/zenoh-transport" }
+
+# GPUI carries the GPU-effects mechanism, because none of it can live outside
+# the renderer: `Scene` and every primitive are `pub(crate)` upstream, and the
+# only routes for application pixels are a CPU image or a macOS-only surface.
+# See docs/device-center-gpu-effects-architecture.md.
+#
+# hadronomy/zed, branch `inari/gpu-effects`: upstream 69e2130 (the `gpui 0.2.2`
+# release commit, so `gpui-component` still resolves), plus `gpui::effect` — a
+# registry, a WGSL-to-MSL/HLSL translator, and `effect/{preamble,epilogue}.wgsl`
+# as the shader ABI — the `EffectQuad` primitive and its capture, the
+# `paint_effect` pair on `Window`, `#[derive(Effect)]`, and a per-effect
+# pipeline in the Metal and Direct3D renderers. Read the branch for the list;
+# naming commits here only produces a comment that goes stale. Effects
+# themselves stay in this repository; the fork ships only the mechanism.
+#
+# Forking the whole monorepo rather than vendoring the crate is what Zeron and
+# Zed's own 25 forks do. Cargo finds `crates/gpui` by name anywhere in the
+# repository, so GPUI's workspace inheritance resolves verbatim and there is no
+# manifest to keep in step.
+#
+# Zed's own `[patch.crates-io]` does not travel through a git dependency. At
+# 69e2130 it pins notify, notify-types and windows-capture; none reach GPUI in
+# our feature set. Re-check when moving the base.
+gpui = { git = "https://github.com/hadronomy/zed", rev = "5736663122c644eb90d7fa35757361d4eb018eff" }

@@ -1,31 +1,32 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, MouseButton,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled, Subscription, Task,
-    Window, WindowControlArea, actions, div, prelude::FluentBuilder as _, px,
+    InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, ParentElement as _, Render,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, actions, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::{IconName, StyledExt as _, TitleBar, input::InputState, tooltip::Tooltip};
+use gpui_component::{IconName, StyledExt as _, tooltip::Tooltip};
 use inari_agent_client::{
-    AgentConnection, AgentEvent, Device, DeviceId, DeviceState, EnrollmentPreview, InvitationLink,
-    Job, ServiceState, SetupAccess, SetupSnapshot,
+    AgentConnection, AgentEvent, Device, DeviceId, DeviceState, Job, ServiceState, SetupAccess,
+    SetupSnapshot,
 };
 
 use crate::{
     features::{
-        activity::ActivityView, devices::DeviceDirectory, overview::OverviewView, setup::SetupView,
+        activity::ActivityView, devices::DeviceDirectory, overview::OverviewView,
         support::SupportView,
     },
-    infrastructure::{AgentRuntime, TrayCommand, TrayController, platform},
+    infrastructure::{AgentRuntime, TrayCommand, TrayController},
     ui::{
         chrome::{self, NavigationRail, PANEL_INSET, RailItem, content_panel},
         content::Typography as _,
         focus,
         icon::{Glyph, Symbol},
-        material, motion,
+        material, motion, readout,
         status::{Status, StatusDot},
         theme::{ActiveTheme as _, Theme},
+        titlebar::WindowChrome,
     },
 };
 
@@ -105,20 +106,6 @@ impl Destination {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RootSurface {
-    Operations,
-    Setup,
-}
-
-fn root_surface(access: SetupAccess, setup_forced: bool) -> RootSurface {
-    if setup_forced || access == SetupAccess::Required {
-        RootSurface::Setup
-    } else {
-        RootSurface::Operations
-    }
-}
-
 pub struct DeviceCenter {
     destination: Destination,
     /// Where the rail indicator slides from. Equal to `destination` until the
@@ -134,13 +121,12 @@ pub struct DeviceCenter {
     service_error: Option<String>,
     agent_error: Option<String>,
     identity_retry_available: bool,
-    invitation_input: Entity<InputState>,
-    preview: Option<EnrollmentPreview>,
-    setup_error: Option<String>,
-    selected_setup_devices: HashSet<DeviceId>,
-    setup_working: bool,
-    setup_forced: bool,
     runtime: Arc<AgentRuntime>,
+    /// Reopens enrollment for a forwarded `inari://` link. Only Windows
+    /// forwards activations, so on other platforms this is held and never
+    /// called rather than making the constructor differ per platform.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    open_onboarding: crate::onboarding::OpenOnboarding,
     tray: Option<TrayController>,
     focus_handle: FocusHandle,
     _setup_task: Task<()>,
@@ -155,41 +141,27 @@ impl DeviceCenter {
     pub fn new(
         runtime: Arc<AgentRuntime>,
         tray_commands: async_channel::Receiver<TrayCommand>,
-        initial_invitation: Option<String>,
+        open_onboarding: crate::onboarding::OpenOnboarding,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let initial_preview = initial_invitation
-            .as_deref()
-            .and_then(|value| InvitationLink::parse(value).ok());
-        let setup_task = match initial_preview.clone() {
-            Some(invitation) => Self::load_invitation_preview(runtime.clone(), invitation, cx),
-            None => Self::load_setup(runtime.clone(), cx),
-        };
+        let setup_task = Self::load_setup(runtime.clone(), cx);
         let service_task = Self::load_service_state(runtime.clone(), cx);
         let updates_task = Self::listen_for_updates(runtime.clone(), window.window_handle(), cx);
         let device_directory = cx.new(|cx| DeviceDirectory::new(window, cx));
         let appearance_subscription = window.observe_window_appearance(Theme::sync);
-        let invitation_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Paste an invitation link")
-                .default_value(
-                    initial_invitation
-                        .clone()
-                        .unwrap_or_default(),
-                )
-        });
         let tray_task = Self::listen_for_tray(tray_commands, window.window_handle(), cx);
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
+        // The dev previews navigate this shell; noted so the preview window
+        // can reach it. Debug builds only — the module does not exist in a
+        // release.
+        #[cfg(debug_assertions)]
+        crate::dev_tools::note_center(&cx.entity(), cx);
         Self {
             destination: Destination::Overview,
             previous_destination: Destination::Overview,
-            setup: if initial_invitation.is_some() {
-                SetupSnapshot::invitation()
-            } else {
-                SetupSnapshot::unavailable()
-            },
+            setup: SetupSnapshot::unavailable(),
             devices: Arc::default(),
             device_directory,
             jobs: Arc::default(),
@@ -199,13 +171,8 @@ impl DeviceCenter {
             service_error: None,
             agent_error: None,
             identity_retry_available: false,
-            invitation_input,
-            preview: None,
-            setup_error: None,
-            selected_setup_devices: HashSet::new(),
-            setup_working: initial_preview.is_some(),
-            setup_forced: initial_invitation.is_some(),
             runtime,
+            open_onboarding,
             tray: None,
             focus_handle,
             _setup_task: setup_task,
@@ -222,20 +189,6 @@ impl DeviceCenter {
         tray.set_setup_required(self.setup.access != SetupAccess::Complete);
         tray.set_service_state(self.service_state);
         self.tray = Some(tray);
-    }
-
-    pub(crate) fn set_setup_device_selected(
-        &mut self,
-        id: DeviceId,
-        selected: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if selected {
-            self.selected_setup_devices.insert(id);
-        } else {
-            self.selected_setup_devices.remove(&id);
-        }
-        cx.notify();
     }
 
     /// Open the device directory with `id` selected.
@@ -299,9 +252,7 @@ impl DeviceCenter {
     }
 
     fn navigate(&mut self, destination: Destination, cx: &mut Context<Self>) {
-        if root_surface(self.setup.access, self.setup_forced) != RootSurface::Operations
-            || self.destination == destination
-        {
+        if self.destination == destination {
             return;
         }
         self.previous_destination = self.destination;
@@ -348,32 +299,13 @@ impl DeviceCenter {
         let status = self.agent_status();
         let tone = status.tone;
         let detail = status.detail.clone();
-        let reachable =
-            root_surface(self.setup.access, self.setup_forced) == RootSurface::Operations;
 
-        TitleBar::new()
-            .h(px(Theme::TITLEBAR_HEIGHT))
+        WindowChrome::new("titlebar-drag-region")
             // The chip's own padding then lands its edge exactly on the
             // panel's right border, so the two right edges read as one line.
-            .pr(px(PANEL_INSET - Theme::SPACE_SM))
-            .bg(gpui::transparent_black())
-            .border_color(gpui::transparent_black())
-            .child(chrome::brand_lockup(theme))
-            .child(
-                div()
-                    .id("titlebar-drag-region")
-                    .h_full()
-                    .flex_1()
-                    // Declared on every platform. gpui 0.2.2 consumes control
-                    // areas on Windows only, and its caption press path still
-                    // loses drags (fixed upstream after this release), so
-                    // movement goes through platform::start_window_drag.
-                    .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |_, window, _| {
-                        platform::start_window_drag(window);
-                    }),
-            )
-            .child(
+            .trailing_pad(PANEL_INSET - Theme::SPACE_SM)
+            .leading(chrome::brand_lockup(theme))
+            .trailing(
                 div()
                     .id("agent-health")
                     .h_flex()
@@ -384,14 +316,21 @@ impl DeviceCenter {
                     .rounded(px(Theme::RADIUS_CONTROL))
                     .border_1()
                     .border_color(gpui::transparent_black())
-                    .when(reachable, |chip| {
+                    .when(true, |chip| {
                         chip.cursor_pointer()
                             .focusable()
                             .tab_stop(true)
                             .when(focus::visible(), |chip| {
                                 chip.focus(|style| style.border_color(theme.focus_ring))
                             })
-                            .hover(|chip| chip.bg(theme.wash_hover))
+                            .on_hover(|hovered, window, _| {
+                                if motion::hover_set("agent-health", *hovered) {
+                                    // Refresh: request_animation_frame panics
+                                    // outside paint (see hover_set).
+                                    window.refresh();
+                                }
+                            })
+                            .bg(motion::hover_blend("agent-health", theme.wash_hover))
                             .active(|chip| chip.bg(theme.wash_pressed))
                             .tooltip(move |window, cx| {
                                 Tooltip::new(detail.clone()).build(window, cx)
@@ -437,14 +376,22 @@ impl Focusable for DeviceCenter {
 }
 
 impl Render for DeviceCenter {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let surface_kind = root_surface(self.setup.access, self.setup_forced);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Hover washes ease toward the pointer over a few frames, and a copy
+        // on Support stays acknowledged for a moment after it. The root is
+        // what keeps asking for frames while either is still running; an idle
+        // window schedules nothing.
+        if motion::fades_live() || readout::acknowledgements_live() {
+            window.request_animation_frame();
+        }
         let titlebar = self.titlebar(cx);
         let theme = cx.inari();
         let font = theme.font_sans.clone();
         let text = theme.text;
         let surface = content_panel(theme);
-        let rail = self.rail(surface_kind == RootSurface::Operations);
+        // Enrollment has its own window, so by the time this one exists the
+        // rail is always live.
+        let rail = self.rail(true);
 
         div()
             .id("device-center")
@@ -454,12 +401,6 @@ impl Render for DeviceCenter {
             .on_action(cx.listener(Self::show_devices))
             .on_action(cx.listener(Self::show_activity))
             .on_action(cx.listener(Self::show_support))
-            .on_action(cx.listener(Self::retry_connection))
-            .on_action(cx.listener(Self::preview_invitation))
-            .on_action(cx.listener(Self::begin_setup))
-            .on_action(cx.listener(Self::confirm_devices))
-            .on_action(cx.listener(Self::continue_without_devices))
-            .on_action(cx.listener(Self::start_over))
             .on_action(cx.listener(Self::refresh_agent_service))
             .on_action(cx.listener(Self::start_agent_service))
             .on_action(cx.listener(Self::restart_agent_service))
@@ -494,21 +435,7 @@ impl Render for DeviceCenter {
                     .min_h(px(0.0))
                     .w_full()
                     .child(rail)
-                    .child(
-                        surface.child(match surface_kind {
-                            RootSurface::Operations => self.main_content(cx).into_any_element(),
-                            RootSurface::Setup => SetupView::new(
-                                self.setup.clone(),
-                                self.invitation_input.clone(),
-                                self.preview.clone(),
-                                self.setup_error.clone(),
-                                self.setup_working,
-                                self.selected_setup_devices.clone(),
-                                cx.entity().downgrade(),
-                            )
-                            .into_any_element(),
-                        }),
-                    ),
+                    .child(surface.child(self.main_content(cx))),
             )
     }
 }
@@ -531,11 +458,6 @@ pub(crate) fn device_health(devices: &[Device], agent_reachable: bool) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn post_install_agent_failure_keeps_support_available() {
-        assert_eq!(root_surface(SetupAccess::Unknown, false), RootSurface::Operations);
-    }
 
     #[test]
     fn destination_order_matches_the_rail_indicator_positions() {
