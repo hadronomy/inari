@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{Animation, Hsla, SharedString, ease_in_out, linear, pulsating_between};
+use gpui::{Animation, Hsla, Pixels, SharedString, ease_in_out, linear, pulsating_between, px};
 
 /// A state change the user caused and is watching: a selection moving, a panel
 /// swapping, a copy button reporting. Long enough to read as motion, short
@@ -54,7 +54,7 @@ pub const SWAP_SCALE: f32 = 0.25;
 /// marks are half-present — two sharp shapes at 50% read as two shapes, and two
 /// soft ones read as one thing changing — and it lets [`SWAP_SCALE`] go small
 /// enough for the swap to have a pop in it.
-pub const SWAP_BLUR: f32 = 2.0;
+pub const SWAP_BLUR: Pixels = px(2.0);
 
 /// The curve every swap runs on.
 ///
