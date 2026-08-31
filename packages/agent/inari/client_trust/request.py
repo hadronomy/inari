@@ -125,6 +125,15 @@ class BrowserRequest:
     dpop: str
 
 
+@dataclass(frozen=True, slots=True)
+class KeyBoundBrowserRequest:
+    """A browser request authenticated only by a proposed or paired key."""
+
+    target: RequestTarget
+    origin: str
+    dpop: str
+
+
 def normalize_headers(headers: HeaderInput | NormalizedHeaders) -> NormalizedHeaders:
     """Normalize header names and reject duplicate or folded security fields."""
 
@@ -255,6 +264,37 @@ def build_browser_request(
     dpop = _required_header(normalized_headers, "dpop")
     _reject_browser_credentials(normalized_headers, query_string)
     return BrowserRequest(target, origin, authorization, dpop)
+
+
+def build_key_bound_browser_request(
+    *,
+    method: str,
+    scheme: str,
+    server: ServerAddress,
+    path: str,
+    query_string: str | bytes = b"",
+    raw_path: bytes | None = None,
+    headers: HeaderInput | NormalizedHeaders = (),
+) -> KeyBoundBrowserRequest:
+    """Build a no-cookie browser request authenticated by one DPoP key."""
+
+    normalized_headers = normalize_headers(headers)
+    target = build_request_target(
+        method=method,
+        scheme=scheme,
+        server=server,
+        path=path,
+        raw_path=raw_path,
+        headers=normalized_headers,
+    )
+    if normalized_headers.get("authorization") is not None:
+        raise RequestTargetError(
+            "Authorization credentials are not accepted on pairing routes."
+        )
+    origin = normalize_origin(normalized_headers.get("origin"))
+    dpop = _required_header(normalized_headers, "dpop")
+    _reject_browser_credentials(normalized_headers, query_string)
+    return KeyBoundBrowserRequest(target, origin, dpop)
 
 
 def _required_header(headers: NormalizedHeaders, name: str) -> str:

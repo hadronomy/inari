@@ -31,11 +31,23 @@ class ClientTrustStore(Protocol):
 
     def save_pairing_request(self, request: PairingRequest) -> None: ...
 
+    def transition_pairing_request(
+        self,
+        request_id: str,
+        *,
+        from_states: frozenset[str],
+        to_state: str,
+    ) -> PairingRequest | None: ...
+
     def get_pairing(self, pairing_id: str) -> ClientPairing | None: ...
+
+    def get_pairing_by_request(self, request_id: str) -> ClientPairing | None: ...
 
     def save_pairing(self, pairing: ClientPairing) -> None: ...
 
     def get_grant(self, grant_id: str) -> ClientGrant | None: ...
+
+    def get_grant_for_pairing(self, pairing_id: str) -> ClientGrant | None: ...
 
     def save_grant(self, grant: ClientGrant) -> None: ...
 
@@ -48,6 +60,8 @@ class ClientTrustStore(Protocol):
         assertion_jti: str,
         at: datetime,
     ) -> bool: ...
+
+    def pairing_assertion_was_consumed(self, assertion_jti: str) -> bool: ...
 
     def save_dpop_nonce(
         self, nonce: str, *, issued_at: datetime, expires_at: datetime
@@ -68,7 +82,7 @@ class PairingAssertionVerifierPort(Protocol):
 
     def verify(
         self,
-        assertion: PairingAssertion,
+        assertion: PairingAssertion | str,
         *,
         request: PairingRequest,
         at: datetime,

@@ -76,6 +76,7 @@ from .schemas import (
 )
 from .device_work import DeviceWorkSubmission, authorized_device_work_request
 from .problem_handlers import problem_responses
+from .pairing_routes import pairing_router
 
 router = APIRouter()
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -657,3 +658,4 @@ router.include_router(system_router)
 router.include_router(devices_router)
 router.include_router(jobs_router)
 router.include_router(events_router)
+router.include_router(pairing_router)

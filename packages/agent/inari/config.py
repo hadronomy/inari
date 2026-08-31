@@ -79,6 +79,9 @@ _SECTION_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("auth", "local"): (
         "Local auth and standalone pairing settings for trusted loopback clients such as the tray.",
     ),
+    ("auth", "browser"): (
+        "Browser Client Pairing trust supplied by the current Controller policy.",
+    ),
     ("auth", "zitadel"): (
         "ZITADEL service-account settings used when managed enrollment is authorized through ZITADEL.",
     ),
@@ -195,6 +198,12 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ("auth", "local", "token_ttl"): ("Lifetime of locally issued bearer tokens.",),
     ("auth", "local", "audience"): ("Audience claim for locally issued tokens.",),
     ("auth", "local", "issuer"): ("Issuer claim for locally issued tokens.",),
+    ("auth", "browser", "pairing_assertion_jwks_path"): (
+        "JSON Web Key Set with trusted Odoo Pairing Assertion public keys.",
+    ),
+    ("auth", "browser", "pairing_assertion_issuer"): (
+        "Exact issuer accepted on Odoo Pairing Assertions.",
+    ),
     ("api", "tls", "cert_path"): ("PEM certificate file presented by the local API.",),
     ("api", "tls", "key_path"): ("Private key for the local API certificate.",),
     ("api", "tls", "ca_path"): ("Optional custom CA bundle trusted by the agent.",),
@@ -308,6 +317,9 @@ _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     ("storage", "security_state_dir"): "./data/security",
     ("devices", "printing", "default_printer"): "Kitchen Printer",
     ("auth", "local", "issuer"): "inari.local",
+    ("auth", "browser", "pairing_assertion_jwks_path"): (
+        "./data/security/odoo-pairing-assertion.jwks.json"
+    ),
     ("api", "tls", "cert_path"): "./certs/agent.crt",
     ("api", "tls", "key_path"): "./certs/agent.key",
     ("api", "tls", "ca_path"): "./certs/ca.crt",
@@ -605,10 +617,18 @@ class AuthZitadelConfig(BaseModel):
     token_refresh_skew: ConfigDuration = timedelta(seconds=120)
 
 
+class AuthBrowserConfig(BaseModel):
+    model_config = _NESTED_MODEL_CONFIG
+
+    pairing_assertion_jwks_path: Path | None = None
+    pairing_assertion_issuer: str = "odoo"
+
+
 class AuthConfig(BaseModel):
     model_config = _NESTED_MODEL_CONFIG
 
     local: AuthLocalConfig = Field(default_factory=AuthLocalConfig)
+    browser: AuthBrowserConfig = Field(default_factory=AuthBrowserConfig)
     zitadel: AuthZitadelConfig = Field(default_factory=AuthZitadelConfig)
 
 
@@ -820,6 +840,10 @@ class AgentConfigFile(BaseModel):
             ),
             "token_audience": self.auth.local.audience,
             "token_issuer": self.auth.local.issuer,
+            "pairing_assertion_jwks_path": _resolve_relative_path(
+                self.auth.browser.pairing_assertion_jwks_path, base_dir
+            ),
+            "pairing_assertion_issuer": self.auth.browser.pairing_assertion_issuer,
             "tls_cert_path": _resolve_relative_path(self.api.tls.cert_path, base_dir),
             "tls_key_path": _resolve_relative_path(self.api.tls.key_path, base_dir),
             "tls_ca_path": _resolve_relative_path(self.api.tls.ca_path, base_dir),
@@ -938,6 +962,8 @@ class AgentSettings(BaseModel):
     local_token_ttl_seconds: IntegralDurationSeconds = 3600
     token_audience: str = "inari.local"
     token_issuer: str | None = None
+    pairing_assertion_jwks_path: Path | None = None
+    pairing_assertion_issuer: str = "odoo"
     secret_store_service_name: str = "inari"
     allow_loopback_bootstrap: bool = True
     local_pairing_required: bool = True

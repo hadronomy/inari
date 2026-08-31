@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import sys
+from pathlib import Path
+from typing import Any
 
 from dishka import Provider, Scope, provide
 
@@ -38,6 +41,29 @@ from ..security.tls import TlsContextFactory
 from ..runtime.store import RuntimeStore
 from ..security.tokens import TokenService
 from ..security.windows_secrets import WindowsMachineSecretStore
+
+
+def _pairing_assertion_keys(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None:
+        return {}
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"Cannot read the Pairing Assertion JWKS at {path}."
+        ) from exc
+    keys = document.get("keys") if isinstance(document, dict) else None
+    if not isinstance(keys, list):
+        raise RuntimeError("The Pairing Assertion JWKS must contain a keys array.")
+    by_id: dict[str, dict[str, Any]] = {}
+    for value in keys:
+        if not isinstance(value, dict):
+            raise RuntimeError("Each Pairing Assertion JWKS key must be an object.")
+        key_id = value.get("kid")
+        if not isinstance(key_id, str) or not key_id or key_id in by_id:
+            raise RuntimeError("Each Pairing Assertion JWKS key needs one unique kid.")
+        by_id[key_id] = value
+    return by_id
 
 
 class SecurityProvider(Provider):
@@ -125,7 +151,11 @@ class SecurityProvider(Provider):
         return ClientTrustService(
             store=store,
             assertion_verifier=PairingAssertionVerifier(
-                verification_keys={},
+                verification_keys=_pairing_assertion_keys(
+                    settings.pairing_assertion_jwks_path
+                ),
+                issuer=settings.pairing_assertion_issuer,
+                audience=settings.token_audience,
                 agent_id=identity.agent_id,
             ),
             access_token_verifier=AccessTokenVerifier(

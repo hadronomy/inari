@@ -513,7 +513,7 @@ The access token contains `cnf.jkt`. Each DPoP proof contains exact `htm`,
 normalized `htu`, `iat`, `ath`, nonce, and `jti` values. The Agent rejects a
 missing or mismatched claim.
 
-The proof header contains `typ=dpop+jwt`, `alg=EdDSA`, and the public Ed25519
+The proof header contains `typ=dpop+jwt`, `alg=Ed25519`, and the public Ed25519
 JWK without private members. The normalized `htu` excludes query and fragment
 components. Requests present the access token with the `DPoP` authorization
 scheme.
@@ -2895,6 +2895,22 @@ The Local Agent Interface contains these versioned endpoints:
 
 Client Pairing uses a separate privileged Interface under `/pairing/v1/`.
 Device Work credentials cannot call that Interface.
+
+The browser Client Pairing Interface contains these endpoints:
+
+- `POST /pairing/v1/requests`
+- `GET /pairing/v1/requests/{request_id}`
+- `POST /pairing/v1/requests/{request_id}/cancel`
+- `POST /pairing/v1/requests/{request_id}/admit`
+- `POST /pairing/v1/client-grants/renew`.
+
+Device Center uses its separate application identity for:
+
+- `GET /pairing/v1/requests/{request_id}/review`
+- `POST /pairing/v1/requests/{request_id}/decision`.
+
+Browser calls use exact-origin key proof and no authorization header. Device
+Center review and decision calls require its local administrative credential.
 
 Versioned Python protocol models are the contract source. The build publishes
 committed OpenAPI 3.1, JSON Schema, generated client, and contract-fixture

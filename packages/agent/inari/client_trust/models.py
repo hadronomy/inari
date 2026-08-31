@@ -18,7 +18,7 @@ from .permissions import Permission, PermissionCatalog, PermissionSet
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
-_TOKEN_VALUE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,511}\Z")
+_TOKEN_VALUE = re.compile(r"[A-Za-z0-9._~-]{1,512}\Z")
 _BASE64URL = re.compile(r"[A-Za-z0-9_-]{8,512}\Z")
 
 
@@ -835,33 +835,13 @@ class PairingRequest:
 
 @dataclass(frozen=True, slots=True)
 class PairingCommand:
-    request: PairingRequest
-    assertion: PairingAssertion
+    request_id: str
+    assertion: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.request, PairingRequest):
-            raise TypeError("request must be a PairingRequest")
-        if not isinstance(self.assertion, PairingAssertion):
-            raise TypeError("assertion must be a PairingAssertion")
-        claims = self.assertion.claims
-        if claims.pairing_request_id != self.request.request_id:
-            raise ScopeMismatchError(
-                "The Pairing Assertion does not match the request."
-            )
-        if claims.jwk_thumbprint != self.request.browser_jwk_thumbprint:
-            raise ScopeMismatchError(
-                "The Pairing Assertion does not match the browser key."
-            )
-        if (
-            claims.agent_id != self.request.scope.agent_id
-            or claims.audience != self.request.scope.audience
-            or claims.business != self.request.scope.business
-            or claims.scopes != self.request.requested_permissions
-            or claims.session_nonce != self.request.session_nonce
-        ):
-            raise ScopeMismatchError(
-                "The Pairing Assertion does not match the request scope."
-            )
+        _identifier("request_id", self.request_id)
+        if not isinstance(self.assertion, str) or self.assertion.count(".") != 2:
+            raise ValueError("assertion must be a compact JWS")
 
 
 PairClientCommand = PairingCommand
@@ -872,6 +852,20 @@ class PairingResult:
     pairing: ClientPairing
     grant: ClientGrant
     admission: GrantAdmissionProof
+    access_token: str
+    claims: AccessTokenClaims
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.pairing, ClientPairing):
+            raise TypeError("pairing must be a ClientPairing")
+        if not isinstance(self.grant, ClientGrant):
+            raise TypeError("grant must be a ClientGrant")
+        if not isinstance(self.admission, GrantAdmissionProof):
+            raise TypeError("admission must be a GrantAdmissionProof")
+        if not isinstance(self.access_token, str) or not self.access_token:
+            raise ValueError("access_token must be non-empty")
+        if not isinstance(self.claims, AccessTokenClaims):
+            raise TypeError("claims must be AccessTokenClaims")
 
 
 PairClientResult = PairingResult
@@ -882,6 +876,7 @@ class RenewalCommand:
     pairing_id: str
     grant_id: str
     target: RequestTarget
+    browser_origin: BoundOrigin
     dpop: str
 
     def __post_init__(self) -> None:
@@ -889,6 +884,8 @@ class RenewalCommand:
         _identifier("grant_id", self.grant_id)
         if not isinstance(self.target, RequestTarget):
             raise TypeError("target must be a RequestTarget")
+        if not isinstance(self.browser_origin, BoundOrigin):
+            raise TypeError("browser_origin must be a BoundOrigin")
         if not isinstance(self.dpop, str) or self.dpop.count(".") != 2:
             raise ValueError("dpop must contain three encoded segments")
 
@@ -899,12 +896,15 @@ GrantRenewalCommand = RenewalCommand
 @dataclass(frozen=True, slots=True)
 class RenewalResult:
     grant: ClientGrant
+    access_token: str
     claims: AccessTokenClaims
     state: RenewalResultState = RenewalResultState.RENEWED
 
     def __post_init__(self) -> None:
         if not isinstance(self.grant, ClientGrant):
             raise TypeError("grant must be a ClientGrant")
+        if not isinstance(self.access_token, str) or not self.access_token:
+            raise ValueError("access_token must be non-empty")
         if not isinstance(self.claims, AccessTokenClaims):
             raise TypeError("claims must be AccessTokenClaims")
         if self.grant.jwk_thumbprint != self.claims.cnf_jkt:

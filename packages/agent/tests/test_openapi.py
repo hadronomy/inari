@@ -47,3 +47,33 @@ def test_contract_exposes_only_the_explicit_device_work_submission(
             "DPoP-Nonce",
             "WWW-Authenticate",
         }
+
+
+def test_contract_exposes_the_separate_client_pairing_interface(
+    tmp_path: Path,
+) -> None:
+    canonical_path = tmp_path / "local-agent.openapi.json"
+    codegen_path = tmp_path / "local-agent.codegen.openapi.json"
+
+    write_contracts(canonical_path, codegen_path)
+
+    expected = {
+        "/pairing/v1/requests",
+        "/pairing/v1/requests/{request_id}",
+        "/pairing/v1/requests/{request_id}/admit",
+        "/pairing/v1/requests/{request_id}/cancel",
+        "/pairing/v1/requests/{request_id}/review",
+        "/pairing/v1/requests/{request_id}/decision",
+        "/pairing/v1/client-grants/renew",
+    }
+    for contract in (_load(canonical_path), _load(codegen_path)):
+        paths = contract["paths"]
+        assert isinstance(paths, dict)
+        assert expected <= paths.keys()
+        create = paths["/pairing/v1/requests"]["post"]
+        assert create["operationId"] == "create_client_pairing_request"
+        assert set(create["responses"]["401"]["headers"]) == {
+            "Cache-Control",
+            "DPoP-Nonce",
+            "WWW-Authenticate",
+        }

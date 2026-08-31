@@ -8,12 +8,16 @@ if TYPE_CHECKING:
 
 
 class ClientTrustErrorCode(StrEnum):
+    NOT_FOUND = "not_found"
     INVALID_ORIGIN = "invalid_origin"
     INVALID_VALUE = "invalid_value"
+    INVALID_STATE = "invalid_state"
     UNKNOWN_PERMISSION = "unknown_permission"
     PERMISSION_DENIED = "permission_denied"
     SCOPE_MISMATCH = "scope_mismatch"
     PAIRING_EXPIRED = "pairing_expired"
+    PAIRING_DENIED = "pairing_denied"
+    PAIRING_CANCELED = "pairing_canceled"
     GRANT_EXPIRED = "grant_expired"
     GRANT_REVOKED = "grant_revoked"
     INVALID_ASSERTION = "invalid_assertion"

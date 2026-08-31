@@ -6,6 +6,7 @@ from functools import lru_cache
 from dishka import make_container
 
 from ..config import AgentSettings, get_settings
+from ..client_trust import ClientTrustService
 from ..db import DatabaseMigrator
 from ..di import (
     AppProvider,
@@ -50,6 +51,7 @@ class AgentContainer:
     device_work_submission: DeviceWorkSubmission
     physical_execution: PhysicalExecution
     device_work_authorizer: ClientTrustAuthorizer | None = None
+    client_trust_service: ClientTrustService | None = None
     identity_service: AgentIdentityService | None = None
     authorization_service: AuthorizationService | None = None
     standalone_trust_service: StandaloneTrustService | None = None
@@ -84,6 +86,7 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         device_work_submission=dependency_container.get(DeviceWorkSubmission),
         physical_execution=dependency_container.get(PhysicalExecution),
         device_work_authorizer=dependency_container.get(ClientTrustAuthorizer),
+        client_trust_service=dependency_container.get(ClientTrustService),
         identity_service=dependency_container.get(AgentIdentityService),
         authorization_service=dependency_container.get(AuthorizationService),
         standalone_trust_service=dependency_container.get(StandaloneTrustService),

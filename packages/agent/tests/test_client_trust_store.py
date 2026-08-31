@@ -80,6 +80,12 @@ def test_store_round_trips_content_free_trust_values(tmp_path: Path) -> None:
     )
 
     store.save_pairing_request(request)
+    approved = store.transition_pairing_request(
+        request.request_id,
+        from_states=frozenset({PairingRequestState.PENDING.value}),
+        to_state=PairingRequestState.APPROVED.value,
+    )
+    assert approved is not None
     assert store.complete_pairing(
         request=replace(request, state=PairingRequestState.COMPLETED),
         pairing=pairing,
@@ -95,36 +101,48 @@ def test_store_round_trips_content_free_trust_values(tmp_path: Path) -> None:
     assert store.get_grant(grant.grant_id) == grant
     nonce_expires_at = NOW + timedelta(minutes=2)
     store.save_dpop_nonce("nonce_1234", issued_at=NOW, expires_at=nonce_expires_at)
-    assert store.consume_dpop_nonce(
-        "nonce_1234",
-        jti="dpop_1",
-        at=NOW,
-        replay_expires_at=NOW + timedelta(minutes=15),
-    ) is DPoPNonceConsumption.ACCEPTED
-    assert store.consume_dpop_nonce(
-        "nonce_1234",
-        jti="dpop_1",
-        at=NOW,
-        replay_expires_at=NOW + timedelta(minutes=15),
-    ) is DPoPNonceConsumption.REPLAY
+    assert (
+        store.consume_dpop_nonce(
+            "nonce_1234",
+            jti="dpop_1",
+            at=NOW,
+            replay_expires_at=NOW + timedelta(minutes=15),
+        )
+        is DPoPNonceConsumption.ACCEPTED
+    )
+    assert (
+        store.consume_dpop_nonce(
+            "nonce_1234",
+            jti="dpop_1",
+            at=NOW,
+            replay_expires_at=NOW + timedelta(minutes=15),
+        )
+        is DPoPNonceConsumption.REPLAY
+    )
 
-    assert store.consume_dpop_nonce(
-        "unknown_nonce",
-        jti="dpop_after_invalid_nonce",
-        at=NOW,
-        replay_expires_at=NOW + timedelta(minutes=15),
-    ) is DPoPNonceConsumption.INVALID
+    assert (
+        store.consume_dpop_nonce(
+            "unknown_nonce",
+            jti="dpop_after_invalid_nonce",
+            at=NOW,
+            replay_expires_at=NOW + timedelta(minutes=15),
+        )
+        is DPoPNonceConsumption.INVALID
+    )
     store.save_dpop_nonce(
         "nonce_after_invalid_nonce",
         issued_at=NOW,
         expires_at=nonce_expires_at,
     )
-    assert store.consume_dpop_nonce(
-        "nonce_after_invalid_nonce",
-        jti="dpop_after_invalid_nonce",
-        at=NOW,
-        replay_expires_at=NOW + timedelta(minutes=15),
-    ) is DPoPNonceConsumption.ACCEPTED
+    assert (
+        store.consume_dpop_nonce(
+            "nonce_after_invalid_nonce",
+            jti="dpop_after_invalid_nonce",
+            at=NOW,
+            replay_expires_at=NOW + timedelta(minutes=15),
+        )
+        is DPoPNonceConsumption.REPLAY
+    )
 
     with sqlite3.connect(path) as connection:
         columns = {

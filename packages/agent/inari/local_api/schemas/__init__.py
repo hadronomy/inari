@@ -70,6 +70,15 @@ from .onboarding import (
     ManagedOnboardingStartResponse,
     ManagedOnboardingStatusResponse,
 )
+from .pairing import (
+    ClientGrantRenewalInput,
+    ClientGrantRenewalResponse,
+    PairingAdmissionInput,
+    PairingAdmissionResponse,
+    PairingDecisionInput,
+    PairingRequestCreateInput,
+    PairingRequestResponse,
+)
 from .system import (
     LiveEventUpdateResponse,
     LiveSnapshotResponse,
@@ -126,7 +135,14 @@ __all__ = [
     "LocalPairingStartResponse",
     "LocalTrustStatusResponse",
     "ManagedCertificateStatusResponse",
+    "ClientGrantRenewalInput",
+    "ClientGrantRenewalResponse",
     "OpenCashDrawerCommandInput",
+    "PairingAdmissionInput",
+    "PairingAdmissionResponse",
+    "PairingDecisionInput",
+    "PairingRequestCreateInput",
+    "PairingRequestResponse",
     "DeviceWorkAcceptedResponse",
     "PrincipalResponse",
     "PrintTestPageCommandInput",
