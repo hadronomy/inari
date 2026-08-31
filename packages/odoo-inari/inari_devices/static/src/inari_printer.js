@@ -2,7 +2,6 @@
 
 import { htmlToCanvas } from "@point_of_sale/app/services/render_service";
 
-import { ReceiptQueue } from "./receipt_queue";
 import { materializeSubmissionContext } from "./submission_context";
 
 function canvasToJpeg(canvas, quality) {
@@ -29,32 +28,30 @@ export async function renderReceiptToJpeg(element, { quality = 0.92 } = {}) {
 
 /** Render, identify, queue, and admit one physical customer-receipt copy. */
 export class InariReceiptPrinter {
-    constructor({ client, contextStore, render = renderReceiptToJpeg, materialize } = {}) {
-        if (!client || !contextStore || typeof render !== "function") {
-            throw new TypeError(
-                "InariReceiptPrinter requires a client, context store, and renderer",
-            );
+    constructor({ client, recovery, render = renderReceiptToJpeg, materialize } = {}) {
+        if (!recovery || typeof render !== "function") {
+            throw new TypeError("InariReceiptPrinter requires a recovery coordinator and renderer");
         }
+        this.client = client;
+        this.recovery = recovery;
         this.render = render;
         this.materialize = materialize || materializeSubmissionContext;
-        this.queue = new ReceiptQueue({
-            contextStore,
-            submit: (context, jpeg) => client.submit(context, jpeg),
-        });
     }
 
-    async printReceipt(element, plan) {
+    async printReceipt(element, plan, descriptor = {}) {
         try {
-            const existing = this.queue
-                .snapshot()
-                .find((entry) => entry.key === plan?.print_intent_id);
+            const existing = this.recovery.knownResult(plan?.print_intent_id);
             if (existing) {
-                return this.retry(existing.key);
+                return existing;
             }
             const jpeg = await this.render(element);
             const context = await this.materialize(plan, jpeg);
-            const entry = await this.queue.enqueue(context, jpeg);
-            return this.result(entry);
+            return this.recovery.enqueue({
+                context,
+                jpeg,
+                client: this.client,
+                descriptor,
+            });
         } catch (error) {
             return {
                 accepted: false,
@@ -62,31 +59,5 @@ export class InariReceiptPrinter {
                 error,
             };
         }
-    }
-
-    async retry(key) {
-        await this.queue.retry(key);
-        const entry = this.queue.snapshot().find((candidate) => candidate.key === key);
-        return this.result(entry);
-    }
-
-    snapshot() {
-        return this.queue.snapshot();
-    }
-
-    result(entry) {
-        if (!entry || entry.state !== "accepted") {
-            return {
-                accepted: false,
-                state: entry?.state || "failed",
-                error: entry?.error || null,
-                context: entry?.context,
-            };
-        }
-        return {
-            accepted: true,
-            context: entry.context,
-            ...entry.result,
-        };
     }
 }

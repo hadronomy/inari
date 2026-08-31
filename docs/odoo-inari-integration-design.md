@@ -50,8 +50,9 @@ starts the report in a browser.
 
 Before a POS Device Adapter renders or submits Device Work, it creates one
 immutable Submission Context. The context contains the Print Origin, Binding
-Revision, Device, actor, POS session, document kind, content revision, and copy
-ordinal.
+Revision, Device, POS session, document kind, content revision, and copy
+ordinal. It contains no actor or authority claim. The Agent derives those
+claims from the accepted Client Grant.
 
 The Device Adapter copies the Submission Context into the Print Intent and
 Print Audit Record. A Retry reuses the context. A Reprint creates a new context
@@ -141,6 +142,36 @@ printing.
 
 The global recovery panel continues Job Reconciliation after this observation
 window. An automatic sequence records the pending document and continues.
+
+### Local POS print recovery
+
+One POS recovery coordinator owns customer-receipt and preparation-ticket
+recovery. It serializes work for each Binding Revision and Device. The POS
+stores the content-free Submission Context and recovery state in IndexedDB
+before it calls the Agent. The IndexedDB database is scoped to the Odoo
+database, company, and POS configuration. It keeps the exact JPEG only in the
+current tab.
+
+If the Agent response is uncertain, the coordinator queries the protected
+`/v1/jobs/query` endpoint before it permits a retry. Each query contains no
+more than 100 Print Intent identities. It also polls admitted work while the
+state is `accepted` or `in_progress`, so a later failure becomes visible without
+an operator refresh. A missing Print Intent permits an exact same-tab retry.
+After a reload, missing work becomes `content_unavailable` because the JPEG no
+longer exists. The addon does not render replacement content from partial
+state.
+
+`outcome_unknown` never permits an automatic retry. The operator must check
+the printer, query the Agent again, or explicitly finish the task without a
+confirmed ticket. Customer receipts also permit an explicit browser print
+while the current tab still holds the exact JPEG. Preparation tickets do not
+use browser print.
+
+Odoo increments receipt copy state only after Agent admission. Odoo advances
+preparation change state only after Agent admission or an explicit operator
+dismissal. Native printers keep Odoo's native retry dialog. An authoritative
+Inari printer uses only the global Inari recovery dialog, including in a mixed
+native and Inari printer setup.
 
 Pending work expires at the deadline that the Controller assigned at Controller
 Admission. Agent acceptance links the Managed Work record to the authoritative

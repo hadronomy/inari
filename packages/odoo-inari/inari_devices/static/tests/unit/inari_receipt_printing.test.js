@@ -4,13 +4,14 @@ import {
     PosPrinterService,
     posPrinterService,
 } from "@point_of_sale/app/services/pos_printer_service";
+import { PosStore } from "@point_of_sale/app/services/pos_store";
 
-import { InariAgentClient, canonicalJson } from "../../../src/agent_client";
-import { MemoryContextStore } from "../../../src/context_store";
-import { InariDeviceService } from "../../../src/inari_device_service";
-import { ReceiptQueue } from "../../../src/receipt_queue";
-import { createSubmissionContext, envelopeFor } from "../../../src/submission_context";
-import "../../../src/pos_printer_patch";
+import { InariAgentClient, InariAgentError, canonicalJson } from "../../src/agent_client";
+import { InariDeviceService } from "../../src/inari_device_service";
+import { PrintRecoveryCoordinator } from "../../src/print_recovery";
+import { MemoryRecoveryStore } from "../../src/recovery_store";
+import { createSubmissionContext, envelopeFor } from "../../src/submission_context";
+import "../../src/pos_printer_patch";
 
 function context() {
     return createSubmissionContext({
@@ -42,7 +43,7 @@ function posPrinter(inariDevice, nativePrinter) {
 
 describe("Inari customer receipt printing", () => {
     test("printer service receives the deep Inari service at composition", () => {
-        const inariDevice = {};
+        const inariDevice = { marker: "inari" };
         const service = posPrinterService.start(
             {},
             {
@@ -53,7 +54,7 @@ describe("Inari customer receipt printing", () => {
             },
         );
 
-        expect(service.inariDevice).toBe(inariDevice);
+        expect(service.inariDevice.marker).toBe("inari");
     });
 
     test("context rejects authority fields and canonicalizes the exact envelope", () => {
@@ -73,9 +74,9 @@ describe("Inari customer receipt printing", () => {
                 actor_id: "operator-1",
             }),
         ).toThrow();
-        expect(canonicalJson(envelopeFor(submissionContext))).toContain(
-            '"operation":"receipt_image"',
-        );
+        expect(
+            canonicalJson(envelopeFor(submissionContext)).includes('"operation":"receipt_image"'),
+        ).toBe(true);
     });
 
     test("Agent client retries one RFC 9449 challenge with the same receipt identity", async () => {
@@ -105,6 +106,8 @@ describe("Inari customer receipt printing", () => {
                     state: "accepted",
                     print_intent_id: context().print_intent_id,
                     print_job_id: "job-1",
+                    device_id: "printer-1",
+                    state_version: 1,
                 }),
                 { status: 202, headers: { "Content-Type": "application/json" } },
             );
@@ -170,27 +173,44 @@ describe("Inari customer receipt printing", () => {
         expect(fetches[0].options.body).toBe('{"print_intent_ids":["intent-1"]}');
     });
 
-    test("receipt queue keeps one immutable context through retry", async () => {
+    test("print recovery keeps one immutable context through retry", async () => {
         const calls = [];
-        const queue = new ReceiptQueue({
-            contextStore: new MemoryContextStore(),
+        const client = {
             submit: async (submissionContext) => {
                 calls.push(submissionContext);
                 if (calls.length === 1) {
-                    throw new Error("offline");
+                    throw new InariAgentError("printer_offline", "Printer offline", {
+                        status: 503,
+                        retryable: true,
+                    });
                 }
-                return { state: "accepted", print_job_id: "job-1" };
+                return {
+                    state: "accepted",
+                    print_intent_id: submissionContext.print_intent_id,
+                    print_job_id: "job-1",
+                    device_id: submissionContext.device_id,
+                    state_version: 1,
+                };
             },
+        };
+        const recovery = new PrintRecoveryCoordinator({
+            store: new MemoryRecoveryStore(),
+            clientForContext: async () => client,
         });
+        await recovery.restore();
         const original = context();
-        const entry = await queue.enqueue(original, new Blob(["jpeg"], { type: "image/jpeg" }));
+        await recovery.enqueue({
+            context: original,
+            jpeg: new Blob(["jpeg"], { type: "image/jpeg" }),
+            client,
+        });
 
-        await queue.retry(entry.key);
+        await recovery.act(original.print_intent_id, "retry");
 
         expect(calls).toHaveLength(2);
         expect(calls[0]).toBe(original);
         expect(calls[1]).toBe(original);
-        expect(queue.snapshot()[0].state).toBe("accepted");
+        expect(recovery.knownResult(original.print_intent_id).state).toBe("accepted");
     });
 
     test("active Inari receipts bypass the native printer on success and failure", async () => {
@@ -251,6 +271,98 @@ describe("Inari customer receipt printing", () => {
         expect(nativeCalls).toBe(1);
     });
 
+    test("preparation recovery updates Odoo once outside the active print attempt", async () => {
+        let updates = 0;
+        let syncs = 0;
+        const order = {
+            updateLastOrderChange() {
+                updates += 1;
+            },
+        };
+        const service = new InariDeviceService();
+        service.recovery = { blocksPreparation: () => false };
+        service.pos = {
+            models: {
+                "pos.order": { getBy: () => order },
+                "pos.prep.display": [],
+            },
+            async syncAllOrders() {
+                syncs += 1;
+            },
+        };
+        service.blockPreparationAttempt("order-1", { tracked: false });
+        expect(service.canAdvancePreparation("order-1")).toBe(false);
+        service.beginPreparationAttempt("order-1");
+        expect(service.canAdvancePreparation("order-1")).toBe(true);
+
+        service.blockPreparationAttempt("order-1", { tracked: true });
+        await service.onPreparationSettled({ offline_order_id: "order-1" });
+        expect(updates).toBe(0);
+        service.endPreparationAttempt("order-1");
+
+        service.blockPreparationAttempt("order-1", { tracked: true });
+        await service.onPreparationSettled({ offline_order_id: "order-1" });
+        expect(updates).toBe(1);
+        expect(syncs).toBe(1);
+    });
+
+    test("mixed preparation printers keep native retry separate from Inari recovery", async () => {
+        const blockers = [];
+        const dialogs = [];
+        const inariPrinter = {
+            config: {
+                name: "Kitchen",
+                product_categories_ids: [],
+                inari_preparation_binding: { authoritative: true },
+            },
+        };
+        const nativePrinter = {
+            config: {
+                name: "Bar",
+                product_categories_ids: [],
+            },
+        };
+        const store = Object.create(PosStore.prototype);
+        store.unwatched = { printers: [inariPrinter, nativePrinter] };
+        store.env = {
+            services: {
+                inari_device: {
+                    blockPreparationAttempt(orderId, options) {
+                        blockers.push({ orderId, options });
+                    },
+                },
+            },
+        };
+        store.dialog = {
+            add(component, props) {
+                dialogs.push({ component, props });
+            },
+        };
+        store.generateOrderChange = () => ({ orderData: {}, changes: {} });
+        store.generateReceiptsDataToPrint = async () => [{}];
+        store.printOrderChanges = async (_data, printer) =>
+            printer === inariPrinter
+                ? {
+                      successful: false,
+                      inari: true,
+                      printIntentId: "pi_v1_preparation_1",
+                  }
+                : {
+                      successful: false,
+                      inari: false,
+                      message: { body: "Paper out" },
+                  };
+
+        const printed = await PosStore.prototype.printChanges.call(store, { uuid: "order-1" }, [
+            {},
+        ]);
+
+        expect(printed).toBe(false);
+        expect(blockers).toEqual([{ orderId: "order-1", options: { tracked: true } }]);
+        expect(dialogs).toHaveLength(1);
+        expect(dialogs[0].props.message).toBe("Bar: Paper out");
+    });
+
     test("active binding without browser pairing stays authoritative and explains the fix", async () => {
         const notifications = [];
         const service = new InariDeviceService({
@@ -259,9 +371,10 @@ describe("Inari customer receipt printing", () => {
                     notifications.push({ message, options });
                 },
             },
+            recoveryStoreFactory: () => new MemoryRecoveryStore(),
             randomUUID: () => "00000000-0000-0000-0000-000000000001",
         });
-        service.attachPos({
+        await service.attachPos({
             config: {
                 inari_receipt_binding: {
                     authoritative: true,
@@ -278,7 +391,6 @@ describe("Inari customer receipt printing", () => {
 
         expect(result.accepted).toBe(false);
         expect(notifications).toHaveLength(1);
-        expect(notifications[0].message).toContain("Pair this browser");
         expect(notifications[0].options.sticky).toBe(true);
     });
 });

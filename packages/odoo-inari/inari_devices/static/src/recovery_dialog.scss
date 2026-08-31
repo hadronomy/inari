@@ -1,0 +1,115 @@
+.inari-recovery-launcher {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 1050;
+    display: flex;
+    gap: 0.65rem;
+    align-items: center;
+    min-height: 2.75rem;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid rgba(44, 67, 52, 0.28);
+    color: #f8fbf8;
+    background: #233b2c;
+    box-shadow: 0 0.35rem 0.8rem rgba(17, 31, 22, 0.2);
+    clip-path: polygon(0 0, calc(100% - 0.55rem) 0, 100% 0.55rem, 100% 100%, 0 100%);
+    font-weight: 650;
+}
+
+.inari-recovery-launcher:hover,
+.inari-recovery-launcher:focus-visible {
+    background: #172d20;
+}
+
+.inari-recovery-launcher span:first-of-type {
+    min-width: 1.35rem;
+    padding-inline: 0.25rem;
+    color: #172d20;
+    background: #d7e5da;
+    text-align: center;
+}
+
+.inari-recovery {
+    width: calc(100vw - 2rem);
+    max-width: 44rem;
+    max-height: calc(100vh - 3rem);
+    overflow: auto;
+    color: #17211b;
+}
+
+.inari-recovery__header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    gap: 1.5rem;
+    justify-content: space-between;
+    padding: 0.25rem 0 1rem;
+    background: var(--modal-bg, #fff);
+}
+
+.inari-recovery__header h3,
+.inari-recovery__header p,
+.inari-recovery__task p {
+    margin: 0;
+}
+
+.inari-recovery__header h3 {
+    font:
+        680 1.4rem/1.25 system-ui,
+        sans-serif;
+}
+
+.inari-recovery__header p {
+    margin-top: 0.35rem;
+    color: #526057;
+}
+
+.inari-recovery__list {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.inari-recovery__task {
+    display: grid;
+    gap: 0.8rem;
+    padding: 1rem;
+    background: #edf3ee;
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.inari-recovery__identity {
+    display: flex;
+    gap: 0.75rem 1.25rem;
+    align-items: baseline;
+    justify-content: space-between;
+}
+
+.inari-recovery__identity span,
+.inari-recovery__state {
+    color: #526057;
+}
+
+.inari-recovery__warning,
+.inari-recovery__error {
+    padding: 0.7rem 0.8rem;
+    color: #5c2c1d;
+    background: #f7e8df;
+}
+
+.inari-recovery__actions,
+.inari-recovery__confirm {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    align-items: center;
+}
+
+.inari-recovery__confirm p {
+    flex-basis: 100%;
+}
+
+.inari-recovery__empty {
+    padding-block: 1.5rem;
+    color: #526057;
+}

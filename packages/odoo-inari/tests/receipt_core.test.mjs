@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { InariAgentClient, canonicalJson } from "../inari_devices/static/src/agent_client.js";
-import { MemoryContextStore } from "../inari_devices/static/src/context_store.js";
-import { ReceiptQueue } from "../inari_devices/static/src/receipt_queue.js";
 import {
     createSubmissionContext,
     envelopeFor,
@@ -106,6 +104,8 @@ describe("Odoo Inari receipt core", () => {
                         state: "accepted",
                         print_intent_id: "pi_v1_receipt_1",
                         print_job_id: "job-1",
+                        device_id: "printer-1",
+                        state_version: 1,
                     },
                     { status: 202 },
                 );
@@ -125,10 +125,7 @@ describe("Odoo Inari receipt core", () => {
             fetches[0].headers.get("Idempotency-Key"),
             fetches[1].headers.get("Idempotency-Key"),
         );
-        assert.equal(
-            fetches[0].body.get("envelope").type.startsWith("application/json"),
-            true,
-        );
+        assert.equal(fetches[0].body.get("envelope").type.startsWith("application/json"), true);
         assert.equal(fetches[0].body.get("document").type, "image/jpeg");
     });
 
@@ -162,28 +159,5 @@ describe("Odoo Inari receipt core", () => {
         assert.equal(requests[0].url, "https://agent.example/v1/jobs/query");
         assert.equal(requests[0].options.headers.get("Content-Type"), "application/json");
         assert.equal(requests[0].options.body, '{"print_intent_ids":["intent-1"]}');
-    });
-
-    test("keeps one immutable context through a failed submission and retry", async () => {
-        const contexts = [];
-        const queue = new ReceiptQueue({
-            contextStore: new MemoryContextStore(),
-            submit: async (context) => {
-                contexts.push(context);
-                if (contexts.length === 1) {
-                    throw new Error("offline");
-                }
-                return { state: "accepted", print_job_id: "job-1" };
-            },
-        });
-        const context = submissionContext();
-
-        const entry = await queue.enqueue(context, new Blob(["jpeg"], { type: "image/jpeg" }));
-        await queue.retry(entry.key);
-
-        assert.equal(contexts.length, 2);
-        assert.equal(contexts[0], context);
-        assert.equal(contexts[1], context);
-        assert.equal(queue.snapshot()[0].state, "accepted");
     });
 });

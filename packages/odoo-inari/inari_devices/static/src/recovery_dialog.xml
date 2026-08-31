@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="inari_devices.RecoveryLauncher">
+        <button
+            t-if="view.entries.length"
+            type="button"
+            class="inari-recovery-launcher"
+            t-on-click="open"
+        >
+            Print recovery
+            <span aria-hidden="true" t-esc="view.entries.length"/>
+            <span class="visually-hidden">unresolved prints</span>
+        </button>
+    </t>
+
+    <t t-name="inari_devices.RecoveryDialog">
+        <section
+            class="inari-recovery"
+            aria-live="polite"
+            t-att-aria-busy="view.busyKey ? 'true' : 'false'"
+        >
+            <header class="inari-recovery__header">
+                <div>
+                    <h3>Print recovery</h3>
+                    <p>Check one result before you send another physical copy.</p>
+                </div>
+                <button type="button" class="btn btn-link" t-on-click="close">Close</button>
+            </header>
+
+            <p t-if="view.error" class="inari-recovery__error" role="status" t-esc="view.error"/>
+            <p t-if="!view.entries.length" class="inari-recovery__empty">
+                No prints need operator action.
+            </p>
+
+            <div class="inari-recovery__list">
+                <article t-foreach="view.entries" t-as="entry" t-key="entry.key" class="inari-recovery__task">
+                    <div class="inari-recovery__identity">
+                        <strong t-esc="title(entry)"/>
+                        <span><t t-esc="entry.order_reference"/> · <t t-esc="entry.printer_name"/></span>
+                    </div>
+                    <p class="inari-recovery__state" t-esc="stateCopy(entry)"/>
+                    <p t-if="entry.state === 'outcome_unknown'" class="inari-recovery__warning">
+                        The Agent cannot prove whether paper came out. Check the printer before you continue.
+                    </p>
+                    <p t-if="entry.state === 'content_unavailable'" class="inari-recovery__warning">
+                        Reopen the order to make a new print. Inari will not recreate unknown content.
+                    </p>
+
+                    <div t-if="view.confirmKey === entry.key" class="inari-recovery__confirm">
+                        <p>This closes the recovery task without an Agent-confirmed ticket.</p>
+                        <button
+                            type="button"
+                            class="btn btn-danger"
+                            t-att-disabled="view.busyKey"
+                            t-on-click="() => this.act(entry, 'finish_without_ticket')"
+                        >Confirm and continue</button>
+                        <button type="button" class="btn btn-link" t-on-click="keepWaiting">Keep waiting</button>
+                    </div>
+                    <div t-else="" class="inari-recovery__actions">
+                        <button
+                            t-if="entry.actions.includes('retry')"
+                            type="button"
+                            class="btn btn-primary"
+                            t-att-disabled="view.busyKey === entry.key"
+                            t-on-click="() => this.act(entry, 'retry')"
+                        ><t t-esc="retryLabel(entry)"/></button>
+                        <button
+                            t-if="entry.actions.includes('reconcile')"
+                            type="button"
+                            class="btn btn-secondary"
+                            t-att-disabled="view.busyKey === entry.key"
+                            t-on-click="() => this.act(entry, 'reconcile')"
+                        >Check status</button>
+                        <button
+                            t-if="entry.actions.includes('browser_print')"
+                            type="button"
+                            class="btn btn-secondary"
+                            t-att-disabled="view.busyKey === entry.key"
+                            t-on-click="() => this.act(entry, 'browser_print')"
+                        >Print receipt in browser</button>
+                        <button
+                            t-if="entry.actions.includes('finish_without_ticket')"
+                            type="button"
+                            class="btn btn-link text-danger"
+                            t-att-disabled="view.busyKey === entry.key"
+                            t-on-click="() => this.confirm(entry)"
+                        ><t t-esc="continueLabel(entry)"/></button>
+                    </div>
+                </article>
+            </div>
+        </section>
+    </t>
+</templates>

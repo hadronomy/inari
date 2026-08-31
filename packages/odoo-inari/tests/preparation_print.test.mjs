@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { MemoryContextStore } from "../inari_devices/static/src/context_store.js";
-import { InariReceiptPrinter } from "../inari_devices/static/src/inari_printer.js";
+import { InariAgentError } from "../inari_devices/static/src/agent_client.js";
 import {
     markPreparationSegments,
     markPreparationSource,
     PreparationPlanBook,
     preparationSource,
 } from "../inari_devices/static/src/preparation_print.js";
+import { PrintRecoveryCoordinator } from "../inari_devices/static/src/print_recovery.js";
+import { MemoryRecoveryStore } from "../inari_devices/static/src/recovery_store.js";
+import { materializeSubmissionContext } from "../inari_devices/static/src/submission_context.js";
 
 function binding() {
     return {
@@ -78,22 +80,29 @@ describe("Odoo preparation printing", () => {
     test("retries the cached JPEG and immutable context without rendering again", async () => {
         let renders = 0;
         const contexts = [];
-        const printer = new InariReceiptPrinter({
-            client: {
-                async submit(context) {
-                    contexts.push(context);
-                    if (contexts.length === 1) {
-                        throw new Error("offline");
-                    }
-                    return { state: "accepted", print_job_id: "job-1" };
-                },
+        const client = {
+            async submit(context) {
+                contexts.push(context);
+                if (contexts.length === 1) {
+                    throw new InariAgentError("printer_offline", "Printer offline", {
+                        status: 503,
+                        retryable: true,
+                    });
+                }
+                return {
+                    state: "accepted",
+                    print_intent_id: context.print_intent_id,
+                    print_job_id: "job-1",
+                    device_id: context.device_id,
+                    state_version: 1,
+                };
             },
-            contextStore: new MemoryContextStore(),
-            render: async () => {
-                renders += 1;
-                return new Blob(["jpeg"], { type: "image/jpeg" });
-            },
+        };
+        const recovery = new PrintRecoveryCoordinator({
+            store: new MemoryRecoveryStore(),
+            clientForContext: async () => client,
         });
+        await recovery.restore();
         const { receipts } = source();
         const plan = await new PreparationPlanBook({
             randomUUID: () => "00000000-0000-0000-0000-000000000001",
@@ -102,9 +111,17 @@ describe("Odoo preparation printing", () => {
             source: preparationSource(receipts[0]),
             posSessionId: 42,
         });
+        renders += 1;
+        const jpeg = new Blob(["jpeg"], { type: "image/jpeg" });
+        const submissionContext = await materializeSubmissionContext(plan, jpeg);
 
-        const failed = await printer.printReceipt({}, plan);
-        const accepted = await printer.printReceipt({}, plan);
+        const failed = await recovery.enqueue({
+            context: submissionContext,
+            jpeg,
+            client,
+        });
+        await recovery.act(plan.print_intent_id, "retry");
+        const accepted = recovery.knownResult(plan.print_intent_id);
 
         assert.equal(failed.accepted, false);
         assert.equal(accepted.accepted, true);

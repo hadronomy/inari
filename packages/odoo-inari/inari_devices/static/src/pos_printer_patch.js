@@ -1,6 +1,8 @@
 /** @odoo-module */
 
 import { OrderReceipt } from "@point_of_sale/app/screens/receipt_screen/receipt/order_receipt";
+import { RetryPrintPopup } from "@point_of_sale/app/components/popups/retry_print_popup/retry_print_popup";
+import { changesToOrder } from "@point_of_sale/app/models/utils/order_change";
 import {
     PosPrinterService,
     posPrinterService,
@@ -91,6 +93,103 @@ patch(PosStore.prototype, {
         return markPreparationSegments(receiptsData, orderData, changes, orderChange);
     },
 
+    async sendOrderInPreparation(order, opts = {}) {
+        if (!hasAuthoritativePreparation(this.unwatched?.printers)) {
+            return super.sendOrderInPreparation(...arguments);
+        }
+        let isPrinted = false;
+        let canAdvance = true;
+        const inariDevice = this.env.services.inari_device;
+        inariDevice.beginPreparationAttempt(order.uuid);
+        try {
+            this.syncingOrders.add(order.uuid);
+            if (this.config.printerCategories.size && !opts.byPassPrint) {
+                const orderChange = changesToOrder(
+                    order,
+                    this.config.printerCategories,
+                    opts.cancelled,
+                );
+                const hasChanges =
+                    orderChange.new.length ||
+                    orderChange.cancelled.length ||
+                    orderChange.noteUpdate.length ||
+                    orderChange.internal_note ||
+                    orderChange.general_customer_note;
+                if (!order.uiState.isReprinting) {
+                    order.uiState.lastPrints.push(orderChange);
+                }
+                if (hasChanges) {
+                    isPrinted = await this.printChanges(order, [orderChange]);
+                }
+            }
+            canAdvance = inariDevice.canAdvancePreparation(order.uuid);
+            if (canAdvance) {
+                order.updateLastOrderChange();
+            }
+        } finally {
+            this.syncingOrders.delete(order.uuid);
+            inariDevice.endPreparationAttempt(order.uuid);
+        }
+        if (isPrinted && canAdvance && !this.models["pos.prep.display"]?.length) {
+            await this.syncAllOrders({ orders: [order] });
+        }
+    },
+
+    async printChanges(order, orderChange, reprint = false, printers = this.unwatched.printers) {
+        if (!hasAuthoritativePreparation(printers)) {
+            return super.printChanges(...arguments);
+        }
+        let isPrinted = false;
+        const nativeFailures = [];
+        const nativeRetryPrinters = new Set();
+
+        for (const printer of printers) {
+            for (const change of orderChange) {
+                const { orderData, changes } = this.generateOrderChange(
+                    order,
+                    change,
+                    printer.config.product_categories_ids,
+                    reprint,
+                );
+                const receiptsData = await this.generateReceiptsDataToPrint(
+                    orderData,
+                    changes,
+                    change,
+                );
+                for (const data of receiptsData) {
+                    // oxlint-disable-next-line no-await-in-loop
+                    const result = await this.printOrderChanges(data, printer);
+                    if (result.successful) {
+                        isPrinted = true;
+                        if (result.warningCode) {
+                            this.displayPrinterWarning(result, printer.config.name);
+                        }
+                    } else if (result.inari) {
+                        this.env.services.inari_device.blockPreparationAttempt(order.uuid, {
+                            tracked: Boolean(result.printIntentId),
+                        });
+                    } else if (!result.inari) {
+                        nativeRetryPrinters.add(printer);
+                        nativeFailures.push(
+                            `${printer.config.name}: ${result.message?.body || "Print failed"}`,
+                        );
+                    }
+                }
+            }
+        }
+
+        if (nativeFailures.length) {
+            this.dialog.add(RetryPrintPopup, {
+                message: nativeFailures.join("\n"),
+                canRetry: true,
+                retry: () => {
+                    this.printChanges(order, orderChange, reprint, nativeRetryPrinters);
+                },
+            });
+        }
+        return isPrinted;
+    },
+
     async printOrderChanges(data, printer) {
         const binding = printer?.config?.inari_preparation_binding;
         if (binding?.authoritative !== true) {
@@ -108,6 +207,14 @@ patch(PosStore.prototype, {
         );
     },
 });
+
+function hasAuthoritativePreparation(printers) {
+    return Boolean(
+        [...(printers || [])].some(
+            (printer) => printer.config.inari_preparation_binding?.authoritative === true,
+        ),
+    );
+}
 
 async function servicesPlan(store, binding, source) {
     if (!source) {
