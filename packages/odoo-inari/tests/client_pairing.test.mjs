@@ -20,7 +20,7 @@ function binding() {
         browser_origin: "https://odoo.example",
         agent_endpoint: "https://agent.example",
         audience: "inari-agent",
-        requested_permissions: ["receipt_image"],
+        requested_permissions: ["device_work:receipt_image", "jobs:read"],
     };
 }
 
@@ -91,7 +91,7 @@ describe("Odoo browser Client Pairing", () => {
                 request_id: "pairing_request-1",
                 scope,
                 browser_jwk_thumbprint: requestThumbprint,
-                requested_permissions: ["receipt_image"],
+                requested_permissions: ["device_work:receipt_image", "jobs:read"],
                 session_nonce: "session_nonce-1",
                 phrase: "amber-river-seven",
                 approval_uri: "inari://pairing/pairing_request-1",

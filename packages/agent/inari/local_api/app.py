@@ -77,7 +77,12 @@ def create_app(
                         AuthorizationMode.CLIENT_GRANT,
                         permission=Permission.RECEIPT_IMAGE,
                         name="receipt image submission",
-                    )
+                    ),
+                    ("POST", "/v1/jobs/query"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.JOBS_READ,
+                        name="Print Job reconciliation",
+                    ),
                 }
             ),
             authorizer=app_container.device_work_authorizer,

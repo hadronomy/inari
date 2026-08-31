@@ -2254,6 +2254,157 @@
         "title": "PairingScopeResponse",
         "type": "object"
       },
+      "PosPrintOriginResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_revision": {
+            "title": "Content Revision",
+            "type": "string"
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "document_kind": {
+            "title": "Document Kind",
+            "type": "string"
+          },
+          "kind": {
+            "default": "pos",
+            "enum": [
+              "pos"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "offline_order_id": {
+            "title": "Offline Order Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "paired_client_id": {
+            "title": "Paired Client Id",
+            "type": "string"
+          },
+          "pos_configuration_id": {
+            "title": "Pos Configuration Id",
+            "type": "string"
+          },
+          "pos_session_id": {
+            "title": "Pos Session Id",
+            "type": "string"
+          },
+          "server_order_id": {
+            "nullable": true,
+            "title": "Server Order Id",
+            "type": "string"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "site_id",
+          "database",
+          "paired_client_id",
+          "pos_configuration_id",
+          "pos_session_id",
+          "offline_order_id",
+          "server_order_id",
+          "document_kind",
+          "content_revision"
+        ],
+        "title": "PosPrintOriginResponse",
+        "type": "object"
+      },
+      "PreparationPrintOriginResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_revision": {
+            "title": "Content Revision",
+            "type": "string"
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "document_kind": {
+            "title": "Document Kind",
+            "type": "string"
+          },
+          "kind": {
+            "default": "preparation",
+            "enum": [
+              "preparation"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "offline_order_id": {
+            "title": "Offline Order Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "paired_client_id": {
+            "title": "Paired Client Id",
+            "type": "string"
+          },
+          "pos_configuration_id": {
+            "title": "Pos Configuration Id",
+            "type": "string"
+          },
+          "pos_session_id": {
+            "title": "Pos Session Id",
+            "type": "string"
+          },
+          "preparation_revision": {
+            "title": "Preparation Revision",
+            "type": "string"
+          },
+          "segment_index": {
+            "title": "Segment Index",
+            "type": "integer"
+          },
+          "segment_kind": {
+            "title": "Segment Kind",
+            "type": "string"
+          },
+          "server_order_id": {
+            "nullable": true,
+            "title": "Server Order Id",
+            "type": "string"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "site_id",
+          "database",
+          "paired_client_id",
+          "pos_configuration_id",
+          "pos_session_id",
+          "offline_order_id",
+          "server_order_id",
+          "document_kind",
+          "content_revision",
+          "segment_kind",
+          "segment_index",
+          "preparation_revision"
+        ],
+        "title": "PreparationPrintOriginResponse",
+        "type": "object"
+      },
       "PrincipalKind": {
         "enum": [
           "local_client",
@@ -2308,6 +2459,58 @@
           "audience"
         ],
         "title": "PrincipalResponse",
+        "type": "object"
+      },
+      "PrintJobQueryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "print_intent_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Print Intent Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "print_intent_ids"
+        ],
+        "title": "PrintJobQueryRequest",
+        "type": "object"
+      },
+      "PrintJobQueryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "high_water_mark": {
+            "title": "High Water Mark",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PublicPrintJobResponse"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "missing_print_intent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Print Intent Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "jobs",
+          "missing_print_intent_ids",
+          "high_water_mark"
+        ],
+        "title": "PrintJobQueryResponse",
         "type": "object"
       },
       "PrintTestPageCommandInput": {
@@ -2490,6 +2693,137 @@
         "title": "PublicEd25519JwkInput",
         "type": "object"
       },
+      "PublicPrintJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "confirmation_evidence": {
+            "enum": [
+              "device",
+              "spooler",
+              "transport"
+            ],
+            "nullable": true,
+            "title": "Confirmation Evidence",
+            "type": "string"
+          },
+          "contract_version": {
+            "title": "Contract Version",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "error_code": {
+            "nullable": true,
+            "title": "Error Code",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "managed_work_id": {
+            "nullable": true,
+            "title": "Managed Work Id",
+            "type": "string"
+          },
+          "message_key": {
+            "nullable": true,
+            "title": "Message Key",
+            "type": "string"
+          },
+          "origin": {
+            "discriminator": {
+              "mapping": {
+                "pos": "#/components/schemas/PosPrintOriginResponse",
+                "preparation": "#/components/schemas/PreparationPrintOriginResponse",
+                "report": "#/components/schemas/ReportPrintOriginResponse"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PosPrintOriginResponse"
+              },
+              {
+                "$ref": "#/components/schemas/PreparationPrintOriginResponse"
+              },
+              {
+                "$ref": "#/components/schemas/ReportPrintOriginResponse"
+              }
+            ],
+            "title": "Origin"
+          },
+          "print_intent_id": {
+            "title": "Print Intent Id",
+            "type": "string"
+          },
+          "print_job_id": {
+            "title": "Print Job Id",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Started At",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "accepted",
+              "in_progress",
+              "output_confirmed",
+              "failed",
+              "outcome_unknown",
+              "expired",
+              "canceled"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "state_version": {
+            "title": "State Version",
+            "type": "integer"
+          },
+          "terminal_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Terminal At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "print_job_id",
+          "print_intent_id",
+          "device_id",
+          "origin",
+          "state",
+          "state_version",
+          "accepted_at",
+          "started_at",
+          "terminal_at",
+          "expires_at",
+          "retryable",
+          "error_code",
+          "message_key",
+          "confirmation_evidence",
+          "managed_work_id",
+          "contract_version"
+        ],
+        "title": "PublicPrintJobResponse",
+        "type": "object"
+      },
       "QueueSummaryResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2537,6 +2871,82 @@
           "total"
         ],
         "title": "QueueSummaryResponse",
+        "type": "object"
+      },
+      "ReportPrintOriginResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "string"
+          },
+          "database": {
+            "title": "Database",
+            "type": "string"
+          },
+          "kind": {
+            "default": "report",
+            "enum": [
+              "report"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "organization_id": {
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "record_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Record Ids",
+            "type": "array"
+          },
+          "rendered_document_index": {
+            "title": "Rendered Document Index",
+            "type": "integer"
+          },
+          "report_action": {
+            "title": "Report Action",
+            "type": "string"
+          },
+          "report_binding_id": {
+            "title": "Report Binding Id",
+            "type": "string"
+          },
+          "report_route": {
+            "title": "Report Route",
+            "type": "string"
+          },
+          "site_id": {
+            "title": "Site Id",
+            "type": "string"
+          },
+          "source_model": {
+            "title": "Source Model",
+            "type": "string"
+          },
+          "wizard_input_digest": {
+            "nullable": true,
+            "title": "Wizard Input Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "site_id",
+          "database",
+          "company_id",
+          "report_binding_id",
+          "report_route",
+          "report_action",
+          "source_model",
+          "record_ids",
+          "wizard_input_digest",
+          "rendered_document_index"
+        ],
+        "title": "ReportPrintOriginResponse",
         "type": "object"
       },
       "RuntimeEventKind": {
@@ -4825,6 +5235,97 @@
           }
         },
         "summary": "Submit Device Work",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/query": {
+      "post": {
+        "operationId": "query_print_jobs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrintJobQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintJobQueryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Query Print Jobs",
         "tags": [
           "jobs"
         ]

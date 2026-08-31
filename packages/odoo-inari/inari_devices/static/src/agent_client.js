@@ -3,6 +3,8 @@
 import { envelopeFor } from "./submission_context";
 
 const DPOP_NONCE_BYTES = 24;
+const MAX_RECONCILIATION_IDS = 100;
+const STABLE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 
 export class InariAgentError extends Error {
     constructor(code, message, { status = null, retryable = false } = {}) {
@@ -179,6 +181,24 @@ export class InariAgentClient {
             method: "POST",
             headers: { "Idempotency-Key": context.print_intent_id },
             body: form,
+        });
+        return response.json();
+    }
+
+    async queryPrintJobs(printIntentIds) {
+        if (
+            !Array.isArray(printIntentIds) ||
+            printIntentIds.length < 1 ||
+            printIntentIds.length > MAX_RECONCILIATION_IDS ||
+            printIntentIds.some((value) => typeof value !== "string" || !STABLE_IDENTIFIER.test(value))
+        ) {
+            throw new TypeError("Print Job reconciliation requires 1 to 100 Print Intent IDs");
+        }
+        const uniqueIds = [...new Set(printIntentIds)];
+        const response = await this.protectedRequest("/v1/jobs/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: canonicalJson({ print_intent_ids: uniqueIds }),
         });
         return response.json();
     }

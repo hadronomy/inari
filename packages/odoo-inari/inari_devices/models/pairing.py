@@ -36,7 +36,8 @@ _REQUEST_FIELDS = frozenset(
         "state",
     }
 )
-_PAIRING_PERMISSION = "receipt_image"
+_PAIRING_PERMISSIONS = ("device_work:receipt_image", "jobs:read")
+_RECEIPT_OPERATION = "receipt_image"
 
 
 def _identifier(values, name):
@@ -89,8 +90,8 @@ def _validated_request(values):
     if not isinstance(values, dict) or set(values) != _REQUEST_FIELDS:
         raise ValidationError(_("The Pairing Request shape is invalid."))
     permissions = values.get("requested_permissions")
-    if permissions != [_PAIRING_PERMISSION]:
-        raise AccessError(_("This POS can request receipt printing only."))
+    if not isinstance(permissions, list) or tuple(permissions) != _PAIRING_PERMISSIONS:
+        raise AccessError(_("This POS can request printing and Print Job status only."))
     thumbprint = values.get("browser_jwk_thumbprint")
     session_nonce = values.get("session_nonce")
     if not isinstance(thumbprint, str) or not _THUMBPRINT.fullmatch(thumbprint):
@@ -260,7 +261,7 @@ class InariPairingAssertion(models.Model):
             if self.env.is_superuser()
             or self.env.user.has_group("inari_devices.group_inari_manager")
             else "operator",
-            "scopes": [_PAIRING_PERMISSION],
+            "scopes": list(_PAIRING_PERMISSIONS),
             "session_nonce": pairing_request["session_nonce"],
         }
         try:
@@ -332,7 +333,7 @@ class InariPairingAssertion(models.Model):
             lambda candidate: (
                 candidate.active_revision_id.state == "active"
                 and candidate.active_revision_id.capability_id.operation
-                == _PAIRING_PERMISSION
+                == _RECEIPT_OPERATION
                 and candidate.active_revision_id.device_id.agent_id.agent_id
                 == requested_agent_id
             )

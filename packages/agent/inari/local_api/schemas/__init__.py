@@ -64,6 +64,11 @@ from .device_work import (
     ReceiptImageEnvelope,
     SubmissionContextInput,
 )
+from .public_print_jobs import (
+    PrintJobQueryRequest,
+    PrintJobQueryResponse,
+    PublicPrintJobResponse,
+)
 from .onboarding import (
     ManagedOnboardingDeviceConfirmationRequest,
     ManagedOnboardingInvitationRequest,
@@ -147,9 +152,12 @@ __all__ = [
     "DeviceWorkAcceptedResponse",
     "PrincipalResponse",
     "PrintTestPageCommandInput",
+    "PrintJobQueryRequest",
+    "PrintJobQueryResponse",
     "PrinterCapability",
     "PrinterDetailsResponse",
     "ProblemDetailsResponse",
+    "PublicPrintJobResponse",
     "QueueSummaryResponse",
     "PosPrintOriginInput",
     "PreparationPrintOriginInput",

@@ -2922,6 +2922,16 @@ The Local Agent Interface contains these versioned endpoints:
 - `POST /v1/jobs/query`
 - `GET /v1/events`.
 
+`POST /v1/jobs/query` accepts 1 to 100 Print Intent IDs. The Agent derives the
+Organization, Site, POS Configuration, and Paired Client from the accepted
+Client Grant. It returns public Print Job snapshots in request order, missing
+Print Intent IDs, and a scope-specific high-water mark. An out-of-scope Print
+Intent is reported as missing. The request and response contain no Device Work,
+Receipt Payload, or raw Driver output.
+
+The POS browser pairing requests exactly `device_work:receipt_image` and
+`jobs:read`. Capability selection still uses the `receipt_image` operation.
+
 Client Pairing uses a separate privileged Interface under `/pairing/v1/`.
 Device Work credentials cannot call that Interface.
 

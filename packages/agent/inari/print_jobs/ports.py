@@ -8,12 +8,21 @@ from .models import (
     JobEvent,
     PayloadFingerprint,
     PrintOrigin,
+    PrintIntentPage,
+    PrintIntentQuery,
     PrintJob,
     PrintJobPage,
     PrintJobQuery,
     PrintJobScope,
     SubmissionResult,
 )
+
+
+class PrintJobReader(Protocol):
+    """Content-free Print Job reads with scope enforcement inside the adapter."""
+
+    async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
+        """Return exact scoped snapshots and scoped reconciliation position."""
 
 
 class PrintJobSubmission(Protocol):
@@ -46,11 +55,11 @@ class PrintJobModule(Protocol):
     async def query(self, query: PrintJobQuery) -> PrintJobPage:
         """Return bounded snapshots and an immutable reconciliation high-water mark."""
 
-    async def subscribe(
+    def subscribe(
         self, *, after: int, scope: PrintJobScope
     ) -> AsyncIterator[EventStreamItem]:
         """Yield a ready barrier, then durable events after a sequence cursor."""
-        yield  # pragma: no cover - protocol method body
+        ...
 
 
 class PrintJobStore(Protocol):

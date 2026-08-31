@@ -3,7 +3,7 @@
 const DATABASE_NAME = "inari-client-trust";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "pairings";
-const PAIRING_PERMISSION = "receipt_image";
+const PAIRING_PERMISSIONS = Object.freeze(["device_work:receipt_image", "jobs:read"]);
 const TOKEN_RENEWAL_MARGIN_MS = 60_000;
 const INITIAL_NONCE_BYTES = 24;
 
@@ -106,8 +106,10 @@ function requiredBinding(binding, browserOrigin) {
     }
     if (
         !Array.isArray(binding.requested_permissions) ||
-        binding.requested_permissions.length !== 1 ||
-        binding.requested_permissions[0] !== PAIRING_PERMISSION
+        binding.requested_permissions.length !== PAIRING_PERMISSIONS.length ||
+        binding.requested_permissions.some(
+            (permission, index) => permission !== PAIRING_PERMISSIONS[index],
+        )
     ) {
         throw new TypeError("The POS receipt binding has invalid pairing permissions");
     }

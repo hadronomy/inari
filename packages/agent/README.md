@@ -37,7 +37,7 @@ The API is organized around a small set of resources:
 | Local trust | `/auth/local-challenge`, `/auth/local-token`, `/auth/pairing/*`, `/auth/me` |
 | Agent state | `/system/status`, `/gateway/identity`, `/gateway/upstream/status` |
 | Devices | `/devices`, `/devices/{device_id}`, `/devices/{device_id}/events` |
-| Work | `/v1/device-work`, `/device-commands`, `/jobs`, `/jobs/{job_id}` |
+| Work | `/v1/device-work`, `/v1/jobs/query`, `/device-commands`, `/jobs`, `/jobs/{job_id}` |
 | Live updates | `WS /events` |
 
 Operational routes require a scoped local token. Device Center pairs, signs a
@@ -112,8 +112,18 @@ POS configuration, operator, pairing, generation, and authorization digest.
 The request body cannot override these authority values.
 
 The Agent returns `202 Accepted` only after durable admission. An exact replay
-returns the same Print Job with `200 OK`. Follow the Print Job through
-`/jobs/{job_id}` or the live event stream.
+returns the same Print Job with `200 OK`.
+
+## Reconcile Print Jobs
+
+`POST /v1/jobs/query` accepts 1 to 100 stable `print_intent_ids`. The Client
+Grant must include `jobs:read`. The Agent derives Organization, Site, POS
+configuration, and paired-client scope from the accepted grant. The body
+cannot supply or override this scope.
+
+The response returns the public, content-free Print Job projection in request
+order. A missing or out-of-scope Print Intent appears in
+`missing_print_intent_ids`. The two cases are intentionally indistinguishable.
 
 ## Runtime and drivers
 

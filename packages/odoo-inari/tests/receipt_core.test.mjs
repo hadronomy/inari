@@ -125,8 +125,43 @@ describe("Odoo Inari receipt core", () => {
             fetches[0].headers.get("Idempotency-Key"),
             fetches[1].headers.get("Idempotency-Key"),
         );
-        assert.equal(fetches[0].body.get("envelope").type, "application/json");
+        assert.equal(
+            fetches[0].body.get("envelope").type.startsWith("application/json"),
+            true,
+        );
         assert.equal(fetches[0].body.get("document").type, "image/jpeg");
+    });
+
+    test("queries Print Jobs by stable Print Intent identity", async () => {
+        const requests = [];
+        const client = new InariAgentClient({
+            baseUrl: "https://agent.example",
+            credentials: {
+                getAccessToken: async () => "access-token",
+                createProof: async () => "proof",
+            },
+            cryptoApi: {
+                getRandomValues(bytes) {
+                    bytes.fill(9);
+                    return bytes;
+                },
+            },
+            fetchApi: async (url, options) => {
+                requests.push({ url, options });
+                return Response.json({
+                    jobs: [],
+                    missing_print_intent_ids: ["intent-1"],
+                    high_water_mark: 0,
+                });
+            },
+        });
+
+        const result = await client.queryPrintJobs(["intent-1", "intent-1"]);
+
+        assert.deepEqual(result.missing_print_intent_ids, ["intent-1"]);
+        assert.equal(requests[0].url, "https://agent.example/v1/jobs/query");
+        assert.equal(requests[0].options.headers.get("Content-Type"), "application/json");
+        assert.equal(requests[0].options.body, '{"print_intent_ids":["intent-1"]}');
     });
 
     test("keeps one immutable context through a failed submission and retry", async () => {

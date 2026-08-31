@@ -7,6 +7,7 @@ from ..config import AgentSettings
 from ..client_trust import ClientTrustService
 from ..application.container import AgentContainer, get_default_container
 from .device_work import DeviceWorkSubmission
+from .print_job_queries import PrintJobQueries
 from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..runtime.events import EventHub
@@ -44,6 +45,12 @@ def get_device_work_submission(
     container: AgentContainer = Depends(get_container),
 ) -> DeviceWorkSubmission:
     return container.device_work_submission
+
+
+def get_print_job_queries(
+    container: AgentContainer = Depends(get_container),
+) -> PrintJobQueries:
+    return container.print_job_queries
 
 
 def get_client_trust_service(

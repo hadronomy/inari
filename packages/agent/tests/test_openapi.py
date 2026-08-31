@@ -36,6 +36,7 @@ def test_contract_exposes_only_the_explicit_device_work_submission(
         paths = contract["paths"]
         assert isinstance(paths, dict)
         assert "/v1/device-work" in paths
+        assert "/v1/jobs/query" in paths
         assert "/print-jobs" not in paths
         operation = paths["/v1/device-work"]
         assert isinstance(operation, dict)
@@ -47,6 +48,11 @@ def test_contract_exposes_only_the_explicit_device_work_submission(
             "DPoP-Nonce",
             "WWW-Authenticate",
         }
+        query_operation = paths["/v1/jobs/query"]["post"]
+        query_schema = query_operation["requestBody"]["content"]["application/json"][
+            "schema"
+        ]
+        assert query_schema["$ref"].endswith("/PrintJobQueryRequest")
 
 
 def test_contract_exposes_the_separate_client_pairing_interface(

@@ -18,6 +18,8 @@ from inari.print_jobs import (
     PrintJob,
     PrintJobPage,
     PrintJobQuery,
+    PrintIntentPage,
+    PrintIntentQuery,
     PrintJobState,
     ReportPrintOrigin,
     SiteManagerScope,
@@ -97,9 +99,7 @@ def outcome_unknown(at: datetime = NOW + timedelta(seconds=3)) -> PrintJob:
 def test_public_state_machine_is_strict() -> None:
     assert can_transition(PrintJobState.ACCEPTED, PrintJobState.IN_PROGRESS)
     assert can_transition(PrintJobState.IN_PROGRESS, PrintJobState.OUTCOME_UNKNOWN)
-    assert can_transition(
-        PrintJobState.OUTCOME_UNKNOWN, PrintJobState.OUTPUT_CONFIRMED
-    )
+    assert can_transition(PrintJobState.OUTCOME_UNKNOWN, PrintJobState.OUTPUT_CONFIRMED)
     assert not can_transition(PrintJobState.ACCEPTED, PrintJobState.OUTPUT_CONFIRMED)
     assert not can_transition(PrintJobState.IN_PROGRESS, PrintJobState.CANCELED)
     assert not can_transition(PrintJobState.FAILED, PrintJobState.IN_PROGRESS)
@@ -157,7 +157,10 @@ def test_start_and_expiry_respect_the_accepted_deadline() -> None:
         )
     with pytest.raises(ValueError, match="before expires_at"):
         transition(job(), PrintJobState.EXPIRED, at=deadline - timedelta(seconds=1))
-    assert transition(job(), PrintJobState.EXPIRED, at=deadline).state is PrintJobState.EXPIRED
+    assert (
+        transition(job(), PrintJobState.EXPIRED, at=deadline).state
+        is PrintJobState.EXPIRED
+    )
 
 
 def test_outcome_unknown_can_improve_only_during_active_reconciliation() -> None:
@@ -299,9 +302,7 @@ def test_batch_query_rejects_empty_invalid_and_oversized_input() -> None:
 
 
 def test_page_tracks_missing_ids_and_agent_high_water() -> None:
-    page = PrintJobPage(
-        jobs=(job(),), missing_job_ids=("job_02",), high_water_mark=7
-    )
+    page = PrintJobPage(jobs=(job(),), missing_job_ids=("job_02",), high_water_mark=7)
     assert page.missing_job_ids == ("job_02",)
     with pytest.raises(ValueError, match="nonnegative"):
         replace(page, high_water_mark=-1)
@@ -309,11 +310,34 @@ def test_page_tracks_missing_ids_and_agent_high_water() -> None:
         replace(page, missing_job_ids=("job_01",))
     with pytest.raises(ValueError, match="100"):
         PrintJobPage(
-            jobs=tuple(
-                replace(job(), job_id=f"job_{index}") for index in range(100)
-            ),
+            jobs=tuple(replace(job(), job_id=f"job_{index}") for index in range(100)),
             missing_job_ids=("job_101",),
             high_water_mark=7,
+        )
+
+
+def test_print_intent_query_and_page_are_bounded_and_exact() -> None:
+    scope = PairedClientScope(
+        organization_id="org_01",
+        site_id="site_01",
+        pos_configuration_id="pos_01",
+        paired_client_id="client_01",
+    )
+    query = PrintIntentQuery.from_ids(
+        ["intent_01", "intent_01", "intent_02"], scope=scope
+    )
+    assert query.print_intent_ids == ("intent_01", "intent_02")
+    page = PrintIntentPage(
+        jobs=(job(),),
+        missing_print_intent_ids=("intent_02",),
+        high_water_mark=9,
+    )
+    assert page.high_water_mark == 9
+    with pytest.raises(ValueError, match="both present and missing"):
+        replace(page, missing_print_intent_ids=("intent_01",))
+    with pytest.raises(ValueError, match="100"):
+        PrintIntentQuery.from_ids(
+            [f"intent_{index}" for index in range(101)], scope=scope
         )
 
 

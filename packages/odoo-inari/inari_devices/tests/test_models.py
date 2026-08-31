@@ -333,7 +333,7 @@ class TestInariDevices(TransactionCase):
             "pos_configuration_id": str(config.id),
             "audience": "inari-agent",
             "browser_jwk_thumbprint": "A" * 43,
-            "requested_permissions": ["receipt_image"],
+            "requested_permissions": ["device_work:receipt_image", "jobs:read"],
             "session_nonce": "session_nonce-1",
             "expires_at": (datetime.now(UTC) + timedelta(minutes=10))
             .isoformat()

@@ -59,7 +59,7 @@ def pos_binding_projection(env, config, binding):
         "browser_origin": browser_origin,
         "agent_endpoint": endpoint_url,
         "audience": os.environ.get("INARI_AGENT_TOKEN_AUDIENCE", "inari-agent"),
-        "requested_permissions": ["receipt_image"],
+        "requested_permissions": ["device_work:receipt_image", "jobs:read"],
         "authorization_digest": revision.authorization_digest,
         "capability_id": revision.capability_id.controller_uuid,
         "contract_major": revision.capability_id.contract_major,

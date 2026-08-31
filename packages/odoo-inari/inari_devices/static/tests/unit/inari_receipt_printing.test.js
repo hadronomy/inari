@@ -134,6 +134,42 @@ describe("Inari customer receipt printing", () => {
         expect(fetches[0].body.get("document").type).toBe("image/jpeg");
     });
 
+    test("Agent client reconciles unique Print Intent IDs through the protected query", async () => {
+        const fetches = [];
+        const client = new InariAgentClient({
+            baseUrl: "https://agent.example",
+            credentials: {
+                getAccessToken: async () => "access-token",
+                createProof: async () => "proof",
+            },
+            fetchApi: async (url, options) => {
+                fetches.push({ url, options });
+                return new Response(
+                    JSON.stringify({
+                        jobs: [],
+                        missing_print_intent_ids: ["intent-1"],
+                        high_water_mark: 0,
+                    }),
+                    { status: 200, headers: { "Content-Type": "application/json" } },
+                );
+            },
+            cryptoApi: {
+                getRandomValues(bytes) {
+                    bytes.fill(7);
+                    return bytes;
+                },
+            },
+        });
+
+        const result = await client.queryPrintJobs(["intent-1", "intent-1"]);
+
+        expect(result.missing_print_intent_ids).toEqual(["intent-1"]);
+        expect(fetches).toHaveLength(1);
+        expect(fetches[0].url).toBe("https://agent.example/v1/jobs/query");
+        expect(fetches[0].options.headers.get("Content-Type")).toBe("application/json");
+        expect(fetches[0].options.body).toBe('{"print_intent_ids":["intent-1"]}');
+    });
+
     test("receipt queue keeps one immutable context through retry", async () => {
         const calls = [];
         const queue = new ReceiptQueue({
