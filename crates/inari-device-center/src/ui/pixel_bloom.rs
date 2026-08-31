@@ -223,9 +223,12 @@ impl WallControls {
         let resting = Tuning::default();
         let slider = |min: f32, max: f32, step: f32, value: f32, cx: &mut App| {
             cx.new(|_| {
+                // `max` before `min`: setting the minimum re-clamps the thumb
+                // against whatever maximum is in force, and the default is 100,
+                // so a range that starts above it panics.
                 SliderState::new()
-                    .min(min)
                     .max(max)
+                    .min(min)
                     .step(step)
                     .default_value(value)
             })
