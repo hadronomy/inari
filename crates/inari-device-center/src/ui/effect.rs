@@ -53,6 +53,14 @@ pub struct PixelBloom {
     pub origin_x: f32,
     /// The other half of the origin.
     pub origin_y: f32,
+    /// The largest a dot grows, as a fraction of its cell.
+    pub dot_size: f32,
+    /// Device pixels the bloom front travels per second.
+    pub spread: f32,
+    /// How fast an arrived dot oscillates its size.
+    pub shimmer: f32,
+    /// Strength of the halo outside each dot.
+    pub glow: f32,
     /// Seconds since the pointer last entered or left.
     pub age: f32,
     /// `1` while the pointer is inside, `-1` after it leaves, `0` before the
@@ -73,6 +81,10 @@ impl Default for PixelBloom {
             gap: 7.0,
             origin_x: 0.0,
             origin_y: 0.0,
+            dot_size: 0.4,
+            spread: 1400.0,
+            shimmer: 2.4,
+            glow: 0.45,
             age: 0.0,
             direction: 0.0,
             near: gpui::blue(),

@@ -14,15 +14,11 @@
 // centre, and leaving unwinds in the same staggered order rather than
 // collapsing the whole field at once.
 //
-// `time`, `gap`, `origin_x`, `origin_y`, `age`, `direction`, `near` and `far`
-// are generated from the fields of `PixelBloom`.
+// Every name the body calls is generated from a field of `PixelBloom`.
 
-// A dot's size as a fraction of its cell. The reference draws at most 2px on a
-// 5px grid, so a dot covers well under half its cell even at full size.
+// The smallest a dot ever gets, as a fraction of its cell. The ceiling is
+// `dot_size`, drawn per cell between this and that.
 const MIN_EXTENT: f32 = 0.08;
-const MAX_EXTENT: f32 = 0.40;
-// Device pixels the bloom front travels per second.
-const SPREAD: f32 = 1400.0;
 // Seconds one dot takes to grow, before its own jitter is applied.
 const DURATION: f32 = 0.22;
 
@@ -45,13 +41,13 @@ fn effect(input: EffectInput) -> vec4<f32> {
     let alpha_seed = bloom_hash(index + vec2<f32>(29.1, 17.9));
     let colour_seed = bloom_hash(index + vec2<f32>(5.4, 41.2));
 
-    let ceiling = mix(MIN_EXTENT, MAX_EXTENT, size_seed);
+    let ceiling = mix(MIN_EXTENT, max(dot_size(input), MIN_EXTENT), size_seed);
 
     // A jittered delay, so the front of the bloom is ragged rather than a clean
     // expanding circle.
     let jitter = 0.75 + 0.5 * bloom_hash(index + vec2<f32>(2.6, 7.1));
     let origin = vec2<f32>(origin_x(input), origin_y(input)) * input.scale;
-    let delay = length(centre - origin) / SPREAD * jitter;
+    let delay = length(centre - origin) / max(spread(input), 1.0) * jitter;
     let travel = clamp((age(input) - delay) / (DURATION * jitter), 0.0, 1.0);
 
     let heading = direction(input);
@@ -67,7 +63,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
 
     // Arrived dots oscillate between their floor and their ceiling forever, each
     // on its own phase and speed, so a settled field is never a still image.
-    let beat = time(input) * (0.9 + 2.6 * speed_seed) + colour_seed * 6.2831853;
+    let beat = time(input) * shimmer(input) * (0.35 + speed_seed) + colour_seed * 6.2831853;
     let shimmering = mix(MIN_EXTENT, ceiling, 0.5 + 0.5 * sin(beat));
     let wanted = select(ceiling, shimmering, reach >= 1.0);
     let extent = wanted * reach;
@@ -80,10 +76,10 @@ fn effect(input: EffectInput) -> vec4<f32> {
     let core = 1.0 - smoothstep(extent - feather, extent + feather, distance);
     // The glow: a short exponential skirt outside the dot. Without it the field
     // reads as flat confetti rather than as something lit.
-    let glow = exp(-max(distance - extent, 0.0) * 34.0) * 0.45;
+    let halo = exp(-max(distance - extent, 0.0) * 34.0) * glow(input);
 
     let colour = mix(near(input), far(input), colour_seed);
     // Per-cell opacity is what keeps the field from reading as one flat tone.
-    let weight = clamp(core + glow, 0.0, 1.0) * mix(0.28, 1.0, alpha_seed);
+    let weight = clamp(core + halo, 0.0, 1.0) * mix(0.28, 1.0, alpha_seed);
     return vec4<f32>(colour.rgb, weight * colour.a);
 }

@@ -46,8 +46,11 @@ use crate::{
         field,
         gate::Gate,
         icon::Glyph,
-        material, motion, readout,
+        material, motion,
+        pixel_bloom::{self, WallControls},
+        readout,
         status::Status,
+        surface::card,
         theme::{ActiveTheme as _, Appearance, Theme},
         titlebar::WindowChrome,
     },
@@ -64,7 +67,8 @@ actions!(
         ShowSupport,
         ShowSetup,
         ShowBanners,
-        ShowEffects
+        ShowEffects,
+        ToggleWallOrigin
     ]
 );
 
@@ -222,10 +226,12 @@ struct DevTools {
     focus_handle: FocusHandle,
     directory: Entity<DeviceDirectory>,
     invitation_input: Entity<InputState>,
+    wall_controls: WallControls,
 }
 
 impl DevTools {
     fn new(window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
+        let wall_controls = WallControls::new(cx);
         let directory = cx.new(|cx| DeviceDirectory::new(window, cx));
         directory.update(cx, |directory, cx| {
             directory.replace_devices(mock_devices(), cx);
@@ -245,7 +251,7 @@ impl DevTools {
         .detach();
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window);
-        Self { page: Page::Overview, focus_handle, directory, invitation_input }
+        Self { page: Page::Overview, focus_handle, directory, invitation_input, wall_controls }
     }
 
     fn navigate(&mut self, page: Page, cx: &mut gpui::Context<Self>) {
@@ -282,7 +288,7 @@ impl Render for DevTools {
             Page::Support => render_support(),
             Page::Setup => self.render_setup(cx),
             Page::Banners => render_banners(),
-            Page::Effects => render_effects(),
+            Page::Effects => self.render_effects(cx),
         };
 
         let theme = cx.inari();
@@ -313,6 +319,10 @@ impl Render for DevTools {
             .on_action(cx.listener(|this, _: &ShowSetup, _, cx| this.navigate(Page::Setup, cx)))
             .on_action(cx.listener(|this, _: &ShowBanners, _, cx| this.navigate(Page::Banners, cx)))
             .on_action(cx.listener(|this, _: &ShowEffects, _, cx| this.navigate(Page::Effects, cx)))
+            .on_action(cx.listener(|this, _: &ToggleWallOrigin, _, cx| {
+                this.wall_controls.toggle_origin();
+                cx.notify();
+            }))
             .size_full()
             .v_flex()
             .font_family(font)
@@ -331,6 +341,41 @@ impl Render for DevTools {
 }
 
 impl DevTools {
+    fn render_effects(&self, cx: &mut gpui::Context<Self>) -> gpui::AnyElement {
+        page("dev-effects")
+            .child(Section::new("Pixel wall — point at it").child(
+                div().h(px(380.0)).w_full().child(
+                    pixel_bloom::wall("dev-pixel-bloom").tuning(self.wall_controls.tuning(cx)),
+                ),
+            ))
+            .child(
+                Section::new("Tuning").child(
+                    card(cx.inari())
+                        .w_full()
+                        .p(px(Theme::SPACE_LG))
+                        .v_flex()
+                        .gap(px(Theme::SPACE_SM))
+                        .child(
+                            div()
+                                .h_flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(Theme::SPACE_MD))
+                                .child("Bloom from the pointer, not the centre")
+                                .child(
+                                    Switch::new("wall-from-pointer")
+                                        .checked(self.wall_controls.blooms_from_pointer())
+                                        .on_click(|_, window, cx| {
+                                            window.dispatch_action(Box::new(ToggleWallOrigin), cx);
+                                        }),
+                                ),
+                        )
+                        .child(self.wall_controls.render(cx)),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn render_overview(&self, cx: &mut gpui::Context<Self>) -> gpui::AnyElement {
         let healthy_devices = vec![
             device("Front desk printer", DeviceKind::Printer, DeviceState::Online),
@@ -582,21 +627,6 @@ fn render_support() -> gpui::AnyElement {
             None,
             false,
         )))
-        .into_any_element()
-}
-
-fn render_effects() -> gpui::AnyElement {
-    use crate::ui::pixel_bloom;
-
-    page("dev-effects")
-        .child(
-            Section::new("Pixel wall — point at it").child(
-                div()
-                    .h(px(420.0))
-                    .w_full()
-                    .child(pixel_bloom::wall("dev-pixel-bloom")),
-            ),
-        )
         .into_any_element()
 }
 
