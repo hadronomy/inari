@@ -29,7 +29,12 @@ from inari.client_trust import (
     Permission,
     RequestTarget,
 )
-from inari.documents import AdmissionAccepted, AdmissionRequest, DocumentWork
+from inari.documents import (
+    AdmissionAccepted,
+    AdmissionRequest,
+    DocumentWork,
+    PreparationPrintOrigin,
+)
 from inari.drivers import (
     DeviceIdentity,
     DeviceKind,
@@ -445,19 +450,23 @@ def test_committed_event_fixture_matches_the_python_contract() -> None:
     assert events[0].resource_id == "dev_front_desk"
 
 
-@pytest.mark.anyio
-async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
-    container = make_test_container(mocker=mocker)
-    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
-    envelope = {
+def device_work_envelope(
+    device_id: str,
+    *,
+    print_intent_id: str = "pi_v1_test",
+    origin: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
         "contract_major": 1,
         "operation": "receipt_image",
         "media_type": "image/jpeg",
         "context": {
             "contract_major": 1,
-            "print_intent_id": "pi_v1_test",
-            "origin_submission_key": "osk_v1_test",
-            "origin": {
+            "print_intent_id": print_intent_id,
+            "origin_submission_key": f"osk:{print_intent_id}",
+            "origin": origin
+            or {
+                "kind": "pos",
                 "pos_session_id": "pos_session_42",
                 "offline_order_id": "order-1",
                 "server_order_id": None,
@@ -469,6 +478,13 @@ async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
             "copy_ordinal": 1,
         },
     }
+
+
+@pytest.mark.anyio
+async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
+    envelope = device_work_envelope(device_id)
 
     async with async_client_for(container) as client:
         headers = await auth_headers(client)
@@ -510,6 +526,52 @@ async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
         admission.submitted_request.grant.authorization_digest
         == "authorization_digest_1"
     )
+
+
+@pytest.mark.anyio
+async def test_submit_preparation_work_preserves_segment_identity(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
+    envelope = device_work_envelope(
+        device_id,
+        print_intent_id="pi_v1_preparation",
+        origin={
+            "kind": "preparation",
+            "pos_session_id": "pos_session_42",
+            "offline_order_id": "order-1",
+            "server_order_id": None,
+            "document_kind": "preparation_ticket",
+            "content_revision": "sha256:ticket-image",
+            "segment_kind": "new",
+            "segment_index": 0,
+            "preparation_revision": "sha256:order-change",
+        },
+    )
+
+    async with async_client_for(container) as client:
+        headers = await auth_headers(client)
+        headers["Idempotency-Key"] = "pi_v1_preparation"
+        response = await client.post(
+            "/v1/device-work",
+            files={
+                "envelope": (
+                    None,
+                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    "application/json",
+                ),
+                "document": ("ticket.jpg", b"\xff\xd8ticket\xff\xd9", "image/jpeg"),
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 202
+    admission = cast(StubDocumentAdmission, container.document_admission)
+    assert admission.submitted_work is not None
+    origin = admission.submitted_work.context.origin
+    assert isinstance(origin, PreparationPrintOrigin)
+    assert origin.segment_kind == "new"
+    assert origin.segment_index == 0
+    assert origin.preparation_revision == "sha256:order-change"
 
 
 @pytest.mark.anyio
@@ -717,26 +779,7 @@ async def test_agent_errors_use_unified_problem_details_shape(mocker) -> None:
         status_code=404,
     )
     device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
-    envelope = {
-        "contract_major": 1,
-        "operation": "receipt_image",
-        "media_type": "image/jpeg",
-        "context": {
-            "contract_major": 1,
-            "print_intent_id": "pi_v1_missing",
-            "origin_submission_key": "osk_v1_missing",
-            "origin": {
-                "pos_session_id": "pos_session_42",
-                "offline_order_id": "order-1",
-                "server_order_id": None,
-                "document_kind": "customer_receipt",
-                "content_revision": "revision-1",
-            },
-            "binding_revision_id": "binding_revision_9",
-            "device_id": device_id,
-            "copy_ordinal": 1,
-        },
-    }
+    envelope = device_work_envelope(device_id, print_intent_id="pi_v1_missing")
 
     async with async_client_for(container) as client:
         headers = await auth_headers(client)

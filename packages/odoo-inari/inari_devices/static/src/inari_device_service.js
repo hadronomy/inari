@@ -8,6 +8,7 @@ import { ClientPairingManager } from "./client_pairing";
 import { ClientPairingDialog } from "./client_pairing_dialog";
 import { IndexedDbContextStore } from "./context_store";
 import { InariReceiptPrinter } from "./inari_printer";
+import { PreparationPlanBook } from "./preparation_print";
 import { createReceiptPlan } from "./submission_context";
 
 const FAILURE_MESSAGES = Object.freeze({
@@ -27,6 +28,25 @@ function activeBinding(pos) {
     return binding?.authoritative === true ? Object.freeze({ ...binding }) : null;
 }
 
+function channelKey(binding) {
+    return [
+        binding.browser_origin,
+        binding.agent_endpoint,
+        binding.database,
+        binding.company_id,
+        binding.organization_id,
+        binding.site_id,
+        binding.pos_configuration_id,
+        binding.agent_id,
+        binding.audience,
+        ...(binding.requested_permissions || []),
+    ].join("|");
+}
+
+function printerKey(binding) {
+    return `${channelKey(binding)}|${binding.binding_revision_id}|${binding.device_id}`;
+}
+
 /** Deep POS service for the authoritative Inari receipt path. */
 export class InariDeviceService {
     constructor({
@@ -38,23 +58,26 @@ export class InariDeviceService {
         clientFactory = (options) => new InariAgentClient(options),
         contextStoreFactory = () => new IndexedDbContextStore(),
         printerFactory = (options) => new InariReceiptPrinter(options),
+        preparationPlanBook = null,
         randomUUID = () => crypto.randomUUID(),
     } = {}) {
         this.notification = notification;
         this.dialog = dialog;
         this.rpc = rpc;
-        this.credentials = credentials;
+        this.providedCredentials = credentials;
         this.pairingManagerFactory = pairingManagerFactory;
         this.clientFactory = clientFactory;
         this.contextStoreFactory = contextStoreFactory;
         this.printerFactory = printerFactory;
         this.randomUUID = randomUUID;
+        this.preparationPlans =
+            preparationPlanBook || new PreparationPlanBook({ randomUUID: this.randomUUID });
         this.pos = null;
         this.binding = null;
-        this.client = null;
-        this.printer = null;
         this.contextStore = null;
         this.pairing = null;
+        this.channels = new Map();
+        this.printers = new Map();
         this.lastResult = null;
     }
 
@@ -62,39 +85,75 @@ export class InariDeviceService {
         this.pos = pos;
         this.binding = activeBinding(pos);
         this.pairing = null;
-        if (this.binding?.agent_endpoint && this.rpc) {
-            this.pairing = this.pairingManagerFactory({
-                binding: this.binding,
-                posSessionId: this.pos.session.id,
-                rpc: this.rpc,
-            });
-            if (await this.pairing.restore()) {
-                this.credentials = this.pairing;
-            }
+        this.channels.clear();
+        this.printers.clear();
+        if (this.binding?.agent_endpoint && this.rpc && !this.providedCredentials) {
+            const channel = this.channelFor(this.binding);
+            this.pairing = channel.manager;
+            channel.ready = await channel.manager.restore();
+            channel.restored = true;
         }
-        this.configureTransport();
     }
 
     setCredentials(credentials) {
-        this.credentials = credentials;
-        this.configureTransport();
+        this.providedCredentials = credentials;
+        this.printers.clear();
     }
 
-    configureTransport() {
-        this.client = null;
-        this.printer = null;
-        if (!this.binding?.agent_endpoint || !this.credentials) {
-            return;
+    channelFor(binding) {
+        const key = channelKey(binding);
+        let channel = this.channels.get(key);
+        if (!channel) {
+            const manager = this.pairingManagerFactory({
+                binding,
+                posSessionId: this.pos.session.id,
+                rpc: this.rpc,
+            });
+            channel = { manager, ready: false, restored: false };
+            this.channels.set(key, channel);
+        }
+        return channel;
+    }
+
+    async credentialsFor(binding) {
+        if (this.providedCredentials) {
+            return this.providedCredentials;
+        }
+        if (!this.rpc) {
+            return null;
+        }
+        const channel = this.channelFor(binding);
+        if (!channel.restored) {
+            channel.ready = await channel.manager.restore();
+            channel.restored = true;
+        }
+        if (!channel.ready && !(await this.ensurePairing(binding))) {
+            return null;
+        }
+        return channel.manager;
+    }
+
+    async printerFor(binding) {
+        const credentials = await this.credentialsFor(binding);
+        if (!credentials) {
+            return null;
+        }
+        const key = printerKey(binding);
+        const existing = this.printers.get(key);
+        if (existing) {
+            return existing;
         }
         this.contextStore ||= this.contextStoreFactory();
-        this.client = this.clientFactory({
-            baseUrl: this.binding.agent_endpoint,
-            credentials: this.credentials,
+        const client = this.clientFactory({
+            baseUrl: binding.agent_endpoint,
+            credentials,
         });
-        this.printer = this.printerFactory({
-            client: this.client,
+        const printer = this.printerFactory({
+            client,
             contextStore: this.contextStore,
         });
+        this.printers.set(key, printer);
+        return printer;
     }
 
     isReceiptAuthoritative() {
@@ -124,10 +183,11 @@ export class InariDeviceService {
         if (!this.binding?.agent_endpoint) {
             return this.fail("agent_endpoint_required");
         }
-        if ((!this.credentials || !this.printer) && !(await this.ensurePairing())) {
+        const printer = await this.printerFor(this.binding);
+        if (!printer) {
             return this.fail("pairing_required");
         }
-        const result = await this.printer.printReceipt(element, plan);
+        const result = await printer.printReceipt(element, plan);
         this.lastResult = result;
         if (!result.accepted) {
             const code =
@@ -137,18 +197,69 @@ export class InariDeviceService {
         return result;
     }
 
-    async ensurePairing() {
-        if (!this.pairing) {
+    async preparePreparationPrint(binding, source) {
+        try {
+            return await this.preparationPlans.plan({
+                binding,
+                source,
+                posSessionId: this.pos.session.id,
+            });
+        } catch (error) {
+            return Object.freeze({ planningError: error });
+        }
+    }
+
+    async printPreparation(element, plan, binding, source, printerName) {
+        let result;
+        if (plan?.planningError) {
+            result = { accepted: false, state: "failed", error: plan.planningError };
+        } else if (!binding?.agent_endpoint) {
+            result = { accepted: false, state: "failed" };
+        } else {
+            const printer = await this.printerFor(binding);
+            result = printer
+                ? await printer.printReceipt(element, plan)
+                : { accepted: false, state: "failed" };
+        }
+        if (!plan?.planningError) {
+            this.preparationPlans.settle({ binding, source, result });
+        }
+        if (result.accepted) {
+            return {
+                successful: true,
+                inari: true,
+                printIntentId: result.context.print_intent_id,
+                printJobId: result.print_job_id,
+            };
+        }
+        return {
+            successful: false,
+            canRetry: true,
+            message: {
+                title: _t("Preparation ticket not sent"),
+                body: _t(
+                    "Inari did not accept the ticket for %s. Check the printer and try again.",
+                    printerName,
+                ),
+            },
+        };
+    }
+
+    async ensurePairing(binding = this.binding) {
+        if (!binding || !this.rpc) {
             return false;
         }
+        const channel = this.channelFor(binding);
+        this.pairing = channel.manager;
         const close = this.dialog?.add(ClientPairingDialog, {
-            manager: this.pairing,
+            manager: channel.manager,
         });
         try {
-            await this.pairing.begin();
-            this.setCredentials(this.pairing);
+            await channel.manager.begin();
+            channel.ready = true;
+            channel.restored = true;
             close?.();
-            this.notification?.add(_t("Browser paired. Sending the ticket now."), {
+            this.notification?.add(_t("Browser paired. Sending the print job now."), {
                 type: "success",
             });
             return true;

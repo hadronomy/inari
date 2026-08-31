@@ -18,6 +18,7 @@ function context() {
         print_intent_id: "pi_v1_receipt_1",
         origin_submission_key: "order-1:customer_receipt:revision-1",
         origin: {
+            kind: "pos",
             pos_session_id: "session-1",
             offline_order_id: "order-1",
             server_order_id: null,
@@ -59,6 +60,7 @@ describe("Inari customer receipt printing", () => {
         const submissionContext = context();
         expect(Object.isFrozen(submissionContext)).toBe(true);
         expect(Object.keys(submissionContext.origin)).toEqual([
+            "kind",
             "pos_session_id",
             "offline_order_id",
             "server_order_id",

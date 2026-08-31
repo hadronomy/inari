@@ -23,6 +23,7 @@
             "inari_devices/static/src/submission_context.js",
             "inari_devices/static/src/context_store.js",
             "inari_devices/static/src/receipt_queue.js",
+            "inari_devices/static/src/preparation_print.js",
             "inari_devices/static/src/client_pairing.js",
             "inari_devices/static/src/client_pairing_dialog.js",
             "inari_devices/static/src/client_pairing_dialog.xml",

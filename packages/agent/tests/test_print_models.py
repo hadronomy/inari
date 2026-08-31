@@ -17,6 +17,7 @@ def receipt_envelope() -> dict[str, object]:
             "print_intent_id": "pi_v1_test",
             "origin_submission_key": "osk_v1_test",
             "origin": {
+                "kind": "pos",
                 "pos_session_id": "pos_session_42",
                 "offline_order_id": "01991a84-d0c2-7a49-89ad-2fd14bdbe501",
                 "server_order_id": None,
@@ -36,6 +37,30 @@ def test_receipt_envelope_accepts_only_work_specific_values() -> None:
     assert envelope.context.print_intent_id == "pi_v1_test"
     assert envelope.context.device_id == "dev_receipt_1"
     assert envelope.context.origin.pos_session_id == "pos_session_42"
+
+
+def test_preparation_envelope_keeps_the_exact_segment_identity() -> None:
+    payload = receipt_envelope()
+    context = payload["context"]
+    assert isinstance(context, dict)
+    context["origin"] = {
+        "kind": "preparation",
+        "pos_session_id": "pos_session_42",
+        "offline_order_id": "01991a84-d0c2-7a49-89ad-2fd14bdbe501",
+        "server_order_id": None,
+        "document_kind": "preparation_ticket",
+        "content_revision": "sha256:ticket-image",
+        "segment_kind": "cancelled",
+        "segment_index": 1,
+        "preparation_revision": "sha256:order-change",
+    }
+
+    envelope = ReceiptImageEnvelope.model_validate(payload)
+
+    origin = envelope.context.origin
+    assert origin.kind == "preparation"
+    assert origin.segment_kind == "cancelled"
+    assert origin.segment_index == 1
 
 
 @pytest.mark.parametrize(

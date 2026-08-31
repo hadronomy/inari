@@ -17,6 +17,7 @@ PURPOSES = {
 }
 PURPOSE_OPERATIONS = {
     "pos_receipt": "receipt_image",
+    "pos_preparation": "receipt_image",
     "pos_cash_drawer": "open_cashbox",
     "pos_scale": "scale_reading",
     "pos_scanner": "barcode_event",
@@ -85,10 +86,14 @@ class InariDeviceBinding(models.Model):
             "WHERE active AND scope_type = 'pos_config' AND purpose <> 'pos_preparation'"
         )
         self.env.cr.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS inari_binding_preparation_printer_active_idx "
-            "ON inari_device_binding (company_id, pos_printer_id) "
+            "DROP INDEX IF EXISTS inari_binding_preparation_printer_active_idx"
+        )
+        self.env.cr.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS inari_binding_preparation_scope_active_idx "
+            "ON inari_device_binding (company_id, pos_config_id, pos_printer_id) "
             "WHERE active AND purpose = 'pos_preparation'"
         )
+
     def _compute_revision_count(self):
         for record in self:
             record.revision_count = len(record.revision_ids)
@@ -146,7 +151,7 @@ class InariDeviceBinding(models.Model):
             if (
                 record.pos_printer_id
                 and record.pos_config_id
-                and record.pos_printer_id.config_id != record.pos_config_id
+                and record.pos_config_id not in record.pos_printer_id.pos_config_ids
             ):
                 raise ValidationError(
                     _("The preparation printer must belong to the POS configuration.")

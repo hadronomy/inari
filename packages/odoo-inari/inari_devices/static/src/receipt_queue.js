@@ -2,7 +2,7 @@
 
 import { contextKey } from "./submission_context";
 
-const TERMINAL_STATES = new Set(["accepted", "canceled", "expired", "outcome_unknown"]);
+const TERMINAL_STATES = new Set(["accepted", "canceled", "expired", "failed", "outcome_unknown"]);
 
 /** Serialize receipt admission while keeping each rendered document in memory. */
 export class ReceiptQueue {

@@ -5,6 +5,7 @@ from .pairing_assertions import (
     build_pairing_assertion_signer,
     pairing_signing_key_name,
 )
+from .pos_binding_projections import pos_binding_projection
 
 __all__ = [
     "PairingAssertionSigner",
@@ -12,4 +13,5 @@ __all__ = [
     "SignedPairingAssertion",
     "build_pairing_assertion_signer",
     "pairing_signing_key_name",
+    "pos_binding_projection",
 ]

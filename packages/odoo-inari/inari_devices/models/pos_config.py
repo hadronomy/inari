@@ -1,23 +1,6 @@
-import os
-from urllib.parse import urlsplit
-
 from odoo import fields, models
 
-
-def _is_https_origin(value):
-    try:
-        parsed = urlsplit(value)
-    except (TypeError, ValueError):
-        return False
-    return (
-        parsed.scheme == "https"
-        and bool(parsed.netloc)
-        and not parsed.username
-        and not parsed.password
-        and parsed.path in {"", "/"}
-        and not parsed.query
-        and not parsed.fragment
-    )
+from ..services import pos_binding_projection
 
 
 class PosConfig(models.Model):
@@ -30,8 +13,6 @@ class PosConfig(models.Model):
 
     def _compute_inari_receipt_binding(self):
         Binding = self.env["inari.device.binding"].sudo()
-        Endpoint = self.env["inari.agent.endpoint"].sudo()
-        browser_origin = self.get_base_url().rstrip("/")
         for config in self:
             binding = Binding.search(
                 [
@@ -43,42 +24,6 @@ class PosConfig(models.Model):
                 ],
                 limit=1,
             )
-            revision = binding.active_revision_id
-            if not revision or revision.state != "active":
-                config.inari_receipt_binding = False
-                continue
-            agent = revision.device_id.agent_id
-            endpoint = Endpoint.search(
-                [
-                    ("company_id", "=", config.company_id.id),
-                    ("agent_id", "=", agent.id),
-                    ("origin", "=", browser_origin),
-                    ("state", "=", "active"),
-                ],
-                limit=1,
+            config.inari_receipt_binding = pos_binding_projection(
+                self.env, config, binding
             )
-            endpoint_url = (
-                endpoint.endpoint_url
-                if _is_https_origin(endpoint.endpoint_url)
-                else False
-            )
-            config.inari_receipt_binding = {
-                "authoritative": True,
-                "state": "ready" if endpoint_url else "agent_endpoint_required",
-                "database": self.env.cr.dbname,
-                "company_id": str(config.company_id.id),
-                "organization_id": binding.site_id.organization_id.controller_uuid,
-                "site_id": binding.site_id.controller_uuid,
-                "pos_configuration_id": str(config.id),
-                "binding_revision_id": revision.revision_id,
-                "device_id": revision.device_id.device_id,
-                "agent_id": agent.agent_id,
-                "browser_origin": browser_origin,
-                "agent_endpoint": endpoint_url,
-                "audience": os.environ.get("INARI_AGENT_TOKEN_AUDIENCE", "inari-agent"),
-                "requested_permissions": ["receipt_image"],
-                "authorization_digest": revision.authorization_digest,
-                "capability_id": revision.capability_id.controller_uuid,
-                "contract_major": revision.capability_id.contract_major,
-                "driver_profile_digest": revision.driver_profile_digest,
-            }

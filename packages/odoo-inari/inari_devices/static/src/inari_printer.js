@@ -45,22 +45,16 @@ export class InariReceiptPrinter {
 
     async printReceipt(element, plan) {
         try {
+            const existing = this.queue
+                .snapshot()
+                .find((entry) => entry.key === plan?.print_intent_id);
+            if (existing) {
+                return this.retry(existing.key);
+            }
             const jpeg = await this.render(element);
             const context = await this.materialize(plan, jpeg);
             const entry = await this.queue.enqueue(context, jpeg);
-            if (entry.state !== "accepted") {
-                return {
-                    accepted: false,
-                    state: entry.state,
-                    error: entry.error,
-                    context,
-                };
-            }
-            return {
-                accepted: true,
-                context,
-                ...entry.result,
-            };
+            return this.result(entry);
         } catch (error) {
             return {
                 accepted: false,
@@ -70,11 +64,29 @@ export class InariReceiptPrinter {
         }
     }
 
-    retry(key) {
-        return this.queue.retry(key);
+    async retry(key) {
+        await this.queue.retry(key);
+        const entry = this.queue.snapshot().find((candidate) => candidate.key === key);
+        return this.result(entry);
     }
 
     snapshot() {
         return this.queue.snapshot();
+    }
+
+    result(entry) {
+        if (!entry || entry.state !== "accepted") {
+            return {
+                accepted: false,
+                state: entry?.state || "failed",
+                error: entry?.error || null,
+                context: entry?.context,
+            };
+        }
+        return {
+            accepted: true,
+            context: entry.context,
+            ...entry.result,
+        };
     }
 }

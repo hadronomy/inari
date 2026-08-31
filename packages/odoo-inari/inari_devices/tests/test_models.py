@@ -190,6 +190,80 @@ class TestInariDevices(TransactionCase):
         self.assertNotIn("actor_id", projection)
         self.assertNotIn("client_grant", projection)
 
+    def test_preparation_printer_loads_its_exact_local_binding(self):
+        config = self.env["pos.config"].create({"name": "Inari Kitchen POS"})
+        printer = self.env["pos.printer"].create(
+            {
+                "name": "Kitchen",
+                "pos_config_ids": [(6, 0, [config.id])],
+            }
+        )
+        capability = (
+            self.env["inari.device.capability"]
+            .sudo()
+            .sync_values(
+                {
+                    "company_id": self.company.id,
+                    "controller_uuid": "preparation-capability-test",
+                    "device_id": self.device.id,
+                    "operation": "receipt_image",
+                    "contract_major": 1,
+                },
+                1,
+            )
+        )
+        binding = (
+            self.env["inari.device.binding"]
+            .sudo()
+            .create(
+                {
+                    "company_id": self.company.id,
+                    "site_id": self.site.id,
+                    "scope_type": "pos_config",
+                    "purpose": "pos_preparation",
+                    "pos_config_id": config.id,
+                    "pos_printer_id": printer.id,
+                }
+            )
+        )
+        revision = binding.action_create_revision(self.device, capability)
+        self.env["inari.device.test.result"].sudo().create(
+            {
+                "company_id": self.company.id,
+                "binding_revision_id": revision.id,
+                "driver_profile_digest": "profile-1",
+                "pattern_version": "v1",
+                "result": "passed",
+                "checks": {"preparation": "correct"},
+                "actor_id": self.env.uid,
+                "started_at": fields.Datetime.now(),
+                "finished_at": fields.Datetime.now(),
+            }
+        )
+        binding.action_activate_revision(revision)
+        origin = config.get_base_url().rstrip("/")
+        self.env["inari.agent.endpoint"].sudo().create(
+            {
+                "company_id": self.company.id,
+                "agent_id": self.agent.id,
+                "origin": origin,
+                "endpoint_url": "https://kitchen-agent.example",
+                "certificate_fingerprint": "sha256:kitchen",
+            }
+        )
+
+        [loaded] = self.env["pos.printer"]._load_pos_data_read(printer, config)
+        projection = loaded["inari_preparation_binding"]
+        scope = self.env["inari.pairing.assertion"]._local_print_scope(
+            config, "agent-1"
+        )
+
+        self.assertTrue(projection["authoritative"])
+        self.assertEqual(projection["binding_revision_id"], revision.revision_id)
+        self.assertEqual(projection["device_id"], "device-1")
+        self.assertEqual(projection["agent_endpoint"], "https://kitchen-agent.example")
+        self.assertEqual(scope["binding"], binding)
+
     def test_pairing_assertion_is_exact_and_idempotent(self):
         self.env["ir.config_parameter"].sudo().set_param(
             "web.base.url", "https://odoo.example"

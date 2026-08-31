@@ -2350,13 +2350,13 @@ The Device Adapter Interface exposes three operations:
 - `submit(device_work)` returns the authoritative work identity and state
 - `subscribe(selection, listener)` delivers state changes for selected work.
 
-An `InariPrinter` Device Adapter extends Odoo `BasePrinter`. It serves the
-primary receipt printer and preparation printers through their existing Odoo
-seams.
+The `InariReceiptPrinter` Device Adapter serves the primary receipt printer and
+preparation printers through their existing Odoo seams. It is independent from
+Odoo proxy printer state.
 
-Narrow patches carry Submission Context through `PrinterService.printHtml()`,
-`PosPrinterService.print()`, `PosPrinterService.printHtml()`, the receipt
-caller, and `PosStore.printOrderChanges()`.
+Narrow patches carry Submission Context through `PosPrinterService.print()`,
+`PosPrinterService.printHtml()`, the receipt caller, and
+`PosStore.printOrderChanges()`.
 
 The caller creates the immutable Submission Context before Odoo renders the
 JPEG. Each `InariPrinter` queue entry stores the rendered element and its exact
@@ -2370,27 +2370,26 @@ IndexedDB stores each pending content-free Submission Context by Print Origin,
 preparation segment, Binding Revision, and Copy Ordinal. A reload or Retry
 cannot create a different context for the same Print Intent.
 
-The addon installs `InariPrinter` after POS data load and after Odoo proxy
-connection ordering completes. Active Inari bindings work when Odoo proxy flags
-are disabled.
+The frontend service creates one Agent channel for each exact Agent and Client
+Grant scope. It creates one serialized printer queue for each Binding Revision
+and Device. Odoo proxy connection ordering cannot replace or drain these
+queues.
 
-The addon creates `InariPrinter` only for an active Binding Revision. This rule
-applies to primary receipts and preparation printers. It installs the receipt
-instance in `hardwareProxy.printer`.
+The server adds an authoritative Binding Revision projection to the exact
+`pos.printer` record. It does not add a `printer_type` value or replace Odoo's
+native printer object. A preparation printer without that projection keeps its
+Native Device Path unchanged.
 
-The addon guards `HardwareProxy.connectToPrinter()` and each printer-service
-reset. These paths cannot replace an active `InariPrinter`.
-
-The guard also covers the `EpsonPrinter` assignment in
-`PosStore.afterProcessServerData()` and the reconnect effect that calls
-`printer.printReceipt()`. A native reconnect cannot submit or drain Inari work.
-
-The preparation path creates the same Device Adapter for records whose
-`printer_type` is `inari` and whose Binding Revision is active.
+Odoo continues to own category filtering, order-change calculation, receipt
+segment order, and `OrderChangeReceipt` rendering. The addon patches
+`generateOrderChange()` and `generateReceiptsDataToPrint()` only to carry the
+immutable order-change and segment identity. It patches
+`printOrderChanges()` only when the selected `pos.printer` has an authoritative
+Inari Binding Revision.
 
 `PosStore.printOrderChanges()` creates one stable preparation segment identity
 for every `receiptsData` item. It passes the exact Submission Context to
-`InariPrinter.printReceipt()`.
+`InariReceiptPrinter.printReceipt()`.
 
 Preparation delivery state is stored per order, segment, Device, and Print
 Intent. `lastPrints` and `updateLastOrderChange()` advance only through work
@@ -2902,9 +2901,9 @@ work.
 printer, cash drawer, scale, and scanner. These fields contain no copied Device
 data.
 
-`pos.printer` adds `inari` to `printer_type` and exposes its computed active
-Binding Revision. Managers edit all assignments through the Device Binding
-view and revision workflow.
+`pos.printer` exposes its computed active Binding Revision without changing
+`printer_type`. Managers edit all assignments through the Device Binding view
+and revision workflow.
 
 Device Preflight compares the server addon build identifier with the bundled
 JavaScript identifier. A mismatch requests one hard reload and preserves

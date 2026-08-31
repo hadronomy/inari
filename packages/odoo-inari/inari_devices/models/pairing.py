@@ -215,7 +215,7 @@ class InariPairingAssertion(models.Model):
             raise ValidationError(_("The Pairing Request lifetime is invalid."))
 
         session = self._active_pos_session(pos_session_id)
-        scope = self._receipt_scope(session.config_id)
+        scope = self._local_print_scope(session.config_id, pairing_request["agent_id"])
         self._check_request_scope(pairing_request, scope)
         fingerprint = self._request_fingerprint(
             pairing_request, session.id, self.env.uid
@@ -314,35 +314,44 @@ class InariPairingAssertion(models.Model):
             raise AccessError(_("The POS session is not active for this user."))
         return session
 
-    def _receipt_scope(self, config):
-        binding = (
+    def _local_print_scope(self, config, requested_agent_id):
+        bindings = (
             self.env["inari.device.binding"]
             .sudo()
             .search(
                 [
                     ("company_id", "=", config.company_id.id),
                     ("pos_config_id", "=", config.id),
-                    ("purpose", "=", "pos_receipt"),
+                    ("purpose", "in", ["pos_receipt", "pos_preparation"]),
                     ("active", "=", True),
                     ("state", "=", "active"),
-                ],
-                limit=1,
+                ]
             )
         )
+        binding = bindings.filtered(
+            lambda candidate: (
+                candidate.active_revision_id.state == "active"
+                and candidate.active_revision_id.capability_id.operation
+                == _PAIRING_PERMISSION
+                and candidate.active_revision_id.device_id.agent_id.agent_id
+                == requested_agent_id
+            )
+        )[:1]
         revision = binding.active_revision_id
-        if (
-            not revision
-            or revision.state != "active"
-            or revision.capability_id.operation != _PAIRING_PERMISSION
-        ):
-            raise UserError(_("This POS has no active receipt Binding Revision."))
+        if not revision:
+            raise UserError(
+                _(
+                    "This POS has no active local print Binding Revision for the "
+                    "requested Agent."
+                )
+            )
         agent = revision.device_id.agent_id
         if (
             agent.site_id != binding.site_id
             or agent.organization_id != binding.site_id.organization_id
         ):
             raise ValidationError(
-                _("The receipt Binding Revision has an invalid Agent scope.")
+                _("The local print Binding Revision has an invalid Agent scope.")
             )
         return {
             "binding": binding,
@@ -385,7 +394,7 @@ class InariPairingAssertion(models.Model):
         }
         if any(request_values[name] != value for name, value in expected.items()):
             raise AccessError(
-                _("The Pairing Request does not match this POS receipt scope.")
+                _("The Pairing Request does not match this POS local print scope.")
             )
 
     @staticmethod

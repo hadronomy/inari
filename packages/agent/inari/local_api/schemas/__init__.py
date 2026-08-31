@@ -60,6 +60,7 @@ from .jobs import (
 from .device_work import (
     DeviceWorkAcceptedResponse,
     PosPrintOriginInput,
+    PreparationPrintOriginInput,
     ReceiptImageEnvelope,
     SubmissionContextInput,
 )
@@ -151,6 +152,7 @@ __all__ = [
     "ProblemDetailsResponse",
     "QueueSummaryResponse",
     "PosPrintOriginInput",
+    "PreparationPrintOriginInput",
     "ReceiptImageEnvelope",
     "RuntimeEventResponse",
     "RuntimeEventKind",

@@ -88,6 +88,7 @@ The envelope has this shape:
     "print_intent_id": "pi_01J...",
     "origin_submission_key": "osk_01J...",
     "origin": {
+      "kind": "pos",
       "pos_session_id": "pos_session_42",
       "offline_order_id": "order-1",
       "server_order_id": null,
@@ -100,6 +101,11 @@ The envelope has this shape:
   }
 }
 ```
+
+A preparation ticket uses `kind: "preparation"` and
+`document_kind: "preparation_ticket"`. Its origin also contains
+`segment_kind`, `segment_index`, and `preparation_revision`. The Agent requires
+an exact active `pos_preparation` Binding Revision for this origin.
 
 The accepted Client Grant supplies the database, company, organization, site,
 POS configuration, operator, pairing, generation, and authorization digest.
