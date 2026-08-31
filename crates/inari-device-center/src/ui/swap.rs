@@ -24,8 +24,8 @@
 //! [`motion::SWAP_SCALE`] be small enough for the swap to have a pop in it.
 
 use gpui::{
-    AnyElement, App, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled,
-    Transformation, Window, div, px, size, svg,
+    AnyElement, App, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    Styled, Transformation, Window, div, px, size, svg,
 };
 
 use super::{content::Typography as _, effect, icon::Symbol, motion};
@@ -191,7 +191,7 @@ fn glyph(
     color: Hsla,
     alpha: f32,
     scale: f32,
-    blur: f32,
+    blur: Pixels,
 ) -> impl IntoElement {
     let mark = svg()
         .absolute()
@@ -209,10 +209,10 @@ fn glyph(
 
 /// Below this a blur moves no pixel anyone can see, and still costs two
 /// textures and two composites to do it.
-const VISIBLE_BLUR: f32 = 0.1;
+const VISIBLE_BLUR: Pixels = px(0.1);
 
 /// Blur `content`, unless the radius is too small to see.
-fn soften(radius: f32, content: impl IntoElement) -> AnyElement {
+fn soften(radius: Pixels, content: impl IntoElement) -> AnyElement {
     if radius < VISIBLE_BLUR {
         return content.into_any_element();
     }
@@ -316,11 +316,11 @@ mod tests {
         let blur = |eased: f32| motion::SWAP_BLUR * eased;
         let counter = |eased: f32| motion::SWAP_BLUR * (1.0 - eased);
 
-        assert_eq!(blur(0.0), 0.0, "the leaving half starts blurred");
-        assert_eq!(counter(1.0), 0.0, "the arriving half ends blurred");
+        assert_eq!(blur(0.0), px(0.0), "the leaving half starts blurred");
+        assert_eq!(counter(1.0), px(0.0), "the arriving half ends blurred");
         assert_eq!(blur(0.5), counter(0.5), "the halves are not equally soft at the crossing");
         assert!(
-            blur(0.5) > 0.0 && blur(0.5) < motion::SWAP_BLUR,
+            blur(0.5) > px(0.0) && blur(0.5) < motion::SWAP_BLUR,
             "the crossing is not blurred: {}",
             blur(0.5)
         );
