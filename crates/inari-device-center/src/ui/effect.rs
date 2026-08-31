@@ -36,32 +36,47 @@ impl Default for Grain {
     }
 }
 
-/// A wall of pixel cells that carries a shock outward from where it was struck.
+/// A wall of pixel cells that blooms outward from a point and stays lit.
 ///
-/// Exists to exercise the effect path rather than to ship: it animates, it
-/// reacts to input, and it uses every parameter kind, so a backend that gets any
-/// of that wrong shows it immediately.
+/// After Ryan Mulligan's pixel-canvas. Exists to exercise the effect path rather
+/// than to ship: it animates, it reacts to input, and it uses both parameter
+/// kinds, so a backend that gets any of that wrong shows it at a glance.
 #[derive(Effect, Copy, Clone, Debug, PartialEq)]
-#[effect(name = "inari.ripple", source = "effect/ripple.wgsl")]
-pub struct Ripple {
-    /// Seconds the wall has been on screen, for the idle shimmer.
+#[effect(name = "inari.pixel-bloom", source = "effect/pixel_bloom.wgsl")]
+pub struct PixelBloom {
+    /// Seconds the wall has been on screen, for the idle breath of lit cells.
     pub time: f32,
     /// Cell size in logical pixels.
     pub cell: f32,
-    /// Where the wall was struck, in logical pixels from its top-left corner.
-    pub strike_x: f32,
-    /// The other half of the strike position.
-    pub strike_y: f32,
-    /// Seconds since the strike. Negative before the wall has been struck,
-    /// which keeps a wave from firing at the origin on the first frame.
+    /// Where the bloom starts, in logical pixels from the wall's top-left.
+    pub origin_x: f32,
+    /// The other half of the origin.
+    pub origin_y: f32,
+    /// Seconds since the pointer last entered or left.
     pub age: f32,
-    /// The colour the wall lights up in.
-    pub tint: Hsla,
+    /// `1` while the pointer is inside, `-1` after it leaves, `0` before the
+    /// wall has ever been pointed at. Two floats rather than a signed `age`,
+    /// because "never" and "left just now" are not the same state.
+    pub direction: f32,
+    /// The colour of cells nearest the origin.
+    pub near: Hsla,
+    /// The colour cells drift towards, picked per cell rather than by distance,
+    /// so the palette reads as a texture and not as a gradient.
+    pub far: Hsla,
 }
 
-impl Default for Ripple {
+impl Default for PixelBloom {
     fn default() -> Self {
-        Self { time: 0.0, cell: 9.0, strike_x: 0.0, strike_y: 0.0, age: -1.0, tint: gpui::blue() }
+        Self {
+            time: 0.0,
+            cell: 9.0,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            age: 0.0,
+            direction: 0.0,
+            near: gpui::blue(),
+            far: gpui::blue(),
+        }
     }
 }
 
@@ -71,7 +86,7 @@ impl Default for Ripple {
 /// first frame that draws one.
 pub fn register_all() {
     gpui::effect::register(Grain::definition());
-    gpui::effect::register(Ripple::definition());
+    gpui::effect::register(PixelBloom::definition());
 }
 
 #[cfg(test)]
