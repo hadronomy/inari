@@ -42,13 +42,19 @@ pub const SWAP_TRAVEL: f32 = 4.0;
 
 /// How small a glyph gets on its way out, and starts on its way in.
 ///
-/// The web recipe takes it to 0.25 and hides the gap with a 2px blur. GPUI has
-/// no filter blur — the renderer's only blur is a shadow's — so a glyph shrunk
-/// that far would visibly wink out of nothing, which is the one thing Kowalski
-/// says never to animate from. Without the blur to bridge it the scale has to
-/// carry less: at 0.7 the mark keeps a readable shape the whole way and the
-/// swap still reads as a pop rather than a dissolve.
-pub const SWAP_SCALE: f32 = 0.7;
+/// transitions.dev's number. It only works with [`SWAP_BLUR`]: a mark shrunk
+/// this far and left sharp winks out of nothing, which is the one entrance
+/// Kowalski says never to animate. Blurred, it reads as the mark going out of
+/// focus and something else coming into it.
+pub const SWAP_SCALE: f32 = 0.25;
+
+/// How far out of focus a glyph goes at the far end of a swap, in pixels.
+///
+/// The blur is what buys the whole recipe. It covers the frames where both
+/// marks are half-present — two sharp shapes at 50% read as two shapes, and two
+/// soft ones read as one thing changing — and it lets [`SWAP_SCALE`] go small
+/// enough for the swap to have a pop in it.
+pub const SWAP_BLUR: f32 = 2.0;
 
 /// The curve every swap runs on.
 ///
