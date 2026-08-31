@@ -29,8 +29,9 @@ fn effect(input: EffectInput) -> vec4<f32> {
 
     let blurred = total / max(weight, 0.0001);
     let colour = tint(input);
-    // Over the blurred content, not mixed with it, so the tint reads as a pane
-    // of glass rather than as a wash.
-    let over = colour.rgb * colour.a + to_linear(blurred.rgb) * (1.0 - colour.a);
+    // Both sides converted before mixing. `tint()` hands back sRGB-encoded
+    // colour like every other accessor, and mixing it against linear content
+    // would darken the result before the final encode lifted it again.
+    let over = to_linear(colour.rgb) * colour.a + to_linear(blurred.rgb) * (1.0 - colour.a);
     return vec4<f32>(to_encoded(over), max(blurred.a, colour.a));
 }
