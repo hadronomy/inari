@@ -245,6 +245,19 @@ fn effect(input: EffectInput) -> vec4<f32> {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn fxc_accepts_every_effect_we_ship() {
+        // `every_effect_we_ship_compiles_for_every_backend` proves naga emits
+        // HLSL. fxc is the one that decides whether the pipeline gets built,
+        // and it refuses things naga is happy to write — a register space, a
+        // resource limit, an intrinsic Shader Model 5.0 does not have. The
+        // renderer logs a rejected shader and draws nothing, so without this
+        // the first report is a customer describing a blank rectangle.
+        register_all();
+        effect::validate_all_direct3d().unwrap();
+    }
+
     #[test]
     fn the_abi_reaches_all_three_backends() {
         for target in TARGETS {

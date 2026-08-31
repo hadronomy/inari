@@ -211,4 +211,4 @@ zenoh-transport = { path = "patches/zenoh-transport" }
 # Zed's own `[patch.crates-io]` does not travel through a git dependency. At
 # 69e2130 it pins notify, notify-types and windows-capture; none reach GPUI in
 # our feature set. Re-check when moving the base.
-gpui = { git = "https://github.com/hadronomy/zed", rev = "5736663122c644eb90d7fa35757361d4eb018eff" }
+gpui = { git = "https://github.com/hadronomy/zed", rev = "f7e881f8474293af38539cb55f65a342362847b3" }
