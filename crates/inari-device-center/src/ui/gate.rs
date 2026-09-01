@@ -58,10 +58,13 @@ const TEAR_PERIOD: Duration = Duration::from_millis(2400);
 const TEAR_HALF_WIDTH: f32 = 2.5;
 /// How long the last packet lives after the path fails.
 const LAST_BREATH: Duration = Duration::from_millis(700);
-/// How often the wire tries again. A cut line does not stop being asked; the
-/// attempt repeating is what says the far side is still calling, and the pause
-/// between attempts is what keeps it from reading as ordinary traffic.
-const LAST_BREATH_PERIOD: Duration = Duration::from_millis(1250);
+/// How often the wire tries again.
+///
+/// A cut line does not stop being asked, and the attempt repeating is what says
+/// the far side is still calling. The gap is long: an attempt every second or
+/// two reads as traffic, which is the one thing a dead line must not look like,
+/// and it keeps drawing the eye back to a panel that has nothing new to say.
+const LAST_BREATH_PERIOD: Duration = Duration::from_secs(7);
 
 /// How often a failing mark re-rolls its brightness.
 ///
@@ -750,6 +753,12 @@ mod tests {
         let period = LAST_BREATH_PERIOD.as_secs_f32();
         let travel = LAST_BREATH.as_secs_f32();
         assert!(travel < period, "an attempt must finish before the next starts");
+        // The pause has to dominate, or a dead line reads as a slow live one.
+        assert!(
+            period > travel * 4.0,
+            "the gap between attempts is only {:.1}x the attempt",
+            period / travel
+        );
 
         for cycle in 0..4 {
             let start = cycle as f32 * period;
