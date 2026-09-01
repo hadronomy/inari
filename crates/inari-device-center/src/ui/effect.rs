@@ -127,6 +127,30 @@ enum Axis {
     Down,
 }
 
+/// A mark eroded into cracked, weathered stone.
+///
+/// For the one state that is not a failure but an absence: a component that was
+/// never installed. A broken path is drawn with a cut wire, and a cut wire is
+/// wrong for something that is simply not there.
+#[derive(Effect, Copy, Clone, Debug, PartialEq)]
+#[effect(name = "inari.weathered", source = "effect/weathered.wgsl")]
+pub struct Weathered {
+    /// How far gone, 0..1. Drives the cracks, the pitting and the bleaching
+    /// together, so the state has one dial rather than three.
+    pub amount: f32,
+    /// Offsets the field. Two weathered marks on one screen are not the same
+    /// stone unless they are given the same seed.
+    pub seed: f32,
+    /// What the stone bleaches towards. Its alpha is how much of it arrives.
+    pub tint: Hsla,
+}
+
+impl Default for Weathered {
+    fn default() -> Self {
+        Self { amount: 0.68, seed: 0.0, tint: gpui::hsla(0.09, 0.06, 0.62, 0.55) }
+    }
+}
+
 /// One axis of a Gaussian blur. Use [`blurred`]; this is half of it.
 #[derive(Effect, Copy, Clone, Debug, PartialEq)]
 #[effect(name = "inari.blur", source = "effect/blur.wgsl")]
@@ -176,6 +200,7 @@ pub fn register_all() {
     gpui::effect::register(PixelBloom::definition());
     gpui::effect::register(Frost::definition());
     gpui::effect::register(Blur::definition());
+    gpui::effect::register(Weathered::definition());
 }
 
 #[cfg(test)]
