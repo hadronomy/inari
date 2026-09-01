@@ -41,14 +41,21 @@ struct Phase {
 }
 
 impl Phase {
-    /// A straight crossfade: the two halves always sum to one.
+    /// A constant-power crossfade.
     ///
-    /// They cross at half strength each, which only works because the blur is
-    /// deepest at exactly that moment. Without it the middle of the swap shows
-    /// two distinct marks at 50% and the whole thing reads as a stack rather
-    /// than as one mark becoming another.
+    /// Fading one mark down while another comes up is the same problem as
+    /// crossfading two uncorrelated sounds: the halves are different shapes in
+    /// different places, so their presence adds in power rather than in
+    /// amplitude. Split the fraction linearly and the midpoint has two marks at
+    /// half strength and reads as *less* than either — a dip where the control
+    /// briefly says nothing. Taking the square root holds the pair at constant
+    /// strength right through the crossing.
     fn new(eased: f32) -> Self {
-        Self { leaving: 1.0 - eased, arriving: eased, eased }
+        Self {
+            leaving: (1.0 - eased).sqrt(),
+            arriving: eased.sqrt(),
+            eased,
+        }
     }
 }
 
@@ -180,8 +187,9 @@ impl RenderOnce for IconSwap {
         // Each half is as far out of focus as it is far from resting, so the
         // blur is deepest where the two cross and gone by the time either one
         // is alone on screen.
-        let leaving_blur = motion::SWAP_BLUR * phase.eased;
-        let arriving_blur = motion::SWAP_BLUR * (1.0 - phase.eased);
+        let deepest = self.edge * motion::SWAP_BLUR;
+        let leaving_blur = px(deepest * phase.eased);
+        let arriving_blur = px(deepest * (1.0 - phase.eased));
 
         div()
             .relative()
@@ -241,6 +249,11 @@ fn glyph(
 /// textures and two composites to do it.
 const VISIBLE_BLUR: Pixels = px(0.1);
 
+/// The size of the mark a label swap blurs, which is its own type size. Taken
+/// from `Typography::text_body` rather than measured, because a label's blur
+/// only has to match the glyph beside it and both are set from the same scale.
+const LABEL_SIZE: f32 = 13.5;
+
 /// Blur `content`, unless the radius is too small to see.
 fn soften(radius: Pixels, content: impl IntoElement) -> AnyElement {
     if radius < VISIBLE_BLUR {
@@ -285,7 +298,7 @@ impl RenderOnce for LabelSwap {
             .relative()
             .flex_none()
             .child(soften(
-                motion::SWAP_BLUR * phase.eased,
+                px(LABEL_SIZE * motion::SWAP_BLUR * phase.eased),
                 div()
                     .text_body()
                     .font_weight(gpui::FontWeight::MEDIUM)
@@ -298,7 +311,7 @@ impl RenderOnce for LabelSwap {
                     .child(self.resting),
             ))
             .child(soften(
-                motion::SWAP_BLUR * (1.0 - phase.eased),
+                px(LABEL_SIZE * motion::SWAP_BLUR * (1.0 - phase.eased)),
                 div()
                     .absolute()
                     .inset_0()
@@ -324,17 +337,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_two_halves_always_sum_to_one_state() {
-        // A crossfade that dips below one shows the background through the
-        // middle of the swap, and one that rises above it stacks two marks.
+    fn the_two_halves_hold_constant_power_across_the_crossing() {
+        // Presence adds in power, not in amplitude, because the halves are
+        // different shapes in different places. Splitting the fraction linearly
+        // leaves the midpoint reading as less than either end — the dip this
+        // exists to remove.
         for step in 0..=100 {
             let phase = Phase::new(step as f32 / 100.0);
+            let power = phase.leaving.powi(2) + phase.arriving.powi(2);
             assert!(
-                (phase.leaving + phase.arriving - 1.0).abs() < 1e-6,
-                "the halves sum to {} at {step}%",
-                phase.leaving + phase.arriving
+                (power - 1.0).abs() < 1e-5,
+                "power is {power} at {step}%"
             );
         }
+    }
+
+    #[test]
+    fn the_crossing_carries_more_than_half_of_each_mark() {
+        // The number that makes the difference: an even split is 0.5 each and
+        // visibly thin. Constant power puts both at about 0.707, which is what
+        // keeps the control legible while it changes its mind.
+        let crossing = Phase::new(0.5);
+        assert!(crossing.leaving > 0.7, "leaving is {}", crossing.leaving);
+        assert!(crossing.arriving > 0.7, "arriving is {}", crossing.arriving);
+    }
+
+    #[test]
+    fn a_blur_is_measured_against_the_mark_it_softens() {
+        // A flat 2px is a smudge on a 13px readout mark and barely an edge on a
+        // 56px one. The ratio keeps a swap looking the same at any size.
+        let readout = 13.0 * motion::SWAP_BLUR;
+        let oversized = 56.0 * motion::SWAP_BLUR;
+        assert!(readout < 2.0, "the small mark is over-blurred: {readout}");
+        assert!(oversized > 6.0, "the large mark is under-blurred: {oversized}");
     }
 
     #[test]
@@ -346,11 +381,11 @@ mod tests {
         let blur = |eased: f32| motion::SWAP_BLUR * eased;
         let counter = |eased: f32| motion::SWAP_BLUR * (1.0 - eased);
 
-        assert_eq!(blur(0.0), px(0.0), "the leaving half starts blurred");
-        assert_eq!(counter(1.0), px(0.0), "the arriving half ends blurred");
+        assert_eq!(blur(0.0), 0.0, "the leaving half starts blurred");
+        assert_eq!(counter(1.0), 0.0, "the arriving half ends blurred");
         assert_eq!(blur(0.5), counter(0.5), "the halves are not equally soft at the crossing");
         assert!(
-            blur(0.5) > px(0.0) && blur(0.5) < motion::SWAP_BLUR,
+            blur(0.5) > 0.0 && blur(0.5) < motion::SWAP_BLUR,
             "the crossing is not blurred: {}",
             blur(0.5)
         );

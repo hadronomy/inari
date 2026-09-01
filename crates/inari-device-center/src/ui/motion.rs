@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{Animation, Hsla, Pixels, SharedString, ease_in_out, linear, pulsating_between, px};
+use gpui::{Animation, Hsla, SharedString, ease_in_out, linear, pulsating_between};
 
 /// A state change the user caused and is watching: a selection moving, a panel
 /// swapping, a copy button reporting. Long enough to read as motion, short
@@ -48,13 +48,20 @@ pub const SWAP_TRAVEL: f32 = 4.0;
 /// focus and something else coming into it.
 pub const SWAP_SCALE: f32 = 0.25;
 
-/// How far out of focus a glyph goes at the far end of a swap, in pixels.
+/// How far out of focus a mark goes at the far end of a swap, as a fraction of
+/// its own size.
 ///
 /// The blur is what buys the whole recipe. It covers the frames where both
 /// marks are half-present — two sharp shapes at 50% read as two shapes, and two
 /// soft ones read as one thing changing — and it lets [`SWAP_SCALE`] go small
 /// enough for the swap to have a pop in it.
-pub const SWAP_BLUR: Pixels = px(2.0);
+///
+/// A fraction rather than transitions.dev's flat 2px, because how blurred
+/// something looks is how blurred it is *relative to its own detail*. Two pixels
+/// on the readout's 13px mark is a smudge; the same two pixels on a 56px one is
+/// barely a soft edge. This is that 2px taken against the size our controls
+/// actually use, and held there as the size changes.
+pub const SWAP_BLUR: f32 = 2.0 / 14.0;
 
 /// The curve every swap runs on.
 ///
