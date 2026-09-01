@@ -64,6 +64,13 @@ from .device_work import (
     ReceiptImageEnvelope,
     SubmissionContextInput,
 )
+from .drawer_intents import (
+    DrawerIntentQueryRequest,
+    DrawerIntentQueryResponse,
+    DrawerIntentResponse,
+    DrawerIntentSubmitRequest,
+    DrawerIntentSubmitResponse,
+)
 from .public_print_jobs import (
     PrintJobQueryRequest,
     PrintJobQueryResponse,
@@ -150,6 +157,11 @@ __all__ = [
     "PairingRequestCreateInput",
     "PairingRequestResponse",
     "DeviceWorkAcceptedResponse",
+    "DrawerIntentQueryRequest",
+    "DrawerIntentQueryResponse",
+    "DrawerIntentResponse",
+    "DrawerIntentSubmitRequest",
+    "DrawerIntentSubmitResponse",
     "PrincipalResponse",
     "PrintTestPageCommandInput",
     "PrintJobQueryRequest",

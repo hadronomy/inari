@@ -24,7 +24,23 @@ def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
         revision = connection.execute(
             "SELECT version_num FROM alembic_version"
         ).fetchone()
+        drawer_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(drawer_intents)")
+        }
+        drawer_indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(drawer_intents)")
+        }
     assert revision == (expected_revision,)
+    assert {
+        "intent_id",
+        "pos_session_id",
+        "action_sequence",
+        "reason",
+        "state_version",
+        "fingerprint",
+    }.issubset(drawer_columns)
+    assert "uq_drawer_intents_scope_identity" in drawer_indexes
+    assert "uq_drawer_intents_action" in drawer_indexes
 
 
 def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(

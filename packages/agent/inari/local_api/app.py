@@ -88,6 +88,16 @@ def create_app(
                         permission=Permission.JOBS_READ,
                         name="Print Job lookup",
                     ),
+                    ("POST", "/v1/drawer-intents"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.DRAWER,
+                        name="cash drawer intent submission",
+                    ),
+                    ("POST", "/v1/drawer-intents/query"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.JOBS_READ,
+                        name="cash drawer intent reconciliation",
+                    ),
                 }
             ),
             authorizer=app_container.device_work_authorizer,

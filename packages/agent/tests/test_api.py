@@ -35,6 +35,13 @@ from inari.documents import (
     DocumentWork,
     PreparationPrintOrigin,
 )
+from inari.drawer_intents import (
+    DrawerIntentAccepted,
+    DrawerIntentPage,
+    DrawerIntentRecord,
+    DrawerIntentState,
+    DrawerReason,
+)
 from inari.drivers import (
     DeviceIdentity,
     DeviceKind,
@@ -220,7 +227,11 @@ class StubClientTrustAuthorizer:
         expected_permission = (
             Permission.JOBS_READ
             if request.path.startswith("/v1/jobs/")
-            else Permission.RECEIPT_IMAGE
+            else {
+                "/v1/device-work": Permission.RECEIPT_IMAGE,
+                "/v1/drawer-intents": Permission.DRAWER,
+                "/v1/drawer-intents/query": Permission.JOBS_READ,
+            }[request.path]
         )
         assert policy.permission is expected_permission
         if self.error is not None:
@@ -601,6 +612,113 @@ async def test_submit_preparation_work_preserves_segment_identity(mocker) -> Non
     assert origin.segment_kind == "new"
     assert origin.segment_index == 0
     assert origin.preparation_revision == "sha256:order-change"
+
+
+@pytest.mark.anyio
+async def test_drawer_intent_api_uses_exact_identity_and_scoped_query(mocker) -> None:
+    now = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    record = DrawerIntentRecord(
+        record_id="drawer_record_1",
+        intent_id="drawer_1",
+        database="odoo",
+        organization_id="org_1",
+        site_id="site_1",
+        pos_configuration_id="pos_config_7",
+        paired_client_id="pairing_1",
+        actor_id="res.users:7",
+        device_id="device_1",
+        binding_revision_id="binding_1",
+        pos_session_id="session_1",
+        action_sequence=1,
+        reason=DrawerReason.PAYMENT,
+        fingerprint=b"f" * 32,
+        state=DrawerIntentState.ACCEPTED,
+        state_version=1,
+        accepted_at=now,
+        expires_at=now + timedelta(days=90),
+    )
+    drawer_service = mocker.Mock()
+    drawer_service.submit.return_value = DrawerIntentAccepted(
+        record=record,
+        replayed=False,
+        permit=None,
+    )
+    drawer_service.query.return_value = DrawerIntentPage(
+        intents=(record,), missing_intent_ids=("drawer_missing",)
+    )
+    container = replace(
+        make_test_container(mocker=mocker),
+        drawer_intent_service=drawer_service,
+    )
+    payload = {
+        "contract_major": 1,
+        "drawer_intent_id": "drawer_1",
+        "binding_revision_id": "binding_1",
+        "device_id": "device_1",
+        "pos_session_id": "session_1",
+        "action_sequence": 1,
+        "reason": "payment",
+    }
+
+    async with async_client_for(container) as client:
+        submitted = await client.post(
+            "/v1/drawer-intents",
+            json=payload,
+            headers={"Idempotency-Key": "drawer_1"},
+        )
+        queried = await client.post(
+            "/v1/drawer-intents/query",
+            json={"drawer_intent_ids": ["drawer_1", "drawer_missing"]},
+        )
+
+    assert submitted.status_code == 202
+    assert submitted.json() == {
+        "ok": True,
+        "drawer_intent_id": "drawer_1",
+        "device_id": "device_1",
+        "state": "accepted",
+        "state_version": 1,
+        "retryable": True,
+        "accepted_at": "2026-09-01T12:00:00Z",
+        "replayed": False,
+    }
+    assert queried.status_code == 200
+    assert queried.json()["intents"][0]["drawer_intent_id"] == "drawer_1"
+    assert queried.json()["missing_drawer_intent_ids"] == ["drawer_missing"]
+    submitted_request = drawer_service.submit.call_args.args[0]
+    assert submitted_request.intent_id == "drawer_1"
+    assert submitted_request.reason is DrawerReason.PAYMENT
+
+
+@pytest.mark.anyio
+async def test_drawer_intent_api_rejects_header_identity_mismatch(mocker) -> None:
+    drawer_service = mocker.Mock()
+    container = replace(
+        make_test_container(mocker=mocker),
+        drawer_intent_service=drawer_service,
+    )
+
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/drawer-intents",
+            json={
+                "contract_major": 1,
+                "drawer_intent_id": "drawer_1",
+                "binding_revision_id": "binding_1",
+                "device_id": "device_1",
+                "pos_session_id": "session_1",
+                "action_sequence": 1,
+                "reason": "payment",
+            },
+            headers={"Idempotency-Key": "drawer_2"},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "payload_invalid"
+    assert response.json()["details"]["field_violations"][0]["pointer"] == (
+        "/drawer_intent_id"
+    )
+    drawer_service.submit.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -1055,7 +1173,9 @@ def authorized_device_work() -> AuthorizedRequest:
         scope=scope,
         actor_id="res.users:7",
         role="device_operator",
-        permissions=frozenset({Permission.RECEIPT_IMAGE, Permission.JOBS_READ}),
+        permissions=frozenset(
+            {Permission.RECEIPT_IMAGE, Permission.DRAWER, Permission.JOBS_READ}
+        ),
         authorization_digest="authorization_digest_1",
         generation=1,
         issued_at=now - timedelta(minutes=1),
@@ -1078,7 +1198,12 @@ def authorized_device_work() -> AuthorizedRequest:
         agent_endpoint=agent_endpoint,
         business=business,
         allowed_methods=frozenset({"POST"}),
-        allowed_paths=("/v1/device-work",),
+        allowed_paths=(
+            "/v1/device-work",
+            "/v1/jobs/query",
+            "/v1/drawer-intents",
+            "/v1/drawer-intents/query",
+        ),
     )
     return AuthorizedRequest(
         target=target,
@@ -1189,6 +1314,7 @@ def make_test_container(
         document_admission=cast(Any, admission),
         device_work_submission=DeviceWorkSubmission(admission=admission),
         print_job_queries=PrintJobQueries(reader=print_job_reader),
+        drawer_intent_service=cast(Any, object()),
         physical_execution=cast(Any, object()),
         device_work_authorizer=StubClientTrustAuthorizer(authorization),
         authorization_service=cast(Any, StubAuthorizationService()),

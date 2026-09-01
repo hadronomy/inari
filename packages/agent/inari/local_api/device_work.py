@@ -63,7 +63,7 @@ class DeviceWorkSubmission:
             authorization.require(Permission.RECEIPT_IMAGE)
         except ClientTrustError as error:
             raise DomainFailure(ProblemCode.PERMISSION_DENIED) from error
-        idempotency_key = _idempotency_key(request)
+        idempotency_key = idempotency_key_from_request(request)
         parsed = await self.ingress.parse(request)
         envelope = _envelope(parsed.envelope)
         if envelope.context.print_intent_id != idempotency_key:
@@ -108,7 +108,7 @@ def authorized_device_work_request(request: Request) -> AuthorizedRequest:
     return result
 
 
-def _idempotency_key(request: Request) -> str:
+def idempotency_key_from_request(request: Request) -> str:
     values = [
         value
         for name, value in request.scope.get("headers", ())
@@ -236,4 +236,8 @@ def _admission_request(
     )
 
 
-__all__ = ["DeviceWorkSubmission", "authorized_device_work_request"]
+__all__ = [
+    "DeviceWorkSubmission",
+    "authorized_device_work_request",
+    "idempotency_key_from_request",
+]

@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     Query,
     Request,
@@ -20,10 +21,18 @@ from .dependencies import (
     get_gateway_service,
     get_job_service,
     get_print_job_queries,
+    get_drawer_intent_service,
     get_onboarding_service,
     get_standalone_trust_service,
 )
 from ..core.exceptions import AgentError
+from ..core.failures import (
+    DomainFailure,
+    FieldViolation,
+    FieldViolationCode,
+    ProblemCode,
+    ProblemDetails,
+)
 from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..printing.commands import DeviceCommandKind
@@ -36,6 +45,7 @@ from ..security.auth import AuthorizationService, connection_origin
 from ..security.local_trust import StandaloneTrustService
 from ..security.models import AccessScope, AuthenticatedPrincipal
 from ..core.version import API_VERSION, SERVICE_NAME
+from ..drawer_intents import DrawerIntentService
 from .schemas import (
     AuthenticatedPrincipalResponse,
     DeviceCommandRequest,
@@ -77,8 +87,17 @@ from .schemas import (
     SystemStatusResponse,
     TokenResponse,
     TrustedLocalClientResponse,
+    DrawerIntentQueryRequest,
+    DrawerIntentQueryResponse,
+    DrawerIntentResponse,
+    DrawerIntentSubmitRequest,
+    DrawerIntentSubmitResponse,
 )
-from .device_work import DeviceWorkSubmission, authorized_device_work_request
+from .device_work import (
+    DeviceWorkSubmission,
+    authorized_device_work_request,
+    idempotency_key_from_request,
+)
 from .print_job_queries import PrintJobQueries
 from .problem_handlers import problem_responses
 from .pairing_routes import pairing_router
@@ -156,6 +175,9 @@ DeviceWorkSubmissionDependency = Annotated[
     DeviceWorkSubmission, Depends(get_device_work_submission)
 ]
 PrintJobQueriesDependency = Annotated[PrintJobQueries, Depends(get_print_job_queries)]
+DrawerIntentServiceDependency = Annotated[
+    DrawerIntentService, Depends(get_drawer_intent_service)
+]
 EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
 AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
@@ -552,6 +574,67 @@ async def get_public_print_job(
 ) -> PublicPrintJobResponse:
     authorization = authorized_device_work_request(connection)
     return PublicPrintJobResponse.from_domain(await queries.get(job_id, authorization))
+
+
+@jobs_router.post(
+    "/v1/drawer-intents",
+    response_model=DrawerIntentSubmitResponse,
+    status_code=202,
+    responses=problem_responses(400, 401, 403, 404, 409, 422, 500, 503),
+)
+async def submit_drawer_intent(
+    request: DrawerIntentSubmitRequest,
+    connection: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    service: DrawerIntentServiceDependency,
+) -> DrawerIntentSubmitResponse:
+    authorization = authorized_device_work_request(connection)
+    if request.drawer_intent_id != idempotency_key_from_request(connection):
+        raise DomainFailure(
+            ProblemCode.PAYLOAD_INVALID,
+            details=ProblemDetails(
+                field_violations=(
+                    FieldViolation(
+                        pointer="/drawer_intent_id",
+                        code=FieldViolationCode.CONFLICT,
+                        message_key="drawer_intent_id_mismatch",
+                    ),
+                )
+            ),
+        )
+    accepted = service.submit(request.to_domain(), authorization)
+    if accepted.permit is not None:
+        background_tasks.add_task(service.execute, accepted)
+    if accepted.replayed:
+        response.status_code = 200
+    return DrawerIntentSubmitResponse(
+        drawer_intent_id=accepted.record.intent_id,
+        device_id=accepted.record.device_id,
+        state=accepted.record.state,
+        accepted_at=accepted.record.accepted_at,
+        replayed=accepted.replayed,
+        state_version=accepted.record.state_version,
+        retryable=accepted.record.retryable,
+    )
+
+
+@jobs_router.post(
+    "/v1/drawer-intents/query",
+    response_model=DrawerIntentQueryResponse,
+    responses=problem_responses(400, 401, 403, 409, 422, 500, 503),
+)
+async def query_drawer_intents(
+    request: DrawerIntentQueryRequest,
+    connection: Request,
+    service: DrawerIntentServiceDependency,
+) -> DrawerIntentQueryResponse:
+    authorization = authorized_device_work_request(connection)
+    page = service.query(tuple(request.drawer_intent_ids), authorization)
+    return DrawerIntentQueryResponse(
+        intents=[DrawerIntentResponse.from_domain(intent) for intent in page.intents],
+        missing_drawer_intent_ids=list(page.missing_intent_ids),
+    )
 
 
 @jobs_router.post(

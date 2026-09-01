@@ -1028,6 +1028,102 @@ Index(
     ),
 )
 
+drawer_intents_table = Table(
+    "drawer_intents",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("intent_id", String, nullable=False),
+    Column("database", String, nullable=False),
+    Column("organization_id", String, nullable=False),
+    Column("site_id", String, nullable=False),
+    Column("pos_configuration_id", String, nullable=False),
+    Column("paired_client_id", String, nullable=False),
+    Column("actor_id", String, nullable=False),
+    Column("device_id", String, nullable=False),
+    Column("binding_revision_id", String, nullable=False),
+    Column("pos_session_id", String, nullable=False),
+    Column("action_sequence", Integer, nullable=False),
+    Column("reason", String, nullable=False),
+    Column("contract_major", Integer, nullable=False),
+    Column("state_version", Integer, nullable=False),
+    Column("fingerprint", LargeBinary, nullable=False),
+    Column("state", String, nullable=False),
+    Column("accepted_at", String, nullable=False),
+    Column("expires_at", String, nullable=False),
+    Column("started_at", String),
+    Column("terminal_at", String),
+    Column("error_code", String),
+    Column("message_key", String),
+    Column("printer_name", String),
+    Column("transport", String),
+    Column("updated_at", String, nullable=False),
+    CheckConstraint(
+        "length(id) BETWEEN 1 AND 128 AND length(intent_id) BETWEEN 1 AND 256 AND "
+        "length(database) BETWEEN 1 AND 256 AND length(organization_id) BETWEEN 1 AND 256 AND "
+        "length(site_id) BETWEEN 1 AND 256 AND length(pos_configuration_id) BETWEEN 1 AND 256 AND "
+        "length(paired_client_id) BETWEEN 1 AND 256 AND length(actor_id) BETWEEN 1 AND 256 AND "
+        "length(device_id) BETWEEN 1 AND 256 AND length(binding_revision_id) BETWEEN 1 AND 256 AND "
+        "length(pos_session_id) BETWEEN 1 AND 256 AND "
+        "action_sequence BETWEEN 1 AND 9007199254740991 AND "
+        "reason IN ('payment', 'manual_open') AND contract_major = 1 AND state_version >= 1",
+        name="ck_drawer_intents_identity",
+    ),
+    CheckConstraint("length(fingerprint) = 32", name="ck_drawer_intents_fingerprint"),
+    CheckConstraint(
+        "state IN ('accepted', 'in_progress', 'succeeded', 'outcome_unknown', 'failed')",
+        name="ck_drawer_intents_state",
+    ),
+    CheckConstraint("expires_at > accepted_at", name="ck_drawer_intents_retention"),
+    CheckConstraint(
+        "started_at IS NULL OR started_at >= accepted_at",
+        name="ck_drawer_intents_started_at",
+    ),
+    CheckConstraint(
+        "terminal_at IS NULL OR terminal_at >= accepted_at",
+        name="ck_drawer_intents_terminal_at",
+    ),
+    CheckConstraint(
+        "(state = 'accepted' AND started_at IS NULL AND terminal_at IS NULL AND error_code IS NULL AND message_key IS NULL) OR "
+        "(state = 'in_progress' AND started_at IS NOT NULL AND terminal_at IS NULL AND error_code IS NULL AND message_key IS NULL) OR "
+        "(state = 'succeeded' AND started_at IS NOT NULL AND terminal_at IS NOT NULL AND error_code IS NULL AND message_key IS NULL) OR "
+        "(state = 'outcome_unknown' AND started_at IS NOT NULL AND terminal_at IS NOT NULL AND error_code IS NOT NULL AND message_key IS NOT NULL) OR "
+        "(state = 'failed' AND started_at IS NULL AND terminal_at IS NOT NULL AND error_code IS NOT NULL AND message_key IS NOT NULL)",
+        name="ck_drawer_intents_lifecycle",
+    ),
+)
+Index(
+    "uq_drawer_intents_action",
+    drawer_intents_table.c.database,
+    drawer_intents_table.c.organization_id,
+    drawer_intents_table.c.site_id,
+    drawer_intents_table.c.pos_configuration_id,
+    drawer_intents_table.c.pos_session_id,
+    drawer_intents_table.c.actor_id,
+    drawer_intents_table.c.device_id,
+    drawer_intents_table.c.action_sequence,
+    unique=True,
+)
+Index(
+    "uq_drawer_intents_scope_identity",
+    drawer_intents_table.c.database,
+    drawer_intents_table.c.organization_id,
+    drawer_intents_table.c.site_id,
+    drawer_intents_table.c.pos_configuration_id,
+    drawer_intents_table.c.paired_client_id,
+    drawer_intents_table.c.intent_id,
+    unique=True,
+)
+Index(
+    "idx_drawer_intents_scope_accepted_at",
+    drawer_intents_table.c.database,
+    drawer_intents_table.c.organization_id,
+    drawer_intents_table.c.site_id,
+    drawer_intents_table.c.pos_configuration_id,
+    drawer_intents_table.c.paired_client_id,
+    drawer_intents_table.c.accepted_at,
+)
+Index("idx_drawer_intents_expiry", drawer_intents_table.c.expires_at)
+
 device_authority_signer_keys_table = Table(
     "device_authority_signer_keys",
     metadata,
@@ -1964,6 +2060,7 @@ MANAGED_TABLE_NAMES = frozenset(
         spool_artifacts_table.name,
         public_print_job_events_table.name,
         physical_execution_attempts_table.name,
+        drawer_intents_table.name,
         device_authority_signer_keys_table.name,
         device_authority_revisions_table.name,
         device_authority_state_table.name,

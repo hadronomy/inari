@@ -8,6 +8,7 @@ from ..client_trust import ClientTrustService
 from ..application.container import AgentContainer, get_default_container
 from .device_work import DeviceWorkSubmission
 from .print_job_queries import PrintJobQueries
+from ..drawer_intents import DrawerIntentService
 from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..runtime.events import EventHub
@@ -51,6 +52,12 @@ def get_print_job_queries(
     container: AgentContainer = Depends(get_container),
 ) -> PrintJobQueries:
     return container.print_job_queries
+
+
+def get_drawer_intent_service(
+    container: AgentContainer = Depends(get_container),
+) -> DrawerIntentService:
+    return container.drawer_intent_service
 
 
 def get_client_trust_service(
