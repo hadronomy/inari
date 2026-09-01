@@ -179,6 +179,8 @@ fn attention_summary(count: usize, agent_reachable: bool) -> impl IntoElement {
     div().when(agent_reachable, |aside| {
         aside.child(StatusChip::new(Status {
             tone: if count == 0 { Tone::Positive } else { Tone::Caution },
+            // A count of outstanding work, which is never an absence.
+            missing: false,
             label: match count {
                 0 => "All clear".into(),
                 1 => "1 item".into(),

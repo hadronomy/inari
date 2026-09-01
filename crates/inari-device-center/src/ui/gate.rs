@@ -20,6 +20,7 @@ use gpui_component::{Icon, StyledExt as _};
 
 use super::{
     content::Typography as _,
+    effect::Weathered,
     icon::{Glyph, Symbol},
     motion,
     motion::CASCADE,
@@ -57,6 +58,25 @@ const TEAR_PERIOD: Duration = Duration::from_millis(2400);
 const TEAR_HALF_WIDTH: f32 = 2.5;
 /// How long the last packet lives after the path fails.
 const LAST_BREATH: Duration = Duration::from_millis(700);
+/// How often the wire tries again. A cut line does not stop being asked; the
+/// attempt repeating is what says the far side is still calling, and the pause
+/// between attempts is what keeps it from reading as ordinary traffic.
+const LAST_BREATH_PERIOD: Duration = Duration::from_millis(1250);
+
+/// How often a failing mark re-rolls its brightness.
+///
+/// Slow on purpose. A fast flicker is unpleasant to sit in front of and is a
+/// photosensitivity hazard; at this rate the mark mostly holds and stutters
+/// occasionally, which is what a bulb about to go actually does.
+const FLICKER_TICKS_PER_SECOND: f32 = 5.5;
+/// What the mark sits at between stutters, and the two depths it drops to.
+const FLICKER_REST: f32 = 1.0;
+const FLICKER_DIP: f32 = 0.45;
+const FLICKER_OUT: f32 = 0.14;
+/// The share of ticks that go dark, and the share that merely dip. A bulb is
+/// on far more than it is off, or it reads as a strobe rather than a fault.
+const FLICKER_OUT_CHANCE: f32 = 0.07;
+const FLICKER_DIP_CHANCE: f32 = 0.26;
 const TAU: f32 = std::f32::consts::TAU;
 
 /// The wire's time source: one process-lifetime instant. A per-render
@@ -115,20 +135,6 @@ impl RenderOnce for Gate {
         let live = tone == Tone::Positive;
         let accent = theme.accent;
 
-        let mark = svg()
-            .path("inari-mark-torii-ui.svg")
-            .size(px(40.0))
-            .flex_none()
-            .text_color(if live { accent } else { theme.text_tertiary });
-        let mark = if live && motion::enabled() {
-            mark.with_animation("gate-pulse", motion::pulse(0.72, 1.0), move |mark, delta| {
-                mark.text_color(Hsla { a: delta, ..accent })
-            })
-            .into_any_element()
-        } else {
-            mark.into_any_element()
-        };
-
         let (devices_label, devices_tone) = match self.devices {
             Some((_, 0)) => ("No devices found".into(), Tone::Neutral),
             Some((online, total)) if online == total => {
@@ -139,6 +145,35 @@ impl RenderOnce for Gate {
                 if online == 0 { Tone::Critical } else { Tone::Caution },
             ),
             None => ("State unavailable".into(), Tone::Neutral),
+        };
+
+        // What each side of the gate is carrying. Read once, so the mark can
+        // answer to the pair rather than to the service alone.
+        let inbound = tone;
+        let outbound = if live { devices_tone } else { tone };
+        // Degraded on both sides: the path is not cut, it is failing. A bulb
+        // that is going, rather than one that has gone.
+        let faltering = inbound == Tone::Caution && outbound == Tone::Caution;
+
+        let mark = svg()
+            .path("inari-mark-torii-ui.svg")
+            .size(px(40.0))
+            .flex_none()
+            .text_color(if live { accent } else { theme.text_tertiary });
+
+        let mark = if self.service.missing {
+            // Not a fault: an absence. A cut wire says something broke; stone
+            // left to weather says nothing was ever put here.
+            weathered(mark, theme).into_any_element()
+        } else if faltering && motion::enabled() {
+            flickering(mark).into_any_element()
+        } else if live && motion::enabled() {
+            mark.with_animation("gate-pulse", motion::pulse(0.72, 1.0), move |mark, delta| {
+                mark.text_color(Hsla { a: delta, ..accent })
+            })
+            .into_any_element()
+        } else {
+            mark.into_any_element()
         };
 
         div()
@@ -166,18 +201,14 @@ impl RenderOnce for Gate {
                         Tone::Positive,
                         theme,
                     ))
-                    .child(connector("gate-wire-in", tone, theme))
+                    .child(connector("gate-wire-in", inbound, theme))
                     .child(
                         div()
                             .flex_none()
                             .pt(px(2.0))
                             .child(mark),
                     )
-                    .child(connector(
-                        "gate-wire-out",
-                        if live { devices_tone } else { tone },
-                        theme,
-                    ))
+                    .child(connector("gate-wire-out", outbound, theme))
                     .child(node(
                         Glyph::Device.into(),
                         "Devices",
@@ -275,6 +306,59 @@ fn node(
         )
 }
 
+/// The mark as weathered stone: cracked, pitted and bleached.
+///
+/// The silhouette is still the one the brand ships — the effect is applied over
+/// the real mark rather than replacing it — so the operator sees the same gate,
+/// left standing too long.
+fn weathered(mark: gpui::Svg, theme: &Theme) -> impl IntoElement {
+    gpui::effect_layer(
+        &Weathered {
+            tint: Hsla { a: 0.55, ..theme.text_tertiary },
+            ..Weathered::default()
+        },
+        mark,
+    )
+    // The cracks eat inwards from the silhouette, so nothing spreads past it
+    // and the layer needs no room around the mark.
+    .outset(px(0.0))
+}
+
+/// The mark as a bulb that is going.
+///
+/// Both sides of the gate are degraded: the path is failing rather than cut, so
+/// the mark neither holds steady nor goes out. It runs on the shared wire clock
+/// like everything else here, so the stutter does not restart when the panel
+/// re-renders.
+fn flickering(mark: gpui::Svg) -> impl IntoElement {
+    mark.opacity(flicker(WIRE_CLOCK.elapsed().as_secs_f32()))
+        .with_animation(
+            SharedString::from("gate-flicker"),
+            motion::cascade(),
+            move |mark, _| mark.opacity(flicker(WIRE_CLOCK.elapsed().as_secs_f32())),
+        )
+}
+
+/// How lit the failing mark is at `t` seconds.
+///
+/// Quantised, so the brightness steps rather than slides: a bulb with a bad
+/// contact snaps between levels, and a smooth fade reads as breathing, which is
+/// the animation a healthy gate already has.
+fn flicker(t: f32) -> f32 {
+    let tick = (t * FLICKER_TICKS_PER_SECOND).floor().max(0.0) as u32;
+    let roll = noise(0x00B0_1BED, tick);
+    let level = if roll < FLICKER_OUT_CHANCE {
+        FLICKER_OUT
+    } else if roll < FLICKER_OUT_CHANCE + FLICKER_DIP_CHANCE {
+        FLICKER_DIP
+    } else {
+        FLICKER_REST
+    };
+    // A slow sag underneath, so a bulb that is not currently stuttering is
+    // still not perfectly steady.
+    level * (0.94 + 0.06 * (t * TAU * 0.35).sin())
+}
+
 /// The segment between two nodes. When traffic passes it is a live wire: a
 /// dim carrier with discrete packets of light travelling source-wards, the
 /// same staggered phase wave the alert's cascade uses, so "live" reads as
@@ -325,9 +409,9 @@ fn connector(id: &'static str, tone: Tone, theme: &Theme) -> gpui::Div {
                 .child(stub())
                 .child(cross)
                 .child(stub())
-                // One last packet leaves the source and dies at the break —
-                // the attempt the wire made before it went down. Keyed on the
-                // id and tone, so it plays when the path fails, not forever.
+                // A packet leaves the source and dies at the break, over and
+                // over. The far side has not stopped calling just because the
+                // line is cut, and one attempt at mount would say it had.
                 .when(motion::enabled(), |line| line.child(last_breath(id, tone, theme)))
         })
         .when(!broken, |line| {
@@ -571,21 +655,44 @@ fn wake_cells(
 /// made before it went down, not a loop pretending one is coming.
 fn last_breath(id: &'static str, tone: Tone, theme: &Theme) -> impl IntoElement {
     let color = tone.color(theme);
-    last_breath_canvas(color, 0.0)
+    let at = move || breath(WIRE_CLOCK.elapsed().as_secs_f32());
+    last_breath_canvas(color, at())
         .with_animation(
             gpui::SharedString::from(format!("gate-last-breath-{id}-{}", motion_key(tone))),
-            gpui::Animation::new(LAST_BREATH).with_easing(gpui::ease_out_quint()),
-            move |_, delta| last_breath_canvas(color, delta),
+            // Cadence only. The attempt's own position comes from the shared
+            // clock, so it neither restarts on a re-render nor drifts against
+            // the wires either side of it.
+            motion::cascade(),
+            move |_, _| last_breath_canvas(color, at()),
         )
         .into_any_element()
 }
 
+/// How far along the current attempt is, or `None` in the pause between them.
+///
+/// Eased out so the packet leaves quickly and slows as it reaches the cut,
+/// which is what makes it read as an attempt failing rather than as a dot
+/// crossing a gap.
+fn breath(t: f32) -> Option<f32> {
+    let phase = t.rem_euclid(LAST_BREATH_PERIOD.as_secs_f32());
+    let travel = LAST_BREATH.as_secs_f32();
+    if phase >= travel {
+        return None;
+    }
+    let progress = phase / travel;
+    let remaining = 1.0 - progress;
+    Some(1.0 - remaining * remaining * remaining * remaining * remaining)
+}
+
 /// The dying packet at `delta`: a head with a short trail, its light fading
 /// as it approaches the break at the connector's middle.
-fn last_breath_canvas(color: Hsla, delta: f32) -> gpui::Canvas<()> {
+fn last_breath_canvas(color: Hsla, delta: Option<f32>) -> gpui::Canvas<()> {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, _| {
+            let Some(delta) = delta else {
+                return;
+            };
             let columns = (f32::from(bounds.size.width) / WIRE_PITCH) as usize;
             let y = f32::from(bounds.origin.y) + (f32::from(bounds.size.height) - CELL) / 2.0;
             let head = delta * 0.5 * columns as f32;
@@ -635,6 +742,72 @@ fn lowercase_first(label: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_attempt_repeats_on_its_period_with_a_pause_between() {
+        // A cut line keeps being asked. One attempt at mount said the far side
+        // had given up, which is not what a cut wire means.
+        let period = LAST_BREATH_PERIOD.as_secs_f32();
+        let travel = LAST_BREATH.as_secs_f32();
+        assert!(travel < period, "an attempt must finish before the next starts");
+
+        for cycle in 0..4 {
+            let start = cycle as f32 * period;
+            assert_eq!(breath(start), Some(0.0), "cycle {cycle} does not start at the source");
+            assert!(breath(start + travel * 0.5).is_some(), "cycle {cycle} is missing mid-flight");
+            assert_eq!(breath(start + travel + 0.01), None, "cycle {cycle} does not stop");
+            assert_eq!(breath(start + period - 0.01), None, "cycle {cycle} has no pause");
+        }
+    }
+
+    #[test]
+    fn an_attempt_slows_as_it_reaches_the_cut() {
+        // Eased out: it leaves quickly and dies slowly, which is what reads as
+        // an attempt failing rather than a dot crossing a gap.
+        let travel = LAST_BREATH.as_secs_f32();
+        let early = breath(travel * 0.25).unwrap();
+        let late = breath(travel * 0.75).unwrap();
+        assert!(early > 0.5, "the packet dawdles leaving: {early}");
+        assert!(late > 0.99, "the packet has not settled at the cut: {late}");
+    }
+
+    #[test]
+    fn the_failing_mark_is_lit_far_more_often_than_not() {
+        // A bulb that is off as much as it is on is a strobe, which is
+        // unpleasant to sit in front of and a photosensitivity hazard.
+        let samples = 4000;
+        let lit = (0..samples)
+            .map(|step| flicker(step as f32 / 60.0))
+            .filter(|level| *level > 0.8)
+            .count();
+        let share = lit as f32 / samples as f32;
+        assert!(share > 0.6, "the mark is only lit {:.0}% of the time", share * 100.0);
+    }
+
+    #[test]
+    fn the_failing_mark_never_goes_fully_dark_or_over_bright() {
+        for step in 0..4000 {
+            let level = flicker(step as f32 / 60.0);
+            assert!(
+                (0.05..=1.0).contains(&level),
+                "flicker left the usable range at {step}: {level}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_failing_mark_holds_each_level_long_enough_to_read() {
+        // The stutter is quantised, so a level lasts a whole tick. Anything
+        // faster than this is the strobe the rate was chosen to avoid.
+        let tick = 1.0 / FLICKER_TICKS_PER_SECOND;
+        assert!(tick > 0.15, "a flicker step lasts only {tick}s");
+        let inside = flicker(2.0 * tick + tick * 0.1);
+        let later = flicker(2.0 * tick + tick * 0.8);
+        assert!(
+            (inside - later).abs() < 0.1,
+            "the level changed inside one tick: {inside} then {later}"
+        );
+    }
 
     #[test]
     fn noise_is_deterministic_and_bounded() {
