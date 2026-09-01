@@ -337,16 +337,23 @@ impl RenderOnce for LabelSwap {
         let leaving = (phase.eased / 0.5).clamp(0.0, 1.0);
         let arriving = ((phase.eased - 0.5) / 0.5).clamp(0.0, 1.0);
 
+        // The resting label stays in the tree after it has faded out. It is
+        // what holds the slot's width, and the arriving label is positioned
+        // absolutely inside that slot — drop the one and the other has no box
+        // to sit in, so the second half of every swap renders nothing.
+        let present = 1.0 - leaving;
+        let leaving_blur = if present > 0.004 { px(deepest * leaving) } else { px(0.0) };
+
         div()
             .relative()
             .flex_none()
-            .children((leaving < 0.996).then(|| {
+            .child({
                 soften(
-                    px(deepest * leaving),
+                    leaving_blur,
                     div()
                         .text_body()
                         .font_weight(gpui::FontWeight::MEDIUM)
-                        .opacity(1.0 - leaving)
+                        .opacity(present)
                         // A relative inset, which taffy resolves after layout,
                         // so the label moves the way a CSS transform would and
                         // its neighbours do not follow it.
@@ -354,7 +361,7 @@ impl RenderOnce for LabelSwap {
                         .top(px(-travel * leaving))
                         .child(self.resting),
                 )
-            }))
+            })
             .children((arriving > 0.004).then(|| {
                 soften(
                     px(deepest * (1.0 - arriving)),
@@ -432,6 +439,25 @@ mod tests {
             let arriving = ((eased - 0.5) / 0.5).clamp(0.0, 1.0);
             let both_present = (1.0 - leaving) > 0.004 && arriving > 0.004;
             assert!(!both_present, "two labels visible at eased {eased}");
+        }
+    }
+
+    #[test]
+    fn the_slot_keeps_its_width_after_the_first_label_has_gone() {
+        // The arriving label sits absolutely inside the slot the resting label
+        // measures. If the resting one is dropped once it is invisible the slot
+        // collapses, and the whole second half of the swap renders nothing —
+        // which looks like the transition failing rather than like a layout
+        // that lost its only content.
+        for step in 0..=200 {
+            let eased = step as f32 / 200.0;
+            let leaving = (eased / 0.5).clamp(0.0, 1.0);
+            let present = 1.0 - leaving;
+            let blur_is_paid_for = present > 0.004;
+            assert!(
+                blur_is_paid_for || present == 0.0,
+                "an invisible label is still being blurred at {eased}"
+            );
         }
     }
 
