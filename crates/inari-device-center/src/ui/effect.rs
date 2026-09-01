@@ -259,6 +259,53 @@ fn effect(input: EffectInput) -> vec4<f32> {
         }
     }
 
+    /// An enum's constants, as generated code would emit them: one per variant,
+    /// whether or not the shader branches on all of them.
+    ///
+    /// `Pointer` has three states and `pixel_bloom.wgsl` branches on two, so
+    /// generating a constant per variant means shipping unused ones. HLSL turns
+    /// a module constant into `static const`, and Shader Model 5.0 is the
+    /// strictest target we have.
+    const UNUSED_VARIANTS: EffectDef = EffectDef {
+        name: "inari.unused-variants",
+        parameters: &[ParameterDef { name: "mode", kind: ParameterKind::Index }],
+        wgsl: r#"
+const STATE_NEVER: u32 = 0u;
+const STATE_INSIDE: u32 = 1u;
+const STATE_LEFT: u32 = 2u;
+
+fn effect(input: EffectInput) -> vec4<f32> {
+    if mode(input) == STATE_INSIDE {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(0.0);
+}
+"#,
+    };
+
+    #[test]
+    fn a_variant_the_shader_never_names_still_translates() {
+        for target in TARGETS {
+            let source = effect::translate(&UNUSED_VARIANTS, target)
+                .unwrap_or_else(|error| panic!("{target:?}: {error:#}"));
+            if target == ShaderTarget::Hlsl {
+                println!("--- HLSL for an enum with unused variants ---");
+                for line in source.lines().filter(|line| line.contains("STATE_")) {
+                    println!("{line}");
+                }
+                println!("--- end ---");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fxc_accepts_a_variant_the_shader_never_names() {
+        // Decides whether generated enum constants can be emitted eagerly, one
+        // per variant, or only for the variants a shader actually mentions.
+        effect::validate_direct3d(&UNUSED_VARIANTS).unwrap();
+    }
+
     #[test]
     fn the_shader_and_the_pointer_agree() {
         // The shader compares against these as plain numbers, because a `u32`
