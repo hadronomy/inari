@@ -6,10 +6,12 @@
 //! heard. Landing the tick in a single frame throws that away — the change is
 //! over before the eye that caused it arrives.
 //!
-//! The web recipe is transitions.dev's icon swap and text swap. Both stack the
-//! two states in one slot and cross-fade between them: the glyph scales, the
-//! label leaves upward and arrives from below, and a 2px blur bridges the
-//! moment when both are half-present.
+//! The web recipe is transitions.dev's icon swap and its text swap, and they
+//! are not the same transition. The icon crossfades: two marks in one slot,
+//! one scaling and blurring out while the other scales and sharpens in. The
+//! text runs in sequence: the old label leaves upward and is gone before the
+//! new one arrives from below. Both blur by the same amount at their far end,
+//! and that blur is what makes either legible while it moves.
 //!
 //! One thing had to change on the way over. **There is no scale transform for
 //! a div.** GPUI can scale an SVG, about its own centre, and nothing else — so
@@ -293,42 +295,61 @@ impl RenderOnce for LabelSwap {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
         let phase = phase(window, &self.key, self.showing_active, motion::SWAP);
         let travel = motion::SWAP_TRAVEL;
+        let deepest = LABEL_SIZE * motion::SWAP_BLUR;
+
+        // A word is not a mark. transitions.dev crossfades two icons in one
+        // slot, but swaps text in sequence: the old label leaves completely,
+        // the text changes, and the new one arrives from below. Two words
+        // overlapping do not read as one word changing — they read as two
+        // words, because a reader is trying to make letters out of both.
+        //
+        // Splitting the eased fraction gives each half the curve it wants for
+        // free: the first half of an ease-in-out is an ease-in, which is how a
+        // label should leave, and the second half is an ease-out, which is how
+        // one should arrive and settle.
+        let leaving = (phase.eased / 0.5).clamp(0.0, 1.0);
+        let arriving = ((phase.eased - 0.5) / 0.5).clamp(0.0, 1.0);
 
         div()
             .relative()
             .flex_none()
-            .child(soften(
-                px(LABEL_SIZE * motion::SWAP_BLUR * phase.eased),
-                div()
-                    .text_body()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .opacity(phase.leaving)
-                    // A relative inset, which taffy resolves after layout, so
-                    // the label moves the way a CSS transform would and its
-                    // neighbours do not follow it.
-                    .relative()
-                    .top(px(-travel * phase.eased))
-                    .child(self.resting),
-            ))
-            .child(soften(
-                px(LABEL_SIZE * motion::SWAP_BLUR * (1.0 - phase.eased)),
-                div()
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    // Left, not centred. The resting label holds the width, so
-                    // centring a shorter one inside it strands the glyph beside
-                    // it with a gap the resting state never has; aligned to the
-                    // same edge, the mark and the word stay one unit and the
-                    // slack falls after them where nothing reads it.
-                    .justify_start()
-                    .text_body()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .opacity(phase.arriving)
-                    .top(px(travel * (1.0 - phase.eased)))
-                    .child(self.active),
-            ))
+            .children((leaving < 0.996).then(|| {
+                soften(
+                    px(deepest * leaving),
+                    div()
+                        .text_body()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .opacity(1.0 - leaving)
+                        // A relative inset, which taffy resolves after layout,
+                        // so the label moves the way a CSS transform would and
+                        // its neighbours do not follow it.
+                        .relative()
+                        .top(px(-travel * leaving))
+                        .child(self.resting),
+                )
+            }))
+            .children((arriving > 0.004).then(|| {
+                soften(
+                    px(deepest * (1.0 - arriving)),
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        // Left, not centred. The resting label holds the width,
+                        // so centring a shorter one inside it strands the glyph
+                        // beside it with a gap the resting state never has;
+                        // aligned to the same edge, the mark and the word stay
+                        // one unit and the slack falls after them where nothing
+                        // reads it.
+                        .justify_start()
+                        .text_body()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .opacity(arriving)
+                        .top(px(travel * (1.0 - arriving)))
+                        .child(self.active),
+                )
+            }))
     }
 }
 
@@ -370,6 +391,30 @@ mod tests {
         let oversized = 56.0 * motion::SWAP_BLUR;
         assert!(readout < 2.0, "the small mark is over-blurred: {readout}");
         assert!(oversized > 6.0, "the large mark is under-blurred: {oversized}");
+    }
+
+    #[test]
+    fn a_label_is_never_two_words_at_once() {
+        // The icon crossfades and the label does not. Two words overlapping
+        // read as two words, because a reader tries to make letters out of
+        // both — which is why transitions.dev swaps text in sequence and
+        // crossfades only marks.
+        for step in 0..=200 {
+            let eased = step as f32 / 200.0;
+            let leaving = (eased / 0.5).clamp(0.0, 1.0);
+            let arriving = ((eased - 0.5) / 0.5).clamp(0.0, 1.0);
+            let both_present = (1.0 - leaving) > 0.004 && arriving > 0.004;
+            assert!(!both_present, "two labels visible at eased {eased}");
+        }
+    }
+
+    #[test]
+    fn a_label_leaves_completely_before_the_next_arrives() {
+        let midpoint = 0.5_f32;
+        let leaving = (midpoint / 0.5).clamp(0.0, 1.0);
+        let arriving = ((midpoint - 0.5) / 0.5).clamp(0.0, 1.0);
+        assert_eq!(1.0 - leaving, 0.0, "the old label is still on screen");
+        assert_eq!(arriving, 0.0, "the new label has already started");
     }
 
     #[test]
