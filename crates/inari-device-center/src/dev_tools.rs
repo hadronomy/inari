@@ -390,6 +390,29 @@ impl DevTools {
                 ),
             )
             .child(
+                Section::new("Weathered — the mark as old stone").child(
+                    div()
+                        .v_flex()
+                        .gap(px(Theme::SPACE_MD))
+                        .w_full()
+                        .child(
+                            div()
+                                .h_flex()
+                                .gap(px(Theme::SPACE_XL))
+                                .items_end()
+                                .children([0.0, 0.35, 0.68, 1.0].map(|wear| {
+                                    weathered_mark(wear, 40.0)
+                                }))
+                                .children([0.68].map(|wear| weathered_mark(wear, 132.0))),
+                        )
+                        .child(div().text_caption().child(
+                            "The first four are the size the gate actually draws; the last is \
+                             the same shader given room, because 40px hides whether the cracks \
+                             are cracks.",
+                        )),
+                ),
+            )
+            .child(
                 Section::new("Blur — a separable Gaussian over real text").child(
                     div()
                         .h_flex()
@@ -899,6 +922,30 @@ fn swap_frame(progress: f32) -> impl IntoElement {
             .pinned(progress),
         )
         .child(div().text_caption().child(format!("{:.0}%", progress * 100.0)))
+}
+
+/// The mark weathered by `wear`, at `edge` pixels.
+///
+/// Shown at the shipping size and again enlarged. A shader judged only at the
+/// size it ships at cannot be told apart from a smudge, and one judged only
+/// enlarged flatters itself.
+fn weathered_mark(wear: f32, edge: f32) -> impl IntoElement {
+    use crate::ui::content::Typography as _;
+    use crate::ui::effect::Weathered;
+
+    div()
+        .v_flex()
+        .items_center()
+        .gap(px(Theme::SPACE_SM))
+        .child(gpui::effect_layer(
+            &Weathered { amount: wear, ..Weathered::default() },
+            gpui::svg()
+                .path("inari-mark-torii-ui.svg")
+                .size(px(edge))
+                .flex_none()
+                .text_color(gpui::rgb(0xb9b2a8)),
+        ))
+        .child(div().text_caption().child(format!("{:.0}%", wear * 100.0)))
 }
 
 /// One frame of a label swap, held still.
