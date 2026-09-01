@@ -50,16 +50,10 @@ fn effect(input: EffectInput) -> vec4<f32> {
     let delay = length(centre - origin) / max(spread(input), 1.0) * jitter;
     let travel = clamp((age(input) - delay) / (DURATION * jitter), 0.0, 1.0);
 
-    // These match `Pointer`'s discriminants on the Rust side, which is the one
-    // place they are named; change them there and change them here.
-    const NEVER: u32 = 0u;
-    const INSIDE: u32 = 1u;
-
-    let state = pointer(input);
     var reach = 0.0;
-    if state == INSIDE {
+    if pointer_is_inside(input) {
         reach = travel;
-    } else if state != NEVER {
+    } else if !pointer_is_never(input) {
         reach = 1.0 - travel;
     }
     if reach <= 0.0 {
