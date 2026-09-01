@@ -266,14 +266,12 @@ fn soften(radius: Pixels, content: impl IntoElement) -> AnyElement {
 
 /// Two labels in one slot, the second replacing the first.
 ///
-/// `resting` stays in the layout and reserves the width, so the control keeps
-/// its size and the controls beside it never shuffle along; `active` is
-/// painted over it. The one leaving rises and fades, the one arriving comes up
-/// from below — the direction transitions.dev uses, and the reason a swap
-/// reads as one label becoming another rather than as two labels blinking.
-///
-/// The resting label is the one that has to be the wider of the two, since it
-/// is the one holding the space open.
+/// The slot is held open by whichever label is longer, so the control keeps its
+/// size, the controls beside it never shuffle along, and neither word is cut
+/// off by a box measured for the other. The one leaving rises and fades, the
+/// one arriving comes up from below — the direction transitions.dev uses, and
+/// the reason a swap reads as one label becoming another rather than as two
+/// labels blinking.
 #[derive(IntoElement)]
 pub struct LabelSwap {
     key: SharedString,
@@ -344,20 +342,41 @@ impl RenderOnce for LabelSwap {
         let present = 1.0 - leaving;
         let leaving_blur = if present > 0.004 { px(deepest * leaving) } else { px(0.0) };
 
+        // Neither word is in the layout. A transparent copy of the longer one
+        // holds the slot open and both real labels are positioned inside it,
+        // which is what the web recipe gets from stacking them in one grid
+        // cell. The slot used to be whichever label was resting, and a longer
+        // arriving word was then laid out in a box measured for a shorter one —
+        // a rule the documentation asked callers to keep, which is not
+        // something a caller can see at the call site.
+        let sizer = if self.active.chars().count() > self.resting.chars().count() {
+            self.active.clone()
+        } else {
+            self.resting.clone()
+        };
+
         div()
             .relative()
             .flex_none()
+            .child(
+                div()
+                    .text_body()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .opacity(0.0)
+                    .child(sizer),
+            )
             .child({
                 soften(
                     leaving_blur,
                     div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_start()
                         .text_body()
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .opacity(present)
-                        // A relative inset, which taffy resolves after layout,
-                        // so the label moves the way a CSS transform would and
-                        // its neighbours do not follow it.
-                        .relative()
                         .top(px(-travel * leaving))
                         .child(self.resting),
                 )
@@ -370,12 +389,12 @@ impl RenderOnce for LabelSwap {
                         .inset_0()
                         .flex()
                         .items_center()
-                        // Left, not centred. The resting label holds the width,
-                        // so centring a shorter one inside it strands the glyph
-                        // beside it with a gap the resting state never has;
-                        // aligned to the same edge, the mark and the word stay
-                        // one unit and the slack falls after them where nothing
-                        // reads it.
+                        // Left, not centred. The slot is as wide as the longer
+                        // word, so centring the shorter one inside it strands
+                        // the glyph beside it with a gap the resting state
+                        // never has; aligned to the same edge, the mark and the
+                        // word stay one unit and the slack falls after them
+                        // where nothing reads it.
                         .justify_start()
                         .text_body()
                         .font_weight(gpui::FontWeight::MEDIUM)
@@ -425,6 +444,19 @@ mod tests {
         let oversized = 56.0 * motion::SWAP_BLUR;
         assert!(readout < 2.0, "the small mark is over-blurred: {readout}");
         assert!(oversized > 6.0, "the large mark is under-blurred: {oversized}");
+    }
+
+    #[test]
+    fn the_slot_is_measured_for_the_longer_word() {
+        // Either order at the call site has to work. Sizing to whichever label
+        // happened to be resting meant a longer arriving word was laid out in a
+        // box measured for a shorter one, and got cut off.
+        fn sizer<'a>(resting: &'a str, active: &'a str) -> &'a str {
+            if active.chars().count() > resting.chars().count() { active } else { resting }
+        }
+        assert_eq!(sizer("Copy", "Copied"), "Copied");
+        assert_eq!(sizer("Copy all details", "Copied"), "Copy all details");
+        assert_eq!(sizer("Save", "Save"), "Save");
     }
 
     #[test]
