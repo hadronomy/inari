@@ -140,16 +140,21 @@ impl IconSwap {
         self
     }
 
-    /// Hold the swap still at `progress` along its curve rather than running it.
+    /// Hold the swap still, `fraction` of the way through.
     ///
     /// A swap is [`motion::SWAP`] long, which is too fast to judge while it
     /// runs and is exactly what has to be judged: the frames worth arguing
     /// about are the ones where both halves are present. Pinning renders those
     /// frames through the same code the running control uses, so a preview
     /// cannot drift from the thing it previews.
+    ///
+    /// `fraction` is how far along the halves are, not how much time has
+    /// passed. [`motion::EASE_SWAP`] is steep enough that even sampling by time
+    /// spends most of its frames on the two ends where nothing moves, and shows
+    /// the crossing in one of them.
     #[cfg(debug_assertions)]
-    pub fn pinned(mut self, progress: f32) -> Self {
-        self.pinned = Some(progress);
+    pub fn pinned(mut self, fraction: f32) -> Self {
+        self.pinned = Some(fraction);
         self
     }
 }
@@ -158,7 +163,7 @@ impl RenderOnce for IconSwap {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
         #[cfg(debug_assertions)]
         let phase = match self.pinned {
-            Some(progress) => Phase::new(motion::EASE_SWAP.ease(progress)),
+            Some(fraction) => Phase::new(fraction),
             None => phase(window, &self.key, self.showing_active, motion::SWAP),
         };
         #[cfg(not(debug_assertions))]

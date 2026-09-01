@@ -368,7 +368,7 @@ impl DevTools {
                                 .gap(px(Theme::SPACE_XL))
                                 .items_end()
                                 .children(
-                                    [0.0, 0.2, 0.35, 0.5, 0.65, 0.8, 1.0].map(swap_frame),
+                                    [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0].map(swap_frame),
                                 ),
                         )
                         .child(div().text_caption().child(
@@ -859,6 +859,10 @@ fn frosted(label: &'static str, radius: f32) -> impl IntoElement {
 }
 
 /// One frame of a swap, held still, at four times the size it ships at.
+///
+/// Sampled evenly through the transition rather than evenly through its
+/// duration. `EASE_SWAP` spends its first and last thirds barely moving, so
+/// even sampling by time puts six of eight frames where nothing is happening.
 ///
 /// Big on purpose. The blur is two logical pixels on a fourteen-pixel glyph, so
 /// at shipping size the thing being judged is smaller than the eye can argue
