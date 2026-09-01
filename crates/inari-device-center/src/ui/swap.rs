@@ -280,6 +280,20 @@ pub struct LabelSwap {
     resting: SharedString,
     active: SharedString,
     showing_active: bool,
+    /// See [`IconSwap::pinned`]; a label is worth looking at for the opposite
+    /// reason, which is that its halves must never meet.
+    #[cfg(debug_assertions)]
+    pinned: Option<f32>,
+}
+
+impl LabelSwap {
+    /// Hold the swap still, `fraction` of the way through. See
+    /// [`IconSwap::pinned`].
+    #[cfg(debug_assertions)]
+    pub fn pinned(mut self, fraction: f32) -> Self {
+        self.pinned = Some(fraction);
+        self
+    }
 }
 
 pub fn label(
@@ -288,11 +302,24 @@ pub fn label(
     active: impl Into<SharedString>,
     showing_active: bool,
 ) -> LabelSwap {
-    LabelSwap { key: key.into(), resting: resting.into(), active: active.into(), showing_active }
+    LabelSwap {
+        key: key.into(),
+        resting: resting.into(),
+        active: active.into(),
+        showing_active,
+        #[cfg(debug_assertions)]
+        pinned: None,
+    }
 }
 
 impl RenderOnce for LabelSwap {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        #[cfg(debug_assertions)]
+        let phase = match self.pinned {
+            Some(fraction) => Phase::new(fraction),
+            None => phase(window, &self.key, self.showing_active, motion::SWAP),
+        };
+        #[cfg(not(debug_assertions))]
         let phase = phase(window, &self.key, self.showing_active, motion::SWAP);
         let travel = motion::SWAP_TRAVEL;
         let deepest = LABEL_SIZE * motion::SWAP_BLUR;
