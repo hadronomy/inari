@@ -71,6 +71,17 @@ from .drawer_intents import (
     DrawerIntentSubmitRequest,
     DrawerIntentSubmitResponse,
 )
+from .device_streams import (
+    EmptySuccessResponse,
+    EventAcknowledgementRequest,
+    EventLeaseAcquireRequest,
+    EventLeaseControlRequest,
+    EventLeaseResponse,
+    ScaleLeaseAcquireRequest,
+    ScaleLeaseControlRequest,
+    ScaleLeaseResponse,
+    StreamSelectionInput,
+)
 from .public_print_jobs import (
     PrintJobQueryRequest,
     PrintJobQueryResponse,
@@ -162,6 +173,11 @@ __all__ = [
     "DrawerIntentResponse",
     "DrawerIntentSubmitRequest",
     "DrawerIntentSubmitResponse",
+    "EmptySuccessResponse",
+    "EventAcknowledgementRequest",
+    "EventLeaseAcquireRequest",
+    "EventLeaseControlRequest",
+    "EventLeaseResponse",
     "PrincipalResponse",
     "PrintTestPageCommandInput",
     "PrintJobQueryRequest",
@@ -177,9 +193,13 @@ __all__ = [
     "RuntimeEventResponse",
     "RuntimeEventKind",
     "RuntimeResourceKind",
+    "ScaleLeaseControlRequest",
+    "ScaleLeaseAcquireRequest",
+    "ScaleLeaseResponse",
     "ServiceDescriptorResponse",
     "SubmissionContextInput",
     "SystemStatusResponse",
+    "StreamSelectionInput",
     "TokenResponse",
     "TrustedLocalClientResponse",
 ]

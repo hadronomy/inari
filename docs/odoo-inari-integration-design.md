@@ -1328,6 +1328,39 @@ After access-token renewal, the Transport Leader reconnects with the new token.
 The first event is `ready`. It contains the stream identity, current sequence,
 and an immutable reconciliation high-water mark.
 
+The Local Agent Interface uses these fixed DPoP-protected endpoints:
+
+- `POST /v1/events/lease` acquires the Transport Leader Lease.
+- `POST /v1/events/lease/renew` renews the Transport Leader Lease.
+- `DELETE /v1/events/lease` releases the Transport Leader Lease.
+- `POST /v1/events/scale-lease` acquires the separate three-second Scale Lease.
+- `POST /v1/events/scale-lease/renew` renews the Scale Lease.
+- `DELETE /v1/events/scale-lease` releases the Scale Lease.
+- `GET /v1/events` opens the fetch-based SSE stream.
+- `POST /v1/events/ack` acknowledges accepted Barcode Events.
+
+The SSE request puts the lease, Subscription Identity, and fencing generation
+in bounded request headers. It does not put credentials, scope, or Device
+identities in the URL. The Agent derives business scope from the Client Grant.
+
+Each signed message uses an Ed25519 compact JWS with the protected type
+`inari-agent-event+jws`. The signature covers the canonical message, Agent Boot
+Identity, Subscription Identity, Client Grant, Binding Revision, scope digest,
+and fencing generation. The first `ready` message also returns the Agent public
+JWK. The browser verifies that key against the paired Agent identity before it
+accepts the message.
+
+The stream uses one sequence for each Subscription Identity and one durable
+Agent sequence for its reconciliation barrier. Scale Readings are ephemeral.
+The Agent keeps at most 128 unacknowledged Barcode Events in memory for the
+active lease. It never writes barcode values to SQLite, logs, metrics, runtime
+events, or the gateway. Buffer exhaustion sends signed
+`replay_unavailable` evidence and closes the stream. It never drops an older
+Barcode Event to admit a newer value.
+
+The older unscoped `/events` WebSocket is not part of the Local Agent
+Interface. The Agent does not expose it.
+
 A successor reconciles through that high-water mark before it subscribes to
 later events. A sequence gap starts the same barrier flow. This contract
 prevents loss between the snapshot and subscription.

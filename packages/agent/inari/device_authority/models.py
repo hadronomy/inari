@@ -471,6 +471,31 @@ class CapabilityAdmissionTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class CapabilityStreamTarget:
+    """A typed input stream whose signed capability graph the Agent derives."""
+
+    scope: AuthorityScope
+    purpose: str
+    device_id: str
+    binding_revision_id: str
+    operation: str
+    contract_major: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, AuthorityScope):
+            raise TypeError("scope must be an AuthorityScope")
+        for name, value in (
+            ("purpose", self.purpose),
+            ("device_id", self.device_id),
+            ("binding_revision_id", self.binding_revision_id),
+            ("operation", self.operation),
+        ):
+            _require_text(name, value)
+        if isinstance(self.contract_major, bool) or self.contract_major < 1:
+            raise ValueError("contract_major must be a positive integer")
+
+
+@dataclass(frozen=True, slots=True)
 class AuthorityProof:
     """The public, content-free evidence attached to an Admission Permit."""
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import anyio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
@@ -11,7 +10,6 @@ from typing import Any, cast
 
 import pytest
 from asgi_lifespan import LifespanManager
-from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from inari.config import AgentSettings
@@ -41,6 +39,12 @@ from inari.drawer_intents import (
     DrawerIntentRecord,
     DrawerIntentState,
     DrawerReason,
+)
+from inari.device_streams import (
+    EventLease,
+    ScaleLease,
+    SignedStreamMessage,
+    StreamMessageKind,
 )
 from inari.drivers import (
     DeviceIdentity,
@@ -224,15 +228,18 @@ class StubClientTrustAuthorizer:
         request: HeaderAuthorizationRequest,
         policy: EndpointAuthorizationPolicy,
     ) -> AuthorizationDecision:
-        expected_permission = (
-            Permission.JOBS_READ
-            if request.path.startswith("/v1/jobs/")
-            else {
-                "/v1/device-work": Permission.RECEIPT_IMAGE,
-                "/v1/drawer-intents": Permission.DRAWER,
-                "/v1/drawer-intents/query": Permission.JOBS_READ,
-            }[request.path]
-        )
+        expected_permission = Permission.JOBS_READ if request.path.startswith("/v1/jobs/") else {
+            "/v1/device-work": Permission.RECEIPT_IMAGE,
+            "/v1/jobs/query": Permission.JOBS_READ,
+            "/v1/drawer-intents": Permission.DRAWER,
+            "/v1/drawer-intents/query": Permission.JOBS_READ,
+            "/v1/events/lease": Permission.EVENTS_READ,
+            "/v1/events/lease/renew": Permission.EVENTS_READ,
+            "/v1/events/scale-lease": Permission.EVENTS_READ,
+            "/v1/events/scale-lease/renew": Permission.EVENTS_READ,
+            "/v1/events/ack": Permission.EVENTS_READ,
+            "/v1/events": Permission.EVENTS_READ,
+        }[request.path]
         assert policy.permission is expected_permission
         if self.error is not None:
             raise self.error
@@ -343,6 +350,108 @@ class StubPrinterService:
     pass
 
 
+@dataclass(slots=True)
+class StubDeviceStreamService:
+    signing_public_jwk: dict[str, str] = field(
+        default_factory=lambda: {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "kid": "key_1",
+            "x": "public_key_value",
+        }
+    )
+    acquired: object | None = None
+
+    async def acquire(self, request, authorization) -> EventLease:
+        self.acquired = request
+        return EventLease(
+            lease_id="lease_1",
+            subscription_id="subscription_1",
+            holder_id=request.holder_id,
+            generation=1,
+            scope_digest="scope_12345678",
+            agent_id="agent_1",
+            agent_boot_id="boot_1",
+            client_grant_id=authorization.grant.grant_id,
+            selections=request.selections,
+            issued_at=utc_now(),
+            expires_at=utc_now() + timedelta(seconds=10),
+        )
+
+    async def renew(self, lease_id, generation, authorization) -> EventLease:
+        del lease_id, generation
+        return await self.acquire(self.acquired, authorization)
+
+    async def release(self, lease_id, generation, authorization) -> None:
+        del lease_id, generation, authorization
+
+    async def acquire_scale_lease(
+        self, event_lease_id, generation, authorization
+    ) -> ScaleLease:
+        del generation, authorization
+        return ScaleLease(
+            scale_lease_id="scale_lease_1",
+            event_lease_id=event_lease_id,
+            device_id="scale_1",
+            binding_revision_id="binding_scale_1",
+            generation=1,
+            issued_at=utc_now(),
+            expires_at=utc_now() + timedelta(seconds=3),
+        )
+
+    async def renew_scale_lease(
+        self, scale_lease_id, generation, authorization
+    ) -> ScaleLease:
+        del scale_lease_id, generation, authorization
+        return await self.acquire_scale_lease("lease_1", 1, None)
+
+    async def release_scale_lease(
+        self, scale_lease_id, generation, authorization
+    ) -> None:
+        del scale_lease_id, generation, authorization
+
+    async def acknowledge(
+        self,
+        lease_id,
+        subscription_id,
+        generation,
+        acknowledgements,
+        authorization,
+    ) -> None:
+        del (
+            lease_id,
+            subscription_id,
+            generation,
+            acknowledgements,
+            authorization,
+        )
+
+    async def stream(self, *args, **kwargs):
+        del args, kwargs
+        now = utc_now()
+        yield SignedStreamMessage(
+            kind=StreamMessageKind.READY,
+            stream_sequence=0,
+            generation=1,
+            occurred_at=now,
+            payload={
+                "lease_id": "lease_1",
+                "subscription_id": "subscription_1",
+            },
+            signer_key_id="key_1",
+            signature="signature_1",
+        )
+        yield SignedStreamMessage(
+            kind=StreamMessageKind.LEASE_LOST,
+            stream_sequence=0,
+            generation=1,
+            occurred_at=now,
+            payload={"reason": "released"},
+            signer_key_id="key_1",
+            signature="signature_2",
+        )
+
+
 @asynccontextmanager
 async def async_client_for(container: AgentContainer):
     app = create_app(container=container)
@@ -360,18 +469,6 @@ async def auth_headers(
     if requested_scopes is not None:
         payload["requested_scopes"] = list(requested_scopes)
     response = await client.post("/auth/local-token", json=payload)
-    response.raise_for_status()
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-
-def sync_auth_headers(
-    client: TestClient, *, requested_scopes: tuple[str, ...] | None = None
-) -> dict[str, str]:
-    payload: dict[str, object] = {"client_name": "test-client"}
-    if requested_scopes is not None:
-        payload["requested_scopes"] = list(requested_scopes)
-    response = client.post("/auth/local-token", json=payload)
     response.raise_for_status()
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -852,7 +949,8 @@ async def test_device_work_trust_failure_keeps_browser_cors_headers(mocker) -> N
     assert response.status_code == 401
     assert response.headers["access-control-allow-origin"] == ("http://127.0.0.1:8069")
     assert response.headers["access-control-expose-headers"] == (
-        "DPoP-Nonce, Date, X-Correlation-ID"
+        "DPoP-Nonce, Date, X-Correlation-ID, X-Inari-Event-Lease, "
+        "X-Inari-Event-Subscription, X-Inari-Event-Generation, X-Inari-Scale-Lease"
     )
 
 
@@ -975,40 +1073,96 @@ async def test_list_jobs_serializes_job_execution_results(mocker) -> None:
     assert payload["jobs"][0]["result"]["bytes_written"] == 128
 
 
-def test_events_websocket_connects_successfully(mocker) -> None:
-    with TestClient(create_app(container=make_test_container(mocker=mocker))) as client:
-        with client.websocket_connect(
-            "/events", headers=sync_auth_headers(client)
-        ) as websocket:
-            payload = websocket.receive_json()
+@pytest.mark.anyio
+async def test_legacy_unscoped_events_route_is_removed(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.get("/events")
 
-    assert payload["kind"] == "snapshot"
-    assert payload["status"]["service"]["name"] == "Inari"
-    assert payload["status"]["queue"]["queued"] == 1
+    assert response.status_code == 404
 
 
-def test_events_websocket_streams_snapshot_backed_updates(mocker) -> None:
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("POST", "/v1/events/lease"),
+        ("POST", "/v1/events/lease/renew"),
+        ("DELETE", "/v1/events/lease"),
+        ("POST", "/v1/events/scale-lease"),
+        ("POST", "/v1/events/scale-lease/renew"),
+        ("DELETE", "/v1/events/scale-lease"),
+        ("POST", "/v1/events/ack"),
+        ("GET", "/v1/events"),
+    ),
+)
+async def test_device_stream_routes_require_client_trust(
+    mocker, method: str, path: str
+) -> None:
     container = make_test_container(mocker=mocker)
-    event = JobEventRecord(
-        sequence=2,
-        resource_id="job_123",
-        event_type=RuntimeEventKind.JOB_FAILED,
-        occurred_at=utc_now(),
-        payload={"job_id": "job_123", "error_detail": "Printer offline"},
+    container = replace(
+        container,
+        device_work_authorizer=StubClientTrustAuthorizer(
+            authorized_device_work(),
+            error=AuthorizationFailure("trust_required", "Trust is required."),
+        ),
     )
+    async with async_client_for(container) as client:
+        response = await client.request(method, path)
 
-    with TestClient(create_app(container=container)) as client:
-        with client.websocket_connect(
-            "/events", headers=sync_auth_headers(client)
-        ) as websocket:
-            websocket.receive_json()
-            anyio.run(container.event_hub.publish, event)
-            payload = websocket.receive_json()
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "trust_required"
 
-    assert payload["kind"] == "event_update"
-    assert payload["event"]["event_type"] == "job.failed"
-    assert payload["event"]["payload"]["error_detail"] == "Printer offline"
-    assert payload["status"]["queue"]["queued"] == 1
+
+@pytest.mark.anyio
+async def test_event_lease_api_returns_agent_fencing_identity(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/events/lease",
+            json={
+                "contract_major": 1,
+                "holder_id": "holder_123456789",
+                "selections": [
+                    {
+                        "kind": "scanner",
+                        "device_id": "scanner_1",
+                        "binding_revision_id": "binding_scanner_1",
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lease_id"] == "lease_1"
+    assert payload["subscription_id"] == "subscription_1"
+    assert payload["generation"] == 1
+    assert payload["agent_boot_id"] == "boot_1"
+    assert payload["signing_public_jwk"]["kid"] == "key_1"
+
+
+@pytest.mark.anyio
+async def test_fetch_sse_stream_starts_with_signed_ready_message(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    async with async_client_for(container) as client:
+        response = await client.get(
+            "/v1/events",
+            headers={
+                "X-Inari-Event-Lease": "lease_1",
+                "X-Inari-Event-Subscription": "subscription_1",
+                "X-Inari-Event-Generation": "1",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-store"
+    frames = response.text.split("\n\n")
+    assert frames[0].startswith("event: ready\ndata: ")
+    ready = json.loads(frames[0].split("data: ", 1)[1])
+    assert ready["kind"] == "ready"
+    assert ready["signature"] == "signature_1"
+    assert frames[1].startswith("event: lease_lost\ndata: ")
 
 
 @pytest.mark.anyio
@@ -1315,6 +1469,7 @@ def make_test_container(
         device_work_submission=DeviceWorkSubmission(admission=admission),
         print_job_queries=PrintJobQueries(reader=print_job_reader),
         drawer_intent_service=cast(Any, object()),
+        device_stream_service=cast(Any, StubDeviceStreamService()),
         physical_execution=cast(Any, object()),
         device_work_authorizer=StubClientTrustAuthorizer(authorization),
         authorization_service=cast(Any, StubAuthorizationService()),

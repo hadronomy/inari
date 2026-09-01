@@ -14,6 +14,11 @@ from ..device_authority import (
 )
 from ..documents import DocumentAdmission, DocumentAdmissionService
 from ..drawer_intents import DrawerIntentService
+from ..device_streams import (
+    AgentEventSigner,
+    DeviceStreamService,
+    SqliteDeviceStreamLedger,
+)
 from ..drawer_intents.adapter import PrinterCashDrawerPort
 from ..drawer_intents.sqlite import SqliteDrawerIntentLedger
 from ..gateway.repositories import GatewayRepository
@@ -44,6 +49,7 @@ from ..runtime.jobs.service import JobService
 from ..runtime.store import RuntimeStore
 from ..runtime.supervisor import RuntimeSupervisor
 from ..security.secrets import ProtectedSecretStore
+from ..security.identity import AgentIdentityService
 from ..spool import (
     ArtifactFileStore,
     DurableSpoolAdmissionStore,
@@ -169,6 +175,29 @@ class RuntimeProvider(Provider):
         drawer: PrinterCashDrawerPort,
     ) -> DrawerIntentService:
         return DrawerIntentService(ledger=ledger, authority=authority, drawer=drawer)
+
+    @provide
+    def device_stream_ledger(self, store: RuntimeStore) -> SqliteDeviceStreamLedger:
+        return SqliteDeviceStreamLedger(store)
+
+    @provide
+    def agent_event_signer(
+        self, identity_service: AgentIdentityService
+    ) -> AgentEventSigner:
+        return AgentEventSigner(identity_service)
+
+    @provide
+    def device_stream_service(
+        self,
+        ledger: SqliteDeviceStreamLedger,
+        authority: DeviceCapabilityAuthority,
+        signer: AgentEventSigner,
+    ) -> DeviceStreamService:
+        return DeviceStreamService(
+            ledger=ledger,
+            authority=authority,
+            signer=signer,
+        )
 
     @provide
     def execution_owner(self) -> ExecutionOwner:

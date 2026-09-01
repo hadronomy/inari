@@ -28,6 +28,30 @@
         "title": "AuthenticatedPrincipalResponse",
         "type": "object"
       },
+      "BarcodeAcknowledgementInput": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "sequence": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device_id",
+          "sequence"
+        ],
+        "title": "BarcodeAcknowledgementInput",
+        "type": "object"
+      },
       "ClientGrantRenewalInput": {
         "additionalProperties": false,
         "properties": {
@@ -575,6 +599,260 @@
         "title": "DocumentKind",
         "type": "string"
       },
+      "DrawerIntentQueryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "drawer_intent_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Drawer Intent Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "drawer_intent_ids"
+        ],
+        "title": "DrawerIntentQueryRequest",
+        "type": "object"
+      },
+      "DrawerIntentQueryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "intents": {
+            "items": {
+              "$ref": "#/components/schemas/DrawerIntentResponse"
+            },
+            "title": "Intents",
+            "type": "array"
+          },
+          "missing_drawer_intent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Drawer Intent Ids",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "intents",
+          "missing_drawer_intent_ids"
+        ],
+        "title": "DrawerIntentQueryResponse",
+        "type": "object"
+      },
+      "DrawerIntentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "drawer_intent_id": {
+            "title": "Drawer Intent Id",
+            "type": "string"
+          },
+          "error_code": {
+            "nullable": true,
+            "title": "Error Code",
+            "type": "string"
+          },
+          "message_key": {
+            "nullable": true,
+            "title": "Message Key",
+            "type": "string"
+          },
+          "printer_name": {
+            "nullable": true,
+            "title": "Printer Name",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Started At",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DrawerIntentState"
+          },
+          "state_version": {
+            "title": "State Version",
+            "type": "integer"
+          },
+          "terminal_at": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Terminal At",
+            "type": "string"
+          },
+          "transport": {
+            "nullable": true,
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "drawer_intent_id",
+          "device_id",
+          "state",
+          "state_version",
+          "retryable",
+          "accepted_at"
+        ],
+        "title": "DrawerIntentResponse",
+        "type": "object"
+      },
+      "DrawerIntentState": {
+        "enum": [
+          "accepted",
+          "in_progress",
+          "succeeded",
+          "outcome_unknown",
+          "failed"
+        ],
+        "title": "DrawerIntentState",
+        "type": "string"
+      },
+      "DrawerIntentSubmitRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "action_sequence": {
+            "maximum": 9007199254740991.0,
+            "minimum": 1.0,
+            "title": "Action Sequence",
+            "type": "integer"
+          },
+          "binding_revision_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Binding Revision Id",
+            "type": "string"
+          },
+          "contract_major": {
+            "enum": [
+              1
+            ],
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "device_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "drawer_intent_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Drawer Intent Id",
+            "type": "string"
+          },
+          "pos_session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Pos Session Id",
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "payment",
+              "manual_open"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_major",
+          "drawer_intent_id",
+          "binding_revision_id",
+          "device_id",
+          "pos_session_id",
+          "action_sequence",
+          "reason"
+        ],
+        "title": "DrawerIntentSubmitRequest",
+        "type": "object"
+      },
+      "DrawerIntentSubmitResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "drawer_intent_id": {
+            "title": "Drawer Intent Id",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DrawerIntentState"
+          },
+          "state_version": {
+            "title": "State Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "drawer_intent_id",
+          "device_id",
+          "state",
+          "state_version",
+          "retryable",
+          "accepted_at",
+          "replayed"
+        ],
+        "title": "DrawerIntentSubmitResponse",
+        "type": "object"
+      },
       "DriverResponse": {
         "additionalProperties": false,
         "properties": {
@@ -601,6 +879,21 @@
           "platform"
         ],
         "title": "DriverResponse",
+        "type": "object"
+      },
+      "EmptySuccessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "title": "EmptySuccessResponse",
         "type": "object"
       },
       "ErrorResponse": {
@@ -672,6 +965,218 @@
           "correlation_id"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "EventAcknowledgementRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledgements": {
+            "items": {
+              "$ref": "#/components/schemas/BarcodeAcknowledgementInput"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Acknowledgements",
+            "type": "array"
+          },
+          "contract_major": {
+            "enum": [
+              1
+            ],
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "generation": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "lease_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Lease Id",
+            "type": "string"
+          },
+          "subscription_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Subscription Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_major",
+          "lease_id",
+          "generation",
+          "subscription_id",
+          "acknowledgements"
+        ],
+        "title": "EventAcknowledgementRequest",
+        "type": "object"
+      },
+      "EventLeaseAcquireRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_major": {
+            "enum": [
+              1
+            ],
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "holder_id": {
+            "maxLength": 128,
+            "minLength": 16,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Holder Id",
+            "type": "string"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/StreamSelectionInput"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "contract_major",
+          "holder_id",
+          "selections"
+        ],
+        "title": "EventLeaseAcquireRequest",
+        "type": "object"
+      },
+      "EventLeaseControlRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_major": {
+            "enum": [
+              1
+            ],
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "generation": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "lease_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Lease Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_major",
+          "lease_id",
+          "generation"
+        ],
+        "title": "EventLeaseControlRequest",
+        "type": "object"
+      },
+      "EventLeaseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_boot_id": {
+            "title": "Agent Boot Id",
+            "type": "string"
+          },
+          "agent_id": {
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "client_grant_id": {
+            "title": "Client Grant Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          },
+          "heartbeat_interval_ms": {
+            "title": "Heartbeat Interval Ms",
+            "type": "integer"
+          },
+          "holder_id": {
+            "title": "Holder Id",
+            "type": "string"
+          },
+          "issued_at": {
+            "format": "date-time",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "lease_id": {
+            "title": "Lease Id",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "renew_after_ms": {
+            "title": "Renew After Ms",
+            "type": "integer"
+          },
+          "scope_digest": {
+            "title": "Scope Digest",
+            "type": "string"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/StreamSelectionInput"
+            },
+            "title": "Selections",
+            "type": "array"
+          },
+          "signing_public_jwk": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Signing Public Jwk",
+            "type": "object"
+          },
+          "subscription_id": {
+            "title": "Subscription Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_id",
+          "subscription_id",
+          "holder_id",
+          "generation",
+          "scope_digest",
+          "agent_id",
+          "agent_boot_id",
+          "client_grant_id",
+          "selections",
+          "issued_at",
+          "expires_at",
+          "renew_after_ms",
+          "heartbeat_interval_ms",
+          "signing_public_jwk"
+        ],
+        "title": "EventLeaseResponse",
         "type": "object"
       },
       "FeedDotsCommandInput": {
@@ -2588,6 +3093,10 @@
           "method_not_allowed",
           "binding_required",
           "request_conflict",
+          "transport_leader_active",
+          "transport_leader_lost",
+          "scale_in_use",
+          "scale_lease_required",
           "idempotency_conflict",
           "contract_mismatch",
           "capability_changed",
@@ -3012,6 +3521,129 @@
         "title": "RuntimeResourceKind",
         "type": "string"
       },
+      "ScaleLeaseAcquireRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_major": {
+            "enum": [
+              1
+            ],
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "event_generation": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Event Generation",
+            "type": "integer"
+          },
+          "event_lease_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Event Lease Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_major",
+          "event_lease_id",
+          "event_generation"
+        ],
+        "title": "ScaleLeaseAcquireRequest",
+        "type": "object"
+      },
+      "ScaleLeaseControlRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_major": {
+            "enum": [
+              1
+            ],
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "generation": {
+            "maximum": 9007199254740991.0,
+            "minimum": 0.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "scale_lease_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Scale Lease Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_major",
+          "scale_lease_id",
+          "generation"
+        ],
+        "title": "ScaleLeaseControlRequest",
+        "type": "object"
+      },
+      "ScaleLeaseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_revision_id": {
+            "title": "Binding Revision Id",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "event_lease_id": {
+            "title": "Event Lease Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "integer"
+          },
+          "issued_at": {
+            "format": "date-time",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "enum": [
+              true
+            ],
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "renew_after_ms": {
+            "title": "Renew After Ms",
+            "type": "integer"
+          },
+          "scale_lease_id": {
+            "title": "Scale Lease Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scale_lease_id",
+          "event_lease_id",
+          "device_id",
+          "binding_revision_id",
+          "generation",
+          "issued_at",
+          "expires_at",
+          "renew_after_ms"
+        ],
+        "title": "ScaleLeaseResponse",
+        "type": "object"
+      },
       "ServiceDescriptorResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3029,6 +3661,48 @@
           "version"
         ],
         "title": "ServiceDescriptorResponse",
+        "type": "object"
+      },
+      "StreamSelectionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_revision_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Binding Revision Id",
+            "type": "string"
+          },
+          "certification_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Certification Id",
+            "type": "string"
+          },
+          "device_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "scale",
+              "scanner"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "device_id",
+          "binding_revision_id"
+        ],
+        "title": "StreamSelectionInput",
         "type": "object"
       },
       "SystemStatusResponse": {
@@ -5237,6 +5911,1032 @@
         "summary": "Submit Device Work",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/v1/drawer-intents": {
+      "post": {
+        "operationId": "submit_drawer_intent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrawerIntentSubmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrawerIntentSubmitResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Submit Drawer Intent",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/drawer-intents/query": {
+      "post": {
+        "operationId": "query_drawer_intents",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DrawerIntentQueryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DrawerIntentQueryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Query Drawer Intents",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "operationId": "stream_device_events",
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "A DPoP-protected signed Device Stream."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Stream Device Events",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/ack": {
+      "post": {
+        "operationId": "acknowledge_barcode_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventAcknowledgementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptySuccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Acknowledge Barcode Events",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/lease": {
+      "delete": {
+        "operationId": "release_event_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventLeaseControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptySuccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Release Event Lease",
+        "tags": [
+          "events"
+        ]
+      },
+      "post": {
+        "operationId": "acquire_event_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventLeaseAcquireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventLeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Acquire Event Lease",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/lease/renew": {
+      "post": {
+        "operationId": "renew_event_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventLeaseControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventLeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Renew Event Lease",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/scale-lease": {
+      "delete": {
+        "operationId": "release_scale_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaleLeaseControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmptySuccessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Release Scale Lease",
+        "tags": [
+          "events"
+        ]
+      },
+      "post": {
+        "operationId": "acquire_scale_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaleLeaseAcquireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScaleLeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Acquire Scale Lease",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/v1/events/scale-lease/renew": {
+      "post": {
+        "operationId": "renew_scale_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaleLeaseControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScaleLeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Renew Scale Lease",
+        "tags": [
+          "events"
         ]
       }
     },

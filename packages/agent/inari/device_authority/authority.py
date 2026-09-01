@@ -24,6 +24,7 @@ from .models import (
     AuthorityProof,
     BindingRevision,
     CapabilityAdmissionTarget,
+    CapabilityStreamTarget,
     DeviceCapability,
     DeviceObservation,
     DeviceTestEvidence,
@@ -209,6 +210,41 @@ class DeviceCapabilityAuthority:
         return AdmissionPermit._issue(
             proof,
             permit_token,
+        )
+
+    def authorize_stream(
+        self,
+        target: CapabilityStreamTarget,
+        *,
+        now: datetime | None = None,
+    ) -> AdmissionPermit:
+        """Authorize an input stream without trusting caller-supplied graph facts."""
+
+        if not isinstance(target, CapabilityStreamTarget):
+            _reject(
+                AuthorityErrorCode.INVALID_REQUEST,
+                "The stream capability target is invalid.",
+            )
+        at = _now(now)
+        signed_binding = self._read_binding(target.binding_revision_id)
+        binding = signed_binding.revision
+        signed_profile = self._read_profile(binding.driver_profile_digest)
+        capability = _find_capability(
+            signed_profile.profile,
+            binding.capability_id,
+        )
+        return self.authorize(
+            CapabilityAdmissionTarget(
+                scope=target.scope,
+                purpose=target.purpose,
+                device_id=target.device_id,
+                binding_revision_id=target.binding_revision_id,
+                operation=target.operation,
+                media_type=capability.media_type,
+                contract_major=target.contract_major,
+                options_digest=binding.options_digest,
+            ),
+            now=at,
         )
 
     def check(

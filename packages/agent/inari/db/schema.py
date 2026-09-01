@@ -1124,6 +1124,33 @@ Index(
 )
 Index("idx_drawer_intents_expiry", drawer_intents_table.c.expires_at)
 
+device_stream_state_table = Table(
+    "device_stream_state",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("current_sequence", Integer, nullable=False),
+    CheckConstraint("id = 1", name="ck_device_stream_state_singleton"),
+    CheckConstraint(
+        "current_sequence BETWEEN 0 AND 9007199254740991",
+        name="ck_device_stream_state_sequence",
+    ),
+)
+
+device_stream_generations_table = Table(
+    "device_stream_generations",
+    metadata,
+    Column("scope_digest", String, primary_key=True),
+    Column("generation", Integer, nullable=False),
+    CheckConstraint(
+        "length(scope_digest) BETWEEN 8 AND 256",
+        name="ck_device_stream_generations_scope",
+    ),
+    CheckConstraint(
+        "generation BETWEEN 0 AND 9007199254740991",
+        name="ck_device_stream_generations_value",
+    ),
+)
+
 device_authority_signer_keys_table = Table(
     "device_authority_signer_keys",
     metadata,
@@ -2061,6 +2088,8 @@ MANAGED_TABLE_NAMES = frozenset(
         public_print_job_events_table.name,
         physical_execution_attempts_table.name,
         drawer_intents_table.name,
+        device_stream_state_table.name,
+        device_stream_generations_table.name,
         device_authority_signer_keys_table.name,
         device_authority_revisions_table.name,
         device_authority_state_table.name,

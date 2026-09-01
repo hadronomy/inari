@@ -30,6 +30,15 @@ def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
         drawer_indexes = {
             row[1] for row in connection.execute("PRAGMA index_list(drawer_intents)")
         }
+        stream_state = connection.execute(
+            "SELECT id, current_sequence FROM device_stream_state"
+        ).fetchone()
+        stream_generation_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(device_stream_generations)"
+            )
+        }
     assert revision == (expected_revision,)
     assert {
         "intent_id",
@@ -41,6 +50,8 @@ def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
     }.issubset(drawer_columns)
     assert "uq_drawer_intents_scope_identity" in drawer_indexes
     assert "uq_drawer_intents_action" in drawer_indexes
+    assert stream_state == (1, 0)
+    assert stream_generation_columns == {"scope_digest", "generation"}
 
 
 def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(

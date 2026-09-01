@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import (
@@ -9,15 +10,14 @@ from fastapi import (
     Query,
     Request,
     Response,
-    WebSocket,
-    WebSocketDisconnect,
 )
+from fastapi.responses import StreamingResponse
 
 from .dependencies import (
     get_authorization_service,
     get_device_catalog,
     get_device_work_submission,
-    get_event_hub,
+    get_device_stream_service,
     get_gateway_service,
     get_job_service,
     get_print_job_queries,
@@ -37,7 +37,7 @@ from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..printing.commands import DeviceCommandKind
 from ..documents import DocumentKind
-from ..runtime.events import EventHub
+from ..device_streams import DeviceStreamService, SignedStreamMessage
 from ..runtime.models import JobState
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
@@ -59,14 +59,12 @@ from .schemas import (
     JobAttemptResponse,
     JobCollectionResponse,
     JobHistoryResponse,
-    LiveEventUpdateResponse,
     LocalChallengeRequest,
     LocalChallengeResponse,
     LocalPairingCompleteRequest,
     LocalPairingCompleteResponse,
     LocalPairingRevokeRequest,
     LocalPairingStartResponse,
-    LiveSnapshotResponse,
     LocalTokenRequest,
     LocalTrustStatusResponse,
     JobResourceResponse,
@@ -92,6 +90,14 @@ from .schemas import (
     DrawerIntentResponse,
     DrawerIntentSubmitRequest,
     DrawerIntentSubmitResponse,
+    EmptySuccessResponse,
+    EventAcknowledgementRequest,
+    EventLeaseAcquireRequest,
+    EventLeaseControlRequest,
+    EventLeaseResponse,
+    ScaleLeaseAcquireRequest,
+    ScaleLeaseControlRequest,
+    ScaleLeaseResponse,
 )
 from .device_work import (
     DeviceWorkSubmission,
@@ -178,7 +184,9 @@ PrintJobQueriesDependency = Annotated[PrintJobQueries, Depends(get_print_job_que
 DrawerIntentServiceDependency = Annotated[
     DrawerIntentService, Depends(get_drawer_intent_service)
 ]
-EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
+DeviceStreamServiceDependency = Annotated[
+    DeviceStreamService, Depends(get_device_stream_service)
+]
 AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
 ]
@@ -741,36 +749,245 @@ async def cancel_job(
     return JobResourceResponse(job=JobResponse.from_domain(job))
 
 
-@events_router.websocket("/events")
-async def stream_events(
-    websocket: WebSocket,
-    device_catalog: DeviceCatalogDependency,
-    job_service: JobServiceDependency,
-    event_hub: EventHubDependency,
-    authorization_service: AuthorizationServiceDependency,
-) -> None:
-    try:
-        principal = authorization_service.authenticate_connection(websocket)
-        authorization_service.require_scopes(principal, (AccessScope.EVENTS_READ,))
-    except AgentError as exc:
-        await websocket.close(code=4401, reason=exc.code)
-        return
-    await websocket.accept()
-    await websocket.send_json(
-        LiveSnapshotResponse(
-            status=build_system_status_response(device_catalog, job_service),
-        ).model_dump(mode="json")
+@events_router.post(
+    "/v1/events/lease",
+    response_model=EventLeaseResponse,
+    responses=problem_responses(400, 401, 403, 409, 422, 500, 503),
+)
+async def acquire_event_lease(
+    request: EventLeaseAcquireRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> EventLeaseResponse:
+    authorization = authorized_device_work_request(connection)
+    lease = await service.acquire(request.to_domain(), authorization)
+    return EventLeaseResponse.from_domain(
+        lease,
+        signing_public_jwk=dict(service.signing_public_jwk),
     )
+
+
+@events_router.post(
+    "/v1/events/lease/renew",
+    response_model=EventLeaseResponse,
+    responses=problem_responses(400, 401, 403, 409, 410, 422, 500, 503),
+)
+async def renew_event_lease(
+    request: EventLeaseControlRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> EventLeaseResponse:
+    authorization = authorized_device_work_request(connection)
+    lease = await service.renew(
+        request.lease_id,
+        request.generation,
+        authorization,
+    )
+    return EventLeaseResponse.from_domain(
+        lease,
+        signing_public_jwk=dict(service.signing_public_jwk),
+    )
+
+
+@events_router.delete(
+    "/v1/events/lease",
+    response_model=EmptySuccessResponse,
+    responses=problem_responses(400, 401, 403, 409, 422, 500, 503),
+)
+async def release_event_lease(
+    request: EventLeaseControlRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> EmptySuccessResponse:
+    authorization = authorized_device_work_request(connection)
+    await service.release(request.lease_id, request.generation, authorization)
+    return EmptySuccessResponse()
+
+
+@events_router.post(
+    "/v1/events/scale-lease",
+    response_model=ScaleLeaseResponse,
+    responses=problem_responses(400, 401, 403, 409, 422, 500, 503),
+)
+async def acquire_scale_lease(
+    request: ScaleLeaseAcquireRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> ScaleLeaseResponse:
+    authorization = authorized_device_work_request(connection)
+    lease = await service.acquire_scale_lease(
+        request.event_lease_id,
+        request.event_generation,
+        authorization,
+    )
+    return ScaleLeaseResponse.from_domain(lease)
+
+
+@events_router.post(
+    "/v1/events/scale-lease/renew",
+    response_model=ScaleLeaseResponse,
+    responses=problem_responses(400, 401, 403, 409, 410, 422, 500, 503),
+)
+async def renew_scale_lease(
+    request: ScaleLeaseControlRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> ScaleLeaseResponse:
+    authorization = authorized_device_work_request(connection)
+    lease = await service.renew_scale_lease(
+        request.scale_lease_id,
+        request.generation,
+        authorization,
+    )
+    return ScaleLeaseResponse.from_domain(lease)
+
+
+@events_router.delete(
+    "/v1/events/scale-lease",
+    response_model=EmptySuccessResponse,
+    responses=problem_responses(400, 401, 403, 409, 422, 500, 503),
+)
+async def release_scale_lease(
+    request: ScaleLeaseControlRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> EmptySuccessResponse:
+    authorization = authorized_device_work_request(connection)
+    await service.release_scale_lease(
+        request.scale_lease_id,
+        request.generation,
+        authorization,
+    )
+    return EmptySuccessResponse()
+
+
+@events_router.post(
+    "/v1/events/ack",
+    response_model=EmptySuccessResponse,
+    responses=problem_responses(400, 401, 403, 409, 422, 500, 503),
+)
+async def acknowledge_barcode_events(
+    request: EventAcknowledgementRequest,
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> EmptySuccessResponse:
+    authorization = authorized_device_work_request(connection)
+    await service.acknowledge(
+        request.lease_id,
+        request.subscription_id,
+        request.generation,
+        {value.device_id: value.sequence for value in request.acknowledgements},
+        authorization,
+    )
+    return EmptySuccessResponse()
+
+
+@events_router.get(
+    "/v1/events",
+    response_class=StreamingResponse,
+    responses={
+        **problem_responses(400, 401, 403, 409, 410, 500, 503),
+        200: {
+            "description": "A DPoP-protected signed Device Stream.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        },
+    },
+)
+async def stream_device_events(
+    connection: Request,
+    service: DeviceStreamServiceDependency,
+) -> StreamingResponse:
+    authorization = authorized_device_work_request(connection)
+    lease_id = _single_header(connection, "x-inari-event-lease")
+    subscription_id = _single_header(connection, "x-inari-event-subscription")
+    generation = _safe_sequence_header(connection, "x-inari-event-generation")
+    scale_lease_id = _optional_single_header(connection, "x-inari-scale-lease")
+    raw_last_event_id = _optional_single_header(connection, "last-event-id")
+    last_event_id = (
+        _parse_safe_sequence(raw_last_event_id)
+        if raw_last_event_id is not None
+        else None
+    )
+    events = service.stream(
+        lease_id,
+        subscription_id,
+        generation,
+        authorization,
+        scale_lease_id=scale_lease_id,
+        last_event_id=last_event_id,
+    )
+    first = await anext(events)
+
+    async def frames():
+        yield _sse_frame(first)
+        async for event in events:
+            yield _sse_frame(event)
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _sse_frame(message: SignedStreamMessage) -> bytes:
+    lines = [f"event: {message.kind.value}"]
+    if message.kind.value in {"scale_reading", "barcode"}:
+        lines.append(f"id: {message.stream_sequence}")
+    lines.append(
+        "data: "
+        + json.dumps(
+            message.document(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    )
+    return ("\n".join(lines) + "\n\n").encode("utf-8")
+
+
+def _single_header(request: Request, name: str) -> str:
+    value = _optional_single_header(request, name)
+    if value is None:
+        raise DomainFailure(ProblemCode.REQUEST_MALFORMED)
+    return value
+
+
+def _optional_single_header(request: Request, name: str) -> str | None:
+    encoded_name = name.encode("ascii")
+    values = [
+        bytes(value)
+        for key, value in request.scope.get("headers", ())
+        if bytes(key).lower() == encoded_name
+    ]
+    if not values:
+        return None
+    if len(values) != 1:
+        raise DomainFailure(ProblemCode.REQUEST_MALFORMED)
     try:
-        async for event in event_hub.iter_events():
-            await websocket.send_json(
-                LiveEventUpdateResponse(
-                    status=build_system_status_response(device_catalog, job_service),
-                    event=RuntimeEventResponse.from_domain(event),
-                ).model_dump(mode="json")
-            )
-    except WebSocketDisconnect:
-        return
+        value = values[0].decode("ascii")
+    except UnicodeDecodeError as error:
+        raise DomainFailure(ProblemCode.REQUEST_MALFORMED) from error
+    if not value or value != value.strip() or len(value) > 256:
+        raise DomainFailure(ProblemCode.REQUEST_MALFORMED)
+    return value
+
+
+def _safe_sequence_header(request: Request, name: str) -> int:
+    return _parse_safe_sequence(_single_header(request, name))
+
+
+def _parse_safe_sequence(value: str) -> int:
+    if not value.isascii() or not value.isdecimal():
+        raise DomainFailure(ProblemCode.REQUEST_MALFORMED)
+    parsed = int(value)
+    if not 0 <= parsed <= 9_007_199_254_740_991:
+        raise DomainFailure(ProblemCode.REQUEST_MALFORMED)
+    return parsed
 
 
 router.include_router(auth_router)
