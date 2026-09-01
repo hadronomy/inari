@@ -20,8 +20,8 @@ use chrono::{Duration, Utc};
 use gpui::{
     App, AppContext as _, BorrowAppContext as _, Entity, FocusHandle, Focusable, Global,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
-    Pixels, StatefulInteractiveElement as _, Styled, WeakEntity, Window, WindowOptions, actions,
-    div, point, px, size,
+    Pixels, SharedString, StatefulInteractiveElement as _, Styled, WeakEntity, Window,
+    WindowOptions, actions, div, point, px, size,
 };
 use gpui_component::{
     Root, StyledExt as _,
@@ -338,6 +338,8 @@ impl Render for DevTools {
 
 impl DevTools {
     fn render_effects(&self, cx: &mut gpui::Context<Self>) -> gpui::AnyElement {
+        use crate::ui::content::Typography as _;
+
         page("dev-effects")
             .child(Section::new("Pixel wall — point at it").child(
                 div().h(px(380.0)).w_full().child(
@@ -352,6 +354,28 @@ impl DevTools {
                         .w_full()
                         .child(frosted("Blurred", 6.0))
                         .child(frosted("Untouched", 0.0)),
+                ),
+            )
+            .child(
+                Section::new("Swap — the blur that bridges two glyphs").child(
+                    div()
+                        .v_flex()
+                        .gap(px(Theme::SPACE_MD))
+                        .w_full()
+                        .child(
+                            div()
+                                .h_flex()
+                                .gap(px(Theme::SPACE_XL))
+                                .items_end()
+                                .children(
+                                    [0.0, 0.2, 0.35, 0.5, 0.65, 0.8, 1.0].map(swap_frame),
+                                ),
+                        )
+                        .child(div().text_caption().child(
+                            "Held still along the curve. The middle frames are the ones the \
+                             blur exists for: two sharp marks at half strength read as two \
+                             marks, two soft ones read as one changing.",
+                        )),
                 ),
             )
             .child(
@@ -832,6 +856,34 @@ fn frosted(label: &'static str, radius: f32) -> impl IntoElement {
             ),
     )
     .corner_radii(px(Theme::RADIUS_CARD))
+}
+
+/// One frame of a swap, held still, at four times the size it ships at.
+///
+/// Big on purpose. The blur is two logical pixels on a fourteen-pixel glyph, so
+/// at shipping size the thing being judged is smaller than the eye can argue
+/// with, and a preview that cannot be argued with is decoration.
+fn swap_frame(progress: f32) -> impl IntoElement {
+    use crate::ui::content::Typography as _;
+    use crate::ui::icon::Symbol;
+    use gpui_component::IconName;
+
+    div()
+        .v_flex()
+        .items_center()
+        .gap(px(Theme::SPACE_SM))
+        .child(
+            crate::ui::swap::icon(
+                SharedString::from(format!("dev-swap-{progress}")),
+                Symbol::Component(IconName::Copy),
+                Symbol::Component(IconName::Check),
+                true,
+            )
+            .size(56.0)
+            .tones(gpui::white(), gpui::rgb(0x4ade80).into())
+            .pinned(progress),
+        )
+        .child(div().text_caption().child(format!("{:.0}%", progress * 100.0)))
 }
 
 /// One column of the blur story: the same text at one radius.
