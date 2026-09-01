@@ -11,7 +11,12 @@ from uuid import uuid4
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
-from ..services import PairingSigningError, build_pairing_assertion_signer
+from ..services import (
+    PAIRING_PERMISSION_ORDER,
+    PairingSigningError,
+    build_pairing_assertion_signer,
+    pos_pairing_permissions,
+)
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
@@ -36,8 +41,7 @@ _REQUEST_FIELDS = frozenset(
         "state",
     }
 )
-_PAIRING_PERMISSIONS = ("device_work:receipt_image", "jobs:read")
-_RECEIPT_OPERATION = "receipt_image"
+_PAIRING_PERMISSIONS = frozenset(PAIRING_PERMISSION_ORDER)
 
 
 def _identifier(values, name):
@@ -90,8 +94,19 @@ def _validated_request(values):
     if not isinstance(values, dict) or set(values) != _REQUEST_FIELDS:
         raise ValidationError(_("The Pairing Request shape is invalid."))
     permissions = values.get("requested_permissions")
-    if not isinstance(permissions, list) or tuple(permissions) != _PAIRING_PERMISSIONS:
-        raise AccessError(_("This POS can request printing and Print Job status only."))
+    if (
+        not isinstance(permissions, list)
+        or not permissions
+        or len(permissions) != len(set(permissions))
+        or any(permission not in _PAIRING_PERMISSIONS for permission in permissions)
+        or permissions
+        != [
+            permission
+            for permission in PAIRING_PERMISSION_ORDER
+            if permission in permissions
+        ]
+    ):
+        raise AccessError(_("This POS requested invalid Device permissions."))
     thumbprint = values.get("browser_jwk_thumbprint")
     session_nonce = values.get("session_nonce")
     if not isinstance(thumbprint, str) or not _THUMBPRINT.fullmatch(thumbprint):
@@ -216,7 +231,7 @@ class InariPairingAssertion(models.Model):
             raise ValidationError(_("The Pairing Request lifetime is invalid."))
 
         session = self._active_pos_session(pos_session_id)
-        scope = self._local_print_scope(session.config_id, pairing_request["agent_id"])
+        scope = self._local_device_scope(session.config_id, pairing_request["agent_id"])
         self._check_request_scope(pairing_request, scope)
         fingerprint = self._request_fingerprint(
             pairing_request, session.id, self.env.uid
@@ -261,7 +276,7 @@ class InariPairingAssertion(models.Model):
             if self.env.is_superuser()
             or self.env.user.has_group("inari_devices.group_inari_manager")
             else "operator",
-            "scopes": list(_PAIRING_PERMISSIONS),
+            "scopes": list(pairing_request["requested_permissions"]),
             "session_nonce": pairing_request["session_nonce"],
         }
         try:
@@ -315,7 +330,7 @@ class InariPairingAssertion(models.Model):
             raise AccessError(_("The POS session is not active for this user."))
         return session
 
-    def _local_print_scope(self, config, requested_agent_id):
+    def _local_device_scope(self, config, requested_agent_id):
         bindings = (
             self.env["inari.device.binding"]
             .sudo()
@@ -323,26 +338,35 @@ class InariPairingAssertion(models.Model):
                 [
                     ("company_id", "=", config.company_id.id),
                     ("pos_config_id", "=", config.id),
-                    ("purpose", "in", ["pos_receipt", "pos_preparation"]),
+                    (
+                        "purpose",
+                        "in",
+                        [
+                            "pos_receipt",
+                            "pos_preparation",
+                            "pos_cash_drawer",
+                            "pos_scale",
+                            "pos_scanner",
+                        ],
+                    ),
                     ("active", "=", True),
                     ("state", "=", "active"),
                 ]
             )
         )
-        binding = bindings.filtered(
+        bindings = bindings.filtered(
             lambda candidate: (
                 candidate.active_revision_id.state == "active"
-                and candidate.active_revision_id.capability_id.operation
-                == _RECEIPT_OPERATION
                 and candidate.active_revision_id.device_id.agent_id.agent_id
                 == requested_agent_id
             )
-        )[:1]
+        )
+        binding = bindings[:1]
         revision = binding.active_revision_id
         if not revision:
             raise UserError(
                 _(
-                    "This POS has no active local print Binding Revision for the "
+                    "This POS has no active local Device Binding Revision for the "
                     "requested Agent."
                 )
             )
@@ -352,7 +376,7 @@ class InariPairingAssertion(models.Model):
             or agent.organization_id != binding.site_id.organization_id
         ):
             raise ValidationError(
-                _("The local print Binding Revision has an invalid Agent scope.")
+                _("The local Device Binding Revision has an invalid Agent scope.")
             )
         return {
             "binding": binding,
@@ -360,6 +384,7 @@ class InariPairingAssertion(models.Model):
             "agent": agent,
             "site": binding.site_id,
             "organization": binding.site_id.organization_id,
+            "permissions": pos_pairing_permissions(self.env, config, agent),
         }
 
     def _check_request_scope(self, request_values, scope):
@@ -392,10 +417,11 @@ class InariPairingAssertion(models.Model):
             "site_id": scope["site"].controller_uuid,
             "pos_configuration_id": str(config.id),
             "audience": os.environ.get("INARI_AGENT_TOKEN_AUDIENCE", "inari-agent"),
+            "requested_permissions": scope["permissions"],
         }
         if any(request_values[name] != value for name, value in expected.items()):
             raise AccessError(
-                _("The Pairing Request does not match this POS local print scope.")
+                _("The Pairing Request does not match this POS Device scope.")
             )
 
     @staticmethod

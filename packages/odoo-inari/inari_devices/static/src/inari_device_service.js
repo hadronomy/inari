@@ -4,6 +4,7 @@ import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 
 import { InariAgentClient, InariAgentError } from "./agent_client";
+import { InariHardwareAdapter } from "./hardware_adapter";
 import { ClientPairingManager } from "./client_pairing";
 import { ClientPairingDialog } from "./client_pairing_dialog";
 import { InariReceiptPrinter } from "./inari_printer";
@@ -27,6 +28,11 @@ const FAILURE_MESSAGES = Object.freeze({
 
 function activeBinding(pos) {
     const binding = pos?.config?.inari_receipt_binding;
+    return binding?.authoritative === true ? Object.freeze({ ...binding }) : null;
+}
+
+function activeDrawerBinding(pos) {
+    const binding = pos?.config?.inari_cash_drawer_binding;
     return binding?.authoritative === true ? Object.freeze({ ...binding }) : null;
 }
 
@@ -90,6 +96,7 @@ export class InariDeviceService {
         recoveryFactory = (options) => new PrintRecoveryCoordinator(options),
         printerFactory = (options) => new InariReceiptPrinter(options),
         preparationPlanBook = null,
+        hardwareFactory = (options) => new InariHardwareAdapter(options),
         randomUUID = () => crypto.randomUUID(),
     } = {}) {
         this.notification = notification;
@@ -103,10 +110,15 @@ export class InariDeviceService {
         this.printerFactory = printerFactory;
         this.randomUUID = randomUUID;
         this.receiptPlans = new WeakMap();
+        this.hardware = hardwareFactory({
+            clientForBinding: (binding, options) => this.clientFor(binding, options),
+            randomUUID: this.randomUUID,
+        });
         this.preparationPlans =
             preparationPlanBook || new PreparationPlanBook({ randomUUID: this.randomUUID });
         this.pos = null;
         this.binding = null;
+        this.drawerBinding = null;
         this.recovery = null;
         this.pairing = null;
         this.channels = new Map();
@@ -121,6 +133,14 @@ export class InariDeviceService {
     async attachPos(pos) {
         this.pos = pos;
         this.binding = activeBinding(pos);
+        this.drawerBinding = activeDrawerBinding(pos);
+        await this.hardware.attach({
+            binding: this.drawerBinding,
+            posSessionId: this.pos.session.id,
+        });
+        if (this.pos.hardwareProxy) {
+            this.pos.hardwareProxy.inariDevice = this;
+        }
         this.pairing = null;
         this.channels.clear();
         this.printers.clear();
@@ -208,7 +228,7 @@ export class InariDeviceService {
     }
 
     bindings() {
-        const bindings = [this.binding];
+        const bindings = [this.binding, this.drawerBinding];
         for (const printer of this.pos?.unwatched?.printers || []) {
             bindings.push(printer.config.inari_preparation_binding);
         }
@@ -259,6 +279,31 @@ export class InariDeviceService {
 
     isReceiptAuthoritative() {
         return Boolean(this.binding);
+    }
+
+    async openDrawer({ action = false } = {}) {
+        const result = await this.hardware.openDrawer({ action });
+        if (result.state === "succeeded") {
+            return result;
+        }
+        const outcomeUnknown = result.state === "outcome_unknown";
+        this.notification?.add(
+            outcomeUnknown
+                ? _t(
+                      "The drawer command has an uncertain result. Do not open it again until a manager reviews the intent.",
+                  )
+                : _t(
+                      "The cash drawer did not open. Check the device and try the same action again.",
+                  ),
+            {
+                title: outcomeUnknown
+                    ? _t("Cash drawer needs review")
+                    : _t("Cash drawer unavailable"),
+                type: outcomeUnknown ? "warning" : "danger",
+                sticky: true,
+            },
+        );
+        return result;
     }
 
     async prepareReceiptPrint(order) {
@@ -468,7 +513,7 @@ export class InariDeviceService {
             channel.ready = true;
             channel.restored = true;
             close?.();
-            this.notification?.add(_t("Browser paired. Sending the print job now."), {
+            this.notification?.add(_t("Browser paired. The Device action can continue."), {
                 type: "success",
             });
             return true;

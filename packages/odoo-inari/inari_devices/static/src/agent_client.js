@@ -5,6 +5,7 @@ import { envelopeFor } from "./submission_context";
 const DPOP_NONCE_BYTES = 24;
 const MAX_RECONCILIATION_IDS = 100;
 const STABLE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
+const DRAWER_REASONS = new Set(["payment", "manual_open"]);
 
 export class InariAgentError extends Error {
     constructor(code, message, { status = null, retryable = false } = {}) {
@@ -98,6 +99,43 @@ function isNonceChallenge(response) {
     );
 }
 
+function drawerIntentPayload(intent) {
+    if (
+        !intent ||
+        intent.contract_major !== 1 ||
+        !STABLE_IDENTIFIER.test(intent.drawer_intent_id) ||
+        !STABLE_IDENTIFIER.test(intent.binding_revision_id) ||
+        !STABLE_IDENTIFIER.test(intent.device_id) ||
+        !STABLE_IDENTIFIER.test(intent.pos_session_id) ||
+        !Number.isSafeInteger(intent.action_sequence) ||
+        intent.action_sequence < 1 ||
+        !DRAWER_REASONS.has(intent.reason)
+    ) {
+        throw new TypeError("Drawer submission requires one complete Drawer Intent");
+    }
+    return Object.freeze({
+        contract_major: 1,
+        drawer_intent_id: intent.drawer_intent_id,
+        binding_revision_id: intent.binding_revision_id,
+        device_id: intent.device_id,
+        pos_session_id: intent.pos_session_id,
+        action_sequence: intent.action_sequence,
+        reason: intent.reason,
+    });
+}
+
+function reconciliationIds(values, label) {
+    if (
+        !Array.isArray(values) ||
+        values.length < 1 ||
+        values.length > MAX_RECONCILIATION_IDS ||
+        values.some((value) => typeof value !== "string" || !STABLE_IDENTIFIER.test(value))
+    ) {
+        throw new TypeError(`${label} requires 1 to 100 stable identities`);
+    }
+    return [...new Set(values)];
+}
+
 /** Protected local-Agent transport for replay-safe receipt admission. */
 export class InariAgentClient {
     constructor({ baseUrl, credentials, fetchApi = globalThis.fetch, cryptoApi = crypto } = {}) {
@@ -186,19 +224,34 @@ export class InariAgentClient {
     }
 
     async queryPrintJobs(printIntentIds) {
-        if (
-            !Array.isArray(printIntentIds) ||
-            printIntentIds.length < 1 ||
-            printIntentIds.length > MAX_RECONCILIATION_IDS ||
-            printIntentIds.some((value) => typeof value !== "string" || !STABLE_IDENTIFIER.test(value))
-        ) {
-            throw new TypeError("Print Job reconciliation requires 1 to 100 Print Intent IDs");
-        }
-        const uniqueIds = [...new Set(printIntentIds)];
+        const uniqueIds = reconciliationIds(printIntentIds, "Print Job reconciliation");
         const response = await this.protectedRequest("/v1/jobs/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: canonicalJson({ print_intent_ids: uniqueIds }),
+        });
+        return response.json();
+    }
+
+    async submitDrawerIntent(intent) {
+        const payload = drawerIntentPayload(intent);
+        const response = await this.protectedRequest("/v1/drawer-intents", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Idempotency-Key": payload.drawer_intent_id,
+            },
+            body: canonicalJson(payload),
+        });
+        return response.json();
+    }
+
+    async queryDrawerIntents(drawerIntentIds) {
+        const uniqueIds = reconciliationIds(drawerIntentIds, "Drawer Intent reconciliation");
+        const response = await this.protectedRequest("/v1/drawer-intents/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: canonicalJson({ drawer_intent_ids: uniqueIds }),
         });
         return response.json();
     }

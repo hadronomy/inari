@@ -254,7 +254,7 @@ class TestInariDevices(TransactionCase):
 
         [loaded] = self.env["pos.printer"]._load_pos_data_read(printer, config)
         projection = loaded["inari_preparation_binding"]
-        scope = self.env["inari.pairing.assertion"]._local_print_scope(
+        scope = self.env["inari.pairing.assertion"]._local_device_scope(
             config, "agent-1"
         )
 
@@ -263,6 +263,70 @@ class TestInariDevices(TransactionCase):
         self.assertEqual(projection["device_id"], "device-1")
         self.assertEqual(projection["agent_endpoint"], "https://kitchen-agent.example")
         self.assertEqual(scope["binding"], binding)
+
+    def test_pos_cash_drawer_projects_only_its_required_permissions(self):
+        config = self.env["pos.config"].create({"name": "Inari Drawer POS"})
+        capability = (
+            self.env["inari.device.capability"]
+            .sudo()
+            .sync_values(
+                {
+                    "company_id": self.company.id,
+                    "controller_uuid": "drawer-capability-test",
+                    "device_id": self.device.id,
+                    "operation": "open_cash_drawer",
+                    "contract_major": 1,
+                },
+                1,
+            )
+        )
+        binding = (
+            self.env["inari.device.binding"]
+            .sudo()
+            .create(
+                {
+                    "company_id": self.company.id,
+                    "site_id": self.site.id,
+                    "scope_type": "pos_config",
+                    "purpose": "pos_cash_drawer",
+                    "pos_config_id": config.id,
+                }
+            )
+        )
+        revision = binding.action_create_revision(self.device, capability)
+        self.env["inari.device.test.result"].sudo().create(
+            {
+                "company_id": self.company.id,
+                "binding_revision_id": revision.id,
+                "driver_profile_digest": "profile-1",
+                "pattern_version": "v1",
+                "result": "passed",
+                "checks": {"drawer": "opened"},
+                "actor_id": self.env.uid,
+                "started_at": fields.Datetime.now(),
+                "finished_at": fields.Datetime.now(),
+            }
+        )
+        binding.action_activate_revision(revision)
+        origin = config.get_base_url().rstrip("/")
+        self.env["inari.agent.endpoint"].sudo().create(
+            {
+                "company_id": self.company.id,
+                "agent_id": self.agent.id,
+                "origin": origin,
+                "endpoint_url": "https://drawer-agent.example",
+                "certificate_fingerprint": "sha256:drawer",
+            }
+        )
+
+        projection = config.inari_cash_drawer_binding
+
+        self.assertEqual(projection["purpose"], "pos_cash_drawer")
+        self.assertEqual(projection["device_id"], "device-1")
+        self.assertEqual(
+            projection["requested_permissions"],
+            ["device_work:drawer", "jobs:read"],
+        )
 
     def test_pairing_assertion_is_exact_and_idempotent(self):
         self.env["ir.config_parameter"].sudo().set_param(

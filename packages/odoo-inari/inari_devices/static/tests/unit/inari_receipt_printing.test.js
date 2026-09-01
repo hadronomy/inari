@@ -4,6 +4,7 @@ import {
     PosPrinterService,
     posPrinterService,
 } from "@point_of_sale/app/services/pos_printer_service";
+import { HardwareProxy } from "@point_of_sale/app/services/hardware_proxy_service";
 import { PosStore } from "@point_of_sale/app/services/pos_store";
 
 import { InariAgentClient, InariAgentError, canonicalJson } from "../../src/agent_client";
@@ -11,6 +12,7 @@ import { InariDeviceService } from "../../src/inari_device_service";
 import { PrintRecoveryCoordinator } from "../../src/print_recovery";
 import { MemoryRecoveryStore } from "../../src/recovery_store";
 import { createSubmissionContext, envelopeFor } from "../../src/submission_context";
+import "../../src/cashbox_patch";
 import "../../src/pos_printer_patch";
 
 function context() {
@@ -430,5 +432,73 @@ describe("Inari customer receipt printing", () => {
         expect(result.accepted).toBe(false);
         expect(notifications).toHaveLength(1);
         expect(notifications[0].options.sticky).toBe(true);
+    });
+});
+
+describe("Inari cash drawer seam", () => {
+    test("unbound cash drawers keep the native Odoo path", async () => {
+        let nativeCalls = 0;
+        const proxy = Object.create(HardwareProxy.prototype);
+        proxy.connectionInfo = { status: "connected" };
+        proxy.pos = {
+            config: { iface_cashdrawer: true, inari_cash_drawer_binding: false },
+        };
+        proxy.printer = {
+            openCashbox() {
+                nativeCalls += 1;
+            },
+        };
+
+        await proxy.openCashbox();
+
+        expect(nativeCalls).toBe(1);
+    });
+
+    test("authoritative drawers never fall back to the native pulse", async () => {
+        let nativeCalls = 0;
+        const actions = [];
+        const proxy = Object.create(HardwareProxy.prototype);
+        proxy.connectionInfo = { status: "connected" };
+        proxy.pos = {
+            config: {
+                iface_cashdrawer: true,
+                inari_cash_drawer_binding: { authoritative: true },
+            },
+            logEmployeeMessage(action, kind) {
+                actions.push({ action, kind });
+            },
+        };
+        proxy.printer = {
+            openCashbox() {
+                nativeCalls += 1;
+            },
+        };
+        proxy.inariDevice = {
+            openDrawer: async () => ({ state: "failed", retryable: true }),
+        };
+
+        const result = await proxy.openCashbox("Cash in / out");
+
+        expect(result.state).toBe("failed");
+        expect(nativeCalls).toBe(0);
+        expect(actions).toEqual([]);
+    });
+
+    test("successful manual openings keep Odoo employee audit", async () => {
+        const actions = [];
+        const proxy = Object.create(HardwareProxy.prototype);
+        proxy.pos = {
+            config: { inari_cash_drawer_binding: { authoritative: true } },
+            logEmployeeMessage(action, kind) {
+                actions.push({ action, kind });
+            },
+        };
+        proxy.inariDevice = {
+            openDrawer: async () => ({ state: "succeeded" }),
+        };
+
+        await proxy.openCashbox("Cash in / out");
+
+        expect(actions).toEqual([{ action: "Cash in / out", kind: "CASH_DRAWER_ACTION" }]);
     });
 });

@@ -177,7 +177,7 @@ class InariDeviceCapability(models.Model):
     device_id = fields.Many2one("inari.device", required=True, readonly=True, ondelete="restrict")
     operation = fields.Selection(
         [("receipt_image", "Receipt image"), ("report_pdf", "Report PDF"), ("label_document", "Label document"),
-         ("open_cashbox", "Open cash drawer"), ("scale_reading", "Scale reading"), ("barcode_event", "Barcode event")],
+         ("open_cash_drawer", "Open cash drawer"), ("scale_reading", "Scale reading"), ("barcode_event", "Barcode event")],
         required=True, readonly=True,
     )
     contract_major = fields.Integer(required=True, readonly=True)
