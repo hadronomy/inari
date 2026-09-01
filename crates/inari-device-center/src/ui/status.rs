@@ -73,6 +73,13 @@ impl Tone {
 #[derive(Clone, Debug)]
 pub struct Status {
     pub tone: Tone,
+    /// Whether the thing this describes is absent rather than unwell.
+    ///
+    /// "Stopped" and "Not installed" are both critical and both stop device
+    /// work, but only one of them is a hole where a component should be. A
+    /// screen that draws the difference — the gate does — needs to be able to
+    /// ask, and the tone cannot answer.
+    pub missing: bool,
     pub label: SharedString,
     /// One sentence on what this means or what to do. Kept beside the label so
     /// a state can never appear somewhere without its explanation available.
@@ -81,7 +88,13 @@ pub struct Status {
 
 impl Status {
     fn new(tone: Tone, label: &'static str, detail: &'static str) -> Self {
-        Self { tone, label: label.into(), detail: detail.into() }
+        Self { tone, missing: false, label: label.into(), detail: detail.into() }
+    }
+
+    /// Mark this as an absence rather than a fault. See [`Status::missing`].
+    fn absent(mut self) -> Self {
+        self.missing = true;
+        self
     }
 
     pub fn device(state: DeviceState) -> Self {
@@ -159,7 +172,8 @@ impl Status {
                 Tone::Critical,
                 "Not installed",
                 "Repair the Inari installation to restore the service.",
-            ),
+            )
+            .absent(),
             ServiceState::Unavailable => Self::new(
                 Tone::Critical,
                 "Unavailable",
