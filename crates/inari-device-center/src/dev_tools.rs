@@ -122,11 +122,19 @@ pub fn init(cx: &mut App) {
 /// Open the preview window, or bring it to the front when it is already open.
 fn toggle(cx: &mut App) {
     if let Some(existing) = cx.try_global::<DevWindow>() {
-        existing
+        // A closed window leaves its handle behind — the global outlives the
+        // window it names, and `update` is what discovers that. Returning
+        // regardless meant the first close was permanent: the shortcut kept
+        // finding a handle, kept failing to raise it, and never opened
+        // anything again. Falling through opens a fresh one, and the
+        // `set_global` below replaces the stale handle.
+        let raised = existing
             .0
             .update(cx, |_, window, _| window.activate_window())
-            .ok();
-        return;
+            .is_ok();
+        if raised {
+            return;
+        }
     }
 
     let bounds = gpui::Bounds::centered(None, size(px(980.0), px(680.0)), cx);
