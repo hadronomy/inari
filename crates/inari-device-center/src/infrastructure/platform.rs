@@ -99,7 +99,7 @@ fn start_window_drag_on_platform(window: &Window) {
         Foundation::{LPARAM, WPARAM},
         UI::{
             Input::KeyboardAndMouse::ReleaseCapture,
-            WindowsAndMessaging::{HTCAPTION, PostMessageW, WM_NCLBUTTONDOWN},
+            WindowsAndMessaging::{HTCAPTION, IsZoomed, PostMessageW, WM_NCLBUTTONDOWN},
         },
     };
 
@@ -108,6 +108,15 @@ fn start_window_drag_on_platform(window: &Window) {
     };
 
     unsafe {
+        // A maximised window cannot be moved, so Windows discards the caption
+        // press and the titlebar reads as dead rather than as refusing. The
+        // shell's own answer is to restore the window and carry on dragging it
+        // from under the pointer, which is what this reproduces: without it a
+        // maximised window is the one state where the titlebar does nothing.
+        if IsZoomed(handle).as_bool() {
+            restore_under_pointer(handle);
+        }
+
         let _ = ReleaseCapture();
         // Posted, not sent: SendMessage would start the modal move loop
         // inside this dispatch, and the loop pumps messages — a pending task
@@ -122,6 +131,57 @@ fn start_window_drag_on_platform(window: &Window) {
 // and Linux drags through TitleBar's deferred `start_window_move`.
 #[cfg(not(windows))]
 fn start_window_drag_on_platform(_: &Window) {}
+
+/// Restore a maximised window so the pointer keeps its grip on the titlebar.
+///
+/// Restoring alone would drop the window back at wherever it last was, which
+/// may be nowhere near the pointer — the drag then starts with the window
+/// jumping out from under the hand holding it. Keeping the pointer at the same
+/// fraction along the titlebar is what makes the restore feel like part of the
+/// drag rather than an event of its own.
+#[cfg(windows)]
+unsafe fn restore_under_pointer(handle: windows::Win32::Foundation::HWND) {
+    use windows::Win32::{
+        Foundation::{POINT, RECT},
+        UI::WindowsAndMessaging::{
+            GetCursorPos, GetWindowRect, SW_RESTORE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+            SetWindowPos, ShowWindow,
+        },
+    };
+
+    let mut cursor = POINT::default();
+    let mut maximised = RECT::default();
+    let measured = unsafe {
+        GetCursorPos(&mut cursor).is_ok() && GetWindowRect(handle, &mut maximised).is_ok()
+    };
+    if !measured {
+        unsafe { let _ = ShowWindow(handle, SW_RESTORE); }
+        return;
+    }
+
+    let width = (maximised.right - maximised.left).max(1);
+    let grip = (cursor.x - maximised.left) as f32 / width as f32;
+    let depth = cursor.y - maximised.top;
+
+    unsafe { let _ = ShowWindow(handle, SW_RESTORE); }
+
+    let mut restored = RECT::default();
+    if unsafe { GetWindowRect(handle, &mut restored) }.is_err() {
+        return;
+    }
+    let restored_width = restored.right - restored.left;
+    unsafe {
+        let _ = SetWindowPos(
+            handle,
+            None,
+            cursor.x - (grip * restored_width as f32) as i32,
+            cursor.y - depth,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+}
 
 #[cfg(windows)]
 fn windows_handle(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
