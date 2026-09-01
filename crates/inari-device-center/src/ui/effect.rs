@@ -10,7 +10,7 @@
 //! that would have been a black rectangle on a customer's Windows machine is a
 //! failing `mbx test` here instead.
 
-use gpui::effect::{Effect, ParameterKind};
+use gpui::effect::{Effect, ShaderEnum};
 use gpui::{Hsla, IntoElement, Pixels, Point, effect_layer, px};
 
 /// Film grain, to dither the banding out of large fills and long gradients.
@@ -91,26 +91,16 @@ impl Default for PixelBloom {
 
 /// What the pointer has last done to a wall.
 ///
-/// The shader compares against these as plain numbers, so the discriminants are
-/// the shared spelling: change one and change `pixel_bloom.wgsl` with it.
-/// `the_shader_and_the_pointer_agree` holds them to it.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u8)]
+/// The shader branches on `pointer_is_inside(input)` and friends, generated
+/// from these variants, so neither side spells a number.
+#[derive(ShaderEnum, Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Pointer {
     /// The wall has never been pointed at, so nothing has bloomed.
-    Never = 0,
+    Never,
     /// The pointer is inside, and the bloom is running out from its origin.
-    Inside = 1,
+    Inside,
     /// The pointer has left, and the field is unwinding in the order it arrived.
-    Left = 2,
-}
-
-impl gpui::effect::Parameter for Pointer {
-    const KIND: ParameterKind = ParameterKind::Index;
-
-    fn write(&self, slots: &mut [f32]) {
-        slots[0] = *self as u8 as f32;
-    }
+    Left,
 }
 
 /// A blur of whatever it is applied to, with a tint over the top.
@@ -131,18 +121,10 @@ pub struct Frost {
 /// A Gaussian is separable, so a blur is two passes over one axis each. Nothing
 /// else is a direction, and an axis between the two is not a slower blur — it
 /// is a value the shader would have to round.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(ShaderEnum, Copy, Clone, Debug, Eq, PartialEq)]
 enum Axis {
     Across,
     Down,
-}
-
-impl gpui::effect::Parameter for Axis {
-    const KIND: ParameterKind = ParameterKind::Flag;
-
-    fn write(&self, slots: &mut [f32]) {
-        slots[0] = matches!(self, Axis::Down) as u8 as f32;
-    }
 }
 
 /// One axis of a Gaussian blur. Use [`blurred`]; this is half of it.
@@ -268,14 +250,13 @@ fn effect(input: EffectInput) -> vec4<f32> {
     /// strictest target we have.
     const UNUSED_VARIANTS: EffectDef = EffectDef {
         name: "inari.unused-variants",
-        parameters: &[ParameterDef { name: "mode", kind: ParameterKind::Index }],
+        parameters: &[ParameterDef {
+            name: "mode",
+            kind: ParameterKind::Enum(Pointer::VARIANTS),
+        }],
         wgsl: r#"
-const STATE_NEVER: u32 = 0u;
-const STATE_INSIDE: u32 = 1u;
-const STATE_LEFT: u32 = 2u;
-
 fn effect(input: EffectInput) -> vec4<f32> {
-    if mode(input) == STATE_INSIDE {
+    if mode_is_inside(input) {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
     return vec4<f32>(0.0);
@@ -290,7 +271,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
                 .unwrap_or_else(|error| panic!("{target:?}: {error:#}"));
             if target == ShaderTarget::Hlsl {
                 println!("--- HLSL for an enum with unused variants ---");
-                for line in source.lines().filter(|line| line.contains("STATE_")) {
+                for line in source.lines().filter(|line| line.contains("MODE_")) {
                     println!("{line}");
                 }
                 println!("--- end ---");
@@ -307,32 +288,33 @@ fn effect(input: EffectInput) -> vec4<f32> {
     }
 
     #[test]
-    fn the_shader_and_the_pointer_agree() {
-        // The shader compares against these as plain numbers, because a `u32`
-        // is all a parameter slot can carry. Nothing in either language ties
-        // the two spellings together, so this is the tie.
-        let wgsl = include_str!("effect/pixel_bloom.wgsl");
-        for (variant, name) in
-            [(Pointer::Never, "NEVER"), (Pointer::Inside, "INSIDE")]
-        {
-            assert!(
-                wgsl.contains(&format!("const {name}: u32 = {}u;", variant as u8)),
-                "`pixel_bloom.wgsl` disagrees about {name}"
-            );
-        }
+    fn an_axis_is_the_only_thing_a_blur_pass_can_run_along() {
+        // The whole reason `axis` is not an `f32`: there is no third value for
+        // it to hold, and the shader gets a name for each of the two.
+        assert_eq!(Axis::VARIANTS.len(), 2);
+        assert_eq!(Axis::Across.discriminant(), 0);
+        assert_eq!(Axis::Down.discriminant(), 1);
     }
 
     #[test]
-    fn an_axis_is_the_only_thing_a_blur_pass_can_run_along() {
-        // The whole reason `axis` is not an `f32`. Both variants have to reach
-        // the shader as something `select` can branch on, and there is no third
-        // value to reach it at all.
-        let mut across = [f32::NAN; 1];
-        let mut down = [f32::NAN; 1];
-        gpui::effect::Parameter::write(&Axis::Across, &mut across);
-        gpui::effect::Parameter::write(&Axis::Down, &mut down);
-        assert_eq!(across, [0.0]);
-        assert_eq!(down, [1.0]);
+    fn the_blur_shader_branches_on_a_generated_predicate() {
+        // Not on a number. `axis_is_down` is generated from the enum, so a
+        // renamed variant fails to translate with the name in the message
+        // instead of silently branching the other way.
+        let wgsl = include_str!("effect/blur.wgsl");
+        assert!(wgsl.contains("axis_is_down(input)"), "the blur spells its own axis");
+    }
+
+    #[test]
+    fn the_wall_shader_branches_on_generated_predicates() {
+        let wgsl = include_str!("effect/pixel_bloom.wgsl");
+        for predicate in ["pointer_is_inside(input)", "pointer_is_never(input)"] {
+            assert!(wgsl.contains(predicate), "the wall does not use `{predicate}`");
+        }
+        assert!(
+            !wgsl.contains("const NEVER") && !wgsl.contains("const INSIDE"),
+            "the wall still spells a discriminant by hand"
+        );
     }
 
     #[test]
@@ -519,15 +501,11 @@ fn effect(input: EffectInput) -> vec4<f32> {
     fn the_derive_packs_fields_in_declaration_order() {
         // The generated accessors read slot n; this is the other half of that
         // agreement, and the derive is what keeps them together.
-        let params = Grain { amount: 0.25, size: 3.0, seed: 7.0 }.params();
-        assert_eq!(params[0], 0.25);
-        assert_eq!(params[1], 3.0);
-        assert_eq!(params[2], 7.0);
-        assert!(
-            params[3..]
-                .iter()
-                .all(|value| *value == 0.0)
-        );
+        let params = effect::Params::of(&Grain { amount: 0.25, size: 3.0, seed: 7.0 });
+        assert_eq!(params.slot(0), 0.25);
+        assert_eq!(params.slot(1), 3.0);
+        assert_eq!(params.slot(2), 7.0);
+        assert_eq!(params.slot(3), 0.0, "a slot no field claimed is not zero");
     }
 
     #[test]
