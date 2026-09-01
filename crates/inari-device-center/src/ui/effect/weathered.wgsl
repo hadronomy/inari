@@ -46,6 +46,11 @@ fn fbm(p: vec2<f32>) -> f32 {
     return total / 0.9375;
 }
 
+// How many noise cells span the mark. The stroke of a torii is a small
+// fraction of its width, so the field has to be coarse for a crack to cross a
+// stroke rather than nibble it.
+const CELLS: f32 = 4.5;
+
 fn effect(input: EffectInput) -> vec4<f32> {
     let mark = source(input.uv);
     if mark.a <= 0.004 {
@@ -53,9 +58,12 @@ fn effect(input: EffectInput) -> vec4<f32> {
     }
 
     let wear = clamp(amount(input), 0.0, 1.0);
-    // Logical pixels, so the grain is the same size whatever the display is
-    // doing. A field in uv would stretch with the mark.
-    let at = input.position / max(input.scale, 0.001) * 0.22 + vec2<f32>(seed(input));
+    // Cells across the mark, not across the screen. A mark is the same mark at
+    // any size and its weathering has to be too — measured in pixels, the same
+    // shader gives a 40px gate speckle and a 130px one filigree. Few enough
+    // cells that a crack is wider than the stroke it crosses, which is what
+    // makes it read as a crack rather than as noise.
+    let at = input.uv * CELLS + vec2<f32>(seed(input));
 
     // A crack is a line, and the ridges of a noise field are lines. Taking the
     // distance from the field's midpoint turns its slopes into ridges; the
@@ -65,11 +73,11 @@ fn effect(input: EffectInput) -> vec4<f32> {
 
     // Pitting: the surface loses bites out of it, finer than the cracks and
     // heavier the further gone the stone is.
-    let pit = smoothstep(0.70 - 0.22 * wear, 0.96, fbm(at * 3.1 + vec2<f32>(17.3, 4.1)));
+    let pit = smoothstep(0.72 - 0.22 * wear, 0.97, fbm(at * 2.6 + vec2<f32>(17.3, 4.1)));
 
     // Mottling at the coarsest scale, which is what stops the result reading as
     // a flat silhouette with lines drawn on it.
-    let mottle = 0.74 + 0.26 * fbm(at * 0.6 + vec2<f32>(9.7, 2.3));
+    let mottle = 0.74 + 0.26 * fbm(at * 0.7 + vec2<f32>(9.7, 2.3));
 
     // Bleached towards the stone colour, mixed in linear light so the mid
     // tones do not sink the way an encoded mix would.
