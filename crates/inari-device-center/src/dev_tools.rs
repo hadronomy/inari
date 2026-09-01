@@ -371,10 +371,21 @@ impl DevTools {
                                     [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0].map(swap_frame),
                                 ),
                         )
+                        .child(
+                            div()
+                                .h_flex()
+                                .gap(px(Theme::SPACE_XL))
+                                .items_end()
+                                .children(
+                                    [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0]
+                                        .map(swap_label_frame),
+                                ),
+                        )
                         .child(div().text_caption().child(
-                            "Held still along the curve. The middle frames are the ones the \
-                             blur exists for: two sharp marks at half strength read as two \
-                             marks, two soft ones read as one changing.",
+                            "Held still along the curve. A mark crossfades — the middle frames \
+                             are the ones its blur exists for. A word does not: it leaves \
+                             before the next arrives, because two words overlapping read as \
+                             two words.",
                         )),
                 ),
             )
@@ -888,6 +899,23 @@ fn swap_frame(progress: f32) -> impl IntoElement {
             .pinned(progress),
         )
         .child(div().text_caption().child(format!("{:.0}%", progress * 100.0)))
+}
+
+/// One frame of a label swap, held still.
+///
+/// Beside the glyph frames on purpose: the two recipes differ, and the only way
+/// to see that they differ is to see them together. At the same fraction the
+/// mark shows two halves and the word shows one.
+fn swap_label_frame(fraction: f32) -> impl IntoElement {
+    div().v_flex().items_start().w(px(74.0)).child(
+        crate::ui::swap::label(
+            SharedString::from(format!("dev-swap-label-{fraction}")),
+            "Copy",
+            "Copied",
+            true,
+        )
+        .pinned(fraction),
+    )
 }
 
 /// One column of the blur story: the same text at one radius.
