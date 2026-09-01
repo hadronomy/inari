@@ -92,6 +92,10 @@ pub struct IconSwap {
     edge: f32,
     resting_color: Hsla,
     active_color: Hsla,
+    /// A point on the curve to hold still at, instead of running. See
+    /// [`IconSwap::pinned`].
+    #[cfg(debug_assertions)]
+    pinned: Option<f32>,
     /// How present the resting glyph is allowed to be at most. A copy hint
     /// that only exists under the pointer carries the hover fade here, while
     /// the state it swaps to ignores it — an acknowledgement the operator can
@@ -113,6 +117,8 @@ pub fn icon(
         edge: 14.0,
         resting_color: gpui::white(),
         active_color: gpui::white(),
+        #[cfg(debug_assertions)]
+        pinned: None,
         resting_alpha: 1.0,
     }
 }
@@ -133,10 +139,29 @@ impl IconSwap {
         self.resting_alpha = alpha;
         self
     }
+
+    /// Hold the swap still at `progress` along its curve rather than running it.
+    ///
+    /// A swap is [`motion::SWAP`] long, which is too fast to judge while it
+    /// runs and is exactly what has to be judged: the frames worth arguing
+    /// about are the ones where both halves are present. Pinning renders those
+    /// frames through the same code the running control uses, so a preview
+    /// cannot drift from the thing it previews.
+    #[cfg(debug_assertions)]
+    pub fn pinned(mut self, progress: f32) -> Self {
+        self.pinned = Some(progress);
+        self
+    }
 }
 
 impl RenderOnce for IconSwap {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        #[cfg(debug_assertions)]
+        let phase = match self.pinned {
+            Some(progress) => Phase::new(motion::EASE_SWAP.ease(progress)),
+            None => phase(window, &self.key, self.showing_active, motion::SWAP),
+        };
+        #[cfg(not(debug_assertions))]
         let phase = phase(window, &self.key, self.showing_active, motion::SWAP);
         // Scale runs the whole eased fraction while the fades run their offset
         // halves: the mark that is leaving keeps shrinking after it has gone,
