@@ -344,7 +344,86 @@ is already compiled into the binary, and its Rust-style editor with
 
 ---
 
-## 6. The growth path, and what each step needs
+## 6. DialKit, read properly
+
+Research date: 2026-09-02. Source: `joshpuckett/dialkit` at `1d0ca134`, read
+directly — `src/components/Slider.tsx` for the interaction, `src/styles/theme.css`
+for the geometry — plus the demo at dialkit.dev.
+
+### 6.1 The row is the whole idea
+
+> Every control is one 36px row with an 8px radius on a five-percent white
+> surface. The label sits **inside** the row on the left, the value **inside** it
+> on the right, and a slider is that same row with a fill and a handle drawn
+> behind them.
+
+A label above its control is what a settings screen does. It doubles the
+vertical space and makes twelve knobs unreadable. Putting both inside one row is
+why a DialKit panel reads as one instrument rather than as a form, and it is the
+single change that matters most.
+
+Tokens (`theme.css:4-45`, `:387-510`):
+
+| Token | Value |
+|---|---|
+| row height / radius | 36px / 8px |
+| surface / hover / active | white at 5% / 10% / 11% |
+| border / border hover | white at 10% / 15% |
+| label and value | 13px, weight 500, white at 70% |
+| value face | mono |
+| label inset / value inset | 10px |
+| handle | 3 × 20, fully round, `text-primary` |
+| hash mark | 1 × 8, fully round, `border-hover`, 200ms fade |
+| panel | `#212121`, 14px radius, 20px backdrop blur, 1px border |
+
+### 6.2 The slider, exactly
+
+- **Click versus drag** separate at 3px of pointer travel. A drag tracks the
+  pointer exactly. A click asks for a round number: on a span of ten steps or
+  fewer it lands on the nearest step, above that it is magnetic to the nearest
+  tenth — so clicking the middle of a 0..1 slider gives 0.5, not 0.4913 — and it
+  springs there (stiffness 300, damping 25, mass 0.8).
+- **Hash marks** are the steps on a coarse span and the tenths on a fine one, so
+  the marks and the snapping tell the same story. They fade in only while the
+  row is active.
+- **Rubber band**: dragging past either end slides the whole track by up to 8px,
+  after a 32px dead zone, on `sqrt(min(overflow / 200, 1))` — stiffening as it
+  goes — and springs back over 350ms with a little bounce.
+- **The handle dodges**. It is invisible at rest, half-lit under the pointer,
+  nearly solid while dragging, and drops to a tenth when it would sit under the
+  label or the value, squashing to 75% height as it passes. At rest it is a
+  quarter of its width, so it reads as a tick rather than a grip.
+- **The value is editable in place**: hover it for 800ms and it underlines,
+  click and it becomes a text field, Enter commits, Escape cancels.
+
+### 6.3 The full control set
+
+`Slider`, `Toggle`, `SegmentedControl`, `ButtonGroup`, `SelectControl`,
+`TextControl`, `ColorControl`, `SpringControl` with a live `SpringVisualization`,
+`TransitionControl` with an `EasingVisualization`, `Folder` (nesting),
+`Panel` (dragged, tabbed), `PresetManager`, `ShortcutListener` and
+`ShortcutsMenu`, and a `DialTimeline` with keyframes. Plus `copy-instruction.ts`,
+which copies a panel out as a prompt for a coding agent.
+
+### 6.4 What we have built of it
+
+Landed: the arithmetic, with tests — click snapping, mark placement, band
+stretch, handle dodging, decimals from step (`dev/control.rs`).
+
+Not yet built: the row geometry itself, so the panel still stacks a label over
+its control; the slider element and its drag; the segmented control and toggle
+at DialKit's proportions; select, colour, spring and easing controls; folders,
+presets, shortcuts and the timeline. The text field is `gpui_component::Input`
+with no chrome, where it should have the focus ring and easing that
+`ui/field.rs` gives the enrollment field.
+
+One constraint to record: GPUI 0.2.2 has no spring, so the click-snap will run
+on `ui/motion.rs`'s cubic curves rather than DialKit's spring constants. The
+shape is close and the vocabulary stays one.
+
+---
+
+## 7. The growth path, and what each step needs
 
 | Tool | What it needs |
 |---|---|
@@ -357,3 +436,6 @@ is already compiled into the binary, and its Rust-style editor with
 
 Each is a real tool. None of them is blocked on the architecture above, which
 is the point of choosing it.
+
+Nor is §6.4's remaining work: the knob model already carries everything a
+DialKit-shaped control needs, so the rest is painting and pointer handling.
