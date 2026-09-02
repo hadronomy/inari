@@ -197,6 +197,842 @@ pub fn format_value(value: f32, step: f32) -> String {
     format!("{value:.*}", decimals_for_step(step))
 }
 
+
+// ---- the elements ----
+
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::{Duration, Instant}};
+
+use gpui::{
+    App, Bounds, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
+    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
+    canvas, deferred, div, prelude::FluentBuilder as _, px, relative,
+};
+
+use gpui_component::Sizable as _;
+
+use crate::ui::{
+    motion::{self, CubicBezier},
+    theme::{ActiveTheme as _, Theme},
+};
+
+/// How long a click's snap takes to travel, and on what curve.
+///
+/// DialKit springs (stiffness 300, damping 25, mass 0.8). GPUI 0.2.2 carries no
+/// spring, so this is the nearest curve in the vocabulary the rest of the
+/// application already speaks: ease-out-expo, which leaves fast and settles
+/// long, the way an over-damped spring does.
+const SNAP: Duration = Duration::from_millis(280);
+const EASE_SNAP: CubicBezier = CubicBezier::new(0.16, 1.0, 0.3, 1.0);
+
+thread_local! {
+    /// Where each track was laid out. A pointer handler is given a position and
+    /// nothing else, so the geometry has to be recorded as it is painted.
+    static TRACKS: RefCell<HashMap<SharedString, Bounds<Pixels>>> =
+        RefCell::new(HashMap::new());
+    /// The measured width of each row's label and value, so the handle knows
+    /// what it has to dodge. Measured rather than guessed: a label's width is a
+    /// property of the face and the string, and estimating it puts the handle
+    /// in the wrong place for exactly the strings nobody tested.
+    static TEXT: RefCell<HashMap<SharedString, (f32, f32)>> = RefCell::new(HashMap::new());
+    /// The slider under the pointer, if one is being pressed.
+    static GRIP: RefCell<Option<Grip>> = const { RefCell::new(None) };
+    /// Snaps in flight, keyed by slider.
+    static SNAPS: RefCell<HashMap<SharedString, Travel>> = RefCell::new(HashMap::new());
+}
+
+/// A press in progress.
+struct Grip {
+    key: SharedString,
+    /// Where the press landed, so a click can be told from a drag.
+    from: Point<Pixels>,
+    /// Set once the pointer has travelled past the click threshold.
+    dragging: bool,
+    span: std::ops::RangeInclusive<f32>,
+    step: f32,
+    /// How far the band is stretched past an end.
+    stretch: f32,
+    change: Rc<dyn Fn(f32, &mut Window, &mut App)>,
+}
+
+/// A fill travelling to where a click asked for.
+#[derive(Clone, Copy)]
+struct Travel {
+    from: f32,
+    to: f32,
+    started: Instant,
+}
+
+impl Travel {
+    fn at(&self, now: Instant) -> f32 {
+        let elapsed = now.duration_since(self.started).as_secs_f32();
+        let progress = (elapsed / SNAP.as_secs_f32()).clamp(0.0, 1.0);
+        self.from + (self.to - self.from) * EASE_SNAP.ease(progress)
+    }
+
+    fn done(&self, now: Instant) -> bool {
+        now.duration_since(self.started) >= SNAP
+    }
+}
+
+/// Whether any slider is still travelling, so the panel keeps asking for frames.
+pub fn animating() -> bool {
+    let now = Instant::now();
+    SNAPS.with(|snaps| {
+        let mut snaps = snaps.borrow_mut();
+        snaps.retain(|_, travel| !travel.done(now));
+        !snaps.is_empty()
+    }) || GRIP.with(|grip| grip.borrow().is_some())
+}
+
+/// Forget every measurement. Called when the panel changes story, so a stale
+/// track from a slider that no longer exists cannot answer for a new one.
+pub fn forget() {
+    TRACKS.with(|tracks| tracks.borrow_mut().clear());
+    TEXT.with(|text| text.borrow_mut().clear());
+    SNAPS.with(|snaps| snaps.borrow_mut().clear());
+}
+
+fn measured(key: &SharedString) -> (f32, f32) {
+    TEXT.with(|text| {
+        text.borrow()
+            .get(key)
+            .copied()
+            .unwrap_or((0.0, 0.0))
+    })
+}
+
+/// The row every control is built on: 36px, an 8px radius, and a faint surface.
+///
+/// Nothing here takes a label. A DialKit row puts its label *inside* itself, so
+/// the label is the control's business and not the row's.
+pub fn row(theme: &Theme) -> gpui::Div {
+    div()
+        .relative()
+        .w_full()
+        .h(px(ROW_HEIGHT))
+        .rounded(px(ROW_RADIUS))
+        .bg(theme.surface_raised)
+        .overflow_hidden()
+}
+
+/// One label, at the inset and weight every control shares.
+fn label_text(theme: &Theme, label: SharedString) -> impl IntoElement {
+    div()
+        .text_size(px(TEXT_SIZE))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(theme.text_secondary)
+        .child(label)
+}
+
+/// A canvas that reports the bounds of whatever it is placed inside.
+fn measure(record: impl 'static + Fn(Bounds<Pixels>)) -> impl IntoElement {
+    div()
+        .absolute()
+        .size_full()
+        .child(canvas(move |bounds, _, _| record(bounds), |_, _, _, _| {}))
+}
+
+/// The slider.
+///
+/// Modelled on DialKit's, described in `docs/device-center-dev-environment.md`
+/// §6.2. The behaviour that matters and is easy to miss: a drag tracks the
+/// pointer exactly, but a *click* asks for a round number and travels there, so
+/// clicking the middle of a 0..1 slider gives 0.5 rather than 0.4913.
+#[derive(IntoElement)]
+pub struct Slider {
+    key: SharedString,
+    label: SharedString,
+    value: f32,
+    span: std::ops::RangeInclusive<f32>,
+    step: f32,
+    change: Rc<dyn Fn(f32, &mut Window, &mut App)>,
+}
+
+impl Slider {
+    pub fn new(
+        key: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        value: f32,
+        span: std::ops::RangeInclusive<f32>,
+        step: f32,
+        change: impl 'static + Fn(f32, &mut Window, &mut App),
+    ) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            value,
+            span,
+            step,
+            change: Rc::new(change),
+        }
+    }
+}
+
+impl RenderOnce for Slider {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.inari().clone();
+        let key = self.key.clone();
+        let hover_key = SharedString::from(format!("{key}-hover"));
+
+        let held = GRIP.with(|grip| {
+            grip.borrow()
+                .as_ref()
+                .is_some_and(|held| held.key == key)
+        });
+        let dragging = GRIP.with(|grip| {
+            grip.borrow()
+                .as_ref()
+                .is_some_and(|held| held.key == key && held.dragging)
+        });
+        let stretch = GRIP.with(|grip| {
+            grip.borrow()
+                .as_ref()
+                .filter(|held| held.key == key)
+                .map_or(0.0, |held| held.stretch)
+        });
+
+        // The fill follows the value, except while a click's snap is travelling
+        // — then it follows the curve, because the point of the snap is that you
+        // watch it arrive.
+        let resting = fraction(self.value, &self.span);
+        let now = Instant::now();
+        let travelling = SNAPS.with(|snaps| snaps.borrow().get(&key).map(|t| t.at(now)));
+        let filled = travelling.unwrap_or(resting);
+
+        let lit = motion::fade_fraction(hover_key.clone());
+        let active = held || lit > 0.01;
+        let (label_width, value_width) = measured(&key);
+        let track_width = TRACKS.with(|tracks| {
+            tracks
+                .borrow()
+                .get(&key)
+                .map_or(0.0, |bounds| f32::from(bounds.size.width))
+        });
+        let dodging = dodges(filled, track_width, label_width, value_width);
+
+        let marks: Vec<gpui::AnyElement> = marks(&self.span, self.step)
+            .into_iter()
+            .map(|at| {
+                div()
+                    .absolute()
+                    .left(relative(at))
+                    .top(px((ROW_HEIGHT - MARK_HEIGHT) / 2.0))
+                    .w(px(MARK_WIDTH))
+                    .h(px(MARK_HEIGHT))
+                    .rounded_full()
+                    .bg(Hsla { a: theme.hairline_strong.a * lit, ..theme.hairline_strong })
+                    .into_any_element()
+            })
+            .collect();
+
+        let record_track = {
+            let key = key.clone();
+            move |bounds: Bounds<Pixels>| {
+                TRACKS.with(|tracks| {
+                    tracks
+                        .borrow_mut()
+                        .insert(key.clone(), bounds)
+                });
+            }
+        };
+        let record_label = {
+            let key = key.clone();
+            move |bounds: Bounds<Pixels>| {
+                TEXT.with(|text| {
+                    let mut text = text.borrow_mut();
+                    let entry = text.entry(key.clone()).or_insert((0.0, 0.0));
+                    entry.0 = f32::from(bounds.size.width);
+                });
+            }
+        };
+        let record_value = {
+            let key = key.clone();
+            move |bounds: Bounds<Pixels>| {
+                TEXT.with(|text| {
+                    let mut text = text.borrow_mut();
+                    let entry = text.entry(key.clone()).or_insert((0.0, 0.0));
+                    entry.1 = f32::from(bounds.size.width);
+                });
+            }
+        };
+
+        let press = {
+            let key = key.clone();
+            let span = self.span.clone();
+            let change = self.change.clone();
+            let step = self.step;
+            move |event: &gpui::MouseDownEvent, _: &mut Window, _: &mut App| {
+                GRIP.with(|grip| {
+                    *grip.borrow_mut() = Some(Grip {
+                        key: key.clone(),
+                        from: event.position,
+                        dragging: false,
+                        span: span.clone(),
+                        step,
+                        stretch: 0.0,
+                        change: change.clone(),
+                    })
+                });
+            }
+        };
+
+        div()
+            .id(key.clone())
+            .relative()
+            .w_full()
+            .h(px(ROW_HEIGHT))
+            .cursor(gpui::CursorStyle::PointingHand)
+            .on_hover(move |hovered, window, _| {
+                if motion::hover_set(hover_key.clone(), *hovered) {
+                    window.refresh();
+                }
+            })
+            .on_mouse_down(MouseButton::Left, press)
+            .child(
+                // The track slides when the pointer is dragged past an end, and
+                // the row clips it, so the gesture reads as a band being pulled
+                // rather than as a value that stopped responding.
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(stretch))
+                    .right(px(-stretch))
+                    .rounded(px(ROW_RADIUS))
+                    .bg(theme.surface_raised)
+                    .overflow_hidden()
+                    .child(measure(record_track))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left_0()
+                            .w(relative(filled))
+                            .bg(if active { theme.hairline_strong } else { theme.hairline }),
+                    )
+                    .children(marks)
+                    .child(
+                        div()
+                            .absolute()
+                            .left(relative(filled))
+                            .ml(px(-HANDLE_WIDTH / 2.0))
+                            .top(px((ROW_HEIGHT - HANDLE_HEIGHT) / 2.0))
+                            .w(px(HANDLE_WIDTH))
+                            .h(px(HANDLE_HEIGHT))
+                            .rounded_full()
+                            .bg(Hsla {
+                                a: handle_opacity(active, dragging, dodging),
+                                ..theme.text
+                            })
+                            // At rest the handle is a quarter of its height, so
+                            // it reads as a tick until the pointer arrives.
+                            .when(!active, |handle| {
+                                handle
+                                    .h(px(HANDLE_HEIGHT * HANDLE_RESTING_SCALE))
+                                    .top(px((ROW_HEIGHT - HANDLE_HEIGHT * HANDLE_RESTING_SCALE) / 2.0))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(ROW_INSET))
+                            .top_0()
+                            .bottom_0()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .relative()
+                                    .child(label_text(&theme, self.label.clone()))
+                                    .child(measure(record_label)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .right(px(ROW_INSET))
+                            .top_0()
+                            .bottom_0()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .relative()
+                                    .child(
+                                        div()
+                                            .text_size(px(TEXT_SIZE))
+                                            .font_family(theme.font_mono.clone())
+                                            .text_color(if active {
+                                                theme.text
+                                            } else {
+                                                theme.text_secondary
+                                            })
+                                            .child(format_value(self.value, self.step)),
+                                    )
+                                    .child(measure(record_value)),
+                            ),
+                    ),
+            )
+    }
+}
+
+/// The sheet that follows a press once it leaves the track it started on.
+///
+/// A pointer handler only fires over its own element, and the whole point of
+/// the rubber band is travel *past* the track. The panel mounts this while a
+/// press is live; it is transparent and occludes, so nothing under it reacts to
+/// a pointer that is busy dragging a slider.
+pub fn capture_sheet() -> Option<impl IntoElement> {
+    let live = GRIP.with(|grip| grip.borrow().is_some());
+    if !live {
+        return None;
+    }
+    Some(deferred(
+        div()
+            .absolute()
+            .size_full()
+            .occlude()
+            .on_mouse_move(|event, window, cx| drag(event.position, window, cx))
+            .on_mouse_up(MouseButton::Left, |event, window, cx| {
+                release(event.position, window, cx)
+            }),
+    ))
+}
+
+fn drag(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    let held = GRIP.with(|grip| {
+        let mut grip = grip.borrow_mut();
+        let Some(held) = grip.as_mut() else {
+            return None;
+        };
+        let travelled = (position - held.from).magnitude() as f32;
+        if !held.dragging && travelled > CLICK_THRESHOLD {
+            held.dragging = true;
+        }
+        if !held.dragging {
+            return None;
+        }
+        let track = TRACKS.with(|tracks| tracks.borrow().get(&held.key).copied())?;
+        held.stretch = if position.x < track.origin.x {
+            rubber_stretch(f32::from(track.origin.x - position.x), -1.0)
+        } else if position.x > track.origin.x + track.size.width {
+            rubber_stretch(f32::from(position.x - (track.origin.x + track.size.width)), 1.0)
+        } else {
+            0.0
+        };
+        let across = if track.size.width > px(0.0) {
+            f32::from(position.x - track.origin.x) / f32::from(track.size.width)
+        } else {
+            0.0
+        };
+        // A drag is exact: it reports where the pointer is, rounded only to the
+        // step the caller asked for.
+        let value = round_to_step(value_at(across, &held.span), held.step);
+        SNAPS.with(|snaps| snaps.borrow_mut().remove(&held.key));
+        Some((held.change.clone(), value))
+    });
+    if let Some((change, value)) = held {
+        change(value, window, cx);
+        window.refresh();
+    }
+}
+
+fn release(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    let held = GRIP.with(|grip| grip.borrow_mut().take());
+    let Some(held) = held else {
+        return;
+    };
+    if !held.dragging {
+        // A click, not a drag: ask for a round number and travel there.
+        if let Some(track) = TRACKS.with(|tracks| tracks.borrow().get(&held.key).copied())
+            && track.size.width > px(0.0)
+        {
+            let across = f32::from(position.x - track.origin.x) / f32::from(track.size.width);
+            let landed = snap_on_click(value_at(across, &held.span), &held.span, held.step);
+            SNAPS.with(|snaps| {
+                snaps.borrow_mut().insert(
+                    held.key.clone(),
+                    Travel {
+                        from: across.clamp(0.0, 1.0),
+                        to: fraction(landed, &held.span),
+                        started: Instant::now(),
+                    },
+                )
+            });
+            (held.change)(round_to_step(landed, held.step), window, cx);
+        }
+    }
+    window.refresh();
+}
+
+/// A switch, at DialKit's proportions: a 36 × 20 track with a 16px thumb.
+#[derive(IntoElement)]
+pub struct Toggle {
+    key: SharedString,
+    label: SharedString,
+    checked: bool,
+    change: Rc<dyn Fn(bool, &mut Window, &mut App)>,
+}
+
+impl Toggle {
+    pub fn new(
+        key: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        checked: bool,
+        change: impl 'static + Fn(bool, &mut Window, &mut App),
+    ) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            checked,
+            change: Rc::new(change),
+        }
+    }
+}
+
+impl RenderOnce for Toggle {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.inari().clone();
+        let checked = self.checked;
+        let change = self.change.clone();
+        let hover_key = SharedString::from(format!("{}-hover", self.key));
+        let wash = motion::hover_blend(hover_key.clone(), theme.wash_hover);
+
+        row(&theme)
+            .id(self.key.clone())
+            .flex()
+            .items_center()
+            .justify_between()
+            .px(px(ROW_INSET + 2.0))
+            .cursor(gpui::CursorStyle::PointingHand)
+            .bg(crate::ui::theme::flatten(wash, theme.surface_raised))
+            .on_hover(move |hovered, window, _| {
+                if motion::hover_set(hover_key.clone(), *hovered) {
+                    window.refresh();
+                }
+            })
+            .on_click(move |_, window, cx| change(!checked, window, cx))
+            .child(
+                div()
+                    .text_size(px(TEXT_SIZE))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(if checked { theme.text } else { theme.text_secondary })
+                    .child(self.label.clone()),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w(px(36.0))
+                    .h(px(20.0))
+                    .rounded(px(10.0))
+                    .bg(if checked { theme.accent } else { theme.hairline_strong })
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(2.0))
+                            .left(px(if checked { 18.0 } else { 2.0 }))
+                            .size(px(16.0))
+                            .rounded_full()
+                            .bg(if checked { theme.text_on_accent } else { theme.text }),
+                    ),
+            )
+    }
+}
+
+/// A row whose label sits inside it and whose control sits on the right.
+///
+/// DialKit's `.dialkit-labeled-control`: the shape a select, a text field or a
+/// segmented control takes, so every row in the panel keeps one silhouette.
+pub fn labelled(
+    theme: &Theme,
+    label: impl Into<SharedString>,
+    control: impl IntoElement,
+) -> impl IntoElement {
+    row(theme)
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.0))
+        .pl(px(ROW_INSET + 2.0))
+        .pr(px(ROW_INSET))
+        .child(label_text(theme, label.into()))
+        .child(control)
+}
+
+/// The segmented control, sized to sit inside a row.
+#[derive(IntoElement)]
+pub struct Segmented {
+    key: SharedString,
+    options: Vec<SharedString>,
+    selected: usize,
+    change: Rc<dyn Fn(usize, &mut Window, &mut App)>,
+}
+
+impl Segmented {
+    pub fn new(
+        key: impl Into<SharedString>,
+        options: Vec<SharedString>,
+        selected: usize,
+        change: impl 'static + Fn(usize, &mut Window, &mut App),
+    ) -> Self {
+        Self {
+            key: key.into(),
+            options,
+            selected,
+            change: Rc::new(change),
+        }
+    }
+}
+
+impl RenderOnce for Segmented {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.inari().clone();
+        let key = self.key.clone();
+        let selected = self.selected;
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(2.0))
+            .children(
+                self.options
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, option)| {
+                        let change = self.change.clone();
+                        let chosen = index == selected;
+                        div()
+                            .id(SharedString::from(format!("{key}-{index}")))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .px(px(8.0))
+                            .h(px(24.0))
+                            .rounded(px(6.0))
+                            .text_size(px(TEXT_SIZE))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .when(chosen, |chip| {
+                                chip.bg(theme.surface_overlay)
+                                    .text_color(theme.text)
+                            })
+                            .when(!chosen, |chip| {
+                                chip.text_color(theme.text_tertiary)
+                                    .hover(|style| style.bg(theme.wash_hover))
+                            })
+                            .child(option)
+                            .on_click(move |_, window, cx| change(index, window, cx))
+                    }),
+            )
+    }
+}
+
+
+/// A text field inside a row.
+///
+/// The chrome follows `ui/field.rs`: the edge rests on the hairline and warms
+/// to the accent while the field is live, over the same 150 ms every other wash
+/// in the application uses, with a soft accent ring at full focus. Editing
+/// itself belongs to GPUI Component's editor with its own appearance off — this
+/// owns only the chrome, the way the enrollment field does.
+///
+/// The caller reports focus against `{key}-focus` from the editor's own Focus
+/// and Blur events, because a field cannot see its own focus from here.
+pub fn text_row(
+    theme: &Theme,
+    key: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    input: &gpui::Entity<gpui_component::input::InputState>,
+) -> impl IntoElement {
+    use gpui::BoxShadow;
+
+    let key = key.into();
+    let focus_key = SharedString::from(format!("{key}-focus"));
+    let hover_key = SharedString::from(format!("{key}-hover"));
+    let focus = motion::fade_fraction(focus_key);
+    let hover = motion::fade_fraction(hover_key.clone());
+
+    let border = crate::ui::theme::mix(
+        theme.hairline,
+        Hsla { a: 0.55, ..theme.accent },
+        focus,
+    );
+    let fill = crate::ui::theme::flatten(
+        Hsla { a: theme.wash_hover.a * hover, ..theme.wash_hover },
+        theme.surface_raised,
+    );
+    // Presence without glow: 3px of accent spread, no blur. A blurred halo
+    // behind a translucent fill reads through it as an inner smudge.
+    let ring = (focus > 0.004).then(|| BoxShadow {
+        color: Hsla { a: 0.16 * focus, ..theme.accent },
+        offset: gpui::point(px(0.0), px(0.0)),
+        blur_radius: px(0.0),
+        spread_radius: px(3.0),
+    });
+
+    row(theme)
+        .id(key)
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.0))
+        .pl(px(ROW_INSET + 2.0))
+        .pr(px(ROW_INSET))
+        .bg(fill)
+        .border_1()
+        .border_color(border)
+        .shadow(ring.into_iter().collect::<Vec<_>>())
+        .cursor(gpui::CursorStyle::IBeam)
+        .on_hover(move |hovered, window, _| {
+            if motion::hover_set(hover_key.clone(), *hovered) {
+                window.refresh();
+            }
+        })
+        .child(label_text(theme, label.into()))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .text_size(px(TEXT_SIZE))
+                .child(
+                    gpui_component::input::Input::new(input)
+                        .appearance(false)
+                        .small(),
+                ),
+        )
+}
+
+/// A full-width action, at DialKit's `.dialkit-button` proportions.
+#[derive(IntoElement)]
+pub struct Action {
+    key: SharedString,
+    label: SharedString,
+    press: Rc<dyn Fn(&mut Window, &mut App)>,
+}
+
+impl Action {
+    pub fn new(
+        key: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        press: impl 'static + Fn(&mut Window, &mut App),
+    ) -> Self {
+        Self {
+            key: key.into(),
+            label: label.into(),
+            press: Rc::new(press),
+        }
+    }
+}
+
+impl RenderOnce for Action {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.inari().clone();
+        let hover_key = SharedString::from(format!("{}-hover", self.key));
+        let wash = motion::hover_blend(hover_key.clone(), theme.wash_hover);
+        let press = self.press.clone();
+
+        row(&theme)
+            .id(self.key.clone())
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor(gpui::CursorStyle::PointingHand)
+            .bg(crate::ui::theme::flatten(wash, theme.surface_raised))
+            .on_hover(move |hovered, window, _| {
+                if motion::hover_set(hover_key.clone(), *hovered) {
+                    window.refresh();
+                }
+            })
+            .on_click(move |_, window, cx| press(window, cx))
+            .child(
+                div()
+                    .text_size(px(TEXT_SIZE))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(self.label.clone()),
+            )
+    }
+}
+
+/// A stepper for a whole number, sized to sit inside a row.
+pub fn stepper(
+    theme: &Theme,
+    key: impl Into<SharedString>,
+    value: usize,
+    span: std::ops::RangeInclusive<usize>,
+    change: impl 'static + Fn(usize, &mut Window, &mut App),
+) -> impl IntoElement {
+    let key = key.into();
+    let change = Rc::new(change);
+    let (lo, hi) = (*span.start(), *span.end());
+
+    let arrow = |suffix: &'static str, glyph: gpui_component::IconName, to: Option<usize>| {
+        let change = change.clone();
+        div()
+            .id(SharedString::from(format!("{key}-{suffix}")))
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(20.0))
+            .rounded(px(6.0))
+            .text_color(if to.is_some() { theme.text_secondary } else { theme.text_tertiary })
+            .when(to.is_some(), |arrow| {
+                arrow
+                    .cursor(gpui::CursorStyle::PointingHand)
+                    .hover(|style| style.bg(theme.wash_hover))
+            })
+            .child(
+                gpui_component::Icon::from(glyph)
+                    .size(px(12.0))
+                    .flex_none(),
+            )
+            .on_click(move |_, window, cx| {
+                if let Some(to) = to {
+                    change(to, window, cx);
+                }
+            })
+    };
+
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(px(2.0))
+        .child(arrow(
+            "down",
+            gpui_component::IconName::Minus,
+            (value > lo).then(|| value - 1),
+        ))
+        .child(
+            div()
+                .w(px(24.0))
+                .flex()
+                .justify_center()
+                .text_size(px(TEXT_SIZE))
+                .font_family(theme.font_mono.clone())
+                .text_color(theme.text)
+                .child(value.to_string()),
+        )
+        .child(arrow(
+            "up",
+            gpui_component::IconName::Plus,
+            (value < hi).then(|| value + 1),
+        ))
+}
+
+/// A section heading between runs of rows.
+pub fn heading(theme: &Theme, title: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .pt(px(Theme::SPACE_SM))
+        .pb(px(2.0))
+        .pl(px(ROW_INSET + 2.0))
+        .text_size(px(11.0))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(theme.text_tertiary)
+        .child(title.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

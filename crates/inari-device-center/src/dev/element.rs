@@ -45,6 +45,8 @@ pub struct Selection {
     /// margin rectangle survives to paint time.
     pub margin: Edges<Pixels>,
     pub radius: Corners<Pixels>,
+    /// The frame this was last refreshed on.
+    pub seen: u64,
 }
 
 impl Global for Selection {}
@@ -59,6 +61,17 @@ impl Selection {
     pub fn content_box(&self) -> Bounds<Pixels> {
         inset(self.padding_box(), self.padding)
     }
+}
+
+/// The selection, if it was refreshed recently enough to still be true.
+///
+/// The floating layer draws from the frame before the one the panel wrote, so
+/// one frame of lag is the normal case and two is the limit. Past that the
+/// element has stopped being painted and its box is a ghost.
+pub fn current(cx: &App) -> Option<&Selection> {
+    let now = super::frames::frame(cx);
+    cx.try_global::<Selection>()
+        .filter(|selection| now.saturating_sub(selection.seen) <= 2)
 }
 
 /// Shrink `bounds` by `edges` on every side, never past zero.
@@ -109,7 +122,9 @@ pub fn remember(
         bottom_left: absolute(style.corner_radii.bottom_left, rem),
     };
 
+    let seen = super::frames::frame(cx);
     cx.set_global(Selection {
+        seen,
         id: id.clone(),
         bounds: state.bounds,
         content_size: state.content_size,

@@ -32,7 +32,7 @@ use gpui::{
 use gpui_component::Root;
 
 use crate::{
-    dev::panel::Tool,
+    dev::panel::Screen,
     ui::{material, theme::Theme},
 };
 
@@ -155,7 +155,7 @@ fn open_bench(cx: &mut App) {
                 let bench = cx.new(|cx| bench::Bench::new(window, cx));
                 // The Bench opens with the panel already docked: knobs are the
                 // primary control here, not an extra someone has to find.
-                panel::show(Tool::Knobs, window, cx);
+                panel::show(Screen::Knobs, window, cx);
                 cx.new(|cx| Root::new(bench, window, cx))
             },
         )
