@@ -215,6 +215,14 @@ use crate::ui::{
     theme::{ActiveTheme as _, Theme},
 };
 
+/// What a control does when it is moved.
+///
+/// Every control takes one of these rather than an event enum, because a knob
+/// has exactly one thing to say and the caller always knows which knob it built.
+type Change<T> = Rc<dyn Fn(T, &mut Window, &mut App)>;
+/// What an action does when it is pressed.
+type Press = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// How long a click's snap takes to travel, and on what curve.
 ///
 /// DialKit springs (stiffness 300, damping 25, mass 0.8). GPUI 0.2.2 carries no
@@ -251,7 +259,7 @@ struct Grip {
     step: f32,
     /// How far the band is stretched past an end.
     stretch: f32,
-    change: Rc<dyn Fn(f32, &mut Window, &mut App)>,
+    change: Change<f32>,
 }
 
 /// A fill travelling to where a click asked for.
@@ -345,7 +353,7 @@ pub struct Slider {
     value: f32,
     span: std::ops::RangeInclusive<f32>,
     step: f32,
-    change: Rc<dyn Fn(f32, &mut Window, &mut App)>,
+    change: Change<f32>,
 }
 
 impl Slider {
@@ -603,9 +611,7 @@ pub fn capture_sheet() -> Option<impl IntoElement> {
 fn drag(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
     let held = GRIP.with(|grip| {
         let mut grip = grip.borrow_mut();
-        let Some(held) = grip.as_mut() else {
-            return None;
-        };
+        let held = grip.as_mut()?;
         let travelled = (position - held.from).magnitude() as f32;
         if !held.dragging && travelled > CLICK_THRESHOLD {
             held.dragging = true;
@@ -672,7 +678,7 @@ pub struct Toggle {
     key: SharedString,
     label: SharedString,
     checked: bool,
-    change: Rc<dyn Fn(bool, &mut Window, &mut App)>,
+    change: Change<bool>,
 }
 
 impl Toggle {
@@ -766,7 +772,7 @@ pub struct Segmented {
     key: SharedString,
     options: Vec<SharedString>,
     selected: usize,
-    change: Rc<dyn Fn(usize, &mut Window, &mut App)>,
+    change: Change<usize>,
 }
 
 impl Segmented {
@@ -907,7 +913,7 @@ pub fn text_row(
 pub struct Action {
     key: SharedString,
     label: SharedString,
-    press: Rc<dyn Fn(&mut Window, &mut App)>,
+    press: Press,
 }
 
 impl Action {
@@ -963,7 +969,7 @@ pub fn stepper(
     change: impl 'static + Fn(usize, &mut Window, &mut App),
 ) -> impl IntoElement {
     let key = key.into();
-    let change = Rc::new(change);
+    let change: Change<usize> = Rc::new(change);
     let (lo, hi) = (*span.start(), *span.end());
 
     let arrow = |suffix: &'static str, glyph: gpui_component::IconName, to: Option<usize>| {
