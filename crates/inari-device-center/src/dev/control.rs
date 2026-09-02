@@ -496,6 +496,12 @@ impl RenderOnce for Slider {
                 }
             })
             .on_mouse_down(MouseButton::Left, press)
+            // Measured on the row, not on the track inside it. An absolutely
+            // positioned child resolves `size_full` against its containing
+            // block, and the track is itself absolute — so measuring in there
+            // answered for a box that was neither the row nor the track, and a
+            // click landed a third of the way from where it was aimed.
+            .child(measure(record_track))
             .child(
                 // The track slides when the pointer is dragged past an end, and
                 // the row clips it, so the gesture reads as a band being pulled
@@ -509,7 +515,6 @@ impl RenderOnce for Slider {
                     .rounded(px(ROW_RADIUS))
                     .bg(theme.surface_raised)
                     .overflow_hidden()
-                    .child(measure(record_track))
                     .child(
                         div()
                             .absolute()
