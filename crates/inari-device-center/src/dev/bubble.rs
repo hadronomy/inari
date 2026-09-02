@@ -150,10 +150,16 @@ fn pill(
         .bg(theme.surface_overlay)
         .border_1()
         .border_color(theme.hairline_strong)
-        .child(canvas(
-            |bounds, _, _| PAINTED_AT.with(|painted| painted.set(bounds.origin)),
-            |_, _, _, _| {},
-        ))
+        // Styled on the canvas itself: a bare one lays out at its content
+        // size, which is nothing, and would report a box that is not the pill's.
+        .child(
+            canvas(
+                |bounds, _, _| PAINTED_AT.with(|painted| painted.set(bounds.origin)),
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        )
         .child(grip(theme))
         .children(Screen::ALL.map(|screen| {
             Button::new(gpui::SharedString::from(format!("dev-bubble-{}", screen.title())))
