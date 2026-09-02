@@ -969,3 +969,69 @@ fn reading(theme: &Theme, label: &'static str, value: &str) -> impl IntoElement 
 fn millis(duration: Duration) -> String {
     format!("{:.1} ms", duration.as_secs_f32() * 1000.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui_component::IconNamed as _;
+
+    use super::*;
+    use crate::assets::BrandAssets;
+
+    /// Every glyph the panel names, whether it is a tab or a control.
+    ///
+    /// GPUI draws a missing SVG as nothing at all — no warning, no placeholder,
+    /// no log line. Two tool tabs shipped blank before this test existed, and
+    /// the only way anyone found out was by looking at the pixels.
+    const GLYPHS: [IconName; 7] = [
+        IconName::Settings2,
+        IconName::Inspector,
+        IconName::Frame,
+        IconName::ChartPie,
+        IconName::Palette,
+        IconName::Search,
+        IconName::Close,
+    ];
+
+    #[test]
+    fn every_glyph_the_panel_names_is_embedded() {
+        for glyph in GLYPHS {
+            let path = glyph.path();
+            assert!(
+                BrandAssets::get(path.as_ref()).is_some(),
+                "missing {path}; the panel would draw nothing there"
+            );
+        }
+    }
+
+    #[test]
+    fn every_tool_tab_has_an_embedded_glyph() {
+        for tool in Tool::ALL {
+            let path = tool.icon().path();
+            assert!(
+                BrandAssets::get(path.as_ref()).is_some(),
+                "{} has no embedded glyph at {path}",
+                tool.title()
+            );
+        }
+    }
+
+    #[test]
+    fn the_stepper_arrows_are_embedded() {
+        for glyph in [IconName::Minus, IconName::Plus] {
+            let path = glyph.path();
+            assert!(BrandAssets::get(path.as_ref()).is_some(), "missing {path}");
+        }
+    }
+
+    #[test]
+    fn no_two_tools_share_a_glyph() {
+        let mut paths: Vec<SharedString> = Tool::ALL
+            .iter()
+            .map(|tool| tool.icon().path())
+            .collect();
+        paths.sort();
+        let count = paths.len();
+        paths.dedup();
+        assert_eq!(paths.len(), count, "two tabs would be indistinguishable");
+    }
+}
