@@ -17,6 +17,7 @@
 
 pub mod bench;
 pub mod bubble;
+pub mod control;
 pub mod dial;
 pub mod element;
 pub mod frames;
