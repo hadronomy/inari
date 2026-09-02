@@ -407,19 +407,54 @@ which copies a panel out as a prompt for a coding agent.
 
 ### 6.4 What we have built of it
 
-Landed: the arithmetic, with tests — click snapping, mark placement, band
-stretch, handle dodging, decimals from step (`dev/control.rs`).
+Landed and seen on screen: the row geometry, so every control is one 36px row
+with its label inside it; the slider with its fill, deciles, handle and dodge;
+the toggle, the segmented control, the stepper, the action row and the section
+heading at DialKit's proportions; and text rows carrying `ui/field.rs`'s chrome
+— the edge warming to the accent on focus, the 3px accent ring, the hover fill,
+all on the application's own 150ms clock. Plus the arithmetic, with tests.
 
-Not yet built: the row geometry itself, so the panel still stacks a label over
-its control; the slider element and its drag; the segmented control and toggle
-at DialKit's proportions; select, colour, spring and easing controls; folders,
-presets, shortcuts and the timeline. The text field is `gpui_component::Input`
-with no chrome, where it should have the focus ring and easing that
-`ui/field.rs` gives the enrollment field.
+Not yet built: select, colour, spring and easing controls with their
+visualisations; folders, presets, shortcuts and the timeline; DialKit's
+`copy-instruction`, which copies a panel out as a prompt.
+
+Not attempted, and deliberately: the glass refraction from DialKit's hero. It
+reads as glass there because the dials float over a page. Ours sit on a flat
+panel surface, so a backdrop blur would capture nothing and cost a render
+target to say so.
 
 One constraint to record: GPUI 0.2.2 has no spring, so the click-snap will run
 on `ui/motion.rs`'s cubic curves rather than DialKit's spring constants. The
 shape is close and the vocabulary stays one.
+
+---
+
+## 6.5 The one blocker, and the fork it needs
+
+`Inspector::new` starts with `pick_depth: Some(0.0)` (`gpui/src/inspector.rs`),
+so **every** dock open arms the picker, and `Window::dispatch_mouse_event` skips
+all other mouse handling while it is armed
+(`gpui/src/window.rs:3775-3779`). The first click after the panel appears is
+therefore always eaten — it selects an element instead of doing what it was
+aimed at.
+
+That is the whole of "selecting an element is burdensome", and it also explains
+every "the first click does nothing" in the catalog and on the sliders. Nothing
+in the application can fix it: `pick_depth` is private, `select` and
+`set_active_element_id` are `pub(crate)`, and `start_picking` only arms.
+
+The fix is three lines in the fork:
+
+```rust
+/// Stop picking without selecting anything.
+pub fn stop_picking(&mut self) {
+    self.pick_depth = None;
+}
+```
+
+and one call in `panel::install`, so a dock opened for a screen disarms and a
+dock opened for the picker does not. This is the case §4 reserved: it buys
+capability, not layout taste.
 
 ---
 
