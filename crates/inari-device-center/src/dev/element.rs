@@ -36,7 +36,6 @@ use crate::ui::{
 /// model without the Element tool being on screen.
 #[derive(Clone)]
 pub struct Selection {
-    pub id: InspectorElementId,
     pub bounds: Bounds<Pixels>,
     pub content_size: Size<Pixels>,
     pub padding: Edges<Pixels>,
@@ -85,12 +84,7 @@ fn inset(bounds: Bounds<Pixels>, edges: Edges<Pixels>) -> Bounds<Pixels> {
 }
 
 /// Read the geometry out of the element's own state and remember it.
-pub fn remember(
-    id: &InspectorElementId,
-    state: &DivInspectorState,
-    window: &Window,
-    cx: &mut App,
-) {
+pub fn remember(state: &DivInspectorState, window: &Window, cx: &mut App) {
     let rem = window.rem_size();
     // Percentage padding resolves against the element's own width, which is the
     // rule Taffy applies and the one a reader will expect.
@@ -125,7 +119,6 @@ pub fn remember(
     let seen = super::frames::frame(cx);
     cx.set_global(Selection {
         seen,
-        id: id.clone(),
         bounds: state.bounds,
         content_size: state.content_size,
         padding,
