@@ -5,6 +5,14 @@
 //! `DivInspectorState { base_style, bounds, content_size }`. Everything here is
 //! read from that one value; nothing reaches into the renderer.
 //!
+//! The report states measurements and does not judge them. An earlier version
+//! warned when the children measured larger than the box they were given, and
+//! it fired on a banner that clips nothing: GPUI's `content_size` is the union
+//! of the child *layout* bounds (`elements/div.rs:1371-1394`), which is not the
+//! same quantity as "what would be cut off". The three sizes are printed
+//! together so a reader can compare them; a diagnostic that cries wolf is worse
+//! than none.
+//!
 //! The live style editors are `gpui_component::DivInspector`, hosted rather than
 //! rewritten. It already round-trips the base style through Rust *and* JSON,
 //! with completions driven by GPUI's `styled_reflection`, and it writes back
@@ -51,12 +59,6 @@ impl Selection {
     pub fn content_box(&self) -> Bounds<Pixels> {
         inset(self.padding_box(), self.padding)
     }
-
-    /// Children measure larger than the box they were given, so something is
-    /// being cut off unless the element scrolls.
-    pub fn overflows(&self) -> bool {
-        overflows(self.content_size, self.content_box().size)
-    }
 }
 
 /// Shrink `bounds` by `edges` on every side, never past zero.
@@ -67,12 +69,6 @@ fn inset(bounds: Bounds<Pixels>, edges: Edges<Pixels>) -> Bounds<Pixels> {
         origin: gpui::point(bounds.origin.x + edges.left, bounds.origin.y + edges.top),
         size: gpui::size(width, height),
     }
-}
-
-/// Half a pixel of slack, because a measured child and its box agree to within
-/// rounding far more often than they disagree.
-fn overflows(children: Size<Pixels>, box_size: Size<Pixels>) -> bool {
-    children.width > box_size.width + px(0.5) || children.height > box_size.height + px(0.5)
 }
 
 /// Read the geometry out of the element's own state and remember it.
@@ -204,23 +200,6 @@ pub fn tool(
             .child(measure(theme, "Margin", &edges(selection.margin)))
             .child(measure(theme, "Radius", &corners(selection.radius)))
             .child(measure(theme, "Instance", &id.instance_id.to_string()));
-
-        if selection.overflows() {
-            report = report.child(
-                div()
-                    .w_full()
-                    .px(px(Theme::SPACE_SM))
-                    .py(px(Theme::SPACE_XS))
-                    .rounded(px(Theme::RADIUS_CONTROL))
-                    .bg(theme.danger_wash)
-                    .text_size(px(11.0))
-                    .text_color(theme.danger)
-                    .child(
-                        "Children measure larger than the box they were given. Unless this \
-                         element scrolls, something is being cut off.",
-                    ),
-            );
-        }
     }
 
     card(theme)
@@ -327,12 +306,6 @@ mod tests {
         let bounds = Bounds { origin: point(px(0.0), px(0.0)), size: size(px(10.0), px(10.0)) };
         let inner = inset(bounds, Edges::all(px(40.0)));
         assert_eq!(inner.size, size(px(0.0), px(0.0)));
-    }
-
-    #[test]
-    fn rounding_alone_does_not_report_an_overflow() {
-        assert!(!overflows(size(px(100.2), px(50.0)), size(px(100.0), px(50.0))));
-        assert!(overflows(size(px(101.0), px(50.0)), size(px(100.0), px(50.0))));
     }
 
     #[test]
