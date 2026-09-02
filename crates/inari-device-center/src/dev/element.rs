@@ -44,8 +44,13 @@ pub struct Selection {
     /// margin rectangle survives to paint time.
     pub margin: Edges<Pixels>,
     pub radius: Corners<Pixels>,
-    /// The frame this was last refreshed on.
-    pub seen: u64,
+    /// When this was last refreshed.
+    ///
+    /// A wall clock rather than a frame count, because the frame counter is one
+    /// global and both windows tick it — so with the Bench and the application
+    /// both drawing, `now` ran ahead of the panel's last write and the box
+    /// blinked out and back.
+    pub seen: std::time::Instant,
 }
 
 impl Global for Selection {}
@@ -62,15 +67,16 @@ impl Selection {
     }
 }
 
-/// The selection, if it was refreshed recently enough to still be true.
+/// How long a selection stays believable after its last refresh.
 ///
-/// The floating layer draws from the frame before the one the panel wrote, so
-/// one frame of lag is the normal case and two is the limit. Past that the
-/// element has stopped being painted and its box is a ghost.
+/// Long enough that an idle window redrawing lazily keeps its box, short enough
+/// that a box around something that has gone does not linger.
+const BELIEVABLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// The selection, if it was refreshed recently enough to still be true.
 pub fn current(cx: &App) -> Option<&Selection> {
-    let now = super::frames::frame(cx);
     cx.try_global::<Selection>()
-        .filter(|selection| now.saturating_sub(selection.seen) <= 2)
+        .filter(|selection| selection.seen.elapsed() < BELIEVABLE)
 }
 
 /// Shrink `bounds` by `edges` on every side, never past zero.
@@ -116,7 +122,7 @@ pub fn remember(state: &DivInspectorState, window: &Window, cx: &mut App) {
         bottom_left: absolute(style.corner_radii.bottom_left, rem),
     };
 
-    let seen = super::frames::frame(cx);
+    let seen = std::time::Instant::now();
     cx.set_global(Selection {
         seen,
         bounds: state.bounds,
