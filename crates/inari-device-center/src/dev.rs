@@ -91,9 +91,13 @@ pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
 
     // One global, and every div in the window outlines itself
     // (`gpui/src/style.rs:612-618`). Nothing else has to know.
+    //
+    // `remove_global` panics on a global that was never added, so the check is
+    // load-bearing rather than defensive: the first frame of every run reaches
+    // here with the toggle off and nothing set.
     if panel::deck(cx).outline_all {
         cx.set_global(gpui::DebugBelow);
-    } else {
+    } else if cx.has_global::<gpui::DebugBelow>() {
         cx.remove_global::<gpui::DebugBelow>();
     }
 
