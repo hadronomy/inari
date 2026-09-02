@@ -496,6 +496,50 @@ impl RenderOnce for Slider {
                 }
             })
             .on_mouse_down(MouseButton::Left, press)
+            // The snap lives here rather than on the capture sheet because a
+            // click is a press and a release in one gesture: the sheet only
+            // mounts on the render *after* the press, which the release can
+            // easily beat. A drag has already reported its value on every frame
+            // it moved and owes nothing here.
+            .on_click({
+                let key = key.clone();
+                let span = self.span.clone();
+                let change = self.change.clone();
+                let step = self.step;
+                move |event: &gpui::ClickEvent, window: &mut Window, cx: &mut App| {
+                    let dragged = GRIP.with(|grip| {
+                        grip.borrow()
+                            .as_ref()
+                            .is_some_and(|held| held.dragging)
+                    });
+                    GRIP.with(|grip| *grip.borrow_mut() = None);
+                    if dragged {
+                        return;
+                    }
+                    let Some(track) = TRACKS.with(|tracks| tracks.borrow().get(&key).copied())
+                    else {
+                        return;
+                    };
+                    if track.size.width <= px(0.0) {
+                        return;
+                    }
+                    let at = event.up.position.x;
+                    let across = f32::from(at - track.origin.x) / f32::from(track.size.width);
+                    let landed = snap_on_click(value_at(across, &span), &span, step);
+                    SNAPS.with(|snaps| {
+                        snaps.borrow_mut().insert(
+                            key.clone(),
+                            Travel {
+                                from: across.clamp(0.0, 1.0),
+                                to: fraction(landed, &span),
+                                started: Instant::now(),
+                            },
+                        )
+                    });
+                    change(round_to_step(landed, step), window, cx);
+                    window.refresh();
+                }
+            })
             // Measured on the row, not on the track inside it. An absolutely
             // positioned child resolves `size_full` against its containing
             // block, and the track is itself absolute — so measuring in there
@@ -607,9 +651,7 @@ pub fn capture_sheet() -> Option<impl IntoElement> {
             .size_full()
             .occlude()
             .on_mouse_move(|event, window, cx| drag(event.position, window, cx))
-            .on_mouse_up(MouseButton::Left, |event, window, cx| {
-                release(event.position, window, cx)
-            }),
+            .on_mouse_up(MouseButton::Left, |_, window, _| release(window)),
     ))
 }
 
@@ -649,32 +691,13 @@ fn drag(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
     }
 }
 
-fn release(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+/// End a drag. A click that never became a drag is answered by the row's own
+/// click handler, which does not depend on this sheet having been mounted yet.
+fn release(window: &mut Window) {
     let held = GRIP.with(|grip| grip.borrow_mut().take());
-    let Some(held) = held else {
-        return;
-    };
-    if !held.dragging {
-        // A click, not a drag: ask for a round number and travel there.
-        if let Some(track) = TRACKS.with(|tracks| tracks.borrow().get(&held.key).copied())
-            && track.size.width > px(0.0)
-        {
-            let across = f32::from(position.x - track.origin.x) / f32::from(track.size.width);
-            let landed = snap_on_click(value_at(across, &held.span), &held.span, held.step);
-            SNAPS.with(|snaps| {
-                snaps.borrow_mut().insert(
-                    held.key.clone(),
-                    Travel {
-                        from: across.clamp(0.0, 1.0),
-                        to: fraction(landed, &held.span),
-                        started: Instant::now(),
-                    },
-                )
-            });
-            (held.change)(round_to_step(landed, held.step), window, cx);
-        }
+    if held.is_some() {
+        window.refresh();
     }
-    window.refresh();
 }
 
 /// A switch, at DialKit's proportions: a 36 × 20 track with a 16px thumb.
