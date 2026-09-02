@@ -25,8 +25,8 @@ pub mod story;
 mod stories;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Global, KeyBinding, Window, WindowOptions, actions, point,
-    px, size,
+    AnyElement, App, AppContext as _, Global, IntoElement as _, KeyBinding, Window, WindowOptions,
+    actions, point, px, size,
 };
 use gpui_component::Root;
 
@@ -99,6 +99,15 @@ pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
         cx.set_global(gpui::DebugBelow);
     } else if cx.has_global::<gpui::DebugBelow>() {
         cx.remove_global::<gpui::DebugBelow>();
+    }
+
+    // While the picker is armed GPUI gives *every* div a hitbox
+    // (`elements/div.rs:1711`), and this layer is `deferred`, so its hitbox
+    // would sit on top of the whole window and be the only thing anyone could
+    // ever pick. Standing down for the duration is both the fix and the right
+    // behaviour: picking is not a moment when the launcher is wanted.
+    if window.is_inspector_picking(cx) {
+        return gpui::Empty.into_any_element();
     }
 
     bubble::render(window, cx)

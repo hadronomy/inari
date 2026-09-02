@@ -15,6 +15,12 @@
 
 use std::{cell::OnceCell, collections::HashMap, collections::HashSet, time::Duration};
 
+/// One 60Hz frame, the floor the sparkline scales against so an idle window
+/// does not draw its two lazy renders as a full-height wall.
+const SIXTY_HZ: Duration = Duration::from_millis(16);
+/// How many of the most recent gaps the sparkline draws.
+const SPARKLINE: usize = 60;
+
 use gpui::{
     AnyElement, App, AppContext as _, BorrowAppContext as _, Context, DivInspectorState, Entity,
     Global, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
@@ -767,17 +773,23 @@ fn frames_tool(theme: &Theme, cx: &App) -> AnyElement {
         .iter()
         .copied()
         .max()
-        .unwrap_or(Duration::from_millis(16))
-        .max(Duration::from_millis(16));
+        .unwrap_or(SIXTY_HZ)
+        .max(SIXTY_HZ);
 
-    let bars: Vec<gpui::AnyElement> = gaps
+    // The panel is 30rem wide and the history is 120 samples deep, so drawing
+    // all of it leaves under a pixel per bar. Half a second of history, drawn
+    // wide enough to read, says more than a full second drawn as a smear.
+    let shown = gaps.len().saturating_sub(SPARKLINE);
+    let bars: Vec<gpui::AnyElement> = gaps[shown..]
         .iter()
         .map(|gap| {
             let share = gap.as_secs_f32() / worst.as_secs_f32();
             div()
                 .flex_1()
                 .h(px(1.0 + share * 31.0))
-                .bg(if *gap < Duration::from_millis(12) {
+                // A gap shorter than a 120Hz frame means something asked for
+                // this render before the display could have used the last one.
+                .bg(if *gap < Duration::from_millis(9) {
                     theme.warning
                 } else {
                     theme.accent
@@ -790,14 +802,13 @@ fn frames_tool(theme: &Theme, cx: &App) -> AnyElement {
         .v_flex()
         .gap(px(Theme::SPACE_SM))
         .w_full()
-        .child(reading(theme, "Renders in the last second", &cadence.rate.to_string()))
-        .child(reading(theme, "Since the previous render", &millis(cadence.last)))
-        .child(reading(theme, "Longest gap on record", &millis(cadence.longest)))
+        .child(reading(theme, "Renders per second", &cadence.rate.to_string()))
+        .child(reading(theme, "Since the last", &millis(cadence.last)))
+        .child(reading(theme, "Longest gap", &millis(cadence.longest)))
         .child(
             div()
                 .h_flex()
                 .items_end()
-                .gap(px(1.0))
                 .h(px(32.0))
                 .w_full()
                 .children(bars),
@@ -950,6 +961,7 @@ fn reading(theme: &Theme, label: &'static str, value: &str) -> impl IntoElement 
         .h_flex()
         .items_baseline()
         .justify_between()
+        .gap(px(Theme::SPACE_MD))
         .w_full()
         .child(
             div()
