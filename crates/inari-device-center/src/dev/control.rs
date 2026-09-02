@@ -333,11 +333,15 @@ fn label_text(theme: &Theme, label: SharedString) -> impl IntoElement {
 }
 
 /// A canvas that reports the bounds of whatever it is placed inside.
+///
+/// The styling is on the canvas itself, not on a wrapper. A canvas is an
+/// ordinary element and lays out at its content size, which is nothing — so a
+/// bare one inside a full-size wrapper reports a box that is neither its own
+/// nor its parent's, and every measurement taken from it is quietly wrong.
 fn measure(record: impl 'static + Fn(Bounds<Pixels>)) -> impl IntoElement {
-    div()
+    canvas(move |bounds, _, _| record(bounds), |_, _, _, _| {})
         .absolute()
         .size_full()
-        .child(canvas(move |bounds, _, _| record(bounds), |_, _, _, _| {}))
 }
 
 /// The slider.
