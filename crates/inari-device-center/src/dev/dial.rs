@@ -278,8 +278,15 @@ impl Dial {
     }
 
     fn record(&mut self, label: &'static str, kind: Kind, value: Value, default: Value) {
+        // Headings are exempt. A heading named for the control under it reads
+        // well and cannot collide with anything, because it holds no value and
+        // is never looked up.
         debug_assert!(
-            !self.schema.iter().any(|knob| knob.label == label),
+            matches!(kind, Kind::Group)
+                || !self
+                    .schema
+                    .iter()
+                    .any(|knob| knob.label == label && !matches!(knob.kind, Kind::Group)),
             "story `{}` reads the knob `{label}` twice; knobs are keyed by label",
             self.story
         );
@@ -353,6 +360,14 @@ mod tests {
         dial.values
             .insert("Weight", Value::Choice(7));
         assert_eq!(dial.pick("Weight", Weight::Heavy), Weight::Heavy);
+    }
+
+    #[test]
+    fn a_heading_may_carry_the_name_of_the_control_under_it() {
+        let mut dial = fresh();
+        dial.group("Reporting");
+        dial.flag("Reporting", false);
+        assert_eq!(dial.schema.len(), 2);
     }
 
     #[test]
