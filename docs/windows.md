@@ -295,3 +295,25 @@ describe the Windows trust behavior used here.
 Device Center connects to the local Agent through loopback. The Agent Endpoint
 hostname stays in the HTTPS request and TLS certificate check. Local requests
 do not use proxy settings or the hostname’s LAN or overlay address.
+
+## Building the Device Center here
+
+Pin the toolchain for every Cargo invocation:
+
+```powershell
+$env:RUSTUP_TOOLCHAIN = "stable"
+cargo build -p inari-device-center
+```
+
+Without it the build fails with `E0514: found crate ... compiled by an
+incompatible version of rustc`, and a full `cargo clean` does not help.
+
+The reason is not stale artifacts. Our GPUI fork is a whole Zed checkout, and
+Zed pins `channel = "1.90"` in its own `rust-toolchain.toml`. Cargo runs a build
+script with its working directory inside the crate it belongs to, so the rustup
+proxy reads *that* file and hands those crates a 1.90 rustc while the workspace
+is built with 1.98. The two halves then refuse to link. `RUSTUP_TOOLCHAIN` takes
+precedence over any toolchain file and settles it.
+
+This appears whenever the pinned GPUI revision changes, because that is when
+the checkout is fresh and its build scripts actually run.

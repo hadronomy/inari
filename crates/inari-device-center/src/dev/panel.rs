@@ -28,7 +28,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, IconName, Selectable as _, Sizable as _, StyledExt as _,
+    IconName, Selectable as _, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     input::{InputEvent, InputState},
     switch::Switch,
@@ -109,12 +109,31 @@ pub struct Deck {
     /// Bumped when knobs are reset, so the panel drops the control entities it
     /// caches and rebuilds them at the new values.
     pub generation: usize,
-    /// A request to arm the picker, spent by the next panel render.
+    /// What the next panel render should do to the picker.
+    pub picker: Picker,
+}
+
+/// What the panel should do to GPUI's picker on its next render.
+///
+/// One value with three named intents rather than a pair of booleans, because
+/// "arm" and "disarm" are not independent: they are the two things that can be
+/// asked for, and asking for both is not a state anyone means.
+///
+/// The indirection exists because the two places that decide — the launcher and
+/// `show` — have no `Inspector` to hand, and the one place that has it is the
+/// renderer.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Picker {
+    /// Leave it as it is.
+    #[default]
+    AsIs,
+    /// Arm it: someone asked to pick.
+    Arm,
+    /// Stand it down: the dock was opened to read a screen, not to pick.
     ///
-    /// The launcher has no way to reach the window's `Inspector`, and opening
-    /// the dock arms the picker by itself, so this only carries the case where
-    /// the dock was already open.
-    pub arm: bool,
+    /// An inspector is created armed, so without this every dock open would
+    /// spend the next click in the window selecting whatever was under it.
+    Disarm,
 }
 
 impl Global for Deck {}
@@ -183,8 +202,15 @@ pub fn show(screen: Screen, window: &mut Window, cx: &mut App) {
     // A second press on the screen already showing closes the dock, so one
     // control both opens and dismisses.
     let dismiss = is_open(window, cx) && deck(cx).screen == screen;
-    adjust(cx, |deck| deck.screen = screen);
-    if dismiss || !is_open(window, cx) {
+    let opening = !dismiss && !is_open(window, cx);
+    adjust(cx, |deck| {
+        deck.screen = screen;
+        if opening {
+            // Opened to read, not to pick.
+            deck.picker = Picker::Disarm;
+        }
+    });
+    if dismiss || opening {
         window.toggle_inspector(cx);
     }
 }
@@ -202,13 +228,12 @@ pub fn pick(inspector: &mut gpui::Inspector, window: &mut Window, cx: &mut App) 
 /// One press: the dock opens on the Element screen with the picker armed, so
 /// the click that lands on something is the same click that shows its report.
 pub fn start_pick(window: &mut Window, cx: &mut App) {
+    let opening = !is_open(window, cx);
     adjust(cx, |deck| {
         deck.screen = Screen::Element;
-        deck.arm = true;
+        deck.picker = Picker::Arm;
     });
-    // Opening the dock arms the picker by itself; the flag covers the case
-    // where it was already open.
-    if !is_open(window, cx) {
+    if opening {
         window.toggle_inspector(cx);
     }
 }
@@ -236,9 +261,16 @@ pub fn install(cx: &mut App) {
     let panel = OnceCell::new();
     cx.set_inspector_renderer(Box::new(move |inspector, window, cx| {
         mark_drawn(window, cx);
-        if deck(cx).arm {
-            inspector.start_picking();
-            adjust(cx, |deck| deck.arm = false);
+        match deck(cx).picker {
+            Picker::AsIs => {},
+            Picker::Arm => {
+                inspector.start_picking();
+                adjust(cx, |deck| deck.picker = Picker::AsIs);
+            },
+            Picker::Disarm => {
+                inspector.stop_picking();
+                adjust(cx, |deck| deck.picker = Picker::AsIs);
+            },
         }
         let panel = panel.get_or_init(|| cx.new(|_| Panel::default()));
         // Always run, whatever the screen: the closure above is what keeps the
@@ -320,7 +352,19 @@ impl Panel {
         }
 
         let moved = schema.iter().any(Knob::is_moved);
-        let rows: Vec<AnyElement> = schema
+        // Actions are not values, so they do not belong in the run of value
+        // rows. They belong with Reset, which is the panel's own action, on one
+        // line at the foot — where a row of things you *press* reads as a row of
+        // things you press rather than as more knobs that happen to be buttons.
+        let (actions, values): (Vec<&Knob>, Vec<&Knob>) = schema
+            .iter()
+            .partition(|knob| matches!(knob.kind, Kind::Press));
+
+        let rows: Vec<AnyElement> = values
+            .iter()
+            .map(|knob| self.row(story, knob, window, cx))
+            .collect();
+        let footer: Vec<AnyElement> = actions
             .iter()
             .map(|knob| self.row(story, knob, window, cx))
             .collect();
@@ -333,15 +377,25 @@ impl Panel {
             .w_full()
             .children(rows)
             .child(
-                Button::new("dev-knobs-reset")
-                    .label("Reset")
-                    .ghost()
-                    .small()
-                    .disabled(!moved)
-                    .on_click(move |_, _, cx| {
-                        dial::reset(story, cx);
-                        adjust(cx, |deck| deck.generation += 1);
-                    }),
+                div()
+                    .h_flex()
+                    .gap(px(4.0))
+                    .w_full()
+                    .pt(px(Theme::SPACE_SM))
+                    .children(
+                        footer
+                            .into_iter()
+                            .map(|action| div().flex_1().min_w(px(0.0)).child(action)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(control::reset(&theme, moved, move |_, cx| {
+                                dial::reset(story, cx);
+                                adjust(cx, |deck| deck.generation += 1);
+                            })),
+                    ),
             )
             .into_any_element()
     }

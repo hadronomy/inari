@@ -208,8 +208,6 @@ use gpui::{
     canvas, deferred, div, prelude::FluentBuilder as _, px, relative,
 };
 
-use gpui_component::Sizable as _;
-
 use crate::ui::{
     motion::{self, CubicBezier},
     theme::{ActiveTheme as _, Theme},
@@ -323,11 +321,24 @@ pub fn row(theme: &Theme) -> gpui::Div {
         .overflow_hidden()
 }
 
+/// Text inside a control, centred on the row.
+///
+/// The line height *is* the row height. Centring the text box with flex lands a
+/// hair high, because a line box is not symmetric about the glyphs inside it —
+/// the ascent and descent of the face decide where the ink sits, and flex only
+/// knows the box. Giving the line the row's height moves the centring into the
+/// text system, which does know.
+pub fn row_text(size: f32) -> gpui::Div {
+    div()
+        .text_size(px(size))
+        .line_height(px(ROW_HEIGHT))
+        .font_weight(gpui::FontWeight::MEDIUM)
+}
+
 /// One label, at the inset and weight every control shares.
 fn label_text(theme: &Theme, label: SharedString) -> impl IntoElement {
-    div()
-        .text_size(px(TEXT_SIZE))
-        .font_weight(gpui::FontWeight::MEDIUM)
+    row_text(TEXT_SIZE)
+        .flex_none()
         .text_color(theme.text_secondary)
         .child(label)
 }
@@ -569,12 +580,18 @@ impl RenderOnce for Slider {
                     .bg(theme.surface_raised)
                     .overflow_hidden()
                     .child(
+                        // Rounded by itself, not by the track. GPUI's content
+                        // mask is a rectangle — corner radii never reach a
+                        // child — so a square fill inside a round track escapes
+                        // at the left corners. The radius clamps to the fill's
+                        // own width, so a sliver stays a sliver.
                         div()
                             .absolute()
                             .top_0()
                             .bottom_0()
                             .left_0()
                             .w(relative(filled))
+                            .rounded(px(ROW_RADIUS))
                             .bg(if active { theme.hairline_strong } else { theme.hairline }),
                     )
                     .children(marks)
@@ -604,9 +621,7 @@ impl RenderOnce for Slider {
                             .absolute()
                             .left(px(ROW_INSET))
                             .top_0()
-                            .bottom_0()
-                            .flex()
-                            .items_center()
+                            .h(px(ROW_HEIGHT))
                             .child(
                                 div()
                                     .relative()
@@ -619,15 +634,12 @@ impl RenderOnce for Slider {
                             .absolute()
                             .right(px(ROW_INSET))
                             .top_0()
-                            .bottom_0()
-                            .flex()
-                            .items_center()
+                            .h(px(ROW_HEIGHT))
                             .child(
                                 div()
                                     .relative()
                                     .child(
-                                        div()
-                                            .text_size(px(TEXT_SIZE))
+                                        row_text(TEXT_SIZE)
                                             .font_family(theme.font_mono.clone())
                                             .text_color(if active {
                                                 theme.text
@@ -757,9 +769,7 @@ impl RenderOnce for Toggle {
             })
             .on_click(move |_, window, cx| change(!checked, window, cx))
             .child(
-                div()
-                    .text_size(px(TEXT_SIZE))
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                row_text(TEXT_SIZE)
                     .text_color(if checked { theme.text } else { theme.text_secondary })
                     .child(self.label.clone()),
             )
@@ -854,6 +864,7 @@ impl RenderOnce for Segmented {
                             .h(px(24.0))
                             .rounded(px(6.0))
                             .text_size(px(TEXT_SIZE))
+                            .line_height(px(24.0))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .when(chosen, |chip| {
                                 chip.bg(theme.surface_overlay)
@@ -887,9 +898,28 @@ pub fn text_row(
     label: impl Into<SharedString>,
     input: &gpui::Entity<gpui_component::input::InputState>,
 ) -> impl IntoElement {
+    let key = key.into();
+    field(theme, key.clone(), input)
+        .child(label_text(theme, label.into()))
+        .child(editor(theme, input))
+}
+
+/// The chrome every editable field in the development environment wears.
+///
+/// One recipe, used by the knob rows and by the Bench's filter, because two
+/// fields that behave the same and look different is the fastest way to make a
+/// panel read as a pile of parts.
+///
+/// The caller reports focus against `{key}-focus` from the editor's own Focus
+/// and Blur events, because a field cannot see its own focus from here.
+pub fn field(
+    theme: &Theme,
+    key: SharedString,
+    input: &gpui::Entity<gpui_component::input::InputState>,
+) -> gpui::Stateful<gpui::Div> {
     use gpui::BoxShadow;
 
-    let key = key.into();
+    let _ = input;
     let focus_key = SharedString::from(format!("{key}-focus"));
     let hover_key = SharedString::from(format!("{key}-hover"));
     let focus = motion::fade_fraction(focus_key);
@@ -913,14 +943,20 @@ pub fn text_row(
         spread_radius: px(3.0),
     });
 
-    row(theme)
+    div()
         .id(key)
+        .relative()
+        .w_full()
+        .h(px(ROW_HEIGHT))
+        .rounded(px(ROW_RADIUS))
         .flex()
         .items_center()
-        .justify_between()
-        .gap(px(12.0))
-        .pl(px(ROW_INSET + 2.0))
-        .pr(px(ROW_INSET))
+        .gap(px(10.0))
+        // A border adds a pixel on every side, so the padding gives one back:
+        // without it a bordered row is a pixel narrower inside than a plain one
+        // and the labels stop sharing a column.
+        .pl(px(ROW_INSET + 1.0))
+        .pr(px(ROW_INSET - 1.0))
         .bg(fill)
         .border_1()
         .border_color(border)
@@ -931,17 +967,30 @@ pub fn text_row(
                 window.refresh();
             }
         })
-        .child(label_text(theme, label.into()))
+}
+
+/// The editor inside a field: no chrome of its own, and the row's line height.
+///
+/// GPUI Component's input carries its own padding and leading. Left alone it
+/// sits a couple of pixels off the centre its label is on, which is exactly the
+/// kind of miss that reads as sloppiness without anyone being able to name it.
+pub fn editor(
+    theme: &Theme,
+    input: &gpui::Entity<gpui_component::input::InputState>,
+) -> impl IntoElement {
+    div()
+        .flex_1()
+        .min_w(px(0.0))
+        .h(px(ROW_HEIGHT - 2.0))
+        .flex()
+        .items_center()
+        .text_size(px(TEXT_SIZE))
+        .line_height(px(ROW_HEIGHT - 2.0))
+        .text_color(theme.text)
         .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .text_size(px(TEXT_SIZE))
-                .child(
-                    gpui_component::input::Input::new(input)
-                        .appearance(false)
-                        .small(),
-                ),
+            gpui_component::input::Input::new(input)
+                .appearance(false)
+                .cleanable(true),
         )
 }
 
@@ -988,13 +1037,47 @@ impl RenderOnce for Action {
             })
             .on_click(move |_, window, cx| press(window, cx))
             .child(
-                div()
-                    .text_size(px(TEXT_SIZE))
-                    .font_weight(gpui::FontWeight::MEDIUM)
+                row_text(TEXT_SIZE)
                     .text_color(theme.text_secondary)
                     .child(self.label.clone()),
             )
     }
+}
+
+/// Put every knob back where the story asked for it.
+///
+/// The same row as an action, in the accent's tone rather than the surface's,
+/// because it is the one press here that throws work away. Inert when there is
+/// nothing to undo — a control that would do nothing says so by looking like it.
+pub fn reset(
+    theme: &Theme,
+    moved: bool,
+    press: impl 'static + Fn(&mut Window, &mut App),
+) -> impl IntoElement {
+    let wash = motion::hover_blend("dev-reset-hover", theme.accent_wash);
+
+    row(theme)
+        .id("dev-reset")
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(!moved, |button| button.opacity(0.4))
+        .when(moved, |button| {
+            button
+                .cursor(gpui::CursorStyle::PointingHand)
+                .bg(crate::ui::theme::flatten(wash, theme.surface_raised))
+                .on_hover(|hovered, window, _| {
+                    if motion::hover_set("dev-reset-hover", *hovered) {
+                        window.refresh();
+                    }
+                })
+                .on_click(move |_, window, cx| press(window, cx))
+        })
+        .child(
+            row_text(TEXT_SIZE)
+                .text_color(if moved { theme.accent } else { theme.text_tertiary })
+                .child("Reset"),
+        )
 }
 
 /// A stepper for a whole number, sized to sit inside a row.
@@ -1047,11 +1130,9 @@ pub fn stepper(
             (value > lo).then(|| value - 1),
         ))
         .child(
-            div()
+            row_text(TEXT_SIZE)
                 .w(px(24.0))
-                .flex()
-                .justify_center()
-                .text_size(px(TEXT_SIZE))
+                .text_center()
                 .font_family(theme.font_mono.clone())
                 .text_color(theme.text)
                 .child(value.to_string()),
@@ -1071,6 +1152,7 @@ pub fn heading(theme: &Theme, title: impl Into<SharedString>) -> impl IntoElemen
         .pb(px(2.0))
         .pl(px(ROW_INSET + 2.0))
         .text_size(px(11.0))
+        .line_height(px(16.0))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(theme.text_tertiary)
         .child(title.into())
