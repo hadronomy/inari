@@ -523,6 +523,11 @@ impl RenderOnce for Slider {
                     if track.size.width <= px(0.0) {
                         return;
                     }
+                    // A keyboard-driven click carries no position, and a
+                    // slider has nothing to say about one.
+                    let gpui::ClickEvent::Mouse(event) = event else {
+                        return;
+                    };
                     let at = event.up.position.x;
                     let across = f32::from(at - track.origin.x) / f32::from(track.size.width);
                     let landed = snap_on_click(value_at(across, &span), &span, step);
