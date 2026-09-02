@@ -87,7 +87,7 @@ pub fn init(cx: &mut App) {
 /// Ordinary components carry no debugging code at all.
 pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
     frames::tick(cx);
-    panel::observe(cx);
+    panel::observe(window, cx);
 
     // One global, and every div in the window outlines itself
     // (`gpui/src/style.rs:612-618`). Nothing else has to know.
