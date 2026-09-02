@@ -221,7 +221,7 @@ pub fn install(cx: &mut App) {
         // Refreshed every frame, whatever the panel is showing. The overlay
         // draws from this, and a box that is only refreshed while its own
         // screen is open is a box that lies the moment you look away.
-        element::remember(&id, state, window, cx);
+        element::remember(state, window, cx);
         if deck(cx).screen != Screen::Element {
             return gpui::Empty.into_any_element();
         }
@@ -467,13 +467,13 @@ impl Panel {
                 // A field cannot see its own focus from inside the row, so the
                 // owner reports the flip and the chrome eases off the same
                 // clock as every other wash.
-                InputEvent::Focus | InputEvent::Blur => {
+                InputEvent::Focus | InputEvent::Blur
                     if motion::hover_set(
                         focus_key.clone(),
                         matches!(event, InputEvent::Focus),
-                    ) {
-                        cx.refresh_windows();
-                    }
+                    ) =>
+                {
+                    cx.refresh_windows();
                 },
                 _ => {},
             },
