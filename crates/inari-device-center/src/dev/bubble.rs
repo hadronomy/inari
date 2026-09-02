@@ -24,8 +24,8 @@ use gpui_component::{
 
 use crate::{
     dev::{
-        element::Selection,
-        panel::{self, Tool},
+        element::{self, Selection},
+        panel::{self, Screen},
     },
     ui::{
         motion,
@@ -68,7 +68,7 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
 
     let float = cx.try_global::<Float>();
     let dragging = float.and_then(|float| float.grab).is_some();
-    let width = px(PILL_HEIGHT * Tool::ALL.len() as f32 + 40.0);
+    let width = px(PILL_HEIGHT * (Screen::ALL.len() + 1) as f32 + 40.0);
     // Until it is dragged the launcher is anchored, not positioned: the root is
     // narrower while the dock is open, and an inset follows that where a
     // computed left/top would put the pill under the panel.
@@ -76,7 +76,11 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
 
     let mut layer = div().absolute().size_full();
 
-    if deck.box_model && let Some(selection) = cx.try_global::<Selection>() {
+    // Drawn from the selection only while it is still true. A selected element
+    // that stops being painted leaves its last geometry behind in the
+    // inspector, and a box around something that is no longer there is worse
+    // than no box at all.
+    if let Some(selection) = element::current(cx) {
         layer = layer.child(box_model(&theme, selection));
     }
 
@@ -111,7 +115,7 @@ fn pill(
     theme: &Theme,
     at: Option<Point<Pixels>>,
     width: Pixels,
-    active: Tool,
+    active: Screen,
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
@@ -151,17 +155,30 @@ fn pill(
             |_, _, _, _| {},
         ))
         .child(grip(theme))
-        .children(Tool::ALL.map(|tool| {
-            Button::new(gpui::SharedString::from(format!("dev-bubble-{}", tool.title())))
-                .icon(tool.icon())
+        .children(Screen::ALL.map(|screen| {
+            Button::new(gpui::SharedString::from(format!("dev-bubble-{}", screen.title())))
+                .icon(screen.icon())
                 .ghost()
                 .xsmall()
-                .selected(open && tool == active)
-                .tooltip(tool.title())
+                .selected(open && screen == active)
+                .tooltip(screen.title())
                 .on_click(move |_, window: &mut Window, cx: &mut App| {
-                    panel::show(tool, window, cx);
+                    panel::show(screen, window, cx);
                 })
         }))
+        // Picking from here is the shortest path there is: one press arms the
+        // picker and hands the panel to the Element screen, so the click that
+        // lands on something is the same click that shows its report.
+        .child(
+            Button::new("dev-bubble-pick")
+                .icon(gpui_component::IconName::Search)
+                .ghost()
+                .xsmall()
+                .tooltip("Pick an element")
+                .on_click(|_, window: &mut Window, cx: &mut App| {
+                    panel::start_pick(window, cx);
+                }),
+        )
 }
 
 /// Two rules, not an icon: the launcher is a handle before it is a toolbar, and
