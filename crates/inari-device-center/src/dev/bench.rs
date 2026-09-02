@@ -12,12 +12,13 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    IconName, Sizable as _, StyledExt as _,
-    input::{Input, InputState},
+    Icon, IconName, StyledExt as _,
+    input::InputState,
 };
 
 use crate::{
     dev::{
+        control,
         dial::Dial,
         panel,
         story::{self, Scope, Story},
@@ -33,6 +34,10 @@ use crate::{
 actions!(bench, [NextStory, PreviousStory, FocusFilter]);
 
 pub const KEY_CONTEXT: &str = "Bench";
+
+/// The filter's chrome key, and the fade the Bench reports focus against.
+const FILTER_KEY: &str = "bench-filter";
+const FILTER_FOCUS: &str = "bench-filter-focus";
 
 /// Wide enough that the 30rem panel and a 560px stage both fit without the
 /// catalog collapsing.
@@ -50,7 +55,19 @@ pub struct Bench {
 impl Bench {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter stories"));
-        cx.subscribe(&filter, |_, _, _: &gpui_component::input::InputEvent, cx| {
+        cx.subscribe(&filter, |_, _, event: &gpui_component::input::InputEvent, cx| {
+            // Focus is reported so the field's chrome can ease, the way the
+            // enrollment field's does. A filter is still an input, and an input
+            // that does not answer the caret is the one everybody notices.
+            if matches!(event, gpui_component::input::InputEvent::Focus)
+                || matches!(event, gpui_component::input::InputEvent::Blur)
+            {
+                let focused =
+                    matches!(event, gpui_component::input::InputEvent::Focus);
+                if motion::hover_set(FILTER_FOCUS, focused) {
+                    cx.refresh_windows();
+                }
+            }
             cx.notify();
         })
         .detach();
@@ -236,7 +253,16 @@ impl Bench {
             .child(
                 div()
                     .p(px(Theme::SPACE_SM))
-                    .child(Input::new(&self.filter).small().prefix(IconName::Search)),
+                    .child(
+                        control::field(&theme, FILTER_KEY.into(), &self.filter)
+                            .child(
+                                Icon::from(IconName::Search)
+                                    .size(px(13.0))
+                                    .flex_none()
+                                    .text_color(theme.text_tertiary),
+                            )
+                            .child(control::editor(&theme, &self.filter)),
+                    ),
             )
             .child(list)
             .into_any_element()
