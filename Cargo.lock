@@ -4663,6 +4663,7 @@ dependencies = [
  "gpui-component",
  "image",
  "inari-agent-client",
+ "inventory",
  "open",
  "raw-window-handle",
  "rust-embed",

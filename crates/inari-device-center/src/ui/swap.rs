@@ -583,3 +583,84 @@ mod tests {
         }
     }
 }
+
+crate::story! {
+    id: "motion.swap",
+    name: "Swap",
+    scope: crate::dev::Scope::Motion,
+    about: "A mark crossfades; a word does not. Held still along the curve, \
+            because the middle is where the two recipes disagree.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::{IconName, StyledExt as _};
+        use crate::ui::{content::Typography as _, icon::Symbol, theme::Theme};
+
+        // One frame, held. A transition cannot be judged while it is running:
+        // the eye reports that something happened, not what.
+        let held = dial.range("Progress", 0.5, 0.0..=1.0);
+        let size = dial.range("Size", 56.0, 14.0..=96.0);
+
+        let mark = |progress: f32, size: f32| {
+            gpui::div()
+                .v_flex()
+                .items_center()
+                .gap(gpui::px(Theme::SPACE_SM))
+                .child(
+                    icon(
+                        gpui::SharedString::from(format!("story-swap-{progress}-{size}")),
+                        Symbol::Component(IconName::Copy),
+                        Symbol::Component(IconName::Check),
+                        true,
+                    )
+                    .size(size)
+                    .tones(gpui::white(), gpui::rgb(0x4ade80).into())
+                    .pinned(progress),
+                )
+                .child(
+                    gpui::div()
+                        .text_caption()
+                        .child(format!("{:.0}%", progress * 100.0)),
+                )
+        };
+        let word = |fraction: f32| {
+            gpui::div()
+                .v_flex()
+                .items_start()
+                .w(gpui::px(74.0))
+                .child(
+                    label(
+                        gpui::SharedString::from(format!("story-swap-label-{fraction}")),
+                        "Copy",
+                        "Copied",
+                        true,
+                    )
+                    .pinned(fraction),
+                )
+        };
+
+        let steps = [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0];
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(Theme::SPACE_XL))
+            .child(mark(held, size))
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .gap(gpui::px(Theme::SPACE_XL))
+                    .items_end()
+                    .children(steps.map(|step| mark(step, 56.0))),
+            )
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .gap(gpui::px(Theme::SPACE_XL))
+                    .items_end()
+                    .children(steps.map(word)),
+            )
+            .child(gpui::div().text_caption().child(
+                "Sampled through the transition, not through its duration: the curve spends its \
+                 first and last thirds barely moving.",
+            ))
+            .into_any_element()
+    },
+}

@@ -380,3 +380,64 @@ mod tests {
         );
     }
 }
+
+#[cfg(debug_assertions)]
+impl crate::dev::Choice for Emphasis {
+    const VARIANTS: &'static [(Self, &'static str)] = &[
+        (Self::Primary, "Primary"),
+        (Self::Outline, "Outline"),
+        (Self::Ghost, "Ghost"),
+    ];
+}
+
+crate::story! {
+    id: "control.button",
+    name: "Button",
+    scope: crate::dev::Scope::Controls,
+    about: "One button under every knob, and then all three emphases at once.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+
+        let emphasis = dial.pick("Emphasis", Emphasis::Primary);
+        let label = dial.text("Label", "Copy all details");
+        let icon = dial.flag("Icon", true);
+        let disabled = dial.flag("Disabled", false);
+        dial.group("Reporting");
+        // The swap is a transition, so a still frame cannot show it. The
+        // button holds the reported state for as long as the flag is on, which
+        // is the only way to judge the resting half of a two-state control.
+        let reporting = dial.flag("Reporting", false);
+
+        let build = |emphasis: Emphasis| {
+            let mut button = Button::new(SharedString::from(format!("story-{emphasis:?}")))
+                .label(label.clone())
+                .disabled(disabled)
+                .reports_label("Copied", reporting);
+            if icon {
+                button = button
+                    .icon(gpui_component::IconName::Copy)
+                    .reports_icon(gpui_component::IconName::Check, reporting);
+            }
+            match emphasis {
+                Emphasis::Primary => button.primary(),
+                Emphasis::Outline => button,
+                Emphasis::Ghost => button.ghost(),
+            }
+        };
+
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(24.0))
+            .child(build(emphasis))
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .gap(gpui::px(12.0))
+                    .child(build(Emphasis::Primary))
+                    .child(build(Emphasis::Outline))
+                    .child(build(Emphasis::Ghost)),
+            )
+            .into_any_element()
+    },
+}

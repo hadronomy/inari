@@ -135,7 +135,7 @@ impl Onboarding {
         // The dev previews render the setup stages against this window's
         // entity; debug builds only.
         #[cfg(debug_assertions)]
-        crate::dev_tools::note_onboarding(&cx.entity(), cx);
+        crate::dev::note_onboarding(&cx.entity(), cx);
         Self {
             runtime,
             open_operations,

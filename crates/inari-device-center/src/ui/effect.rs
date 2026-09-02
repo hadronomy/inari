@@ -547,3 +547,134 @@ fn effect(input: EffectInput) -> vec4<f32> {
         assert!(Grain::default().amount < 0.05, "grain would read as texture");
     }
 }
+
+crate::story! {
+    id: "effect.frost",
+    name: "Frost",
+    scope: crate::dev::Scope::Effects,
+    about: "A blur over real content, beside the same card untouched. A capture \
+            that never resolved looks exactly like the one on the right.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::{content::Typography as _, theme::Theme};
+
+        let radius = dial.range("Radius", 6.0, 0.0..=24.0);
+        let card = |label: &'static str, radius: f32| {
+            gpui::effect_layer(
+                &Frost { radius, tint: gpui::rgba(0x6ea8fe22).into() },
+                gpui::div()
+                    .v_flex()
+                    .gap(gpui::px(Theme::SPACE_SM))
+                    .w(gpui::px(220.0))
+                    .p(gpui::px(Theme::SPACE_LG))
+                    .bg(gpui::rgb(0x1c1f26))
+                    .child(gpui::div().text_body().child(label))
+                    .child(gpui::div().text_caption().child(
+                        "Small text is the honest test: a blur that is not running still reads.",
+                    )),
+            )
+            .corner_radii(gpui::px(Theme::RADIUS_CARD))
+        };
+
+        gpui::div()
+            .h_flex()
+            .gap(gpui::px(Theme::SPACE_LG))
+            .child(card("Blurred", radius))
+            .child(card("Untouched", 0.0))
+            .into_any_element()
+    },
+}
+
+crate::story! {
+    id: "effect.blur",
+    name: "Blur",
+    scope: crate::dev::Scope::Effects,
+    about: "A separable Gaussian over real text. A glyph is the hardest thing \
+            to blur: it is mostly edge, so a premultiplication mistake shows up \
+            as a dark rim.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::{content::Typography as _, theme::Theme};
+
+        let single = dial.range("Radius", 6.0, 0.0..=24.0);
+        let sample = || {
+            gpui::div()
+                .v_flex()
+                .gap(gpui::px(Theme::SPACE_XS))
+                .w(gpui::px(150.0))
+                .child(gpui::div().text_body().child("Copied"))
+                .child(gpui::div().text_caption().child(
+                    "A halo here means the taps are summing straight alpha.",
+                ))
+        };
+        let column = |radius: gpui::Pixels| {
+            gpui::div()
+                .v_flex()
+                .gap(gpui::px(Theme::SPACE_SM))
+                .child(
+                    gpui::div()
+                        .text_caption()
+                        .child(format!("blur({}px)", f32::from(radius))),
+                )
+                .child(blurred(radius, sample()))
+        };
+
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(Theme::SPACE_XL))
+            .child(column(gpui::px(single)))
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .items_start()
+                    .gap(gpui::px(Theme::SPACE_LG))
+                    .children([0.0, 1.0, 2.0, 6.0, 16.0].map(|radius| column(gpui::px(radius)))),
+            )
+            .into_any_element()
+    },
+}
+
+crate::story! {
+    id: "effect.weathered",
+    name: "Weathered",
+    scope: crate::dev::Scope::Effects,
+    about: "The mark as old stone. Shown at the size the gate draws it and again \
+            enlarged: 40px hides whether the cracks are cracks.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::{content::Typography as _, theme::Theme};
+
+        let wear = dial.range("Wear", 0.68, 0.0..=1.0);
+        let seed = dial.range("Seed", Weathered::default().seed, 0.0..=32.0);
+        let mark = |wear: f32, edge: f32| {
+            gpui::div()
+                .v_flex()
+                .items_center()
+                .gap(gpui::px(Theme::SPACE_SM))
+                .child(gpui::effect_layer(
+                    &Weathered { amount: wear, seed, ..Weathered::default() },
+                    gpui::svg()
+                        .path("inari-mark-torii-ui.svg")
+                        .size(gpui::px(edge))
+                        .flex_none()
+                        .text_color(gpui::rgb(0xb9b2a8)),
+                ))
+                .child(
+                    gpui::div()
+                        .text_caption()
+                        .child(format!("{:.0}%", wear * 100.0)),
+                )
+        };
+
+        gpui::div()
+            .h_flex()
+            .items_end()
+            .gap(gpui::px(Theme::SPACE_XL))
+            .children([0.0, 0.35, 0.68, 1.0].map(|step| mark(step, 40.0)))
+            .child(mark(wear, 132.0))
+            .into_any_element()
+    },
+}

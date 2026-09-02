@@ -157,7 +157,7 @@ impl DeviceCenter {
         // can reach it. Debug builds only — the module does not exist in a
         // release.
         #[cfg(debug_assertions)]
-        crate::dev_tools::note_center(&cx.entity(), cx);
+        crate::dev::note_center(&cx.entity(), cx);
         Self {
             destination: Destination::Overview,
             previous_destination: Destination::Overview,
@@ -437,6 +437,18 @@ impl Render for DeviceCenter {
                     .child(rail)
                     .child(surface.child(self.main_content(cx))),
             )
+            // The one integration point for the development environment. A
+            // release build has no `dev` module at all.
+            .map(|root| {
+                #[cfg(debug_assertions)]
+                {
+                    root.child(crate::dev::attach(window, cx))
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    root
+                }
+            })
     }
 }
 
