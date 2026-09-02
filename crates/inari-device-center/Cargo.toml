@@ -23,6 +23,10 @@ gpui.workspace = true
 gpui-component.workspace = true
 inari-agent-client = { path = "../inari-agent-client" }
 image.workspace = true
+# Stories register themselves from the file that owns their component, so the
+# catalog needs no central list. Zed collects its own component previews the
+# same way.
+inventory = "0.3"
 open.workspace = true
 raw-window-handle.workspace = true
 rust-embed.workspace = true
