@@ -10,10 +10,12 @@
 //! no content mask (`elements/deferred.rs:65`), so the layer escapes every
 //! rounded scroll container the application has and never joins its layout.
 
+use std::cell::Cell;
+
 use gpui::{
     AnyElement, App, BorrowAppContext as _, Bounds, Global, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, Pixels, Point, StatefulInteractiveElement as _, Styled as _,
-    Window, deferred, div, point, px,
+    Window, canvas, deferred, div, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Selectable as _, Sizable as _, StyledExt as _,
@@ -48,22 +50,29 @@ struct Float {
 
 impl Global for Float {}
 
+thread_local! {
+    /// Where the launcher was laid out last frame.
+    ///
+    /// A mouse-down listener is handed a pointer position and nothing else, so
+    /// without this the first drag would compute a grab offset of zero and the
+    /// pill would jump to sit under the pointer. A `canvas` is the cheapest way
+    /// to read an element's own bounds; Zeron uses the same trick to measure its
+    /// composer.
+    static PAINTED_AT: Cell<Point<Pixels>> = const { Cell::new(point(px(0.0), px(0.0))) };
+}
+
 /// The whole floating layer for one root render.
 pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
     let theme = cx.inari().clone();
     let deck = panel::deck(cx);
-    let viewport = window.viewport_size();
 
     let float = cx.try_global::<Float>();
     let dragging = float.and_then(|float| float.grab).is_some();
     let width = px(PILL_HEIGHT * Tool::ALL.len() as f32 + 40.0);
-    let resting = point(
-        (viewport.width - width - px(MARGIN)).max(px(MARGIN)),
-        (viewport.height - px(PILL_HEIGHT) - px(MARGIN)).max(px(MARGIN)),
-    );
-    let at = float
-        .and_then(|float| float.at)
-        .unwrap_or(resting);
+    // Until it is dragged the launcher is anchored, not positioned: the root is
+    // narrower while the dock is open, and an inset follows that where a
+    // computed left/top would put the pill under the panel.
+    let at = float.and_then(|float| float.at);
 
     let mut layer = div().absolute().size_full();
 
@@ -95,17 +104,18 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
         );
     }
 
-    deferred(layer.child(pill(&theme, at, width, deck.tool, cx))).into_any_element()
+    deferred(layer.child(pill(&theme, at, width, deck.tool, window, cx))).into_any_element()
 }
 
 fn pill(
     theme: &Theme,
-    at: Point<Pixels>,
+    at: Option<Point<Pixels>>,
     width: Pixels,
     active: Tool,
+    window: &Window,
     cx: &App,
 ) -> impl IntoElement {
-    let open = panel::is_open(cx);
+    let open = panel::is_open(window, cx);
     // Quiet until it is wanted, and eased on the application's own hover clock
     // so the launcher does not move at a speed nothing else moves at.
     let resting = if open { 1.0 } else { 0.55 };
@@ -115,8 +125,10 @@ fn pill(
     div()
         .id("dev-bubble")
         .absolute()
-        .left(at.x)
-        .top(at.y)
+        .map(|pill| match at {
+            Some(at) => pill.left(at.x).top(at.y),
+            None => pill.right(px(MARGIN)).bottom(px(MARGIN)),
+        })
         .w(width)
         .h(px(PILL_HEIGHT))
         .occlude()
@@ -134,6 +146,10 @@ fn pill(
         .bg(theme.surface_overlay)
         .border_1()
         .border_color(theme.hairline_strong)
+        .child(canvas(
+            |bounds, _, _| PAINTED_AT.with(|painted| painted.set(bounds.origin)),
+            |_, _, _, _| {},
+        ))
         .child(grip(theme))
         .children(Tool::ALL.map(|tool| {
             Button::new(gpui::SharedString::from(format!("dev-bubble-{}", tool.title())))
@@ -167,8 +183,8 @@ fn grip(theme: &Theme) -> impl IntoElement {
                 cx.set_global(Float::default());
             }
             let position = event.position;
+            let at = PAINTED_AT.with(|painted| painted.get());
             cx.update_global(|float: &mut Float, _| {
-                let at = float.at.unwrap_or(position);
                 float.grab = Some(point(position.x - at.x, position.y - at.y));
                 float.at = Some(at);
             });

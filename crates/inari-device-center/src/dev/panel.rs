@@ -13,13 +13,13 @@
 //! The Bench and the application window get the same panel and the same tools.
 //! Only what the tools have to say differs.
 
-use std::{cell::OnceCell, collections::HashMap, time::Duration};
+use std::{cell::OnceCell, collections::HashMap, collections::HashSet, time::Duration};
 
 use gpui::{
     AnyElement, App, AppContext as _, BorrowAppContext as _, Context, DivInspectorState, Entity,
     Global, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, prelude::FluentBuilder as _,
-    px,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, WindowId, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, IconName, Selectable as _, Sizable as _, StyledExt as _,
@@ -135,48 +135,53 @@ pub fn adjust(cx: &mut App, change: impl FnOnce(&mut Deck)) {
 /// Root prepaints before inspector (`window.rs:2035-2042`), so `open` answers
 /// for the previous frame — one frame stale, and self-correcting, which is
 /// enough to decide whether a click should open the dock or only switch tools.
+/// Per window, because the Bench and the application window each have their
+/// own dock and their own answer.
 #[derive(Default)]
 pub struct Dock {
-    drawn: bool,
-    open: bool,
+    drawn: HashSet<WindowId>,
+    open: HashSet<WindowId>,
 }
 
 impl Global for Dock {}
 
 /// Called from the panel each time GPUI renders it.
-fn mark_drawn(cx: &mut App) {
+fn mark_drawn(window: &Window, cx: &mut App) {
+    let id = window.window_handle().window_id();
     if !cx.has_global::<Dock>() {
         cx.set_global(Dock::default());
     }
-    cx.update_global(|dock: &mut Dock, _| dock.drawn = true);
+    cx.update_global(|dock: &mut Dock, _| dock.drawn.insert(id));
 }
 
-/// Called from the floating layer at the top of every root render. Returns
-/// whether the dock was open on the previous frame.
-pub fn observe(cx: &mut App) -> bool {
+/// Called from the floating layer at the top of every root render.
+pub fn observe(window: &Window, cx: &mut App) {
+    let id = window.window_handle().window_id();
     if !cx.has_global::<Dock>() {
         cx.set_global(Dock::default());
     }
     cx.update_global(|dock: &mut Dock, _| {
-        dock.open = dock.drawn;
-        dock.drawn = false;
-        dock.open
-    })
+        if dock.drawn.remove(&id) {
+            dock.open.insert(id);
+        } else {
+            dock.open.remove(&id);
+        }
+    });
 }
 
-pub fn is_open(cx: &App) -> bool {
+pub fn is_open(window: &Window, cx: &App) -> bool {
+    let id = window.window_handle().window_id();
     cx.try_global::<Dock>()
-        .map(|dock| dock.open)
-        .unwrap_or(false)
+        .is_some_and(|dock| dock.open.contains(&id))
 }
 
 /// Show `tool`, opening the dock if it is closed.
 pub fn show(tool: Tool, window: &mut Window, cx: &mut App) {
-    let already = is_open(cx) && deck(cx).tool == tool;
-    adjust(cx, |deck| deck.tool = tool);
     // A second press on the tool already showing closes the dock, so one
     // control both opens and dismisses.
-    if already || !is_open(cx) {
+    let dismiss = is_open(window, cx) && deck(cx).tool == tool;
+    adjust(cx, |deck| deck.tool = tool);
+    if dismiss || !is_open(window, cx) {
         window.toggle_inspector(cx);
     }
 }
@@ -202,7 +207,7 @@ pub fn install(cx: &mut App) {
 
     let panel = OnceCell::new();
     cx.set_inspector_renderer(Box::new(move |inspector, window, cx| {
-        mark_drawn(cx);
+        mark_drawn(window, cx);
         let panel = panel.get_or_init(|| cx.new(|_| Panel::default()));
         let states = if deck(cx).tool == Tool::Element {
             inspector.render_inspector_states(window, cx)
@@ -335,9 +340,9 @@ impl Panel {
                 ))
             },
 
-            Kind::Range { lo, hi, step } => {
+            Kind::Range { .. } => {
                 let current = number(&knob.value);
-                let state = self.slider(story, knob, *lo, *hi, *step, current, cx);
+                let state = self.slider(story, knob, cx);
                 stacked(
                     &theme,
                     knob,
@@ -438,24 +443,29 @@ impl Panel {
         }
     }
 
+    /// The slider entity for `knob`, built once and kept until the story or the
+    /// generation changes.
     fn slider(
         &mut self,
         story: &'static str,
         knob: &Knob,
-        lo: f32,
-        hi: f32,
-        step: f32,
-        current: f32,
         cx: &mut Context<Self>,
     ) -> Entity<SliderState> {
         let label = knob.label;
         if let Some(state) = self.sliders.get(label) {
             return state.clone();
         }
+        let Kind::Range { lo, hi, step } = knob.kind else {
+            unreachable!("only a range knob builds a slider");
+        };
+        let current = number(&knob.value);
         let state = cx.new(|_| {
+            // `max` before `min`: setting the minimum re-clamps the thumb
+            // against whatever maximum is in force, and the default is 100, so
+            // a span that starts above it panics.
             SliderState::new()
-                .min(lo)
                 .max(hi)
+                .min(lo)
                 .step(step)
                 .default_value(current)
         });
