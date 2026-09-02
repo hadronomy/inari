@@ -26,13 +26,6 @@ pub struct Frames {
     last: Option<Instant>,
     /// Gaps between consecutive renders, newest last.
     gaps: VecDeque<Duration>,
-    /// Root renders since the window opened.
-    ///
-    /// The overlay uses it as a date. A selected element that stops being
-    /// painted leaves its last state behind in the inspector, so without a date
-    /// the overlay would keep drawing a box around something that is no longer
-    /// there.
-    count: u64,
 }
 
 impl Global for Frames {}
@@ -52,14 +45,7 @@ pub fn tick(cx: &mut App) {
             }
         }
         frames.last = Some(now);
-        frames.count += 1;
     });
-}
-
-/// Root renders since the window opened.
-pub fn frame(cx: &App) -> u64 {
-    cx.try_global::<Frames>()
-        .map_or(0, |frames| frames.count)
 }
 
 /// What the readout shows.
