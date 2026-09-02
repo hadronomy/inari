@@ -404,10 +404,10 @@ crate::story! {
         let icon = dial.flag("Icon", true);
         let disabled = dial.flag("Disabled", false);
         dial.group("Reporting");
-        // The swap is a transition, so a still frame cannot show it. The
-        // button holds the reported state for as long as the flag is on, which
-        // is the only way to judge the resting half of a two-state control.
-        let reporting = dial.flag("Reporting", false);
+        // The swap is a transition, so a still frame cannot show it. The button
+        // holds the reported state for as long as the flag is on, which is the
+        // only way to judge the resting half of a two-state control.
+        let reporting = dial.flag("Reported", false);
 
         let build = |emphasis: Emphasis| {
             let mut button = Button::new(SharedString::from(format!("story-{emphasis:?}")))
