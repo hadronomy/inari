@@ -28,7 +28,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    IconName, Selectable as _, Sizable as _, StyledExt as _,
+    Disableable as _, IconName, Selectable as _, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     input::{InputEvent, InputState},
     switch::Switch,

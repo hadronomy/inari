@@ -73,7 +73,7 @@ pub fn init(cx: &mut App) {
         cx.defer(move |cx| {
             active
                 .update(cx, |_, window, cx| {
-                    panel::show(panel::deck(cx).tool, window, cx);
+                    panel::show(panel::deck(cx).screen, window, cx);
                 })
                 .ok();
         });

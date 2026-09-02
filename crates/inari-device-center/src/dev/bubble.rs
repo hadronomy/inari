@@ -108,7 +108,7 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
         );
     }
 
-    deferred(layer.child(pill(&theme, at, width, deck.tool, window, cx))).into_any_element()
+    deferred(layer.child(pill(&theme, at, width, deck.screen, window, cx))).into_any_element()
 }
 
 fn pill(
