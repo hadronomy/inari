@@ -1007,7 +1007,10 @@ The `range_state` value is `valid`, `underload`, or `overload`. The resolution
 uses the same decimal exponent as the value.
 
 For example, `12345` with exponent `-3` and unit `kg` means `12.345 kg`.
-The contract contains no binary floating-point weight.
+The signed wire contract represents `value_mantissa` and
+`resolution_mantissa` as canonical decimal strings. The values stay within the
+signed 64-bit range. The contract contains no binary floating-point weight and
+does not lose precision in a JavaScript browser.
 
 The Agent supplies gross Scale Readings. The Odoo POS keeps its current tare
 behavior and stores the selected gross reading as tare.
@@ -1317,6 +1320,11 @@ The Transport Leader opens one fetch-based SSE stream with DPoP. Each stream
 message carries the fencing generation. The Agent rejects a stale holder and
 sends a final signed `lease_lost` reason before teardown when transport permits.
 
+The Odoo browser transport treats IndexedDB and BroadcastChannel as advisory.
+It still asks the Agent for the authoritative Transport Leader Lease when
+either browser mechanism is unavailable. A BroadcastChannel hint contains only
+the contract version, hint kind, and a random nonce.
+
 The stream sends heartbeats and carries no access token in its URL.
 
 The Agent sends a heartbeat every 15 seconds. The Transport Leader reconnects
@@ -1327,6 +1335,15 @@ After access-token renewal, the Transport Leader reconnects with the new token.
 
 The first event is `ready`. It contains the stream identity, current sequence,
 and an immutable reconciliation high-water mark.
+
+The browser verifies the lease key against the paired Agent identity. It then
+verifies every compact JWS before it sends data to a Device Adapter. It
+completes the `ready` reconciliation barrier before it reads later events. It
+acknowledges a Barcode Event only after the scanner handler accepts it.
+
+Scale activity changes rebuild the selected Event Lease. This keeps a scanner
+stream active while the scale screen is closed and adds the Scale Lease only
+while the scale screen is open.
 
 The Local Agent Interface uses these fixed DPoP-protected endpoints:
 

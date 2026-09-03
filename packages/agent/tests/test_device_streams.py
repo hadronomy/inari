@@ -347,8 +347,9 @@ async def test_scale_stream_emits_exact_signed_readings_and_rate_limits() -> Non
     reading = await anext(events)
     assert reading.kind is StreamMessageKind.SCALE_READING
     assert reading.stream_sequence == 1
-    assert reading.payload["value_mantissa"] == 12_345
+    assert reading.payload["value_mantissa"] == "12345"
     assert reading.payload["decimal_exponent"] == -3
+    assert reading.payload["resolution_mantissa"] == "1"
     assert reading.payload["certification_id"] == "cert_scale_1"
     assert reading.payload["client_grant_id"] == auth.grant.grant_id
     assert "signature" in reading.signature
