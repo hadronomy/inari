@@ -73,7 +73,7 @@ pub fn init(cx: &mut App) {
         cx.defer(move |cx| {
             active
                 .update(cx, |_, window, cx| {
-                    panel::show(panel::deck(cx).screen, window, cx);
+                    panel::show(panel::deck(window, cx).screen, window, cx);
                 })
                 .ok();
         });
@@ -96,7 +96,7 @@ pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
     // `remove_global` panics on a global that was never added, so the check is
     // load-bearing rather than defensive: the first frame of every run reaches
     // here with the toggle off and nothing set.
-    if panel::deck(cx).outline_all {
+    if panel::deck(window, cx).outline_all {
         cx.set_global(gpui::DebugBelow);
     } else if cx.has_global::<gpui::DebugBelow>() {
         cx.remove_global::<gpui::DebugBelow>();
