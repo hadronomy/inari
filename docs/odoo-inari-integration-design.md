@@ -2521,16 +2521,26 @@ Print Intent constraint serializes updates from multiple tabs.
 All Inari POS Print Origins, including the bill action, use this accepted
 counter rule. Native Device Paths keep Odoo's existing counter behavior.
 
-A narrow `InariHardwareAdapter` serves only bound Inari drawer, scale, and
-scanner functions. Both Device Adapters call the deep frontend Module.
+A narrow `InariHardwareAdapter` serves only the bound cash drawer. A separate
+`InariDeviceInputAdapter` owns Certified Scale acceptance and Barcode Event
+de-duplication. Both Device Adapters call the deep frontend Module.
 
 The scale seam wraps the Odoo scale service and screen. It preserves Odoo tare
 behavior and accepts only signed decimal Scale Readings with a current
 Certification Record.
 
+The input Adapter keeps scale mantissas as `BigInt` values. It requires two
+fresh stable readings within one resolution, rejects invalid range and unit
+states, and converts the accepted decimal only at the Odoo scale-service seam.
+Closing the scale screen releases the Scale Lease. Transport or lease loss
+invalidates the accepted reading at once.
+
 The scanner seam owns one Agent subscription and sends checked Barcode Events
 through the native Odoo barcode-reader seam. Keyboard scanning remains a
 Native Device Path.
+
+Scale and scanner Bindings share one browser stream only when their complete
+paired Agent scope matches. Bindings for separate Agents use separate streams.
 
 The drawer seam replaces only bound `HardwareProxy.openCashbox()` calls. It
 also makes `PosStore.openCashbox()` return the hardware promise. Unbound calls

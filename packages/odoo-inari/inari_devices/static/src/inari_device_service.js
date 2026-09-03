@@ -4,6 +4,8 @@ import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 
 import { InariAgentClient, InariAgentError } from "./agent_client";
+import { InariDeviceInputAdapter } from "./device_input_adapter";
+import { BrowserDeviceStreams } from "./device_stream_session";
 import { InariHardwareAdapter } from "./hardware_adapter";
 import { ClientPairingManager } from "./client_pairing";
 import { ClientPairingDialog } from "./client_pairing_dialog";
@@ -33,6 +35,16 @@ function activeBinding(pos) {
 
 function activeDrawerBinding(pos) {
     const binding = pos?.config?.inari_cash_drawer_binding;
+    return binding?.authoritative === true ? Object.freeze({ ...binding }) : null;
+}
+
+function activeScaleBinding(pos) {
+    const binding = pos?.config?.inari_scale_binding;
+    return binding?.authoritative === true ? Object.freeze({ ...binding }) : null;
+}
+
+function activeScannerBinding(pos) {
+    const binding = pos?.config?.inari_scanner_binding;
     return binding?.authoritative === true ? Object.freeze({ ...binding }) : null;
 }
 
@@ -97,6 +109,8 @@ export class InariDeviceService {
         printerFactory = (options) => new InariReceiptPrinter(options),
         preparationPlanBook = null,
         hardwareFactory = (options) => new InariHardwareAdapter(options),
+        streamsFactory = (options) => new BrowserDeviceStreams(options),
+        inputAdapterFactory = (options) => new InariDeviceInputAdapter(options),
         randomUUID = () => crypto.randomUUID(),
     } = {}) {
         this.notification = notification;
@@ -108,6 +122,8 @@ export class InariDeviceService {
         this.recoveryStoreFactory = recoveryStoreFactory;
         this.recoveryFactory = recoveryFactory;
         this.printerFactory = printerFactory;
+        this.streamsFactory = streamsFactory;
+        this.inputAdapterFactory = inputAdapterFactory;
         this.randomUUID = randomUUID;
         this.receiptPlans = new WeakMap();
         this.hardware = hardwareFactory({
@@ -119,10 +135,16 @@ export class InariDeviceService {
         this.pos = null;
         this.binding = null;
         this.drawerBinding = null;
+        this.scaleBinding = null;
+        this.scannerBinding = null;
+        this.scaleService = null;
+        this.scaleRequested = false;
         this.recovery = null;
         this.pairing = null;
         this.channels = new Map();
         this.printers = new Map();
+        this.inputAdapters = new Map();
+        this.inputPageHandler = null;
         this.blockedPreparationOrders = new Set();
         this.planningPreparationOrders = new Set();
         this.activePreparationOrders = new Set();
@@ -131,9 +153,12 @@ export class InariDeviceService {
     }
 
     async attachPos(pos) {
+        await this.closeInputAdapters();
         this.pos = pos;
         this.binding = activeBinding(pos);
         this.drawerBinding = activeDrawerBinding(pos);
+        this.scaleBinding = activeScaleBinding(pos);
+        this.scannerBinding = activeScannerBinding(pos);
         await this.hardware.attach({
             binding: this.drawerBinding,
             posSessionId: this.pos.session.id,
@@ -144,11 +169,19 @@ export class InariDeviceService {
         this.pairing = null;
         this.channels.clear();
         this.printers.clear();
-        if (this.binding?.agent_endpoint && this.rpc && !this.providedCredentials) {
-            const channel = this.channelFor(this.binding);
-            this.pairing = channel.manager;
-            channel.ready = await channel.manager.restore();
-            channel.restored = true;
+        if (this.rpc && !this.providedCredentials) {
+            for (const binding of this.bindings()) {
+                if (!binding.agent_endpoint) continue;
+                const channel = this.channelFor(binding);
+                if (channel.restored) continue;
+                // Browser credentials are restored without a user prompt during POS startup.
+                // oxlint-disable-next-line no-await-in-loop
+                channel.ready = await channel.manager.restore();
+                channel.restored = true;
+            }
+            this.pairing = this.binding?.agent_endpoint
+                ? this.channelFor(this.binding).manager
+                : null;
         }
         if (!this.recovery) {
             this.recovery = this.recoveryFactory({
@@ -165,6 +198,11 @@ export class InariDeviceService {
         }
         await this.recovery.reconcile(undefined, { interactive: false });
         this.recovery.startWatching();
+        await this.startInputAdapters({ interactiveScanner: true });
+        if (typeof window !== "undefined") {
+            this.inputPageHandler = () => void this.closeInputAdapters();
+            window.addEventListener("pagehide", this.inputPageHandler, { once: true });
+        }
     }
 
     setCredentials(credentials) {
@@ -228,11 +266,181 @@ export class InariDeviceService {
     }
 
     bindings() {
-        const bindings = [this.binding, this.drawerBinding];
+        const bindings = [this.binding, this.drawerBinding, this.scaleBinding, this.scannerBinding];
         for (const printer of this.pos?.unwatched?.printers || []) {
             bindings.push(printer.config.inari_preparation_binding);
         }
         return bindings.filter((binding) => binding?.authoritative === true);
+    }
+
+    registerScaleService(scaleService) {
+        this.scaleService = scaleService;
+    }
+
+    isScaleAuthoritative() {
+        return Boolean(this.scaleBinding);
+    }
+
+    isScannerAuthoritative() {
+        return Boolean(this.scannerBinding);
+    }
+
+    inputGroups() {
+        const groups = new Map();
+        for (const [kind, binding] of [
+            ["scaleBinding", this.scaleBinding],
+            ["scannerBinding", this.scannerBinding],
+        ]) {
+            if (!binding?.agent_endpoint || binding.state !== "ready") continue;
+            const key = channelKey(binding);
+            const group = groups.get(key) || { key, scaleBinding: null, scannerBinding: null };
+            group[kind] = binding;
+            groups.set(key, group);
+        }
+        return groups;
+    }
+
+    async startInputAdapters({ interactiveScanner = false } = {}) {
+        for (const group of this.inputGroups().values()) {
+            // Each Agent scope owns one transport. Separate Agents get separate sessions.
+            // oxlint-disable-next-line no-await-in-loop
+            await this.ensureInputAdapter(group, {
+                interactive: interactiveScanner && Boolean(group.scannerBinding),
+            });
+        }
+    }
+
+    async ensureInputAdapter(group, { interactive = false } = {}) {
+        if (!group) return null;
+        const existing = this.inputAdapters.get(group.key);
+        if (existing) return existing.adapter;
+        const binding = group.scannerBinding || group.scaleBinding;
+        const client = await this.clientFor(binding, { interactive });
+        if (!client) return null;
+        const streams = this.streamsFactory({
+            client,
+            pairedAgentId: binding.agent_id,
+            coordinationScope: group.key,
+        });
+        const adapter = this.inputAdapterFactory({
+            streams,
+            scalePort: group.scaleBinding
+                ? {
+                      isUnitCompatible: (unit) =>
+                          this.scaleService?.isInariUnitCompatible(unit) === true,
+                      accept: (reading) => this.scaleService?.acceptInariReading(reading),
+                      invalidate: (reason) => this.scaleService?.invalidateInariReading(reason),
+                  }
+                : null,
+            scannerPort: group.scannerBinding
+                ? {
+                      scan: (value) => this.pos.barcodeReader.scan(value),
+                      setState: (state) => this.onScannerState(state),
+                  }
+                : null,
+            reconcile: (barrier) => this.reconcileInput(barrier, group),
+        });
+        await adapter.start({
+            scaleBinding: group.scaleBinding,
+            scannerBinding: group.scannerBinding,
+        });
+        this.inputAdapters.set(group.key, { adapter, group });
+        return adapter;
+    }
+
+    async activateScale() {
+        if (!this.scaleBinding) return false;
+        this.scaleRequested = true;
+        if (this.scaleBinding.state !== "ready") {
+            this.notification?.add(
+                this.scaleBinding.state === "certification_required"
+                    ? _t("Select a current Certification Record for this Scale Binding.")
+                    : _t("Configure the authenticated Agent Endpoint before weighing a product."),
+                {
+                    title: _t("Certified Scale unavailable"),
+                    type: "danger",
+                    sticky: true,
+                },
+            );
+            return false;
+        }
+        const key = channelKey(this.scaleBinding);
+        let entry = this.inputAdapters.get(key);
+        if (!entry) {
+            const group = this.inputGroups().get(key);
+            const adapter = await this.ensureInputAdapter(group, { interactive: true });
+            entry = adapter ? this.inputAdapters.get(key) : null;
+        }
+        if (!entry) {
+            this.notification?.add(
+                _t("Pair this browser with the Inari Agent before weighing a product."),
+                {
+                    title: _t("Certified Scale unavailable"),
+                    type: "danger",
+                    sticky: true,
+                },
+            );
+            return false;
+        }
+        if (!this.scaleRequested) return false;
+        const state = await entry.adapter.setScaleActive(true);
+        if (!this.scaleRequested) {
+            await entry.adapter.setScaleActive(false);
+            return false;
+        }
+        if (!state.scaleActive) {
+            this.notification?.add(_t("The Certified Scale is in use on another register."), {
+                title: _t("Scale in use"),
+                type: "warning",
+                sticky: true,
+            });
+        }
+        return state.scaleActive;
+    }
+
+    async deactivateScale() {
+        this.scaleRequested = false;
+        if (!this.scaleBinding) return;
+        const entry = this.inputAdapters.get(channelKey(this.scaleBinding));
+        await entry?.adapter.setScaleActive(false);
+    }
+
+    consumeScaleReading() {
+        if (!this.scaleBinding) return null;
+        return this.inputAdapters.get(channelKey(this.scaleBinding))?.adapter.consumeScaleReading();
+    }
+
+    async closeInputAdapters() {
+        this.scaleRequested = false;
+        if (this.inputPageHandler && typeof window !== "undefined") {
+            window.removeEventListener("pagehide", this.inputPageHandler);
+        }
+        this.inputPageHandler = null;
+        const entries = [...this.inputAdapters.values()];
+        this.inputAdapters.clear();
+        await Promise.all(entries.map(({ adapter }) => adapter.stop()));
+    }
+
+    async reconcileInput(barrier, group) {
+        if (barrier.reason !== "replay_unavailable") return;
+        this.notification?.add(
+            _t("The Inari scanner session lost events. Reopen product search before scanning."),
+            {
+                title: _t("Scanner needs attention"),
+                type: "warning",
+                sticky: true,
+            },
+        );
+        if (group.scaleBinding) this.scaleService?.invalidateInariReading("replay_unavailable");
+    }
+
+    onScannerState(state) {
+        if (state.name !== "error") return;
+        this.notification?.add(_t("The Inari scanner is not receiving Barcode Events."), {
+            title: _t("Scanner unavailable"),
+            type: "warning",
+            sticky: true,
+        });
     }
 
     async clientForContext(context, options = {}) {

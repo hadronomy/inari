@@ -62,9 +62,14 @@ def pos_binding_projection(env, config, binding):
     endpoint_url = (
         endpoint.endpoint_url if _is_https_origin(endpoint.endpoint_url) else False
     )
+    certification_id = revision.capability_id.certification_ref
+    if binding.purpose == "pos_scale" and not certification_id:
+        state = "certification_required"
+    else:
+        state = "ready" if endpoint_url else "agent_endpoint_required"
     return {
         "authoritative": True,
-        "state": "ready" if endpoint_url else "agent_endpoint_required",
+        "state": state,
         "database": env.cr.dbname,
         "company_id": str(config.company_id.id),
         "organization_id": binding.site_id.organization_id.controller_uuid,
@@ -79,6 +84,7 @@ def pos_binding_projection(env, config, binding):
         "requested_permissions": pos_pairing_permissions(env, config, agent),
         "authorization_digest": revision.authorization_digest,
         "capability_id": revision.capability_id.controller_uuid,
+        "certification_id": certification_id or False,
         "contract_major": revision.capability_id.contract_major,
         "driver_profile_digest": revision.driver_profile_digest,
         "purpose": binding.purpose,

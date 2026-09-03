@@ -42,3 +42,27 @@ def test_pos_patch_keeps_native_printer_ownership_outside_inari():
     assert "PosStore.prototype" in source
     assert "hardware_proxy.printer =" not in source
     assert "return undefined;" in source
+
+
+def test_input_patches_use_odoo_19_scale_and_barcode_seams():
+    scale = (ADDON / "static/src/scale_patch.js").read_text(encoding="utf-8")
+    scanner = (ADDON / "static/src/scanner_patch.js").read_text(encoding="utf-8")
+
+    assert "PosScaleService.prototype" in scale
+    assert 'posScaleService.dependencies.push("inari_device")' in scale
+    assert "Number(reading.decimal)" in scale
+    assert "BarcodeReader.prototype" in scanner
+    assert "super.connectToProxy(...arguments)" in scanner
+    assert "this.hardwareProxy.message" not in scanner
+
+
+def test_pos_config_projects_certified_scale_and_scanner_bindings():
+    config = (ADDON / "models/pos_config.py").read_text(encoding="utf-8")
+    projection = (ADDON / "services/pos_binding_projections.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "inari_scale_binding = fields.Json" in config
+    assert "inari_scanner_binding = fields.Json" in config
+    assert '"certification_required"' in projection
+    assert '"certification_id": certification_id or False' in projection

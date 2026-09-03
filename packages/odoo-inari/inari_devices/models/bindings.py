@@ -237,6 +237,8 @@ class InariDeviceBinding(models.Model):
         self.write(
             {"active_revision_id": revision.id, "active": True, "state": "active"}
         )
+        if self.purpose == "pos_scale":
+            self.pos_config_id.sudo().write({"iface_electronic_scale": True})
         return revision
 
     def action_deactivate(self):
