@@ -275,7 +275,7 @@ impl Bench {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.inari().clone();
-        let width = panel::deck(cx).stage_width;
+        let width = panel::deck(window, cx).stage_width;
 
         // The knob lifecycle. `Window::draw` prepaints the root before the
         // inspector, so the schema this render records is the schema the panel

@@ -65,7 +65,7 @@ thread_local! {
 /// The whole floating layer for one root render.
 pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
     let theme = cx.inari().clone();
-    let deck = panel::deck(cx);
+    let deck = panel::deck(window, cx);
 
     let float = cx.try_global::<Float>();
     let dragging = float.and_then(|float| float.grab).is_some();
