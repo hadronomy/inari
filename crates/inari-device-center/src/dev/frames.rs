@@ -15,7 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{App, BorrowAppContext as _, Global};
+use gpui::{App, BorrowAppContext as _, Global, Window};
+
+use super::chart::Sample;
 
 /// A second of history at 120Hz, which is as far back as a cadence problem
 /// needs to be visible.
@@ -26,13 +28,20 @@ pub struct Frames {
     last: Option<Instant>,
     /// Gaps between consecutive renders, newest last.
     gaps: VecDeque<Duration>,
+    /// What each of those frames cost, newest last.
+    samples: VecDeque<Sample>,
 }
 
 impl Global for Frames {}
 
 /// Record one root render. Called from the floating layer, which every root
 /// mounts, so no ordinary component has to know this exists.
-pub fn tick(cx: &mut App) {
+pub fn tick(window: &Window, cx: &mut App) {
+    // The stats are the *previous* frame's — this one is still being built.
+    // That is what makes them worth reading: a frame cannot report its own cost
+    // while it is paying it.
+    let stats = window.frame_stats();
+    let sample = Sample { build: stats.build, paint: stats.paint, total: stats.total };
     if !cx.has_global::<Frames>() {
         cx.set_global(Frames::default());
     }
@@ -43,9 +52,20 @@ pub fn tick(cx: &mut App) {
             if frames.gaps.len() > WINDOW {
                 frames.gaps.pop_front();
             }
+            frames.samples.push_back(sample);
+            if frames.samples.len() > WINDOW {
+                frames.samples.pop_front();
+            }
         }
         frames.last = Some(now);
     });
+}
+
+/// What the recent frames cost, oldest first.
+pub fn samples(cx: &App) -> Vec<Sample> {
+    cx.try_global::<Frames>()
+        .map(|frames| frames.samples.iter().copied().collect())
+        .unwrap_or_default()
 }
 
 /// What the readout shows.
@@ -65,12 +85,6 @@ pub fn cadence(cx: &App) -> Cadence {
         .unwrap_or_default()
 }
 
-/// The most recent gaps, newest last, for the sparkline.
-pub fn gaps(cx: &App) -> Vec<Duration> {
-    cx.try_global::<Frames>()
-        .map(|frames| frames.gaps.iter().copied().collect())
-        .unwrap_or_default()
-}
 
 fn measure(gaps: impl Iterator<Item = Duration>) -> Cadence {
     let gaps: Vec<Duration> = gaps.collect();
