@@ -10,12 +10,13 @@
 //! no content mask (`elements/deferred.rs:65`), so the layer escapes every
 //! rounded scroll container the application has and never joins its layout.
 
-use std::cell::Cell;
+use std::{cell::Cell, time::Instant};
 
 use gpui::{
-    AnyElement, App, BorrowAppContext as _, Bounds, Global, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, Pixels, Point, StatefulInteractiveElement as _, Styled as _,
-    Window, canvas, deferred, div, point, prelude::FluentBuilder as _, px,
+    AnyElement, App, BorrowAppContext as _, Bounds, Global, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, Pixels, Point,
+    StatefulInteractiveElement as _, Styled as _, Window, canvas, deferred, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Selectable as _, Sizable as _, StyledExt as _,
@@ -24,7 +25,7 @@ use gpui_component::{
 
 use crate::{
     dev::{
-        element::{self, Selection},
+        element,
         panel::{self, Screen},
     },
     ui::{
@@ -76,13 +77,9 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
 
     let mut layer = div().absolute().size_full();
 
-    // Drawn from the selection only while it is still true. A selected element
-    // that stops being painted leaves its last geometry behind in the
-    // inspector, and a box around something that is no longer there is worse
-    // than no box at all.
-    if let Some(selection) = element::current(window, cx) {
-        layer = layer.child(box_model(&theme, selection));
-    }
+    // Always drawn. There is nothing to turn off: a selection with no box is a
+    // selection you cannot see, and the box costs nothing when there is none.
+    layer = layer.child(box_model(&theme));
 
     // While dragging, a transparent sheet over the window catches the moves the
     // pill itself would miss the moment the pointer leaves it.
@@ -216,62 +213,108 @@ fn grip(theme: &Theme) -> impl IntoElement {
 
 /// Bounds, border, padding and content box for the selected element.
 ///
-/// Margin is not here on purpose. GPUI resolves margin during layout and no
-/// margin rectangle survives to paint, so drawing one would mean guessing — in
-/// the one tool whose whole job is to not guess.
-fn box_model(theme: &Theme, selection: &Selection) -> AnyElement {
-    let band = |bounds: Bounds<Pixels>, fill: gpui::Hsla| {
-        div()
-            .absolute()
-            .left(bounds.origin.x)
-            .top(bounds.origin.y)
-            .w(bounds.size.width)
-            .h(bounds.size.height)
-            .bg(fill)
-    };
+/// Painted rather than laid out. GPUI draws its own picker highlight in the
+/// paint phase from the frame it is drawing (`window.rs:4626-4640`), and this
+/// follows it for the same two reasons.
+///
+/// The first is truth. A `canvas` paint callback runs after the whole tree has
+/// prepainted, so the element's bounds and its `painted` stamp are this frame's
+/// — the box is where the element is *now*, not where it was last time
+/// something asked. Built out of divs the overlay was always a frame behind and
+/// slid whenever the layout moved.
+///
+/// The second is the disappearance. `frame_began` is taken while the root
+/// renders, before anything prepaints. An element still in the tree is stamped
+/// after that; one that has gone keeps a stamp from an earlier frame. So
+/// `painted >= frame_began` is exact, and the box goes in the same frame its
+/// element does — where a duration could only guess, and guessed late.
+///
+/// Margin is still not drawn. GPUI resolves it during layout and no margin
+/// rectangle survives to paint.
+fn box_model(theme: &Theme) -> AnyElement {
+    let frame_began = Instant::now();
+    let outline = theme.accent;
+    let bounds_wash = Hsla { a: 0.10, ..theme.accent };
+    let padding_wash = Hsla { a: 0.14, ..theme.info };
+    let chip_ink = theme.text_on_accent;
+    let mono = theme.font_mono.clone();
 
-    let bounds = selection.bounds;
-    let size = format!(
-        "{:.0} × {:.0}",
-        f32::from(bounds.size.width),
-        f32::from(bounds.size.height)
-    );
-    // Above the element when there is room, inside its top edge when there is
-    // not, so the chip never leaves the window at y = 0.
-    let chip_above = bounds.origin.y > px(20.0);
+    canvas(
+        |_, _, _| (),
+        move |_, _, window: &mut Window, cx: &mut App| {
+            let Some(selection) = element::current(window, cx) else {
+                return;
+            };
+            if selection.painted < frame_began {
+                return;
+            }
+            let bounds = selection.bounds;
+            let padding_box = selection.padding_box();
+            let content_box = selection.content_box();
+            let size = format!(
+                "{:.0} × {:.0}",
+                f32::from(bounds.size.width),
+                f32::from(bounds.size.height)
+            );
 
-    div()
-        .absolute()
-        .size_full()
-        .child(band(bounds, theme.accent.opacity(0.10)))
-        .child(band(selection.padding_box(), theme.info.opacity(0.14)))
-        .child(band(selection.content_box(), theme.accent.opacity(0.0)))
-        .child(
-            div()
-                .absolute()
-                .left(bounds.origin.x)
-                .top(bounds.origin.y)
-                .w(bounds.size.width)
-                .h(bounds.size.height)
-                .border_1()
-                .border_color(theme.accent),
-        )
-        .child(
-            div()
-                .absolute()
-                .left(bounds.origin.x)
-                .top(if chip_above {
-                    bounds.origin.y - px(18.0)
-                } else {
-                    bounds.origin.y + px(2.0)
-                })
-                .px(px(4.0))
-                .rounded(px(3.0))
-                .bg(theme.accent)
-                .text_size(px(10.0))
-                .font_family(theme.font_mono.clone())
-                .text_color(theme.text_on_accent)
-                .child(size),
-        )
-        .into_any_element()
+            // Outermost first: each band is the one above it with a little more
+            // taken away, so the overlaps read as depth rather than as stripes.
+            window.paint_quad(gpui::fill(bounds, bounds_wash));
+            window.paint_quad(gpui::fill(padding_box, padding_wash));
+            window.paint_quad(gpui::fill(content_box, gpui::transparent_black()));
+            window.paint_quad(gpui::outline(bounds, outline, gpui::BorderStyle::Solid));
+
+            // Above the element when there is room, inside its top edge when
+            // there is not, so the chip never leaves the window at y = 0.
+            let font_size = px(10.0);
+            let line_height = px(14.0);
+            let run = gpui::TextRun {
+                len: size.len(),
+                font: gpui::Font {
+                    family: mono.clone(),
+                    features: Default::default(),
+                    fallbacks: None,
+                    weight: Default::default(),
+                    style: Default::default(),
+                },
+                color: chip_ink,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let line = window
+                .text_system()
+                .shape_line(size.into(), font_size, &[run], None);
+            let above = bounds.origin.y > line_height + px(4.0);
+            let plate = Bounds {
+                origin: point(
+                    bounds.origin.x,
+                    if above {
+                        bounds.origin.y - line_height - px(2.0)
+                    } else {
+                        bounds.origin.y + px(2.0)
+                    },
+                ),
+                size: gpui::size(line.width + px(8.0), line_height),
+            };
+            window.paint_quad(gpui::quad(
+                plate,
+                gpui::Corners::all(px(3.0)),
+                outline,
+                gpui::Edges::default(),
+                gpui::transparent_black(),
+                gpui::BorderStyle::default(),
+            ));
+            line.paint(
+                point(plate.origin.x + px(4.0), plate.origin.y),
+                line_height,
+                window,
+                cx,
+            )
+            .ok();
+        },
+    )
+    .absolute()
+    .size_full()
+    .into_any_element()
 }
