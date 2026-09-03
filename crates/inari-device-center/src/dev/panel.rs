@@ -15,20 +15,17 @@
 
 use std::{cell::RefCell, collections::HashMap, collections::HashSet, time::Duration};
 
-/// One 60Hz frame, the floor the sparkline scales against so an idle window
-/// does not draw its two lazy renders as a full-height wall.
-const SIXTY_HZ: Duration = Duration::from_millis(16);
-/// How many of the most recent gaps the sparkline draws.
-const SPARKLINE: usize = 60;
 
 use gpui::{
     AnyElement, App, AppContext as _, BorrowAppContext as _, Context, DivInspectorState, Entity,
+    Hsla,
     Global, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, WindowId, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     IconName, Selectable as _, Sizable as _, StyledExt as _,
+    chart::{AreaChart, BarChart},
     button::{Button, ButtonVariants as _},
     input::{InputEvent, InputState},
     switch::Switch,
@@ -36,6 +33,7 @@ use gpui_component::{
 
 use crate::{
     dev::{
+        chart,
         control,
         dial::{self, Kind, Knob, Value},
         element, frames,
@@ -355,7 +353,7 @@ impl Panel {
                         .into_any_element()
                 }
             },
-            Screen::Frames => frames_tool(&theme, cx),
+            Screen::Frames => frames_tool(&theme, window, cx),
             Screen::Stage => stage_tool(&theme, deck, cx),
         }
     }
@@ -693,58 +691,199 @@ fn hint(theme: &Theme, message: &'static str) -> AnyElement {
 
 // ---- the tools that need no state ----
 
-fn frames_tool(theme: &Theme, cx: &App) -> AnyElement {
-    let cadence = frames::cadence(cx);
-    let gaps = frames::gaps(cx);
-    let worst = gaps
-        .iter()
-        .copied()
-        .max()
-        .unwrap_or(SIXTY_HZ)
-        .max(SIXTY_HZ);
+/// One frame, as the chart plots it.
+///
+/// The bands are cumulative and the labels count backwards from now, so the
+/// newest frame is on the right where a reader's eye already is.
+struct Plotted {
+    age: SharedString,
+    total: f64,
+    upper: f64,
+    lower: f64,
+}
 
-    // The panel is 30rem wide and the history is 120 samples deep, so drawing
-    // all of it leaves under a pixel per bar. Half a second of history, drawn
-    // wide enough to read, says more than a full second drawn as a smear.
-    let shown = gaps.len().saturating_sub(SPARKLINE);
-    let bars: Vec<gpui::AnyElement> = gaps[shown..]
+/// One kind of primitive in the frame.
+struct Counted {
+    kind: &'static str,
+    count: f64,
+}
+
+/// The performance screen.
+///
+/// Four questions, in the order a developer asks them: is it keeping up, where
+/// is the time going, what is the frame made of, and is anything growing that
+/// should not be.
+///
+/// The charts are `gpui_component`'s. It ships a plotting library — scales,
+/// axes, dashed grids, shapes and tooltips — and we already depend on it, so
+/// hand-painting bars was reinventing an axis badly. Series colours are given
+/// explicitly rather than left to its `chart_1..5` palette, which our theme does
+/// not define and which would arrive from somewhere else's idea of a chart.
+fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
+    let cadence = frames::cadence(cx);
+    let samples = frames::samples(cx);
+    let stats = window.frame_stats();
+    let latest = samples.last().copied().unwrap_or_default();
+    let missed = chart::over_budget(&samples);
+
+    let last = samples.len().saturating_sub(1);
+    let plotted: Vec<Plotted> = samples
         .iter()
-        .map(|gap| {
-            let share = gap.as_secs_f32() / worst.as_secs_f32();
-            div()
-                .flex_1()
-                .h(px(1.0 + share * 31.0))
-                // A gap shorter than a 120Hz frame means something asked for
-                // this render before the display could have used the last one.
-                .bg(if *gap < Duration::from_millis(9) {
-                    theme.warning
+        .enumerate()
+        .map(|(index, sample)| {
+            let (total, upper, lower) = sample.bands();
+            Plotted {
+                age: if index == last {
+                    "now".into()
                 } else {
-                    theme.accent
-                })
-                .into_any_element()
+                    format!("-{}", last - index).into()
+                },
+                total,
+                upper,
+                lower,
+            }
         })
         .collect();
+
+    let counted: Vec<Counted> = [
+        ("Quads", stats.quads),
+        ("Glyphs", stats.monochrome_sprites),
+        ("Images", stats.polychrome_sprites),
+        ("Shadows", stats.shadows),
+        ("Paths", stats.paths),
+        ("Lines", stats.underlines),
+        ("Effects", stats.effects),
+        ("Surfaces", stats.surfaces),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(kind, count)| Counted { kind, count: count as f64 })
+    .collect();
 
     div()
         .v_flex()
         .gap(px(Theme::SPACE_SM))
         .w_full()
+        .child(group(theme, "Keeping up"))
         .child(reading(theme, "Renders per second", &cadence.rate.to_string()))
-        .child(reading(theme, "Since the last", &millis(cadence.last)))
-        .child(reading(theme, "Longest gap", &millis(cadence.longest)))
+        .child(reading(
+            theme,
+            "Missed 60Hz",
+            &format!("{missed} of {}", samples.len().max(1)),
+        ))
+        .child(reading(theme, "Median frame", &millis(chart::percentile(&samples, 0.5))))
+        .child(reading(theme, "Worst in 95", &millis(chart::percentile(&samples, 0.95))))
+        .child(
+            // Largest band first: an area chart fills from its baseline, so a
+            // later series drawn over a larger one would bury it.
+            // The chart element asks for 100% of its parent, and a percentage
+            // needs a *definite* box to resolve against. Inside the scrolling
+            // body it had neither, so it laid out at its content size — nothing
+            // — and drew itself into the corner. A grown flex item gives it a
+            // real width, and the row's height gives it a real height.
+            div().flex().w_full().child(plot(px(170.0)).child(
+                AreaChart::new(plotted)
+                    .x(|frame: &Plotted| frame.age.clone())
+                    .y(|frame: &Plotted| frame.total)
+                    .stroke(theme.text_tertiary)
+                    .fill(Hsla { a: 0.18, ..theme.text_tertiary })
+                    .y(|frame: &Plotted| frame.upper)
+                    .stroke(theme.info)
+                    .fill(Hsla { a: 0.35, ..theme.info })
+                    .y(|frame: &Plotted| frame.lower)
+                    .stroke(theme.accent)
+                    .fill(Hsla { a: 0.45, ..theme.accent })
+                    .linear()
+                    .tick_margin(20),
+            )),
+        )
         .child(
             div()
-                .h_flex()
-                .items_end()
-                .h(px(32.0))
-                .w_full()
-                .children(bars),
+                .text_caption()
+                .text_color(theme.text_tertiary)
+                .child(
+                    "Build, then paint, then the rest of `draw`, stacked, scaled to the frames \
+                     themselves. A budget line would set the ceiling at 16.7 ms and squash a fast \
+                     window into the floor, so the budget is counted above instead of drawn. A low \
+                     median with a few tall spikes is a stutter, not a slow window — and the two \
+                     want different fixes.",
+                ),
         )
-        .child(div().text_caption().text_color(theme.text_tertiary).child(
-            "A tall, even wall means something is asking for every frame. An idle window should \
-             be almost flat — GPUI redraws when it is asked to, not on a clock.",
-        ))
+        .child(group(theme, "Where the time went"))
+        .child(phase(theme, "Build", latest.build, latest.total, theme.accent))
+        .child(phase(theme, "Paint", latest.paint, latest.total, theme.info))
+        .child(phase(theme, "Everything else", latest.rest(), latest.total, theme.text_tertiary))
+        .child(group(theme, "What the frame is made of"))
+        .child(div().flex().w_full().child(plot(px(170.0)).child({
+            let ink = theme.accent;
+            BarChart::new(counted)
+                .x(|part: &Counted| part.kind)
+                .y(|part: &Counted| part.count)
+                .fill(move |_: &Counted| ink)
+                .label(|part: &Counted| format!("{}", part.count as usize))
+        })))
+        .child(reading(theme, "Draw operations", &stats.operations.to_string()))
+        .child(group(theme, "Held between frames"))
+        .child(reading(theme, "Hitboxes", &stats.hitboxes.to_string()))
+        .child(reading(theme, "Element states", &stats.element_states.to_string()))
+        .child(reading(theme, "Deferred draws", &stats.deferred_draws.to_string()))
+        .child(
+            div()
+                .text_caption()
+                .text_color(theme.text_tertiary)
+                .child(
+                    "These three are retained. A number that climbs and never comes back down is \
+                     what a leak looks like from here.",
+                ),
+        )
         .into_any_element()
+}
+
+/// A definite box for a chart to fill.
+///
+/// `IntoPlot` gives a chart `Size::full()`, which is a percentage, and a
+/// percentage resolves to nothing without a definite parent. The outer row
+/// fixes the height and the grown item fixes the width.
+fn plot(height: gpui::Pixels) -> gpui::Div {
+    div()
+        .flex_1()
+        .min_w(px(0.0))
+        .w_full()
+        .h(height)
+}
+
+/// One phase of the last frame: its cost, and its share of the whole.
+fn phase(
+    theme: &Theme,
+    label: &'static str,
+    value: Duration,
+    total: Duration,
+    ink: gpui::Hsla,
+) -> impl IntoElement {
+    let share = if total.is_zero() {
+        0.0
+    } else {
+        (value.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+    };
+    div()
+        .v_flex()
+        .gap(px(3.0))
+        .w_full()
+        .child(reading(theme, label, &millis(value)))
+        .child(
+            div()
+                .w_full()
+                .h(px(3.0))
+                .rounded_full()
+                .bg(theme.hairline)
+                .child(
+                    div()
+                        .h_full()
+                        .w(gpui::relative(share))
+                        .rounded_full()
+                        .bg(ink),
+                ),
+        )
 }
 
 fn stage_tool(theme: &Theme, deck: Deck, cx: &App) -> AnyElement {
