@@ -19,10 +19,13 @@
 //! through the same `with_inspector_state` channel, so edits land on the running
 //! element. Reimplementing that would be worse and longer.
 
+use std::collections::HashMap;
+
 use gpui::{
-    AbsoluteLength, App, Bounds, Corners, DefiniteLength, DivInspectorState, Edges, Entity,
-    Global, InspectorElementId, InteractiveElement as _, IntoElement, Length, ParentElement as _,
-    Pixels, SharedString, Size, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AbsoluteLength, App, Bounds, BorrowAppContext as _, Corners, DefiniteLength, DivInspectorState,
+    Edges, Entity, Global, InspectorElementId, InteractiveElement as _, IntoElement, Length,
+    ParentElement as _, Pixels, SharedString, Size, StatefulInteractiveElement as _, Styled as _,
+    Window, WindowId, div, px,
 };
 use gpui_component::{DivInspector, StyledExt as _};
 
@@ -32,8 +35,18 @@ use crate::ui::{
     theme::{ActiveTheme as _, Theme},
 };
 
-/// What the last inspector render saw, cached so the overlay can draw the box
-/// model without the Element tool being on screen.
+/// What each window's inspector last saw.
+///
+/// Keyed by window, because a selection belongs to the inspector that made it.
+/// Held as one global it leaked: the Bench's pick drew a box over the
+/// application window too, at coordinates that meant nothing there.
+#[derive(Default)]
+pub struct Selections(HashMap<WindowId, Selection>);
+
+impl Global for Selections {}
+
+/// What one window's inspector last saw, cached so the overlay can draw the box
+/// model while another screen is showing.
 #[derive(Clone)]
 pub struct Selection {
     pub bounds: Bounds<Pixels>,
@@ -44,16 +57,14 @@ pub struct Selection {
     /// margin rectangle survives to paint time.
     pub margin: Edges<Pixels>,
     pub radius: Corners<Pixels>,
-    /// When this was last refreshed.
+    /// When GPUI last laid the element out.
     ///
-    /// A wall clock rather than a frame count, because the frame counter is one
-    /// global and both windows tick it — so with the Bench and the application
-    /// both drawing, `now` ran ahead of the panel's last write and the box
-    /// blinked out and back.
-    pub seen: std::time::Instant,
+    /// Not when *we* last read it. The inspector hands back the selected
+    /// element's state every frame whether or not the element is still in the
+    /// tree, so "when we last saw it" is always now and says nothing. This is
+    /// stamped by `Div::prepaint`, which only runs while the element exists.
+    pub painted: std::time::Instant,
 }
-
-impl Global for Selection {}
 
 impl Selection {
     /// The box the element's own background fills, inside its border.
@@ -67,16 +78,18 @@ impl Selection {
     }
 }
 
-/// How long a selection stays believable after its last refresh.
+/// How long after its last layout an element is still believed to be there.
 ///
 /// Long enough that an idle window redrawing lazily keeps its box, short enough
 /// that a box around something that has gone does not linger.
 const BELIEVABLE: std::time::Duration = std::time::Duration::from_millis(400);
 
-/// The selection, if it was refreshed recently enough to still be true.
-pub fn current(cx: &App) -> Option<&Selection> {
-    cx.try_global::<Selection>()
-        .filter(|selection| selection.seen.elapsed() < BELIEVABLE)
+/// This window's selection, if its element is still being laid out.
+pub fn current<'a>(window: &Window, cx: &'a App) -> Option<&'a Selection> {
+    let window_id = window.window_handle().window_id();
+    cx.try_global::<Selections>()
+        .and_then(|selections| selections.0.get(&window_id))
+        .filter(|selection| selection.painted.elapsed() < BELIEVABLE)
 }
 
 /// Shrink `bounds` by `edges` on every side, never past zero.
@@ -122,17 +135,24 @@ pub fn remember(state: &DivInspectorState, window: &Window, cx: &mut App) {
         bottom_left: absolute(style.corner_radii.bottom_left, rem),
     };
 
-    let seen = std::time::Instant::now();
-    cx.set_global(Selection {
-        seen,
+    let window_id = window.window_handle().window_id();
+    let selection = Selection {
+        painted: state.painted,
         bounds: state.bounds,
         content_size: state.content_size,
         padding,
         border,
         margin,
         radius,
+    };
+    if !cx.has_global::<Selections>() {
+        cx.set_global(Selections::default());
+    }
+    cx.update_global(|selections: &mut Selections, _| {
+        selections.0.insert(window_id, selection)
     });
 }
+
 
 fn definite(value: Option<DefiniteLength>, base: AbsoluteLength, rem: Pixels) -> Pixels {
     value
@@ -159,10 +179,11 @@ fn length(value: Option<Length>, base: AbsoluteLength, rem: Pixels) -> Pixels {
 pub fn tool(
     id: &InspectorElementId,
     editors: &Entity<DivInspector>,
+    window: &Window,
     cx: &mut App,
 ) -> gpui::AnyElement {
     let theme = cx.inari();
-    let selection = cx.try_global::<Selection>().cloned();
+    let selection = current(window, cx).cloned();
     let source = SharedString::from(format!("{}", id.path.source_location));
 
     let mut report = div()
@@ -222,7 +243,18 @@ pub fn tool(
         .v_flex()
         .gap(px(Theme::SPACE_MD))
         .child(report)
-        .child(editors.clone())
+        .child(
+            // GPUI Component's inspector lays its two editors out with
+            // `size_full` and `h_2_5`, which resolve against the parent's
+            // height. The panel body scrolls, so that height is unbounded and
+            // both editors collapsed to a line and a half. A definite height
+            // gives each of them a readable block and lets the body scroll past
+            // them.
+            div()
+                .w_full()
+                .h(px(440.0))
+                .child(editors.clone()),
+        )
         .into_any_element()
 }
 
