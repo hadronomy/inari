@@ -255,7 +255,7 @@ pub fn install(cx: &mut App) {
         editors.update(cx, |div_inspector, cx| {
             div_inspector.update_inspected_element(id.clone(), state.clone(), window, cx);
         });
-        element::tool(&id, editors, cx)
+        element::tool(&id, editors, window, cx)
     });
 
     let panel = OnceCell::new();

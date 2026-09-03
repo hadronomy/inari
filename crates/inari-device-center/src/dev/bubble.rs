@@ -80,7 +80,7 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
     // that stops being painted leaves its last geometry behind in the
     // inspector, and a box around something that is no longer there is worse
     // than no box at all.
-    if let Some(selection) = element::current(cx) {
+    if let Some(selection) = element::current(window, cx) {
         layer = layer.child(box_model(&theme, selection));
     }
 
