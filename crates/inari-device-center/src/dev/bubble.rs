@@ -10,13 +10,13 @@
 //! no content mask (`elements/deferred.rs:65`), so the layer escapes every
 //! rounded scroll container the application has and never joins its layout.
 
-use std::{cell::Cell, time::Instant};
+use std::{collections::HashMap, time::Instant};
 
 use gpui::{
-    AnyElement, App, BorrowAppContext as _, Bounds, Global, Hsla, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, Pixels, Point,
-    StatefulInteractiveElement as _, Styled as _, Window, canvas, deferred, div, point,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, BorrowAppContext as _, Bounds, DispatchPhase, Global, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Pixels, Point, StatefulInteractiveElement as _, Styled as _, Window,
+    WindowId, canvas, deferred, div, point, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Selectable as _, Sizable as _, StyledExt as _,
@@ -39,27 +39,63 @@ const PILL_HEIGHT: f32 = 30.0;
 const MARGIN: f32 = 16.0;
 const FADE_KEY: &str = "dev-bubble";
 
-/// Where the launcher sits, and whether it is being moved.
+/// Every window's launcher.
+///
+/// Keyed by window, like the rest of the panel's state. Held as one value the
+/// two launchers shared a position and a grab: pressing one moved the other,
+/// and the offset a drag started from came from whichever window had painted
+/// last.
 #[derive(Default)]
+struct Floats(HashMap<WindowId, Float>);
+
+impl Global for Floats {}
+
+/// Where one window's launcher sits, and the drag in progress.
+#[derive(Clone, Copy, Default)]
 struct Float {
     /// `None` until the launcher is first moved: it rests bottom-right, which
     /// follows the window rather than being pinned to a stale point.
     at: Option<Point<Pixels>>,
+    /// Where the pill was last laid out.
+    ///
+    /// A mouse-down listener is handed a pointer position and nothing else, so
+    /// without this a drag would begin with a grab offset of zero and the pill
+    /// would jump to sit under the pointer. A `canvas` is the cheapest way to
+    /// read an element's own bounds.
+    painted: Bounds<Pixels>,
+    /// The area the launcher may be dragged within — the root, which is
+    /// narrower than the window while the dock is open.
+    frame: Bounds<Pixels>,
     /// The grab point inside the pill, so it does not jump under the pointer.
     grab: Option<Point<Pixels>>,
 }
 
-impl Global for Float {}
+fn float(window: &Window, cx: &App) -> Float {
+    float_of(window.window_handle().window_id(), cx)
+}
 
-thread_local! {
-    /// Where the launcher was laid out last frame.
-    ///
-    /// A mouse-down listener is handed a pointer position and nothing else, so
-    /// without this the first drag would compute a grab offset of zero and the
-    /// pill would jump to sit under the pointer. A `canvas` is the cheapest way
-    /// to read an element's own bounds; Zeron uses the same trick to measure its
-    /// composer.
-    static PAINTED_AT: Cell<Point<Pixels>> = const { Cell::new(point(px(0.0), px(0.0))) };
+fn float_of(window_id: WindowId, cx: &App) -> Float {
+    cx.try_global::<Floats>()
+        .and_then(|floats| floats.0.get(&window_id).copied())
+        .unwrap_or_default()
+}
+
+fn adjust_float(window_id: WindowId, cx: &mut App, change: impl FnOnce(&mut Float)) {
+    if !cx.has_global::<Floats>() {
+        cx.set_global(Floats::default());
+    }
+    cx.update_global(|floats: &mut Floats, _| {
+        change(floats.0.entry(window_id).or_default())
+    });
+}
+
+/// A canvas that reports the bounds of whatever it is placed inside.
+fn measure(record: impl 'static + Fn(Bounds<Pixels>, &mut App)) -> impl IntoElement {
+    // Styled on the canvas itself. A bare canvas lays out at its content size,
+    // which is nothing, so it would report a box that is not its parent's.
+    canvas(move |bounds, _, cx| record(bounds, cx), |_, _, _, _| {})
+        .absolute()
+        .size_full()
 }
 
 /// The whole floating layer for one root render.
@@ -67,45 +103,113 @@ pub fn render(window: &mut Window, cx: &mut App) -> AnyElement {
     let theme = cx.inari().clone();
     let deck = panel::deck(window, cx);
 
-    let float = cx.try_global::<Float>();
-    let dragging = float.and_then(|float| float.grab).is_some();
+    let window_id = window.window_handle().window_id();
+    let float = float(window, cx);
     let width = px(PILL_HEIGHT * (Screen::ALL.len() + 1) as f32 + 40.0);
     // Until it is dragged the launcher is anchored, not positioned: the root is
     // narrower while the dock is open, and an inset follows that where a
     // computed left/top would put the pill under the panel.
-    let at = float.and_then(|float| float.at);
+    let at = float.at;
 
-    let mut layer = div().absolute().size_full();
+    let mut layer = div()
+        .absolute()
+        .size_full()
+        .child(measure(move |bounds, cx| {
+            adjust_float(window_id, cx, |float| float.frame = bounds);
+        }))
+        .child(drag_listeners(window_id));
 
     // Always drawn. There is nothing to turn off: a selection with no box is a
     // selection you cannot see, and the box costs nothing when there is none.
     layer = layer.child(box_model(&theme));
 
-    // While dragging, a transparent sheet over the window catches the moves the
-    // pill itself would miss the moment the pointer leaves it.
-    if dragging {
-        layer = layer.child(
-            div()
-                .absolute()
-                .size_full()
-                .occlude()
-                .on_mouse_move(|event, _, cx| {
-                    cx.update_global(|float: &mut Float, _| {
-                        if let Some(grab) = float.grab {
-                            float.at = Some(point(
-                                event.position.x - grab.x,
-                                event.position.y - grab.y,
-                            ));
-                        }
-                    });
-                })
-                .on_mouse_up(MouseButton::Left, |_, _, cx| {
-                    cx.update_global(|float: &mut Float, _| float.grab = None);
-                }),
-        );
-    }
+    deferred(layer.child(pill(&theme, at, width, deck.screen, window_id, window, cx)))
+        .into_any_element()
+}
 
-    deferred(layer.child(pill(&theme, at, width, deck.screen, window, cx))).into_any_element()
+/// The drag, handled at the window rather than under the pointer.
+///
+/// Both of the launcher's faults came from the shape of the old answer: a sheet
+/// over the window, mounted only while a drag was live.
+///
+/// A `div`'s mouse handler fires only over its own hitbox, and a hitbox belongs
+/// to the frame that painted it. Every pointer move re-rendered the tree, so
+/// moves that arrived against a frame still being rebuilt were dropped — and a
+/// drag that loses most of its moves staggers.
+///
+/// Worse, a sheet that exists only *while* dragging cannot catch the release of
+/// a click whose press and release fall inside one frame. The press armed the
+/// drag, the release found no sheet to land on, and nothing ever disarmed it —
+/// so the launcher followed the pointer for good.
+///
+/// `Window::on_mouse_event` answers both. It is registered during paint, fires
+/// for every event whatever is under the pointer, and is registered on *every*
+/// frame rather than only on dragging ones, so the release always has somewhere
+/// to land. On a frame with no drag in progress it costs two early returns.
+fn drag_listeners(window_id: WindowId) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |_, _, window: &mut Window, _| {
+            window.on_mouse_event(
+                move |event: &MouseMoveEvent, phase, window: &mut Window, cx: &mut App| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    let float = float_of(window_id, cx);
+                    let Some(grab) = float.grab else {
+                        return;
+                    };
+                    // The button can come up somewhere we never hear about —
+                    // another window, a menu. A move with nothing held is that
+                    // release arriving late.
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        adjust_float(window_id, cx, |float| float.grab = None);
+                        window.refresh();
+                        return;
+                    }
+                    let at = settle(
+                        point(event.position.x - grab.x, event.position.y - grab.y),
+                        float.painted.size,
+                        float.frame,
+                    );
+                    adjust_float(window_id, cx, |float| float.at = Some(at));
+                    window.refresh();
+                },
+            );
+            window.on_mouse_event(
+                move |_: &MouseUpEvent, phase, window: &mut Window, cx: &mut App| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    if float_of(window_id, cx).grab.is_some() {
+                        adjust_float(window_id, cx, |float| float.grab = None);
+                        window.refresh();
+                    }
+                },
+            );
+        },
+    )
+    .absolute()
+    .size_full()
+}
+
+/// Keep the launcher inside `frame`, whatever the pointer asks for.
+///
+/// Dragged past an edge it would otherwise leave the window, and a launcher you
+/// cannot reach is a launcher you cannot put back.
+fn settle(
+    at: Point<Pixels>,
+    size: gpui::Size<Pixels>,
+    frame: Bounds<Pixels>,
+) -> Point<Pixels> {
+    if frame.size.width <= px(0.0) {
+        return at;
+    }
+    let margin = px(MARGIN);
+    point(
+        at.x.clamp(margin, (frame.size.width - size.width - margin).max(margin)),
+        at.y.clamp(margin, (frame.size.height - size.height - margin).max(margin)),
+    )
 }
 
 fn pill(
@@ -113,6 +217,7 @@ fn pill(
     at: Option<Point<Pixels>>,
     width: Pixels,
     active: Screen,
+    window_id: WindowId,
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
@@ -147,17 +252,10 @@ fn pill(
         .bg(theme.surface_overlay)
         .border_1()
         .border_color(theme.hairline_strong)
-        // Styled on the canvas itself: a bare one lays out at its content
-        // size, which is nothing, and would report a box that is not the pill's.
-        .child(
-            canvas(
-                |bounds, _, _| PAINTED_AT.with(|painted| painted.set(bounds.origin)),
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .size_full(),
-        )
-        .child(grip(theme))
+        .child(measure(move |bounds, cx| {
+            adjust_float(window_id, cx, |float| float.painted = bounds);
+        }))
+        .child(grip(theme, window_id))
         .children(Screen::ALL.map(|screen| {
             Button::new(gpui::SharedString::from(format!("dev-bubble-{}", screen.title())))
                 .icon(screen.icon())
@@ -186,7 +284,7 @@ fn pill(
 
 /// Two rules, not an icon: the launcher is a handle before it is a toolbar, and
 /// a drawn grip says so without adding a sixth glyph to a row of five.
-fn grip(theme: &Theme) -> impl IntoElement {
+fn grip(theme: &Theme, window_id: WindowId) -> impl IntoElement {
     div()
         .id("dev-bubble-grip")
         .h_flex()
@@ -198,17 +296,18 @@ fn grip(theme: &Theme) -> impl IntoElement {
         .cursor(gpui::CursorStyle::OpenHand)
         .child(div().w(px(1.0)).h(px(10.0)).bg(theme.text_tertiary))
         .child(div().w(px(1.0)).h(px(10.0)).bg(theme.text_tertiary))
-        .on_mouse_down(MouseButton::Left, |event, _, cx| {
-            if !cx.has_global::<Float>() {
-                cx.set_global(Float::default());
-            }
-            let position = event.position;
-            let at = PAINTED_AT.with(|painted| painted.get());
-            cx.update_global(|float: &mut Float, _| {
-                float.grab = Some(point(position.x - at.x, position.y - at.y));
-                float.at = Some(at);
-            });
-        })
+        .on_mouse_down(
+            MouseButton::Left,
+            move |event, window: &mut Window, cx: &mut App| {
+                let position = event.position;
+                adjust_float(window_id, cx, |float| {
+                    let at = float.painted.origin;
+                    float.grab = Some(point(position.x - at.x, position.y - at.y));
+                    float.at = Some(at);
+                });
+                window.refresh();
+            },
+        )
 }
 
 /// Bounds, border, padding and content box for the selected element.
