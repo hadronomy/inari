@@ -78,18 +78,16 @@ impl Selection {
     }
 }
 
-/// How long after its last layout an element is still believed to be there.
+/// This window's selection, as the panel last recorded it.
 ///
-/// Long enough that an idle window redrawing lazily keeps its box, short enough
-/// that a box around something that has gone does not linger.
-const BELIEVABLE: std::time::Duration = std::time::Duration::from_millis(400);
-
-/// This window's selection, if its element is still being laid out.
+/// Whether the element is still *there* is not answered here. A caller in the
+/// paint phase can settle that exactly by comparing [`Selection::painted`]
+/// against the moment its own frame began; a duration would only be a guess,
+/// and a guess is what made the box linger.
 pub fn current<'a>(window: &Window, cx: &'a App) -> Option<&'a Selection> {
     let window_id = window.window_handle().window_id();
     cx.try_global::<Selections>()
         .and_then(|selections| selections.0.get(&window_id))
-        .filter(|selection| selection.painted.elapsed() < BELIEVABLE)
 }
 
 /// Shrink `bounds` by `edges` on every side, never past zero.
