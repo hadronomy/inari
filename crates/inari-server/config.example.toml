@@ -32,6 +32,7 @@ enabled = true
 issuer_url = "https://identity.example.com"
 client_id = "inari-controller"
 client_secret_file = "/var/run/secrets/inari/oidc-client-secret"
+workload_audience = "urn:inari:managed-workload"
 scopes = ["openid", "profile", "email", "urn:zitadel:iam:org:project:roles"]
 role_claim = "urn:zitadel:iam:org:project:roles"
 

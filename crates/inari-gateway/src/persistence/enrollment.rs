@@ -1,7 +1,9 @@
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QuerySelect, TransactionTrait};
 
-use super::entity::value::{InvitationState, StoredActions, StoredJwk, StoredSnapshot};
+use super::entity::value::{
+    InvitationState, StoredActions, StoredDispatchEncryptionKey, StoredJwk, StoredSnapshot,
+};
 use super::entity::{agent, invitation};
 use super::{AgentEnrollmentRecord, GatewayRepository, stored_time};
 use crate::audit::{AuditAction, AuditEventDraft, AuditOutcome, AuditResource};
@@ -44,6 +46,7 @@ impl GatewayRepository {
             key_id: Set(enrollment.key_id.clone()),
             jwk_thumbprint: Set(enrollment.jwk_thumbprint),
             public_jwk: Set(StoredJwk(enrollment.public_jwk)),
+            dispatch_key: Set(Some(StoredDispatchEncryptionKey(enrollment.dispatch_key))),
             certificate_pem: Set(enrollment.certificate_pem),
             namespace: Set(enrollment.namespace),
             protocol_version: Set(enrollment
@@ -61,6 +64,7 @@ impl GatewayRepository {
                 .update_column(agent::COLUMN.key_id)
                 .update_column(agent::COLUMN.jwk_thumbprint)
                 .update_column(agent::COLUMN.public_jwk)
+                .update_column(agent::COLUMN.dispatch_key)
                 .update_column(agent::COLUMN.certificate_pem)
                 .update_column(agent::COLUMN.namespace)
                 .update_column(agent::COLUMN.protocol_version)

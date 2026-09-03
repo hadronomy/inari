@@ -18,6 +18,7 @@ from ...security.certificates.store import (
     ManagedCertificate,
 )
 from ...security.identity import AgentIdentityService
+from ...security.dispatch_keys import DispatchEncryptionKeyService
 from ...security.secrets import SecretStore
 from ...security.files import write_text_owner_only
 from ...security.tls import TlsContextFactory
@@ -67,6 +68,7 @@ class GatewayEnrollmentService:
         self.settings = settings
         self.identity_service = identity_service
         self.secret_store = secret_store
+        self.dispatch_keys = DispatchEncryptionKeyService(secret_store)
         self.tls_context_factory = tls_context_factory
         self.certificate_service = certificate_service
         self.auth_provider = auth_provider
@@ -84,6 +86,9 @@ class GatewayEnrollmentService:
         if not self.metadata_path.exists():
             return None
         payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        dispatch_key = self.dispatch_keys.get_or_create()
+        if payload.get("dispatch_key_id") != dispatch_key.key_id:
+            return None
         data_plane_payload = payload.get("data_plane")
         if not isinstance(data_plane_payload, dict):
             return None
@@ -185,10 +190,12 @@ class GatewayEnrollmentService:
             return None
 
         identity = self.identity_service.get_or_create_identity()
+        dispatch_key = self.dispatch_keys.get_or_create()
         request_payload = EnrollmentRequestPayload(
             agent_id=identity.agent_id,
             key_id=identity.key_id,
             public_jwk=dict(identity.public_jwk),
+            dispatch_key=dispatch_key.public_descriptor(),
             certificate_pem=identity.certificate_pem,
             csr_pem=self.identity_service.build_csr_pem(),
             snapshot=self.snapshot_provider(),
@@ -326,6 +333,7 @@ class GatewayEnrollmentService:
     def _save_enrollment(self, record: GatewayEnrollmentRecord) -> None:
         raw_payload = record.to_persisted_dict()
         payload = {key: _serialize_value(value) for key, value in raw_payload.items()}
+        payload["dispatch_key_id"] = self.dispatch_keys.get_or_create().key_id
         write_text_owner_only(
             self.metadata_path,
             json.dumps(payload, indent=2, sort_keys=True),

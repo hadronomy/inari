@@ -3,6 +3,7 @@ mod commands;
 mod enrollment;
 mod entity;
 mod fleet;
+mod managed_work;
 mod onboarding;
 mod publications;
 
@@ -11,8 +12,8 @@ use jsonwebtoken::jwk::Jwk;
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait};
 
 use crate::protocol::{
-    AgentId, AgentPublication, ControllerCommand, GatewaySnapshot, JobId, JobState, OrganizationId,
-    ProtocolVersion, SiteId,
+    AgentId, AgentPublication, ControllerCommand, DispatchEncryptionKey, GatewaySnapshot, JobId,
+    JobState, OrganizationId, ProtocolVersion, SiteId,
 };
 use crate::{GatewayError, GatewayResult};
 
@@ -36,6 +37,7 @@ pub struct AgentEnrollmentRecord {
     pub key_id: String,
     pub jwk_thumbprint: String,
     pub public_jwk: Jwk,
+    pub dispatch_key: DispatchEncryptionKey,
     pub certificate_pem: Option<String>,
     pub namespace: String,
     pub protocol_version: ProtocolVersion,
@@ -69,6 +71,45 @@ pub struct PersistedAgentStatus {
     pub message_id: String,
     pub received_at: DateTime<Utc>,
     pub snapshot: GatewaySnapshot,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManagedWorkTargetRecord {
+    pub organization_id: OrganizationId,
+    pub site_id: SiteId,
+    pub agent_id: AgentId,
+    pub device_id: crate::protocol::DeviceId,
+    pub device_state: crate::protocol::DeviceState,
+    pub capabilities: Vec<crate::protocol::DeviceCapability>,
+    pub dispatch_key: DispatchEncryptionKey,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewManagedWorkPreflight {
+    pub preflight_id: crate::protocol::ManagedPreflightId,
+    pub request: crate::protocol::ManagedWorkPreflightRequest,
+    pub dispatch_key_id: String,
+    pub capability_digest: String,
+    pub work_expires_at: DateTime<Utc>,
+    pub idempotency_expires_at: DateTime<Utc>,
+    pub submit_before: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PersistedManagedWork {
+    pub managed_work_id: crate::protocol::ManagedWorkId,
+    pub print_intent_id: crate::protocol::PrintIntentId,
+    pub scope: crate::protocol::ManagedWorkScope,
+    pub device_id: crate::protocol::DeviceId,
+    pub operation: crate::protocol::ManagedDocumentOperation,
+    pub state: crate::protocol::ManagedWorkState,
+    pub print_job_id: Option<String>,
+    pub error_code: Option<String>,
+    pub message_key: String,
+    pub admitted_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
 }
 
 fn stored_time(value: DateTime<Utc>) -> DateTime<FixedOffset> {

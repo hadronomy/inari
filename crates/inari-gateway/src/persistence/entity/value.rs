@@ -4,11 +4,15 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    AgentPublication, ControllerCommand, DeviceCapability, GatewaySnapshot, StructuredFields,
+    AgentPublication, ControllerCommand, DeviceCapability, DispatchEncryptionKey, GatewaySnapshot,
+    ManagedWorkPreflightRequest, ReportBindingClaim, SealedManagedDocument, StructuredFields,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredJwk(pub Jwk);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
+pub struct StoredDispatchEncryptionKey(pub DispatchEncryptionKey);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredActions(pub Vec<String>);
@@ -24,6 +28,15 @@ pub struct StoredPublication(pub AgentPublication);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredCapabilities(pub Vec<DeviceCapability>);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
+pub struct StoredReportBindingClaim(pub ReportBindingClaim);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
+pub struct StoredSealedManagedDocument(pub SealedManagedDocument);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
+pub struct StoredManagedWorkPreflightRequest(pub ManagedWorkPreflightRequest);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredAuditDetail(pub StructuredFields);
@@ -64,6 +77,34 @@ pub enum CommandState {
     Failed,
     #[sea_orm(string_value = "superseded")]
     Superseded,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Text")]
+pub enum ManagedDocumentOperationValue {
+    #[sea_orm(string_value = "report_pdf")]
+    ReportPdf,
+    #[sea_orm(string_value = "label_document")]
+    LabelDocument,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Text")]
+pub enum ManagedWorkStateValue {
+    #[sea_orm(string_value = "pending_agent")]
+    PendingAgent,
+    #[sea_orm(string_value = "dispatching")]
+    Dispatching,
+    #[sea_orm(string_value = "accepted")]
+    Accepted,
+    #[sea_orm(string_value = "rejected")]
+    Rejected,
+    #[sea_orm(string_value = "canceled")]
+    Canceled,
+    #[sea_orm(string_value = "expired")]
+    Expired,
+    #[sea_orm(string_value = "recovery_uncertain")]
+    RecoveryUncertain,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]

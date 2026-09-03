@@ -36,6 +36,8 @@ Each agent keeps a persistent logical and cryptographic identity:
 - `agent_id` — stable managed agent identifier;
 - `key_id` — identifier for the signing key;
 - `public_jwk` — Ed25519 public key in OKP JWK form;
+- `dispatch_key` — X25519 public key used to seal Managed Device Work for this
+  Agent;
 - `csr_pem` — PKCS#10 request signed by that key;
 - `certificate_pem` — current managed certificate, when one exists.
 
@@ -107,6 +109,11 @@ Content-Type: application/json
     "kid": "kid_123",
     "x": "..."
   },
+  "dispatch_key": {
+    "key_id": "dispatch_0123456789abcdef",
+    "kem": "dhkem_x25519_hkdf_sha256",
+    "public_key_base64url": "..."
+  },
   "certificate_pem": null,
   "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n",
   "snapshot": {
@@ -121,9 +128,11 @@ Content-Type: application/json
 }
 ```
 
-`agent_id`, `key_id`, `public_jwk`, `csr_pem`, and `snapshot` are required. The
-snapshot describes the agent’s observed state and capabilities; it never grants
-permissions to the controller.
+`agent_id`, `key_id`, `public_jwk`, `dispatch_key`, `csr_pem`, and `snapshot` are
+required. The snapshot describes the Agent’s observed state and capabilities.
+It never grants permissions to the Controller. The Agent keeps the dispatch
+private key in its protected secret store. The Controller stores only the public
+key.
 
 All API errors use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
 details with `Content-Type: application/problem+json`.
@@ -232,6 +241,34 @@ GET /api/zenoh/v1/iot/v1/agents/agt_123/status/latest
 It does not replace native Zenoh traffic. The typed Inari API exposes controller
 resources such as `GET /api/inari/v1/agents/{agent_id}` separately; an agent
 detail includes the latest durable status observed by the controller.
+
+## Managed Work admission
+
+The Odoo backend uses a separate HTTPS workload API for report and label
+admission:
+
+| Operation | Route |
+| --- | --- |
+| Check the target and get its dispatch key | `POST /api/inari/v1/managed-work/preflight` |
+| Submit sealed work | `POST /api/inari/v1/managed-work` |
+| Read durable state | `GET /api/inari/v1/managed-work/{managed_work_id}` |
+
+These routes accept an OIDC workload access token. The token must use the
+configured workload audience. It must contain `inari_database`,
+`inari_company_id`, `inari_organization_id`, and a `scope` claim. Write routes
+require `managed_work:write`. The read route requires `managed_work:read`. Each
+request must match the database, company, and Organization in the token.
+
+Preflight checks the durable Agent and Device scope, online state, print
+capability, and current dispatch key. A ready result fixes the work deadline,
+idempotency deadline, payload media type, and dispatch key before Odoo renders
+and seals the document.
+
+Submission requires `Idempotency-Key`. The Controller stores the sealed HPKE
+document, fingerprints, binding claim, scope, deadlines, and state in one
+transaction. It does not receive or store the plaintext PDF or Label Document.
+The PDF plaintext limit is 10 MiB. The Label Document plaintext limit is 2 MiB.
+Queue admission returns HTTP 429 when the Agent or Organization limit is full.
 
 ## Commands
 

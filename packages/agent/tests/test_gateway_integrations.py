@@ -204,6 +204,10 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     assert record is not None
     assert http_client.last_post_headers["Authorization"] == "Bearer bootstrap-token"
     assert "enrollment_code" not in http_client.last_post_json
+    assert http_client.last_post_json["dispatch_key"]["kem"] == (
+        "dhkem_x25519_hkdf_sha256"
+    )
+    assert http_client.last_post_json["dispatch_key"]["key_id"].startswith("dispatch_")
     assert record.certificate_enrollment is not None
     assert record.certificate_enrollment.bootstrap_auth is not None
     assert (
@@ -219,6 +223,7 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
         (tmp_path / "upstream-enrollment.json").read_text(encoding="utf-8")
     )
     assert "certificate_enrollment" in metadata
+    assert metadata["dispatch_key_id"].startswith("dispatch_")
     assert "token" not in metadata["certificate_enrollment"]["bootstrap_auth"]
 
     reloaded = service.load_enrollment()

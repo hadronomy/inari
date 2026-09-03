@@ -12,6 +12,7 @@ mod enrollment;
 mod fleet;
 mod jobs;
 mod keyspace;
+mod managed_work;
 mod models;
 mod runtime;
 mod store;

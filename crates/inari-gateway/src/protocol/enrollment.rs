@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use jsonwebtoken::jwk::Jwk;
 use serde::{Deserialize, Serialize};
 
-use super::{AgentId, GatewaySnapshot, ProtocolDescriptor, ProtocolVersion};
+use super::{AgentId, DispatchEncryptionKey, GatewaySnapshot, ProtocolDescriptor, ProtocolVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -12,6 +12,7 @@ pub struct EnrollmentRequest {
     pub agent_id: AgentId,
     pub key_id: String,
     pub public_jwk: Jwk,
+    pub dispatch_key: DispatchEncryptionKey,
     #[serde(default)]
     pub certificate_pem: Option<String>,
     pub csr_pem: String,

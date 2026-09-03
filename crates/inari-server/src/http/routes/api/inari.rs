@@ -1,4 +1,4 @@
-use axum::extract::{Extension, State};
+use axum::extract::{DefaultBodyLimit, Extension, State};
 use axum::http::header::LOCATION;
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -11,15 +11,18 @@ use inari_gateway::audit::{AuditAction, AuditEvent, AuditEventDraft, AuditOutcom
 use inari_gateway::onboarding::InvitationId;
 use inari_gateway::protocol::{
     AgentDetail, AgentId, AgentSummary, DeviceSummary, EnrollmentRequest, EnrollmentResponse,
-    JobId, JobList, JobRecord, JobRequest, SiteId, SiteSummary,
+    JobId, JobList, JobRecord, JobRequest, ManagedWorkId, ManagedWorkPreflightRequest,
+    ManagedWorkPreflightResult, ManagedWorkRecord, ManagedWorkSubmission, SiteId, SiteSummary,
 };
 use inari_web::InvitationPreview;
 use tower_http::request_id::RequestId;
 
 use super::extract::{ApiJson, ApiPath, ApiQuery, IdempotencyKey};
 use crate::error::AppError;
-use crate::identity::{Permission, Principal};
+use crate::identity::{Permission, Principal, WorkloadPrincipal};
 use crate::state::AppState;
+
+const MANAGED_WORK_BODY_LIMIT: usize = 15 * 1024 * 1024;
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -32,7 +35,75 @@ pub(super) fn router() -> Router<AppState> {
         .route("/agents/{agent_id}/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{job_id}", get(get_job))
         .route("/jobs/{job_id}/cancellation", put(cancel_job))
+        .route("/managed-work/preflight", post(preflight_managed_work))
+        .route(
+            "/managed-work",
+            post(submit_managed_work).layer(DefaultBodyLimit::max(MANAGED_WORK_BODY_LIMIT)),
+        )
+        .route("/managed-work/{managed_work_id}", get(get_managed_work))
         .route("/audit-events", get(list_audit_events))
+}
+
+async fn preflight_managed_work(
+    principal: WorkloadPrincipal,
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<ManagedWorkPreflightRequest>,
+) -> Result<Json<ManagedWorkPreflightResult>, AppError> {
+    principal.require("managed_work:write")?;
+    principal.require_scope(&request.scope)?;
+    let _permit = state.acquire_inari_api_permit().await?;
+    state
+        .managed_gateway()
+        .preflight_managed_work(request)
+        .await
+        .map(Json)
+}
+
+async fn submit_managed_work(
+    principal: WorkloadPrincipal,
+    State(state): State<AppState>,
+    idempotency_key: IdempotencyKey,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(request): ApiJson<ManagedWorkSubmission>,
+) -> Result<Response, AppError> {
+    principal.require("managed_work:write")?;
+    principal.require_scope(&request.scope)?;
+    let _permit = state.acquire_inari_api_permit().await?;
+    let managed_work_id = idempotency_key.managed_work_id(&request.scope.organization_id)?;
+    let organization_id = request.scope.organization_id.clone();
+    let receipt = state
+        .managed_gateway()
+        .submit_managed_work(managed_work_id, request)
+        .await?;
+    state
+        .managed_gateway()
+        .record_audit_event(AuditEventDraft {
+            organization_id,
+            actor_id: principal.identity().actor_id.clone(),
+            action: AuditAction::ManagedWorkSubmitted,
+            resource: AuditResource::ManagedWork {
+                managed_work_id: receipt.managed_work_id.clone(),
+            },
+            outcome: AuditOutcome::Succeeded,
+            request_id: request_id_value(request_id),
+        })
+        .await?;
+    accepted_managed_work(receipt)
+}
+
+async fn get_managed_work(
+    principal: WorkloadPrincipal,
+    State(state): State<AppState>,
+    ApiPath(managed_work_id): ApiPath<ManagedWorkId>,
+) -> Result<Json<ManagedWorkRecord>, AppError> {
+    principal.require("managed_work:read")?;
+    let _permit = state.acquire_inari_api_permit().await?;
+    let record = state
+        .managed_gateway()
+        .managed_work(&managed_work_id)
+        .await?;
+    principal.require_scope(&record.scope)?;
+    Ok(Json(record))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -231,6 +302,21 @@ fn accepted_job(receipt: inari_gateway::protocol::JobReceipt) -> Result<Response
         .map_err(|source| {
             AppError::internal("job_location", "The job resource location is invalid.")
                 .with_source(source)
+        })?;
+    Ok((StatusCode::ACCEPTED, [(LOCATION, location)], Json(receipt)).into_response())
+}
+
+fn accepted_managed_work(
+    receipt: inari_gateway::protocol::ManagedWorkReceipt,
+) -> Result<Response, AppError> {
+    let location =
+        HeaderValue::from_str(&format!("/api/inari/v1/managed-work/{}", receipt.managed_work_id))
+            .map_err(|source| {
+            AppError::internal(
+                "managed_work_location",
+                "The Managed Work resource location is invalid.",
+            )
+            .with_source(source)
         })?;
     Ok((StatusCode::ACCEPTED, [(LOCATION, location)], Json(receipt)).into_response())
 }

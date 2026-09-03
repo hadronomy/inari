@@ -7,6 +7,7 @@ mod m20260712_223023_create_fleet;
 mod m20260712_223024_create_enrollment;
 mod m20260712_223026_create_gateway_data;
 mod m20260712_223027_create_sessions;
+mod m20260903_223028_create_managed_work;
 
 pub struct Migrator;
 
@@ -18,6 +19,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260712_223024_create_enrollment::Migration),
             Box::new(m20260712_223026_create_gateway_data::Migration),
             Box::new(m20260712_223027_create_sessions::Migration),
+            Box::new(m20260903_223028_create_managed_work::Migration),
         ]
     }
 }

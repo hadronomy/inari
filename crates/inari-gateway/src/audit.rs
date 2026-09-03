@@ -3,13 +3,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::ActorId;
 use crate::onboarding::InvitationId;
-use crate::protocol::{AgentId, JobId, OrganizationId};
+use crate::protocol::{AgentId, JobId, ManagedWorkId, OrganizationId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuditAction {
     JobCreated,
     JobCancellationRequested,
+    ManagedWorkSubmitted,
     InvitationCreated,
     InvitationRevoked,
     AgentEnrolled,
@@ -23,6 +24,7 @@ impl AuditAction {
         match self {
             Self::JobCreated => "job.created",
             Self::JobCancellationRequested => "job.cancellation_requested",
+            Self::ManagedWorkSubmitted => "managed_work.submitted",
             Self::InvitationCreated => "invitation.created",
             Self::InvitationRevoked => "invitation.revoked",
             Self::AgentEnrolled => "agent.enrolled",
@@ -39,6 +41,7 @@ pub enum AuditResource {
     Agent { agent_id: AgentId },
     Invitation { invitation_id: InvitationId },
     Job { job_id: JobId },
+    ManagedWork { managed_work_id: ManagedWorkId },
     ZenohSelector { selector: String },
 }
 
@@ -49,6 +52,9 @@ impl AuditResource {
             Self::Agent { agent_id } => ("agent", Some(agent_id.as_str())),
             Self::Invitation { invitation_id } => ("invitation", Some(invitation_id.as_str())),
             Self::Job { job_id } => ("job", Some(job_id.as_str())),
+            Self::ManagedWork { managed_work_id } => {
+                ("managed_work", Some(managed_work_id.as_str()))
+            },
             Self::ZenohSelector { selector } => ("zenoh_selector", Some(selector)),
         }
     }
@@ -66,6 +72,7 @@ impl AuditResource {
             "agent" => Ok(Self::Agent { agent_id: required_id()?.parse()? }),
             "invitation" => Ok(Self::Invitation { invitation_id: required_id()?.parse()? }),
             "job" => Ok(Self::Job { job_id: required_id()?.parse()? }),
+            "managed_work" => Ok(Self::ManagedWork { managed_work_id: required_id()?.parse()? }),
             "zenoh_selector" => Ok(Self::ZenohSelector { selector: required_id()? }),
             other => Err(crate::GatewayError::CorruptState(format!(
                 "unknown audit resource kind {other:?}"

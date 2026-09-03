@@ -1,7 +1,12 @@
 use chrono::Utc;
-use inari_gateway::protocol::{AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord};
+use inari_gateway::protocol::{
+    AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord, ManagedWorkId, ManagedWorkSubmission,
+};
 use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
-use inari_gateway::{AgentEnrollmentRecord, GatewayRepository};
+use inari_gateway::{
+    AgentEnrollmentRecord, GatewayRepository, ManagedWorkTargetRecord, NewManagedWorkPreflight,
+    PersistedManagedWork,
+};
 use sha2::{Digest, Sha256};
 
 use super::models::{
@@ -72,6 +77,7 @@ impl ManagedGatewayStore {
                     key_id: enrollment.key_id,
                     jwk_thumbprint: enrollment.public_jwk_fingerprint,
                     public_jwk: enrollment.public_jwk,
+                    dispatch_key: enrollment.dispatch_key,
                     certificate_pem: enrollment.certificate_pem,
                     namespace: enrollment.namespace,
                     protocol_version: enrollment.protocol_version,
@@ -212,6 +218,66 @@ impl ManagedGatewayStore {
                 })
             })
             .map_err(AppError::from)
+    }
+
+    pub(super) async fn managed_work_target(
+        &self,
+        organization_id: &OrganizationId,
+        site_id: &SiteId,
+        agent_id: &AgentId,
+        device_id: &inari_gateway::protocol::DeviceId,
+    ) -> AppResult<ManagedWorkTargetRecord> {
+        self.repository()?
+            .managed_work_target(
+                organization_id.as_str(),
+                site_id.as_str(),
+                agent_id.as_str(),
+                device_id.as_str(),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn create_managed_work_preflight(
+        &self,
+        preflight: NewManagedWorkPreflight,
+    ) -> AppResult<()> {
+        self.repository()?
+            .create_managed_work_preflight(preflight)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn admit_managed_work(
+        &self,
+        managed_work_id: &ManagedWorkId,
+        submission: &ManagedWorkSubmission,
+        request_fingerprint: &[u8; 32],
+        payload_fingerprint: &[u8; 32],
+        payload_bytes: i64,
+        now: chrono::DateTime<Utc>,
+    ) -> AppResult<PersistedManagedWork> {
+        self.repository()?
+            .admit_managed_work(
+                managed_work_id,
+                submission,
+                request_fingerprint,
+                payload_fingerprint,
+                payload_bytes,
+                now,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn managed_work(
+        &self,
+        managed_work_id: &ManagedWorkId,
+    ) -> AppResult<PersistedManagedWork> {
+        self.repository()?
+            .managed_work(managed_work_id)
+            .await
+            .map_err(Into::into)
     }
 }
 

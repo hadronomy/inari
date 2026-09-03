@@ -110,6 +110,8 @@ pub enum AppError {
     #[error("{message}")]
     Conflict { code: &'static str, message: Cow<'static, str> },
     #[error("{message}")]
+    TooManyRequests { code: &'static str, message: Cow<'static, str> },
+    #[error("{message}")]
     NotFound { code: &'static str, message: Cow<'static, str> },
     #[error("{message}")]
     NotImplemented { code: &'static str, message: Cow<'static, str> },
@@ -143,6 +145,11 @@ impl AppError {
     #[must_use]
     pub fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
         Self::Conflict { code: "conflict", message: message.into() }
+    }
+
+    #[must_use]
+    pub fn too_many_requests(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::TooManyRequests { code: "too_many_requests", message: message.into() }
     }
 
     #[must_use]
@@ -199,6 +206,7 @@ impl AppError {
             | Self::Unauthorized { code, .. }
             | Self::Forbidden { code, .. }
             | Self::Conflict { code, .. }
+            | Self::TooManyRequests { code, .. }
             | Self::NotFound { code, .. }
             | Self::NotImplemented { code, .. }
             | Self::ServiceUnavailable { code, .. }
@@ -213,6 +221,7 @@ impl AppError {
             Self::Unauthorized { .. } => StatusCode::UNAUTHORIZED,
             Self::Forbidden { .. } => StatusCode::FORBIDDEN,
             Self::Conflict { .. } => StatusCode::CONFLICT,
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::ServiceUnavailable { .. } | Self::GracefulShutdownTimeout { .. } => {
@@ -245,6 +254,7 @@ impl AppError {
             | Self::Unauthorized { .. }
             | Self::Forbidden { .. }
             | Self::Conflict { .. }
+            | Self::TooManyRequests { .. }
             | Self::NotFound { .. }
             | Self::NotImplemented { .. }
             | Self::ServiceUnavailable { .. }
@@ -280,6 +290,7 @@ impl From<inari_gateway::GatewayError> for AppError {
             inari_gateway::GatewayError::Forbidden(message) => Self::forbidden(message),
             inari_gateway::GatewayError::NotFound(message) => Self::not_found(message),
             inari_gateway::GatewayError::Conflict(message) => Self::conflict(message),
+            inari_gateway::GatewayError::Capacity(message) => Self::too_many_requests(message),
             inari_gateway::GatewayError::Unavailable(message) => Self::service_unavailable(message),
             source => {
                 Self::internal("managed_gateway_error", "The managed gateway operation failed.")

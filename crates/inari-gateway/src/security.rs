@@ -9,6 +9,7 @@ use x509_parser::parse_x509_certificate;
 use x509_parser::pem::parse_x509_pem;
 use x509_parser::prelude::FromDer;
 
+use crate::protocol::{DispatchEncryptionKey, DispatchKem};
 use crate::{GatewayError, GatewayResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +18,47 @@ pub struct ValidatedIdentity {
     pub jwk_thumbprint: String,
     pub public_key: [u8; 32],
     pub csr_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedDispatchKey {
+    pub key_id: String,
+    pub public_key: [u8; 32],
+    pub fingerprint: String,
+}
+
+pub fn validate_dispatch_key(key: &DispatchEncryptionKey) -> GatewayResult<ValidatedDispatchKey> {
+    if key.key_id.is_empty()
+        || key.key_id.len() > 256
+        || !key
+            .key_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(GatewayError::InvalidInput(
+            "dispatch key IDs must use 1 to 256 ASCII letters, digits, hyphens, or underscores"
+                .into(),
+        ));
+    }
+    if key.kem != DispatchKem::DhkemX25519HkdfSha256 {
+        return Err(GatewayError::InvalidInput("unsupported dispatch KEM".into()));
+    }
+    let public_key = URL_SAFE_NO_PAD
+        .decode(key.public_key_base64url.as_bytes())
+        .map_err(|_| GatewayError::InvalidInput("dispatch public key is not base64url".into()))?;
+    let public_key: [u8; 32] = public_key
+        .try_into()
+        .map_err(|_| GatewayError::InvalidInput("X25519 public keys must be 32 bytes".into()))?;
+    if public_key.iter().all(|byte| *byte == 0) {
+        return Err(GatewayError::InvalidInput(
+            "X25519 public keys must not be the all-zero value".into(),
+        ));
+    }
+    Ok(ValidatedDispatchKey {
+        key_id: key.key_id.clone(),
+        public_key,
+        fingerprint: URL_SAFE_NO_PAD.encode(Sha256::digest(public_key)),
+    })
 }
 
 pub fn validate_identity(
@@ -94,7 +136,9 @@ mod tests {
     use jsonwebtoken::jwk::Jwk;
     use serde_json::json;
 
-    use super::validate_identity;
+    use crate::protocol::{DispatchEncryptionKey, DispatchKem};
+
+    use super::{validate_dispatch_key, validate_identity};
 
     const CSR: &str = "-----BEGIN CERTIFICATE REQUEST-----\nMIGSMEYCAQAwEzERMA8GA1UEAwwIYWd0X3Rlc3QwKjAFBgMrZXADIQAhvMvqGoKi\nttgqTZhDbzMb8IFPEaHQvEGR9AOkm+qecaAAMAUGAytlcANBAA8BTmcCjYiBRLuZ\nqNcH8/6K/ZYHnbHl7xksiR9pzqqi+jbcKi8gKJ62q5ApmtDm++N8z2MHzNPyxgFf\neZcf8wQ=\n-----END CERTIFICATE REQUEST-----\n";
 
@@ -137,5 +181,19 @@ mod tests {
                 .to_string()
                 .contains("does not match")
         );
+    }
+
+    #[test]
+    fn validates_a_bounded_x25519_dispatch_key() {
+        let key = DispatchEncryptionKey {
+            key_id: "dispatch_test".into(),
+            kem: DispatchKem::DhkemX25519HkdfSha256,
+            public_key_base64url: "ERERERERERERERERERERERERERERERERERERERERERE".into(),
+        };
+
+        let validated = validate_dispatch_key(&key).expect("dispatch key should validate");
+
+        assert_eq!(validated.public_key, [0x11; 32]);
+        assert!(!validated.fingerprint.is_empty());
     }
 }

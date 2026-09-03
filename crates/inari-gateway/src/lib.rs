@@ -11,6 +11,6 @@ pub mod security;
 
 pub use error::{GatewayError, GatewayResult};
 pub use persistence::{
-    AgentEnrollmentRecord, GatewayRepository, PersistedAgentStatus, PersistedCommand,
-    PersistedPublication,
+    AgentEnrollmentRecord, GatewayRepository, ManagedWorkTargetRecord, NewManagedWorkPreflight,
+    PersistedAgentStatus, PersistedCommand, PersistedManagedWork, PersistedPublication,
 };

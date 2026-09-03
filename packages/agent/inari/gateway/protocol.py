@@ -207,6 +207,12 @@ class EnrollmentDataPlanePayload(GatewayProtocolModel):
     )
 
 
+class DispatchEncryptionKeyPayload(GatewayProtocolModel):
+    key_id: str = Field(min_length=1, max_length=256)
+    kem: Literal["dhkem_x25519_hkdf_sha256"] = "dhkem_x25519_hkdf_sha256"
+    public_key_base64url: str = Field(min_length=43, max_length=43)
+
+
 class EnrollmentRequestPayload(GatewayProtocolModel):
     protocol: GatewayProtocolDescriptor = Field(
         default_factory=GatewayProtocolDescriptor
@@ -214,6 +220,7 @@ class EnrollmentRequestPayload(GatewayProtocolModel):
     agent_id: str
     key_id: str
     public_jwk: Ed25519PublicJwk
+    dispatch_key: DispatchEncryptionKeyPayload
     certificate_pem: str | None = None
     csr_pem: str
     snapshot: GatewaySnapshotPayload
@@ -296,8 +303,7 @@ class ControllerCancelJobMessage(GatewayProtocolModel):
 
 
 ControllerCommandMessage = Annotated[
-    ControllerExecuteDeviceCommandMessage
-    | ControllerCancelJobMessage,
+    ControllerExecuteDeviceCommandMessage | ControllerCancelJobMessage,
     Field(discriminator="type"),
 ]
 

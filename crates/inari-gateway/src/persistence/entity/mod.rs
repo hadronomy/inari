@@ -4,6 +4,8 @@ pub mod command;
 pub mod device;
 pub mod invitation;
 pub mod invitation_attempt;
+pub mod managed_work;
+pub mod managed_work_preflight;
 pub mod organization;
 pub mod publication;
 pub mod site;

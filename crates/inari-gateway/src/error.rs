@@ -13,6 +13,8 @@ pub enum GatewayError {
     #[error("{0}")]
     Conflict(String),
     #[error("{0}")]
+    Capacity(String),
+    #[error("{0}")]
     Unavailable(String),
     #[error("managed gateway persistence failed")]
     Persistence(#[from] sea_orm::DbErr),
