@@ -17,6 +17,7 @@
 
 pub mod bench;
 pub mod bubble;
+pub mod chart;
 pub mod control;
 pub mod dial;
 pub mod element;
@@ -87,7 +88,7 @@ pub fn init(cx: &mut App) {
 /// for the outline-everything toggle, and returns the launcher and overlay.
 /// Ordinary components carry no debugging code at all.
 pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
-    frames::tick(cx);
+    frames::tick(window, cx);
     panel::observe(window, cx);
 
     // One global, and every div in the window outlines itself
