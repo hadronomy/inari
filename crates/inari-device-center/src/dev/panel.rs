@@ -13,7 +13,7 @@
 //! The Bench and the application window get the same panel and the same tools.
 //! Only what the tools have to say differs.
 
-use std::{cell::OnceCell, collections::HashMap, collections::HashSet, time::Duration};
+use std::{cell::RefCell, collections::HashMap, collections::HashSet, time::Duration};
 
 /// One 60Hz frame, the floor the sparkline scales against so an idle window
 /// does not draw its two lazy renders as a full-height wall.
@@ -136,16 +136,32 @@ pub enum Picker {
     Disarm,
 }
 
-impl Global for Deck {}
+/// Every window's deck.
+///
+/// Keyed by window, because a panel belongs to the window it is docked in. Held
+/// as one value it was not a shared preference but a collision: switching the
+/// Bench to the Element screen switched the application's panel too, and the two
+/// then fought over the one set of controls between them, every frame.
+#[derive(Default)]
+struct Decks(HashMap<WindowId, Deck>);
 
-pub fn deck(cx: &App) -> Deck {
-    cx.try_global::<Deck>().copied().unwrap_or_default()
+impl Global for Decks {}
+
+pub fn deck(window: &Window, cx: &App) -> Deck {
+    let window_id = window.window_handle().window_id();
+    cx.try_global::<Decks>()
+        .and_then(|decks| decks.0.get(&window_id).copied())
+        .unwrap_or_default()
 }
 
-pub fn adjust(cx: &mut App, change: impl FnOnce(&mut Deck)) {
-    let mut deck = deck(cx);
+pub fn adjust(window: &Window, cx: &mut App, change: impl FnOnce(&mut Deck)) {
+    let window_id = window.window_handle().window_id();
+    let mut deck = deck(window, cx);
     change(&mut deck);
-    cx.set_global(deck);
+    if !cx.has_global::<Decks>() {
+        cx.set_global(Decks::default());
+    }
+    cx.update_global(|decks: &mut Decks, _| decks.0.insert(window_id, deck));
     cx.refresh_windows();
 }
 
@@ -201,9 +217,9 @@ pub fn is_open(window: &Window, cx: &App) -> bool {
 pub fn show(screen: Screen, window: &mut Window, cx: &mut App) {
     // A second press on the screen already showing closes the dock, so one
     // control both opens and dismisses.
-    let dismiss = is_open(window, cx) && deck(cx).screen == screen;
+    let dismiss = is_open(window, cx) && deck(window, cx).screen == screen;
     let opening = !dismiss && !is_open(window, cx);
-    adjust(cx, |deck| {
+    adjust(window, cx, |deck| {
         deck.screen = screen;
         if opening {
             // Opened to read, not to pick.
@@ -218,7 +234,7 @@ pub fn show(screen: Screen, window: &mut Window, cx: &mut App) {
 /// Arm GPUI's picker, and hand the panel to the screen that will have something
 /// to say the moment anything is picked.
 pub fn pick(inspector: &mut gpui::Inspector, window: &mut Window, cx: &mut App) {
-    adjust(cx, |deck| deck.screen = Screen::Element);
+    adjust(window, cx, |deck| deck.screen = Screen::Element);
     inspector.start_picking();
     window.refresh();
 }
@@ -229,7 +245,7 @@ pub fn pick(inspector: &mut gpui::Inspector, window: &mut Window, cx: &mut App) 
 /// the click that lands on something is the same click that shows its report.
 pub fn start_pick(window: &mut Window, cx: &mut App) {
     let opening = !is_open(window, cx);
-    adjust(cx, |deck| {
+    adjust(window, cx, |deck| {
         deck.screen = Screen::Element;
         deck.picker = Picker::Arm;
     });
@@ -241,43 +257,56 @@ pub fn start_pick(window: &mut Window, cx: &mut App) {
 /// Install the renderer. Must run after `gpui_component::init`, which registers
 /// its own; the last writer wins and we host its editors inside ours.
 pub fn install(cx: &mut App) {
-    let editors = OnceCell::new();
+    // One set of editors per window. Shared, the two panels handed the same
+    // `DivInspector` a different element every frame, and setting an editor's
+    // value puts its scroll back to the top — so the style blocks could not be
+    // scrolled at all while both windows were open.
+    let editors: RefCell<HashMap<WindowId, Entity<gpui_component::DivInspector>>> =
+        RefCell::new(HashMap::new());
     cx.register_inspector_element(move |id, state: &DivInspectorState, window, cx| {
         // Refreshed every frame, whatever the panel is showing. The overlay
         // draws from this, and a box that is only refreshed while its own
         // screen is open is a box that lies the moment you look away.
         element::remember(state, window, cx);
-        if deck(cx).screen != Screen::Element {
+        if deck(window, cx).screen != Screen::Element {
             return gpui::Empty.into_any_element();
         }
+        let window_id = window.window_handle().window_id();
         let editors = editors
-            .get_or_init(|| cx.new(|cx| gpui_component::DivInspector::new(window, cx)));
+            .borrow_mut()
+            .entry(window_id)
+            .or_insert_with(|| cx.new(|cx| gpui_component::DivInspector::new(window, cx)))
+            .clone();
         editors.update(cx, |div_inspector, cx| {
             div_inspector.update_inspected_element(id.clone(), state.clone(), window, cx);
         });
-        element::tool(&id, editors, window, cx)
+        element::tool(&id, &editors, window, cx)
     });
 
-    let panel = OnceCell::new();
+    let panels: RefCell<HashMap<WindowId, Entity<Panel>>> = RefCell::new(HashMap::new());
     cx.set_inspector_renderer(Box::new(move |inspector, window, cx| {
         mark_drawn(window, cx);
-        match deck(cx).picker {
+        match deck(window, cx).picker {
             Picker::AsIs => {},
             Picker::Arm => {
                 inspector.start_picking();
-                adjust(cx, |deck| deck.picker = Picker::AsIs);
+                adjust(window, cx, |deck| deck.picker = Picker::AsIs);
             },
             Picker::Disarm => {
                 inspector.stop_picking();
-                adjust(cx, |deck| deck.picker = Picker::AsIs);
+                adjust(window, cx, |deck| deck.picker = Picker::AsIs);
             },
         }
-        let panel = panel.get_or_init(|| cx.new(|_| Panel::default()));
+        let panel = panels
+            .borrow_mut()
+            .entry(window.window_handle().window_id())
+            .or_insert_with(|| cx.new(|_| Panel::default()))
+            .clone();
         // Always run, whatever the screen: the closure above is what keeps the
         // selection's geometry current, and it is cheap when nothing is asking
         // for the editors.
         let states = inspector.render_inspector_states(window, cx);
-        let states = if deck(cx).screen == Screen::Element { states } else { Vec::new() };
+        let states = if deck(window, cx).screen == Screen::Element { states } else { Vec::new() };
         let picking = inspector.is_picking();
         let body = panel.update(cx, |panel, cx| panel.body(states, window, cx));
         chrome(body, picking, window, cx)
@@ -307,7 +336,7 @@ impl Panel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.inari().clone();
-        let deck = deck(cx);
+        let deck = deck(window, cx);
         // A slider mid-travel and a press mid-drag both need the next frame.
         if control::animating() {
             window.request_animation_frame();
@@ -337,7 +366,7 @@ impl Panel {
         let Some(story) = dial::active_story(cx) else {
             return hint(&theme, "Open the Bench to tune a story.");
         };
-        let generation = deck(cx).generation;
+        let generation = deck(window, cx).generation;
         if self.story != Some(story) || self.generation != generation {
             self.story = Some(story);
             self.generation = generation;
@@ -391,10 +420,14 @@ impl Panel {
                         div()
                             .flex_1()
                             .min_w(px(0.0))
-                            .child(control::reset(&theme, moved, move |_, cx| {
-                                dial::reset(story, cx);
-                                adjust(cx, |deck| deck.generation += 1);
-                            })),
+                            .child(control::reset(
+                                &theme,
+                                moved,
+                                move |window: &mut Window, cx: &mut App| {
+                                    dial::reset(story, cx);
+                                    adjust(window, cx, |deck| deck.generation += 1);
+                                },
+                            )),
                     ),
             )
             .into_any_element()
@@ -550,11 +583,11 @@ fn number(value: &Value) -> f32 {
 fn chrome(
     body: AnyElement,
     picking: bool,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<gpui::Inspector>,
 ) -> AnyElement {
     let theme = cx.inari().clone();
-    let deck = deck(cx);
+    let deck = deck(window, cx);
     let tab = |screen: Screen| {
         Button::new(SharedString::from(format!("dev-screen-{}", screen.title())))
             .icon(screen.icon())
@@ -562,7 +595,9 @@ fn chrome(
             .small()
             .selected(screen == deck.screen)
             .tooltip(screen.title())
-            .on_click(move |_, _, cx| adjust(cx, |deck| deck.screen = screen))
+            .on_click(move |_, window: &mut Window, cx: &mut App| {
+                adjust(window, cx, |deck| deck.screen = screen)
+            })
     };
 
     let bar = div()
@@ -594,8 +629,8 @@ fn chrome(
                         .small()
                         .selected(deck.outline_all)
                         .tooltip("Outline every element")
-                        .on_click(|_, _, cx: &mut App| {
-                            adjust(cx, |deck| deck.outline_all = !deck.outline_all)
+                        .on_click(|_, window: &mut Window, cx: &mut App| {
+                            adjust(window, cx, |deck| deck.outline_all = !deck.outline_all)
                         }),
                 )
                 .child(
@@ -730,7 +765,9 @@ fn stage_tool(theme: &Theme, deck: Deck, cx: &App) -> AnyElement {
                     .hover(|style| style.bg(theme.wash_hover))
             })
             .child(label)
-            .on_click(move |_, _, cx| adjust(cx, |deck| deck.stage_width = value))
+            .on_click(move |_, window: &mut Window, cx: &mut App| {
+                adjust(window, cx, |deck| deck.stage_width = value)
+            })
     };
 
     let appearance = |label: &'static str, pick: Option<Appearance>| {
