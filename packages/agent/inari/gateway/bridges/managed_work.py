@@ -109,7 +109,7 @@ def managed_admission_request(
     )
     return AdmissionRequest(
         work=DocumentWork(
-            idempotency_key=dispatch.managed_work_id,
+            idempotency_key=dispatch.idempotency_key,
             context=context,
             document=document,
         ),

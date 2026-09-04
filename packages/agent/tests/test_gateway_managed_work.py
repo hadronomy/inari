@@ -150,7 +150,7 @@ def _message(*, sequence: int) -> ControllerDispatchDeviceWorkMessage:
                     "site_id": "site_test",
                     "agent_id": "agt_test",
                     "managed_work_id": "mw_test",
-                    "print_intent_id": "pi_test",
+                    "idempotency_key": "report:manual:17:1",
                     "payload_fingerprint": "a" * 64,
                     "dispatch_epoch": 7,
                     "sequence": sequence,
@@ -160,9 +160,7 @@ def _message(*, sequence: int) -> ControllerDispatchDeviceWorkMessage:
                 "sealed_envelope": {
                     "protocol_version": 1,
                     "key_id": "dispatch-test",
-                    "suite": (
-                        "dhkem_x25519_hkdf_sha256_hkdf_sha256_aes256_gcm"
-                    ),
+                    "suite": ("dhkem_x25519_hkdf_sha256_hkdf_sha256_aes256_gcm"),
                     "encapsulated_key_base64url": "a",
                     "ciphertext_base64url": "a",
                 },
@@ -174,6 +172,7 @@ def _message(*, sequence: int) -> ControllerDispatchDeviceWorkMessage:
 def _verified(*, sequence: int = 1) -> VerifiedManagedDispatch:
     return VerifiedManagedDispatch(
         managed_work_id="mw_test",
+        idempotency_key="report:manual:17:1",
         work=ManagedDeviceWorkPayload.model_validate(
             {
                 "contract_major": 1,

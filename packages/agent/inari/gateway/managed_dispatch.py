@@ -40,6 +40,7 @@ class _DispatchJwsHeader(GatewayProtocolModel):
 @dataclass(frozen=True, slots=True)
 class VerifiedManagedDispatch:
     managed_work_id: str
+    idempotency_key: str
     work: ManagedDeviceWorkPayload
     document_bytes: bytes
     dispatch_epoch: int
@@ -65,8 +66,7 @@ class ManagedDispatchVerifier:
     ) -> VerifiedManagedDispatch:
         trust = enrollment.managed_dispatch
         if (
-            ControllerAction.MANAGED_WORK_DISPATCH
-            not in enrollment.controller_actions
+            ControllerAction.MANAGED_WORK_DISPATCH not in enrollment.controller_actions
             or trust is None
         ):
             raise _dispatch_error(
@@ -143,7 +143,6 @@ class ManagedDispatchVerifier:
             work.scope.organization_id != aad.organization_id
             or work.scope.site_id != aad.site_id
             or work.scope.agent_id != aad.agent_id
-            or work.print_intent_id != aad.print_intent_id
         ):
             raise _dispatch_error(
                 "MANAGED_DISPATCH_WORK_MISMATCH",
@@ -158,6 +157,7 @@ class ManagedDispatchVerifier:
 
         return VerifiedManagedDispatch(
             managed_work_id=aad.managed_work_id,
+            idempotency_key=aad.idempotency_key,
             work=work,
             document_bytes=document_bytes,
             dispatch_epoch=aad.dispatch_epoch,
@@ -265,7 +265,12 @@ def _parse_canonical_model(payload: bytes, model_type):
         if rfc8785.dumps(value) != payload:
             raise ValueError("JSON is not in canonical form")
         return model_type.model_validate(value)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, ValueError) as exc:
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValidationError,
+        ValueError,
+    ) as exc:
         raise _dispatch_error(
             "MANAGED_DISPATCH_JWS_INVALID",
             "The managed dispatch JWS contains invalid canonical JSON.",
@@ -287,9 +292,7 @@ def _decode_document(work: ManagedDeviceWorkPayload) -> bytes:
             "The managed document base64 is not canonical.",
         )
     limit = (
-        _MAX_PDF_BYTES
-        if work.document.operation == "report_pdf"
-        else _MAX_LABEL_BYTES
+        _MAX_PDF_BYTES if work.document.operation == "report_pdf" else _MAX_LABEL_BYTES
     )
     if len(decoded) > limit:
         raise _dispatch_error(

@@ -106,7 +106,7 @@ def _dispatch_fixture() -> _DispatchFixture:
         "site_id": "site_test",
         "agent_id": "agt_test",
         "managed_work_id": "mw_test",
-        "print_intent_id": "pi_test",
+        "idempotency_key": "report:manual:17:1",
         "payload_fingerprint": sha256(document).hexdigest(),
         "dispatch_epoch": 7,
         "sequence": 42,
@@ -181,9 +181,7 @@ def _dispatch_fixture() -> _DispatchFixture:
             format=serialization.PublicFormat.Raw,
         )
     )
-    info = (
-        f"inari-managed-dispatch\0v1\0agt_test\0{recipient.key_id}".encode()
-    )
+    info = f"inari-managed-dispatch\0v1\0agt_test\0{recipient.key_id}".encode()
     encapsulated_key, sender = suite.create_sender_context(
         recipient_public_key,
         info=info,
@@ -202,9 +200,7 @@ def _dispatch_fixture() -> _DispatchFixture:
                 "sealed_envelope": {
                     "protocol_version": 1,
                     "key_id": recipient.key_id,
-                    "suite": (
-                        "dhkem_x25519_hkdf_sha256_hkdf_sha256_aes256_gcm"
-                    ),
+                    "suite": ("dhkem_x25519_hkdf_sha256_hkdf_sha256_aes256_gcm"),
                     "encapsulated_key_base64url": _base64url(encapsulated_key),
                     "ciphertext_base64url": _base64url(ciphertext),
                 },
