@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::engine::general_purpose::STANDARD;
 use chrono::{TimeDelta, Utc};
 use inari_gateway::protocol::{
     DeviceCapability, DeviceState, MANAGED_WORK_CONTRACT_MAJOR, ManagedDocumentOperation,
@@ -18,7 +18,6 @@ const WORK_TTL: Duration = Duration::from_secs(5 * 60);
 const IDEMPOTENCY_TTL: Duration = Duration::from_secs(90 * 24 * 60 * 60);
 const REPORT_PDF_LIMIT: usize = 10 * 1024 * 1024;
 const LABEL_DOCUMENT_LIMIT: usize = 2 * 1024 * 1024;
-const HPKE_AEAD_TAG_BYTES: usize = 16;
 
 impl ManagedGatewayController {
     pub async fn preflight_managed_work(
@@ -26,6 +25,7 @@ impl ManagedGatewayController {
         request: ManagedWorkPreflightRequest,
     ) -> AppResult<ManagedWorkPreflightResult> {
         self.ensure_enabled()?;
+        self.dispatch_signer()?;
         validate_preflight_request(&request)?;
         if request.scope.organization_id != self.inner.organization.id {
             return Err(AppError::forbidden(
@@ -80,7 +80,6 @@ impl ManagedGatewayController {
             media_type: request.operation.media_type().into(),
             device_id: request.device_id,
             capability_digest: Some(capability_digest),
-            dispatch_key: Some(target.dispatch_key),
             expires_at: Some(expires_at),
             idempotency_expires_at: Some(idempotency_expires_at),
             submit_before: Some(submit_before),
@@ -92,19 +91,36 @@ impl ManagedGatewayController {
     pub async fn submit_managed_work(
         &self,
         managed_work_id: ManagedWorkId,
+        idempotency_key: String,
         submission: ManagedWorkSubmission,
     ) -> AppResult<ManagedWorkReceipt> {
         self.ensure_enabled()?;
+        let signer = self
+            .inner
+            .dispatch_signer
+            .clone()
+            .ok_or_else(|| {
+                AppError::service_unavailable("Managed Work dispatch is not enabled.")
+            })?;
         validate_submission(&submission)?;
-        if submission.scope.organization_id != self.inner.organization.id {
+        if submission.work.scope.organization_id != self.inner.organization.id {
             return Err(AppError::forbidden(
                 "Managed Work Organization does not match this Controller.",
             ));
         }
         let payload_fingerprint = decode_fingerprint(&submission.payload_fingerprint)?;
-        let payload_bytes = decoded_ciphertext_size(&submission)?;
+        let payload = decoded_document(&submission)?;
+        let actual_payload_fingerprint: [u8; 32] = Sha256::digest(&payload).into();
+        if actual_payload_fingerprint != payload_fingerprint {
+            return Err(AppError::bad_request(
+                "Managed Work payload fingerprint does not match the document.",
+            ));
+        }
+        let payload_bytes = payload.len();
         let request_fingerprint: [u8; 32] = Sha256::digest(serde_json::to_vec(&submission)?).into();
-        let persisted = self
+        let dispatch_submission = submission.clone();
+        let dispatch_idempotency_key = idempotency_key.clone();
+        let (persisted, command) = self
             .inner
             .store
             .admit_managed_work(
@@ -115,9 +131,55 @@ impl ManagedGatewayController {
                 i64::try_from(payload_bytes).map_err(|_| {
                     AppError::bad_request("Managed Work payload size is out of range.")
                 })?,
-                Utc::now(),
+                move |actual_managed_work_id,
+                      sequence,
+                      command_id,
+                      message_id,
+                      issued_at,
+                      recipient_key,
+                      work_expires_at| {
+                    signer
+                        .command(
+                            actual_managed_work_id.clone(),
+                            dispatch_idempotency_key,
+                            dispatch_submission,
+                            recipient_key,
+                            work_expires_at,
+                            message_id.to_owned(),
+                            command_id.to_owned(),
+                            sequence,
+                            issued_at,
+                        )
+                        .map_err(|error| {
+                            inari_gateway::GatewayError::Unavailable(error.to_string())
+                        })
+                },
             )
             .await?;
+        if let Some(command) = command {
+            match self
+                .publish_live_command(&command)
+                .await
+            {
+                Ok(()) => {
+                    self.inner
+                        .store
+                        .mark_command_published(
+                            command.agent_id.as_str(),
+                            command.command_id.as_str(),
+                        )
+                        .await?;
+                },
+                Err(error) => {
+                    tracing::debug!(
+                        error = %error,
+                        command_id = %command.command_id,
+                        agent_id = %command.agent_id,
+                        "durable Managed Work dispatch could not be published live"
+                    );
+                },
+            }
+        }
         Ok(ManagedWorkReceipt {
             managed_work_id: persisted.managed_work_id,
             state: persisted.state,
@@ -165,29 +227,12 @@ fn validate_submission(submission: &ManagedWorkSubmission) -> AppResult<()> {
     if submission.contract_major != MANAGED_WORK_CONTRACT_MAJOR {
         return Err(AppError::bad_request("Managed Work contract major is not supported."));
     }
-    if submission.expires_at <= Utc::now() {
-        return Err(AppError::conflict("Managed Work has expired."));
+    if submission.work.contract_major != submission.contract_major {
+        return Err(AppError::bad_request("Managed Work contract versions do not match."));
     }
-    if submission.idempotency_expires_at <= submission.expires_at {
-        return Err(AppError::bad_request(
-            "Managed Work idempotency expiry must follow the work expiry.",
-        ));
-    }
-    validate_text("database", &submission.scope.database, 128)?;
-    validate_text("company_id", &submission.scope.company_id, 64)?;
-    validate_binding(&submission.binding)?;
-    validate_text("dispatch key_id", &submission.sealed_document.key_id, 128)?;
-    let encapsulated_key = URL_SAFE_NO_PAD
-        .decode(
-            &submission
-                .sealed_document
-                .encapsulated_key_base64url,
-        )
-        .map_err(|_| AppError::bad_request("HPKE encapsulated key is not valid base64url."))?;
-    if encapsulated_key.len() != 32 {
-        return Err(AppError::bad_request("HPKE encapsulated key must contain 32 bytes."));
-    }
-    Ok(())
+    validate_text("database", &submission.work.scope.database, 128)?;
+    validate_text("company_id", &submission.work.scope.company_id, 64)?;
+    validate_binding(&submission.work.origin.binding)
 }
 
 fn validate_binding(binding: &inari_gateway::protocol::ReportBindingClaim) -> AppResult<()> {
@@ -234,7 +279,6 @@ fn blocked_preflight(
         media_type: request.operation.media_type().into(),
         device_id: request.device_id.clone(),
         capability_digest: None,
-        dispatch_key: None,
         expires_at: None,
         idempotency_expires_at: None,
         submit_before: None,
@@ -292,96 +336,96 @@ fn decode_fingerprint(value: &str) -> AppResult<[u8; 32]> {
     })
 }
 
-fn decoded_ciphertext_size(submission: &ManagedWorkSubmission) -> AppResult<usize> {
-    let decoded = URL_SAFE_NO_PAD
-        .decode(
-            &submission
-                .sealed_document
-                .ciphertext_base64url,
-        )
-        .map_err(|_| AppError::bad_request("Managed Work ciphertext is not valid base64url."))?;
-    let limit = match submission.operation {
+fn decoded_document(submission: &ManagedWorkSubmission) -> AppResult<Vec<u8>> {
+    let content_base64 = match &submission.work.document {
+        inari_gateway::protocol::ManagedDocument::ReportPdf { content_base64 }
+        | inari_gateway::protocol::ManagedDocument::LabelDocument { content_base64 } => {
+            content_base64
+        },
+    };
+    let decoded = STANDARD
+        .decode(content_base64)
+        .map_err(|_| AppError::bad_request("Managed Work document is not valid base64."))?;
+    let operation = submission.work.document.operation();
+    let limit = match operation {
         ManagedDocumentOperation::ReportPdf => REPORT_PDF_LIMIT,
         ManagedDocumentOperation::LabelDocument => LABEL_DOCUMENT_LIMIT,
     };
-    if decoded.len() <= HPKE_AEAD_TAG_BYTES || decoded.len() > limit + HPKE_AEAD_TAG_BYTES {
+    if decoded.is_empty() || decoded.len() > limit {
         return Err(AppError::bad_request(format!(
             "Managed Work {} payload exceeds its {limit}-byte limit.",
-            submission.operation.media_type()
+            operation.media_type()
         )));
     }
-    Ok(decoded.len())
+    Ok(decoded)
 }
 
 #[cfg(test)]
 mod tests {
     use inari_gateway::protocol::{
-        DispatchHpkeSuite, ManagedDocumentOperation, ManagedPreflightId, ManagedWorkScope,
-        PrintIntentId, ReportBindingClaim, SealedManagedDocument,
+        ManagedDeviceWork, ManagedDocument, ManagedPreflightId, ManagedWorkScope,
+        ManagedWorkSubmission, ReportBindingClaim, ReportPrintOrigin, ReportRoute, ReportSource,
     };
 
-    use super::{decoded_ciphertext_size, validate_submission};
+    use super::{decoded_document, validate_submission};
 
-    fn submission() -> inari_gateway::protocol::ManagedWorkSubmission {
-        let now = chrono::Utc::now();
-        inari_gateway::protocol::ManagedWorkSubmission {
+    fn submission() -> ManagedWorkSubmission {
+        ManagedWorkSubmission {
             contract_major: 1,
             preflight_id: "mpf_test"
                 .parse::<ManagedPreflightId>()
                 .unwrap(),
-            scope: ManagedWorkScope {
-                database: "production".into(),
-                company_id: "7".into(),
-                organization_id: "org_example".parse().unwrap(),
-                site_id: "site_example".parse().unwrap(),
-                agent_id: "agt_example".parse().unwrap(),
-            },
-            print_intent_id: "pi_v1_test"
-                .parse::<PrintIntentId>()
-                .unwrap(),
-            device_id: "dev_printer".parse().unwrap(),
-            operation: ManagedDocumentOperation::ReportPdf,
-            binding: ReportBindingClaim {
-                report_binding_id: "binding-1".into(),
-                binding_revision_id: "revision-1".into(),
-                report_action_id: "sale.action_report_saleorder".into(),
-                report_contract_digest: "a".repeat(64),
-                template_digest: "b".repeat(64),
-                command_profile_id: None,
-                layout_profile_id: None,
-                hardware_matrix_digest: None,
-            },
             payload_fingerprint: "c".repeat(64),
-            sealed_document: SealedManagedDocument {
-                key_id: "dispatch-key-1".into(),
-                suite: DispatchHpkeSuite::DhkemX25519HkdfSha256HkdfSha256Aes256Gcm,
-                encapsulated_key_base64url: base64::Engine::encode(
-                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-                    [1_u8; 32],
-                ),
-                ciphertext_base64url: base64::Engine::encode(
-                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-                    [1_u8; 17],
-                ),
+            work: ManagedDeviceWork {
+                contract_major: 1,
+                scope: ManagedWorkScope {
+                    database: "production".into(),
+                    company_id: "7".into(),
+                    organization_id: "org_example".parse().unwrap(),
+                    site_id: "site_example".parse().unwrap(),
+                    agent_id: "agt_example".parse().unwrap(),
+                },
+                print_intent_id: "pi_v1_test".parse().unwrap(),
+                device_id: "dev_printer".parse().unwrap(),
+                origin: ReportPrintOrigin {
+                    binding: ReportBindingClaim {
+                        report_binding_id: "binding-1".into(),
+                        binding_revision_id: "revision-1".into(),
+                        report_action_id: "sale.action_report_saleorder".into(),
+                        report_contract_digest: "a".repeat(64),
+                        template_digest: "b".repeat(64),
+                        command_profile_id: None,
+                        layout_profile_id: None,
+                        hardware_matrix_digest: None,
+                    },
+                    route: ReportRoute::Manual,
+                    source: ReportSource::Records {
+                        model: "sale.order".into(),
+                        ordered_ids: vec![42],
+                    },
+                    rendered_document_index: 0,
+                    copy_ordinal: 1,
+                },
+                document: ManagedDocument::ReportPdf { content_base64: "JVBERi0xLjQ=".into() },
+                normalized_device_options: Default::default(),
             },
-            expires_at: now + chrono::TimeDelta::minutes(5),
-            idempotency_expires_at: now + chrono::TimeDelta::days(90),
         }
     }
 
     #[test]
-    fn submission_accepts_fixed_hpke_shape() {
+    fn submission_accepts_a_plain_document_with_controller_owned_deadlines() {
         let submission = submission();
         assert!(validate_submission(&submission).is_ok());
-        assert_eq!(decoded_ciphertext_size(&submission).unwrap(), 17);
+        assert_eq!(decoded_document(&submission).unwrap(), b"%PDF-1.4");
     }
 
     #[test]
-    fn submission_rejects_wrong_encapsulated_key_length() {
+    fn submission_rejects_invalid_document_base64() {
         let mut submission = submission();
-        submission
-            .sealed_document
-            .encapsulated_key_base64url = "AQ".into();
-        assert!(validate_submission(&submission).is_err());
+        let ManagedDocument::ReportPdf { content_base64 } = &mut submission.work.document else {
+            panic!("expected a PDF document");
+        };
+        *content_base64 = "%%%".into();
+        assert!(decoded_document(&submission).is_err());
     }
 }

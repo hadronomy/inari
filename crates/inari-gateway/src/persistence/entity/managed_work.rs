@@ -2,7 +2,7 @@ use sea_orm::entity::prelude::*;
 
 use super::value::{
     ManagedDocumentOperationValue, ManagedWorkStateValue, StoredReportBindingClaim,
-    StoredSealedManagedDocument,
+    StoredSealedManagedDispatch,
 };
 
 #[sea_orm::model]
@@ -28,7 +28,7 @@ pub struct Model {
     pub payload_fingerprint: Vec<u8>,
     pub request_fingerprint: Vec<u8>,
     #[sea_orm(column_type = "JsonBinary")]
-    pub sealed_document: StoredSealedManagedDocument,
+    pub sealed_document: StoredSealedManagedDispatch,
     pub payload_bytes: i64,
     #[sea_orm(column_type = "Text", nullable)]
     pub print_job_id: Option<String>,

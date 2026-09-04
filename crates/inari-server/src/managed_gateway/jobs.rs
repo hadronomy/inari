@@ -78,7 +78,10 @@ impl ManagedGatewayController {
         .await
     }
 
-    async fn publish_live_command(&self, command: &StoredControllerCommand) -> AppResult<()> {
+    pub(super) async fn publish_live_command(
+        &self,
+        command: &StoredControllerCommand,
+    ) -> AppResult<()> {
         let namespace =
             KeyExpression::from_str(command.namespace.trim_end_matches('/')).map_err(|source| {
                 AppError::bad_request(format!("Invalid Zenoh command key: {source}"))

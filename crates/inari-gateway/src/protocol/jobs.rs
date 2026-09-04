@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{AgentId, JobId, ProtocolVersion, StructuredFields};
+use super::{AgentId, DispatchDeviceWork, JobId, ProtocolVersion, StructuredFields};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields)]
@@ -21,6 +21,14 @@ pub enum ControllerCommand {
         sequence: u64,
         issued_at: DateTime<Utc>,
         job_id: String,
+    },
+    #[serde(rename = "controller.command.dispatch_device_work")]
+    DispatchDeviceWork {
+        message_id: String,
+        command_id: String,
+        sequence: u64,
+        issued_at: DateTime<Utc>,
+        payload: DispatchDeviceWork,
     },
 }
 

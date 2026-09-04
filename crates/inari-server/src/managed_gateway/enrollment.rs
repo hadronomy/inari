@@ -4,9 +4,10 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use inari_gateway::certificate::CertificateRequest;
 use inari_gateway::protocol::{
-    AgentId, CertificateProvisioning, CertificateTrust, ControllerInfo, DataPlane, DataPlaneAuth,
-    DataPlaneAuthKind, DataPlaneKind, DataPlaneTls, EnrollmentPermissions, EnrollmentRequest,
-    EnrollmentResponse, ProtocolVersion, Serialization, SessionMode, StepCaEnrollment,
+    AgentId, AgentManagedScope, CertificateProvisioning, CertificateTrust, ControllerInfo,
+    DataPlane, DataPlaneAuth, DataPlaneAuthKind, DataPlaneKind, DataPlaneTls,
+    EnrollmentPermissions, EnrollmentRequest, EnrollmentResponse, ProtocolVersion, Serialization,
+    SessionMode, StepCaEnrollment,
 };
 use inari_gateway::security::{validate_dispatch_key, validate_identity};
 
@@ -112,6 +113,21 @@ impl ManagedGatewayController {
                 },
             },
             certificate,
+            managed_dispatch: self
+                .inner
+                .dispatch_signer
+                .as_ref()
+                .map(|signer| {
+                    signer.enrollment(AgentManagedScope {
+                        organization_id: self.inner.organization.id.clone(),
+                        site_id: self
+                            .inner
+                            .organization
+                            .default_site_id
+                            .clone(),
+                        agent_id: request.agent_id.clone(),
+                    })
+                }),
             enrolled_at: now,
         })
     }

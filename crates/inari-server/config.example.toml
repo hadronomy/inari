@@ -90,6 +90,15 @@ step_ca_signing_algorithm = "ed_dsa"
 step_ca_token_ttl = "5m"
 requires_mutual_tls_after_issuance = true
 
+[managed_gateway.dispatch]
+# Managed Work dispatch uses a Controller key that is separate from the
+# step-ca provisioner key. Increase the epoch when this key changes.
+enabled = true
+epoch = 1
+signing_key_id = "controller-dispatch-2026-01"
+signing_key_file = "/var/run/secrets/inari/managed-dispatch-key.pem"
+envelope_ttl = "2m"
+
 [zenoh]
 enabled = true
 mode = "client"

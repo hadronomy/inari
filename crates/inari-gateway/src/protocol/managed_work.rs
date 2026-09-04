@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use jsonwebtoken::jwk::Jwk;
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -7,6 +8,7 @@ use super::{
 };
 
 pub const MANAGED_WORK_CONTRACT_MAJOR: u16 = 1;
+pub const MANAGED_DISPATCH_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,6 +18,23 @@ pub struct ManagedWorkScope {
     pub organization_id: OrganizationId,
     pub site_id: SiteId,
     pub agent_id: AgentId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentManagedScope {
+    pub organization_id: OrganizationId,
+    pub site_id: SiteId,
+    pub agent_id: AgentId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedDispatchEnrollment {
+    pub scope: AgentManagedScope,
+    pub issuer: String,
+    pub epoch: u64,
+    pub verification_jwk: Jwk,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,7 +94,6 @@ pub struct ManagedWorkPreflightResult {
     pub media_type: String,
     pub device_id: DeviceId,
     pub capability_digest: Option<String>,
-    pub dispatch_key: Option<DispatchEncryptionKey>,
     pub expires_at: Option<DateTime<Utc>>,
     pub idempotency_expires_at: Option<DateTime<Utc>>,
     pub submit_before: Option<DateTime<Utc>>,
@@ -140,8 +158,6 @@ pub struct ManagedDeviceWork {
     pub document: ManagedDocument,
     #[serde(default)]
     pub normalized_device_options: StructuredFields,
-    pub expires_at: DateTime<Utc>,
-    pub idempotency_expires_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,27 +182,21 @@ pub struct DispatchEncryptionKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SealedManagedDocument {
+pub struct SealedManagedDispatch {
+    pub protocol_version: u16,
     pub key_id: String,
     pub suite: DispatchHpkeSuite,
     pub encapsulated_key_base64url: String,
     pub ciphertext_base64url: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedWorkSubmission {
     pub contract_major: u16,
     pub preflight_id: ManagedPreflightId,
-    pub scope: ManagedWorkScope,
-    pub print_intent_id: PrintIntentId,
-    pub device_id: DeviceId,
-    pub operation: ManagedDocumentOperation,
-    pub binding: ReportBindingClaim,
     pub payload_fingerprint: String,
-    pub sealed_document: SealedManagedDocument,
-    pub expires_at: DateTime<Utc>,
-    pub idempotency_expires_at: DateTime<Utc>,
+    pub work: ManagedDeviceWork,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -230,7 +240,34 @@ pub struct ManagedWorkRecord {
 #[serde(deny_unknown_fields)]
 pub struct DispatchDeviceWork {
     pub managed_work_id: ManagedWorkId,
-    pub signed_envelope: String,
+    pub authenticated_data: ManagedDispatchAuthenticatedData,
+    pub sealed_envelope: SealedManagedDispatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedDispatchAuthenticatedData {
+    pub organization_id: OrganizationId,
+    pub site_id: SiteId,
+    pub agent_id: AgentId,
+    pub managed_work_id: ManagedWorkId,
+    pub idempotency_key: String,
+    pub payload_fingerprint: String,
+    pub dispatch_epoch: u64,
+    pub sequence: u64,
+    pub issued_at: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedDispatchClaims {
+    #[serde(rename = "iss")]
+    pub issuer: String,
+    #[serde(rename = "aud")]
+    pub audience: AgentId,
+    pub authenticated_data: ManagedDispatchAuthenticatedData,
+    pub work: ManagedDeviceWork,
 }
 
 #[cfg(test)]

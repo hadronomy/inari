@@ -8,6 +8,7 @@ use crate::error::{AppError, AppResult};
 use crate::zenoh::ZenohHandle;
 
 mod certificate;
+mod dispatch;
 mod enrollment;
 mod fleet;
 mod jobs;
@@ -18,6 +19,7 @@ mod runtime;
 mod store;
 
 pub use self::certificate::StepCaIssuer;
+pub use self::dispatch::ManagedDispatchSigner;
 
 pub use self::models::{AgentPublicationList, CommandHistory, JobList, JobReceipt, JobRequest};
 use self::models::{StoredAgentEnrollment, StoredControllerCommand};
@@ -35,6 +37,7 @@ struct ManagedGatewayControllerInner {
     store: ManagedGatewayStore,
     organization: OrganizationConfig,
     certificate_issuer: Option<CertificateIssuerHandle>,
+    dispatch_signer: Option<Arc<ManagedDispatchSigner>>,
 }
 
 impl ManagedGatewayController {
@@ -46,6 +49,7 @@ impl ManagedGatewayController {
         zenoh: ZenohHandle,
         repository: Option<GatewayRepository>,
         certificate_issuer: Option<CertificateIssuerHandle>,
+        dispatch_signer: Option<Arc<ManagedDispatchSigner>>,
     ) -> Self {
         let store = ManagedGatewayStore::new(repository);
         Self {
@@ -56,6 +60,7 @@ impl ManagedGatewayController {
                 store,
                 organization,
                 certificate_issuer,
+                dispatch_signer,
             }),
         }
     }
@@ -71,5 +76,12 @@ impl ManagedGatewayController {
         } else {
             Err(AppError::service_unavailable("Managed gateway controller is not enabled."))
         }
+    }
+
+    fn dispatch_signer(&self) -> AppResult<&ManagedDispatchSigner> {
+        self.inner
+            .dispatch_signer
+            .as_deref()
+            .ok_or_else(|| AppError::service_unavailable("Managed Work dispatch is not enabled."))
     }
 }

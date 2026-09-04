@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
     AgentPublication, ControllerCommand, DeviceCapability, DispatchEncryptionKey, GatewaySnapshot,
-    ManagedWorkPreflightRequest, ReportBindingClaim, SealedManagedDocument, StructuredFields,
+    ManagedWorkPreflightRequest, ReportBindingClaim, SealedManagedDispatch, StructuredFields,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
@@ -33,7 +33,7 @@ pub struct StoredCapabilities(pub Vec<DeviceCapability>);
 pub struct StoredReportBindingClaim(pub ReportBindingClaim);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
-pub struct StoredSealedManagedDocument(pub SealedManagedDocument);
+pub struct StoredSealedManagedDispatch(pub SealedManagedDispatch);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredManagedWorkPreflightRequest(pub ManagedWorkPreflightRequest);

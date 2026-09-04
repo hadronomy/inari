@@ -19,6 +19,7 @@ pub struct ManagedGatewayConfig {
     pub onboarding: ManagedGatewayOnboardingConfig,
     pub data_plane: ManagedGatewayDataPlaneConfig,
     pub certificate: ManagedGatewayCertificateConfig,
+    pub dispatch: ManagedGatewayDispatchConfig,
 }
 
 impl Default for ManagedGatewayConfig {
@@ -34,12 +35,14 @@ impl Default for ManagedGatewayConfig {
                 "events:read",
                 "jobs:cancel",
                 "commands:execute",
+                "managed_work:dispatch",
             ]
             .map(String::from)
             .to_vec(),
             onboarding: ManagedGatewayOnboardingConfig::default(),
             data_plane: ManagedGatewayDataPlaneConfig::default(),
             certificate: ManagedGatewayCertificateConfig::default(),
+            dispatch: ManagedGatewayDispatchConfig::default(),
         }
     }
 }
@@ -142,7 +145,60 @@ impl ManagedGatewayConfig {
                 ));
             }
         }
+        if self.dispatch.enabled {
+            if self
+                .dispatch
+                .signing_key_id
+                .as_deref()
+                .is_none_or(str::is_empty)
+                || self.dispatch.signing_key_file.is_none()
+                || self.dispatch.epoch == 0
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch requires a signing_key_id, signing_key_file, and non-zero epoch.",
+                ));
+            }
+            if !self
+                .controller_actions
+                .iter()
+                .any(|action| action == "managed_work:dispatch")
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch requires the managed_work:dispatch Controller action.",
+                ));
+            }
+            if !(Duration::from_secs(10)..=Duration::from_secs(5 * 60))
+                .contains(&self.dispatch.envelope_ttl)
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch.envelope_ttl must be between 10 seconds and 5 minutes.",
+                ));
+            }
+        }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ManagedGatewayDispatchConfig {
+    pub enabled: bool,
+    pub epoch: u64,
+    pub signing_key_id: Option<String>,
+    pub signing_key_file: Option<PathBuf>,
+    #[serde(with = "humantime_serde")]
+    pub envelope_ttl: Duration,
+}
+
+impl Default for ManagedGatewayDispatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            epoch: 1,
+            signing_key_id: None,
+            signing_key_file: None,
+            envelope_ttl: Duration::from_secs(2 * 60),
+        }
     }
 }
 

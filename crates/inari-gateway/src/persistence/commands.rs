@@ -55,20 +55,7 @@ impl GatewayRepository {
             return persisted_command(existing, managed_agent.namespace);
         }
 
-        let next = command::Entity::find()
-            .select_only()
-            .column_as(command::COLUMN.sequence.0.max(), "max_sequence")
-            .filter(command::COLUMN.agent_id.eq(agent_id))
-            .into_model::<NextSequence>()
-            .one(&transaction)
-            .await?
-            .ok_or_else(|| {
-                GatewayError::CorruptState("command sequence query returned no row".into())
-            })?
-            .max_sequence
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or_else(|| GatewayError::Conflict("command sequence is out of range".into()))?;
+        let next = next_command_sequence(&transaction, agent_id).await?;
         let sequence = u64::try_from(next)
             .map_err(|_| GatewayError::Conflict("command sequence is out of range".into()))?;
         let command_id = requested_command_id
@@ -172,7 +159,28 @@ where
         .namespace)
 }
 
-fn persisted_command(model: command::Model, namespace: String) -> GatewayResult<PersistedCommand> {
+pub(super) async fn next_command_sequence<C>(database: &C, agent_id: &str) -> GatewayResult<i64>
+where
+    C: ConnectionTrait,
+{
+    command::Entity::find()
+        .select_only()
+        .column_as(command::COLUMN.sequence.0.max(), "max_sequence")
+        .filter(command::COLUMN.agent_id.eq(agent_id))
+        .into_model::<NextSequence>()
+        .one(database)
+        .await?
+        .ok_or_else(|| GatewayError::CorruptState("command sequence query returned no row".into()))?
+        .max_sequence
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| GatewayError::Conflict("command sequence is out of range".into()))
+}
+
+pub(super) fn persisted_command(
+    model: command::Model,
+    namespace: String,
+) -> GatewayResult<PersistedCommand> {
     Ok(PersistedCommand {
         agent_id: model.agent_id.parse()?,
         namespace,

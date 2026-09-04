@@ -1,21 +1,22 @@
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DbBackend, EntityTrait,
-    FromQueryResult, QueryFilter, QuerySelect, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseTransaction,
+    DbBackend, EntityTrait, FromQueryResult, QueryFilter, QuerySelect, Statement, TransactionTrait,
 };
+use sha2::{Digest, Sha256};
 
 use super::entity::value::{
-    ManagedDocumentOperationValue, ManagedWorkStateValue, StoredManagedWorkPreflightRequest,
-    StoredReportBindingClaim, StoredSealedManagedDocument,
+    CommandState, ManagedDocumentOperationValue, ManagedWorkStateValue, StoredCommand,
+    StoredManagedWorkPreflightRequest, StoredReportBindingClaim, StoredSealedManagedDispatch,
 };
-use super::entity::{agent, device, managed_work, managed_work_preflight};
+use super::entity::{agent, command, device, managed_work, managed_work_preflight};
 use super::{
     GatewayRepository, ManagedWorkTargetRecord, NewManagedWorkPreflight, PersistedManagedWork,
-    stored_time, utc_time,
+    PersistedManagedWorkDispatch, stored_time, utc_time,
 };
 use crate::protocol::{
-    ManagedDocumentOperation, ManagedWorkId, ManagedWorkPreflightRequest, ManagedWorkState,
-    ManagedWorkSubmission,
+    ControllerCommand, DispatchEncryptionKey, ManagedDocumentOperation, ManagedWorkId,
+    ManagedWorkPreflightRequest, ManagedWorkState, ManagedWorkSubmission, SealedManagedDispatch,
 };
 use crate::{GatewayError, GatewayResult};
 
@@ -89,7 +90,7 @@ impl GatewayRepository {
         })
     }
 
-    pub async fn admit_managed_work(
+    pub async fn admit_managed_work<F>(
         &self,
         managed_work_id: &ManagedWorkId,
         submission: &ManagedWorkSubmission,
@@ -97,15 +98,27 @@ impl GatewayRepository {
         payload_fingerprint: &[u8; 32],
         payload_bytes: i64,
         now: DateTime<Utc>,
-    ) -> GatewayResult<PersistedManagedWork> {
+        build_command: F,
+    ) -> GatewayResult<PersistedManagedWorkDispatch>
+    where
+        F: FnOnce(
+            &ManagedWorkId,
+            u64,
+            &str,
+            &str,
+            DateTime<Utc>,
+            &DispatchEncryptionKey,
+            DateTime<Utc>,
+        ) -> GatewayResult<ControllerCommand>,
+    {
         let transaction = self.database.begin().await?;
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0)), pg_advisory_xact_lock(hashtextextended($2, 0))",
                 [
-                    submission.scope.organization_id.as_str().to_owned().into(),
-                    submission.scope.agent_id.as_str().to_owned().into(),
+                    submission.work.scope.organization_id.as_str().to_owned().into(),
+                    submission.work.scope.agent_id.as_str().to_owned().into(),
                 ],
             ))
             .await?;
@@ -119,11 +132,12 @@ impl GatewayRepository {
                     "the idempotency key was already used for another Managed Work request".into(),
                 ));
             }
-            transaction.commit().await?;
-            return persisted_managed_work(existing);
+            return existing_dispatch(transaction, existing).await;
         }
         if let Some(existing) = managed_work::Entity::find()
-            .filter(managed_work::Column::PrintIntentId.eq(submission.print_intent_id.as_str()))
+            .filter(
+                managed_work::Column::PrintIntentId.eq(submission.work.print_intent_id.as_str()),
+            )
             .one(&transaction)
             .await?
         {
@@ -132,8 +146,7 @@ impl GatewayRepository {
                     "the Print Intent was already used for another Managed Work request".into(),
                 ));
             }
-            transaction.commit().await?;
-            return persisted_managed_work(existing);
+            return existing_dispatch(transaction, existing).await;
         }
 
         let preflight =
@@ -146,16 +159,12 @@ impl GatewayRepository {
                 })?;
         let expected_request = ManagedWorkPreflightRequest {
             contract_major: submission.contract_major,
-            scope: submission.scope.clone(),
-            device_id: submission.device_id.clone(),
-            operation: submission.operation,
-            binding: submission.binding.clone(),
+            scope: submission.work.scope.clone(),
+            device_id: submission.work.device_id.clone(),
+            operation: submission.work.document.operation(),
+            binding: submission.work.origin.binding.clone(),
         };
-        if preflight.request.0 != expected_request
-            || preflight.dispatch_key_id != submission.sealed_document.key_id
-            || utc_time(preflight.work_expires_at) != submission.expires_at
-            || utc_time(preflight.idempotency_expires_at) != submission.idempotency_expires_at
-        {
+        if preflight.request.0 != expected_request {
             return Err(GatewayError::Conflict(
                 "Managed Work submission does not match its preflight".into(),
             ));
@@ -167,22 +176,24 @@ impl GatewayRepository {
         let target = managed_work_target_in(
             &transaction,
             submission
+                .work
                 .scope
                 .organization_id
                 .as_str(),
-            submission.scope.site_id.as_str(),
-            submission.scope.agent_id.as_str(),
-            submission.device_id.as_str(),
+            submission.work.scope.site_id.as_str(),
+            submission.work.scope.agent_id.as_str(),
+            submission.work.device_id.as_str(),
         )
         .await?;
-        if target.0.key_id != submission.sealed_document.key_id {
+        if target.0.key_id != preflight.dispatch_key_id {
             return Err(GatewayError::Conflict(
-                "the sealed document does not use the current Agent dispatch key".into(),
+                "the Managed Work preflight does not use the current Agent dispatch key".into(),
             ));
         }
 
         let agent_usage =
-            pending_usage(&transaction, "agent_id", submission.scope.agent_id.as_str()).await?;
+            pending_usage(&transaction, "agent_id", submission.work.scope.agent_id.as_str())
+                .await?;
         enforce_quota(
             agent_usage,
             payload_bytes,
@@ -194,6 +205,7 @@ impl GatewayRepository {
             &transaction,
             "organization_id",
             submission
+                .work
                 .scope
                 .organization_id
                 .as_str(),
@@ -207,6 +219,19 @@ impl GatewayRepository {
             "Organization",
         )?;
 
+        let work_expires_at = utc_time(preflight.work_expires_at);
+        let idempotency_expires_at = utc_time(preflight.idempotency_expires_at);
+        let (command, sealed_dispatch) = insert_dispatch_command(
+            &transaction,
+            managed_work_id,
+            submission.work.scope.agent_id.as_str(),
+            request_fingerprint,
+            now,
+            &target.0,
+            work_expires_at,
+            build_command,
+        )
+        .await?;
         let model = managed_work::ActiveModel {
             managed_work_id: Set(managed_work_id.as_str().to_owned()),
             preflight_id: Set(submission
@@ -214,50 +239,67 @@ impl GatewayRepository {
                 .as_str()
                 .to_owned()),
             organization_id: Set(submission
+                .work
                 .scope
                 .organization_id
                 .as_str()
                 .to_owned()),
-            database_name: Set(submission.scope.database.clone()),
-            company_id: Set(submission.scope.company_id.clone()),
+            database_name: Set(submission.work.scope.database.clone()),
+            company_id: Set(submission.work.scope.company_id.clone()),
             site_id: Set(submission
+                .work
                 .scope
                 .site_id
                 .as_str()
                 .to_owned()),
             agent_id: Set(submission
+                .work
                 .scope
                 .agent_id
                 .as_str()
                 .to_owned()),
-            device_id: Set(submission.device_id.as_str().to_owned()),
+            device_id: Set(submission
+                .work
+                .device_id
+                .as_str()
+                .to_owned()),
             print_intent_id: Set(submission
+                .work
                 .print_intent_id
                 .as_str()
                 .to_owned()),
-            operation: Set(submission.operation.into()),
+            operation: Set(submission
+                .work
+                .document
+                .operation()
+                .into()),
             media_type: Set(submission
-                .operation
+                .work
+                .document
+                .operation()
                 .media_type()
                 .to_owned()),
-            state: Set(ManagedWorkStateValue::PendingAgent),
-            binding_claim: Set(StoredReportBindingClaim(submission.binding.clone())),
+            state: Set(ManagedWorkStateValue::Dispatching),
+            binding_claim: Set(StoredReportBindingClaim(submission.work.origin.binding.clone())),
             payload_fingerprint: Set(payload_fingerprint.to_vec()),
             request_fingerprint: Set(request_fingerprint.to_vec()),
-            sealed_document: Set(StoredSealedManagedDocument(submission.sealed_document.clone())),
+            sealed_document: Set(StoredSealedManagedDispatch(sealed_dispatch)),
             payload_bytes: Set(payload_bytes),
             print_job_id: Set(None),
             error_code: Set(None),
-            message_key: Set("managed_work.waiting_for_agent".into()),
-            expires_at: Set(stored_time(submission.expires_at)),
-            idempotency_expires_at: Set(stored_time(submission.idempotency_expires_at)),
+            message_key: Set("managed_work.dispatching".into()),
+            expires_at: Set(stored_time(work_expires_at)),
+            idempotency_expires_at: Set(stored_time(idempotency_expires_at)),
             admitted_at: Set(stored_time(now)),
             updated_at: Set(stored_time(now)),
         }
         .insert(&transaction)
         .await?;
         transaction.commit().await?;
-        persisted_managed_work(model)
+        Ok(PersistedManagedWorkDispatch {
+            managed_work: persisted_managed_work(model)?,
+            command: Some(command),
+        })
     }
 
     pub async fn managed_work(
@@ -270,6 +312,101 @@ impl GatewayRepository {
             .ok_or_else(|| GatewayError::NotFound("Managed Work was not found".into()))
             .and_then(persisted_managed_work)
     }
+}
+
+async fn existing_dispatch(
+    transaction: DatabaseTransaction,
+    existing: managed_work::Model,
+) -> GatewayResult<PersistedManagedWorkDispatch> {
+    let command = if existing.state == ManagedWorkStateValue::Dispatching {
+        let command_id = dispatch_command_id(&existing.managed_work_id);
+        let model = command::Entity::find_by_id(&command_id)
+            .one(&transaction)
+            .await?
+            .ok_or_else(|| {
+                GatewayError::CorruptState(
+                    "dispatching Managed Work has no durable Controller command".into(),
+                )
+            })?;
+        let namespace = agent::Entity::find_by_id(&existing.agent_id)
+            .one(&transaction)
+            .await?
+            .ok_or_else(|| GatewayError::CorruptState("Managed Work Agent is missing".into()))?
+            .namespace;
+        Some(super::commands::persisted_command(model, namespace)?)
+    } else {
+        None
+    };
+    transaction.commit().await?;
+    Ok(PersistedManagedWorkDispatch { managed_work: persisted_managed_work(existing)?, command })
+}
+
+async fn insert_dispatch_command<C, F>(
+    transaction: &C,
+    managed_work_id: &ManagedWorkId,
+    agent_id: &str,
+    request_fingerprint: &[u8; 32],
+    issued_at: DateTime<Utc>,
+    recipient_key: &DispatchEncryptionKey,
+    work_expires_at: DateTime<Utc>,
+    build_command: F,
+) -> GatewayResult<(super::PersistedCommand, SealedManagedDispatch)>
+where
+    C: ConnectionTrait,
+    F: FnOnce(
+        &ManagedWorkId,
+        u64,
+        &str,
+        &str,
+        DateTime<Utc>,
+        &DispatchEncryptionKey,
+        DateTime<Utc>,
+    ) -> GatewayResult<ControllerCommand>,
+{
+    let managed_agent = agent::Entity::find_by_id(agent_id)
+        .one(transaction)
+        .await?
+        .ok_or_else(|| GatewayError::CorruptState("Managed Work Agent is missing".into()))?;
+    let next = super::commands::next_command_sequence(transaction, agent_id).await?;
+    let sequence = u64::try_from(next)
+        .map_err(|_| GatewayError::Conflict("command sequence is out of range".into()))?;
+    let command_id = dispatch_command_id(managed_work_id.as_str());
+    let message_id = format!("msg_{command_id}");
+    let command_message = build_command(
+        managed_work_id,
+        sequence,
+        &command_id,
+        &message_id,
+        issued_at,
+        recipient_key,
+        work_expires_at,
+    )?;
+    let ControllerCommand::DispatchDeviceWork { payload, .. } = &command_message else {
+        return Err(GatewayError::CorruptState(
+            "Managed Work dispatch builder returned another command type".into(),
+        ));
+    };
+    let sealed_dispatch = payload.sealed_envelope.clone();
+    let model = command::ActiveModel {
+        command_id: Set(command_id),
+        agent_id: Set(agent_id.to_owned()),
+        message_id: Set(message_id),
+        sequence: Set(next),
+        state: Set(CommandState::Queued),
+        command: Set(StoredCommand(command_message)),
+        request_fingerprint: Set(request_fingerprint.to_vec()),
+        issued_at: Set(stored_time(issued_at)),
+        published_at: Set(None),
+        updated_at: Set(stored_time(issued_at)),
+    }
+    .insert(transaction)
+    .await?;
+    Ok((super::commands::persisted_command(model, managed_agent.namespace)?, sealed_dispatch))
+}
+
+fn dispatch_command_id(managed_work_id: &str) -> String {
+    let digest = Sha256::digest(managed_work_id.as_bytes());
+    format!("job_dispatch_{}", hex::encode(&digest[..16]))
 }
 
 async fn managed_work_target_in<C>(

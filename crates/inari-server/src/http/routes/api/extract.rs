@@ -60,6 +60,10 @@ where
 pub(super) struct IdempotencyKey(String);
 
 impl IdempotencyKey {
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub(super) fn job_id(&self, agent_id: &AgentId) -> Result<JobId, AppError> {
         let mut digest = Sha256::new();
         digest.update(agent_id.as_str());

@@ -22,7 +22,7 @@ use crate::database::ControllerDatabase;
 use crate::error::{AppError, AppResult};
 use crate::http;
 use crate::identity::{IdentityRuntime, IdentityService};
-use crate::managed_gateway::StepCaIssuer;
+use crate::managed_gateway::{ManagedDispatchSigner, StepCaIssuer};
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
@@ -100,6 +100,7 @@ impl ServerBuilder<WithConfig> {
         let onboarding = initialize_onboarding(&loaded, database.as_ref()).await?;
         let identity = initialize_identity(&loaded, database.as_ref()).await?;
         let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
+        let dispatch_signer = initialize_dispatch_signer(&loaded).await?;
         let state = AppState::new_with_onboarding(
             loaded,
             zenoh_handle,
@@ -107,11 +108,31 @@ impl ServerBuilder<WithConfig> {
             onboarding,
             identity,
             certificate_issuer,
+            dispatch_signer,
         );
         let router = http::router(&state)?.with_state(state.clone());
 
         Ok(ServerApplication { state, router, shutdown, zenoh_supervisor })
     }
+}
+
+async fn initialize_dispatch_signer(
+    loaded: &LoadedConfig,
+) -> AppResult<Option<Arc<ManagedDispatchSigner>>> {
+    let config = &loaded.settings.managed_gateway.dispatch;
+    if !loaded.settings.managed_gateway.enabled || !config.enabled {
+        return Ok(None);
+    }
+    ManagedDispatchSigner::load(
+        config,
+        &loaded
+            .settings
+            .managed_gateway
+            .controller_instance_id,
+    )
+    .await
+    .map(Arc::new)
+    .map(Some)
 }
 
 async fn initialize_certificate_issuer(

@@ -67,13 +67,18 @@ async fn submit_managed_work(
     ApiJson(request): ApiJson<ManagedWorkSubmission>,
 ) -> Result<Response, AppError> {
     principal.require("managed_work:write")?;
-    principal.require_scope(&request.scope)?;
+    principal.require_scope(&request.work.scope)?;
     let _permit = state.acquire_inari_api_permit().await?;
-    let managed_work_id = idempotency_key.managed_work_id(&request.scope.organization_id)?;
-    let organization_id = request.scope.organization_id.clone();
+    let managed_work_id = idempotency_key.managed_work_id(&request.work.scope.organization_id)?;
+    let idempotency_key = idempotency_key.as_str().to_owned();
+    let organization_id = request
+        .work
+        .scope
+        .organization_id
+        .clone();
     let receipt = state
         .managed_gateway()
-        .submit_managed_work(managed_work_id, request)
+        .submit_managed_work(managed_work_id, idempotency_key, request)
         .await?;
     state
         .managed_gateway()

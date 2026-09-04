@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use jsonwebtoken::jwk::Jwk;
 use serde::{Deserialize, Serialize};
 
-use super::{AgentId, DispatchEncryptionKey, GatewaySnapshot, ProtocolDescriptor, ProtocolVersion};
+use super::{
+    AgentId, DispatchEncryptionKey, GatewaySnapshot, ManagedDispatchEnrollment, ProtocolDescriptor,
+    ProtocolVersion,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +30,8 @@ pub struct EnrollmentResponse {
     pub data_plane: DataPlane,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub certificate: Option<CertificateProvisioning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_dispatch: Option<ManagedDispatchEnrollment>,
     pub enrolled_at: DateTime<Utc>,
 }
 

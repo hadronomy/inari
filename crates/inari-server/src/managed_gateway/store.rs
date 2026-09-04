@@ -5,7 +5,7 @@ use inari_gateway::protocol::{
 use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
 use inari_gateway::{
     AgentEnrollmentRecord, GatewayRepository, ManagedWorkTargetRecord, NewManagedWorkPreflight,
-    PersistedManagedWork,
+    PersistedManagedWork, PersistedManagedWorkDispatch,
 };
 use sha2::{Digest, Sha256};
 
@@ -220,6 +220,48 @@ impl ManagedGatewayStore {
             .map_err(AppError::from)
     }
 
+    pub(super) async fn admit_managed_work<F>(
+        &self,
+        managed_work_id: &ManagedWorkId,
+        submission: &ManagedWorkSubmission,
+        request_fingerprint: &[u8; 32],
+        payload_fingerprint: &[u8; 32],
+        payload_bytes: i64,
+        build_command: F,
+    ) -> AppResult<(PersistedManagedWork, Option<StoredControllerCommand>)>
+    where
+        F: FnOnce(
+            &ManagedWorkId,
+            u64,
+            &str,
+            &str,
+            chrono::DateTime<Utc>,
+            &inari_gateway::protocol::DispatchEncryptionKey,
+            chrono::DateTime<Utc>,
+        )
+            -> inari_gateway::GatewayResult<inari_gateway::protocol::ControllerCommand>,
+    {
+        let PersistedManagedWorkDispatch { managed_work, command } = self
+            .repository()?
+            .admit_managed_work(
+                managed_work_id,
+                submission,
+                request_fingerprint,
+                payload_fingerprint,
+                payload_bytes,
+                Utc::now(),
+                build_command,
+            )
+            .await?;
+        let command = command.map(|command| StoredControllerCommand {
+            agent_id: command.agent_id,
+            namespace: command.namespace,
+            command_id: command.command_id,
+            command: command.command,
+        });
+        Ok((managed_work, command))
+    }
+
     pub(super) async fn managed_work_target(
         &self,
         organization_id: &OrganizationId,
@@ -244,28 +286,6 @@ impl ManagedGatewayStore {
     ) -> AppResult<()> {
         self.repository()?
             .create_managed_work_preflight(preflight)
-            .await
-            .map_err(Into::into)
-    }
-
-    pub(super) async fn admit_managed_work(
-        &self,
-        managed_work_id: &ManagedWorkId,
-        submission: &ManagedWorkSubmission,
-        request_fingerprint: &[u8; 32],
-        payload_fingerprint: &[u8; 32],
-        payload_bytes: i64,
-        now: chrono::DateTime<Utc>,
-    ) -> AppResult<PersistedManagedWork> {
-        self.repository()?
-            .admit_managed_work(
-                managed_work_id,
-                submission,
-                request_fingerprint,
-                payload_fingerprint,
-                payload_bytes,
-                now,
-            )
             .await
             .map_err(Into::into)
     }

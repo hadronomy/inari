@@ -112,6 +112,12 @@ pub struct PersistedManagedWork {
     pub expires_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PersistedManagedWorkDispatch {
+    pub managed_work: PersistedManagedWork,
+    pub command: Option<PersistedCommand>,
+}
+
 fn stored_time(value: DateTime<Utc>) -> DateTime<FixedOffset> {
     value.fixed_offset()
 }
