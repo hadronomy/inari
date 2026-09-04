@@ -23,11 +23,15 @@ from ...security.secrets import SecretStore
 from ...security.files import write_text_owner_only
 from ...security.tls import TlsContextFactory
 from ..models import (
+    AgentManagedScope,
     CertificateBootstrapAuth,
     CertificateBootstrapAuthType,
     CertificateEnrollmentSpec,
     CertificateTrustSpec,
+    ControllerAction,
+    Ed25519VerificationJwk,
     GatewayEnrollmentRecord,
+    ManagedDispatchEnrollment,
     UpstreamCertificateMode,
     UpstreamDataPlaneKind,
     ZenohDataPlaneAuthKind,
@@ -41,6 +45,7 @@ from ..protocol import (
     EnrollmentRequestPayload,
     EnrollmentResponsePayload,
     GatewaySnapshotPayload,
+    ManagedDispatchEnrollmentPayload,
     StepCaCertificateEnrollmentPayload,
     StepCaCertificatePayload,
 )
@@ -117,6 +122,15 @@ class GatewayEnrollmentService:
                 or self.settings.upstream_certificate_mode.value
             )
         )
+        managed_dispatch = _parse_managed_dispatch(payload.get("managed_dispatch"))
+        controller_actions = parse_controller_actions(
+            payload.get("controller_actions") or payload.get("granted_scopes")
+        )
+        if (
+            ControllerAction.MANAGED_WORK_DISPATCH in controller_actions
+            and managed_dispatch is None
+        ):
+            return None
         return GatewayEnrollmentRecord(
             enrolled_at=_parse_datetime(payload.get("enrolled_at")) or _utc_now(),
             data_plane=ZenohDataPlaneConfig(
@@ -148,9 +162,7 @@ class GatewayEnrollmentService:
                     )
                 ),
             ),
-            controller_actions=parse_controller_actions(
-                payload.get("controller_actions") or payload.get("granted_scopes")
-            ),
+            controller_actions=controller_actions,
             protocol_version=str(payload["protocol_version"])
             if payload.get("protocol_version")
             else None,
@@ -169,6 +181,7 @@ class GatewayEnrollmentService:
             edge_provider=self.settings.upstream_edge_provider,
             mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
             certificate_enrollment=certificate_enrollment,
+            managed_dispatch=managed_dispatch,
         )
 
     def clear_enrollment(self) -> None:
@@ -259,6 +272,35 @@ class GatewayEnrollmentService:
                     )
 
         certificate = self.certificate_service.current_certificate()
+        managed_dispatch = _to_managed_dispatch_enrollment(payload.managed_dispatch)
+        dispatch_permitted = (
+            ControllerAction.MANAGED_WORK_DISPATCH
+            in payload.permissions.controller_actions
+        )
+        if dispatch_permitted != (managed_dispatch is not None):
+            raise AgentError(
+                "MANAGED_DISPATCH_ENROLLMENT_INVALID",
+                "The Controller managed dispatch permission and trust metadata do not match.",
+                status_code=502,
+            )
+        if managed_dispatch is not None:
+            if managed_dispatch.scope.agent_id != fallback_agent_id:
+                raise AgentError(
+                    "MANAGED_DISPATCH_SCOPE_MISMATCH",
+                    "The Controller returned managed dispatch trust for a different Agent.",
+                    status_code=502,
+                )
+            controller_instance_id = (
+                payload.controller.instance_id
+                if payload.controller is not None
+                else None
+            )
+            if managed_dispatch.issuer != controller_instance_id:
+                raise AgentError(
+                    "MANAGED_DISPATCH_ISSUER_MISMATCH",
+                    "The managed dispatch issuer does not match the Controller instance.",
+                    status_code=502,
+                )
         record = GatewayEnrollmentRecord(
             enrolled_at=payload.enrolled_at,
             data_plane=ZenohDataPlaneConfig(
@@ -291,6 +333,7 @@ class GatewayEnrollmentService:
             edge_provider=self.settings.upstream_edge_provider,
             mutual_tls_mode=self.settings.upstream_mutual_tls_mode,
             certificate_enrollment=certificate_enrollment,
+            managed_dispatch=managed_dispatch,
         )
         self._store_enrollment(record)
         self.secret_store.delete_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
@@ -424,6 +467,44 @@ def _parse_certificate_enrollment(
             status_code=500,
         ) from exc
     return _to_certificate_enrollment_spec(payload, bootstrap_token=bootstrap_token)
+
+
+def _parse_managed_dispatch(value: Any) -> ManagedDispatchEnrollment | None:
+    if value is None:
+        return None
+    try:
+        payload = ManagedDispatchEnrollmentPayload.model_validate(value)
+    except ValidationError as exc:
+        raise AgentError(
+            "MANAGED_DISPATCH_METADATA_INVALID",
+            "Persisted managed dispatch trust metadata is invalid.",
+            status_code=500,
+        ) from exc
+    return _to_managed_dispatch_enrollment(payload)
+
+
+def _to_managed_dispatch_enrollment(
+    value: ManagedDispatchEnrollmentPayload | None,
+) -> ManagedDispatchEnrollment | None:
+    if value is None:
+        return None
+    return ManagedDispatchEnrollment(
+        scope=AgentManagedScope(
+            organization_id=value.scope.organization_id,
+            site_id=value.scope.site_id,
+            agent_id=value.scope.agent_id,
+        ),
+        issuer=value.issuer,
+        epoch=value.epoch,
+        verification_jwk=Ed25519VerificationJwk(
+            x=value.verification_jwk.x,
+            kid=value.verification_jwk.kid,
+            kty=value.verification_jwk.kty,
+            crv=value.verification_jwk.crv,
+            alg=value.verification_jwk.alg,
+            use=value.verification_jwk.use,
+        ),
+    )
 
 
 def _to_certificate_enrollment_spec(

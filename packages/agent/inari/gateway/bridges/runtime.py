@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from ...core.exceptions import AgentError
+from ...documents import DocumentAdmission, DocumentAdmissionError
 from ...local_api.schemas import (
     DeviceCommandRequest,
     JobResponse,
@@ -23,8 +24,12 @@ from ..protocol import (
     AgentRuntimeEventMessage,
     ControllerCancelJobMessage,
     ControllerExecuteDeviceCommandMessage,
+    ControllerDispatchDeviceWorkMessage,
 )
 from ..repositories import GatewayRepository
+from ..managed_dispatch import ManagedDispatchVerifier
+from .managed_work import managed_admission_request
+from ...spool import SpoolAdmissionError
 
 
 class GatewayCommandDispatcher:
@@ -33,9 +38,13 @@ class GatewayCommandDispatcher:
         *,
         job_service: JobService,
         gateway_repository: GatewayRepository,
+        document_admission: DocumentAdmission,
+        managed_dispatch_verifier: ManagedDispatchVerifier,
     ) -> None:
         self.job_service = job_service
         self.gateway_repository = gateway_repository
+        self.document_admission = document_admission
+        self.managed_dispatch_verifier = managed_dispatch_verifier
 
     async def handle_execute_device_command(
         self,
@@ -66,8 +75,7 @@ class GatewayCommandDispatcher:
             message_type=message.type,
             payload=message.model_dump(mode="json"),
         )
-        if not created:
-            self._replay_record(record)
+        if not created and self._replay_record(record):
             return
         try:
             job = await self.job_service.cancel(message.job_id)
@@ -93,6 +101,66 @@ class GatewayCommandDispatcher:
             dedupe_key=f"command-accepted:{message.command_id}",
         )
 
+    async def handle_dispatch_device_work(
+        self,
+        message: ControllerDispatchDeviceWorkMessage,
+        *,
+        enrollment: GatewayEnrollmentRecord,
+    ) -> None:
+        verified = self.managed_dispatch_verifier.verify(
+            message,
+            enrollment=enrollment,
+        )
+        record, created = self.gateway_repository.record_inbound_command(
+            command_id=message.command_id,
+            message_id=message.message_id,
+            sequence=message.sequence,
+            dispatch_epoch=verified.dispatch_epoch,
+            message_type=message.type,
+            payload=message.model_dump(mode="json"),
+        )
+        if not created and self._replay_record(record):
+            return
+        try:
+            accepted_work = await self.document_admission.admit(
+                managed_admission_request(verified, enrollment=enrollment)
+            )
+        except Exception as exc:
+            self._reject_managed_dispatch(
+                message.command_id,
+                dispatch_epoch=verified.dispatch_epoch,
+                exc=exc,
+            )
+            return
+
+        accepted = AgentCommandAcceptedMessage(
+            message_id=_message_id("gack"),
+            command_id=message.command_id,
+            accepted_at=accepted_work.accepted_at,
+            job={
+                "managed_work_id": verified.managed_work_id,
+                "print_intent_id": accepted_work.print_intent_id,
+                "print_job_id": accepted_work.print_job_id,
+                "device_id": accepted_work.device_id,
+                "state": "accepted",
+                "state_version": accepted_work.state_version,
+                "replayed": accepted_work.replayed,
+            },
+            detail=f"Accepted Managed Device Work and queued Print Job {accepted_work.print_job_id}.",
+        )
+        self.gateway_repository.mark_managed_dispatch_accepted(
+            message.command_id,
+            dispatch_epoch=verified.dispatch_epoch,
+            job_id=accepted_work.print_job_id,
+            response_payload=accepted.model_dump(mode="json"),
+        )
+        self.gateway_repository.enqueue_outbound(
+            message_type=accepted.type,
+            payload=accepted.model_dump(mode="json"),
+            correlation_id=message.command_id,
+            dedupe_key=f"command-accepted:{message.command_id}",
+        )
+
     async def _handle_job_submission(
         self,
         *,
@@ -109,8 +177,7 @@ class GatewayCommandDispatcher:
             message_type=message.type,
             payload=message.model_dump(mode="json"),
         )
-        if not created:
-            self._replay_record(record)
+        if not created and self._replay_record(record):
             return
 
         try:
@@ -149,16 +216,25 @@ class GatewayCommandDispatcher:
                 status_code=403,
             )
 
-    def _replay_record(self, record) -> None:
+    def _replay_record(self, record) -> bool:
         if record.response_payload is None:
-            return
-        self.gateway_repository.enqueue_outbound(
-            message_type=str(
-                record.response_payload.get("type", "agent.command.rejected")
-            ),
+            return False
+        message_type = str(
+            record.response_payload.get("type", "agent.command.rejected")
+        )
+        dedupe_prefix = (
+            "command-accepted"
+            if message_type == "agent.command.accepted"
+            else "command-rejected"
+        )
+        outbound = self.gateway_repository.enqueue_outbound(
+            message_type=message_type,
             payload=record.response_payload,
             correlation_id=record.command_id,
+            dedupe_key=f"{dedupe_prefix}:{record.command_id}",
         )
+        self.gateway_repository.requeue_outbound(outbound.message_id)
+        return True
 
     def _reject_command(self, command_id: str, exc: Exception) -> None:
         error = _coerce_error(exc)
@@ -171,6 +247,35 @@ class GatewayCommandDispatcher:
         )
         self.gateway_repository.mark_inbound_rejected(
             command_id,
+            error_code=error.code,
+            error_detail=error.message,
+            response_payload=rejected.model_dump(mode="json"),
+        )
+        self.gateway_repository.enqueue_outbound(
+            message_type=rejected.type,
+            payload=rejected.model_dump(mode="json"),
+            correlation_id=command_id,
+            dedupe_key=f"command-rejected:{command_id}",
+        )
+
+    def _reject_managed_dispatch(
+        self,
+        command_id: str,
+        *,
+        dispatch_epoch: int,
+        exc: Exception,
+    ) -> None:
+        error = _coerce_error(exc)
+        rejected = AgentCommandRejectedMessage(
+            message_id=_message_id("gerr"),
+            command_id=command_id,
+            rejected_at=_utc_now(),
+            code=error.code,
+            detail=error.message,
+        )
+        self.gateway_repository.mark_managed_dispatch_rejected(
+            command_id,
+            dispatch_epoch=dispatch_epoch,
             error_code=error.code,
             error_detail=error.message,
             response_payload=rejected.model_dump(mode="json"),
@@ -223,6 +328,10 @@ class GatewayRuntimeEventForwarder:
 def _coerce_error(exc: Exception) -> AgentError:
     if isinstance(exc, AgentError):
         return exc
+    if isinstance(exc, DocumentAdmissionError):
+        return AgentError(exc.code.upper(), exc.message, details=exc.details)
+    if isinstance(exc, SpoolAdmissionError):
+        return AgentError(exc.code.value.upper(), str(exc))
     return AgentError(
         "UPSTREAM_COMMAND_FAILED",
         f"Upstream command failed with {type(exc).__name__}.",

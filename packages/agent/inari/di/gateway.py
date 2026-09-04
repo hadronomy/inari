@@ -11,6 +11,7 @@ from ..gateway.data_plane import ZenohGatewayTransport
 from ..gateway.enrollment import GatewayEnrollmentService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..gateway.repositories import GatewayRepository
+from ..gateway.managed_dispatch import ManagedDispatchVerifier
 from ..gateway.bridges.runtime import (
     GatewayCommandDispatcher,
     GatewayRuntimeEventForwarder,
@@ -20,6 +21,7 @@ from ..gateway.supervisor import GatewaySupervisor
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
 from ..security.certificates.crypto import ManagedCertificateCryptoService
+from ..security.dispatch_keys import DispatchEncryptionKeyService
 from ..security.certificates.lifecycle import ManagedCertificateLifecycleManager
 from ..security.certificates.providers import ClientCertificateProvider
 from ..security.certificates.store import CertificateLifecycleService
@@ -45,6 +47,13 @@ class GatewayProvider(Provider):
 
     gateway_command_dispatcher = provide(GatewayCommandDispatcher)
     gateway_runtime_event_forwarder = provide(GatewayRuntimeEventForwarder)
+
+    @provide
+    def managed_dispatch_verifier(
+        self,
+        secret_store: ProtectedSecretStore,
+    ) -> ManagedDispatchVerifier:
+        return ManagedDispatchVerifier(DispatchEncryptionKeyService(secret_store))
 
     @provide
     def zenoh_gateway_transport(

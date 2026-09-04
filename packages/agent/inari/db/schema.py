@@ -143,6 +143,7 @@ gateway_inbound_commands_table = Table(
     Column("command_id", String, primary_key=True),
     Column("message_id", String, nullable=False),
     Column("sequence", Integer),
+    Column("dispatch_epoch", Integer),
     Column("message_type", String, nullable=False),
     Column("state", String, nullable=False),
     Column("payload_json", Text, nullable=False),
@@ -163,6 +164,27 @@ Index(
     gateway_inbound_commands_table.c.sequence,
     unique=True,
     sqlite_where=gateway_inbound_commands_table.c.sequence.is_not(None),
+)
+Index(
+    "uq_gateway_inbound_dispatch_epoch_sequence",
+    gateway_inbound_commands_table.c.dispatch_epoch,
+    gateway_inbound_commands_table.c.sequence,
+    unique=True,
+    sqlite_where=gateway_inbound_commands_table.c.dispatch_epoch.is_not(None),
+)
+
+gateway_managed_dispatch_state_table = Table(
+    "gateway_managed_dispatch_state",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("dispatch_epoch", Integer, nullable=False),
+    Column("last_sequence", Integer, nullable=False),
+    Column("updated_at", String, nullable=False),
+    CheckConstraint("id = 1", name="ck_gateway_managed_dispatch_state_singleton"),
+    CheckConstraint(
+        "dispatch_epoch > 0 AND last_sequence >= 0",
+        name="ck_gateway_managed_dispatch_state_position",
+    ),
 )
 
 gateway_outbox_table = Table(
@@ -325,6 +347,7 @@ device_work_admissions_table = Table(
     Column("planned_job_id", String, nullable=False, unique=True),
     Column("database", String, nullable=False),
     Column("scope_kind", String, nullable=False),
+    Column("managed_work_id", String),
     Column("organization_id", String, nullable=False),
     Column("site_id", String, nullable=False),
     Column("pos_configuration_id", String),
@@ -444,6 +467,12 @@ Index(
     unique=True,
     sqlite_where=(device_work_admissions_table.c.scope_kind == "device_manager")
     & device_work_admissions_table.c.pos_configuration_id.is_(None),
+)
+Index(
+    "uq_device_work_admissions_managed_work_id",
+    device_work_admissions_table.c.managed_work_id,
+    unique=True,
+    sqlite_where=device_work_admissions_table.c.managed_work_id.is_not(None),
 )
 Index(
     "uq_device_work_admissions_manager_pos_idempotency",

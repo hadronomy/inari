@@ -70,10 +70,12 @@ class ExecutionClaim:
     media_type: str
     normalized_options_digest: bytes
     binding_revision_id: str
-    grant_id: str
-    grant_pairing_id: str
-    grant_generation: int
-    grant_authorization_digest: bytes
+    scope_kind: str
+    managed_work_id: str | None
+    grant_id: str | None
+    grant_pairing_id: str | None
+    grant_generation: int | None
+    grant_authorization_digest: bytes | None
     expires_at: datetime
     original: ArtifactRef
     key: WrappedJobKey

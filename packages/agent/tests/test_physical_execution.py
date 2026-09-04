@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from io import BytesIO
@@ -23,6 +23,7 @@ from inari.client_trust import (
     Permission,
 )
 from inari.client_trust.store import SqliteClientTrustStore
+from inari.drivers import DeviceIdentity, DeviceTransport
 from inari.physical_execution import (
     DriverExecutionResult,
     DriverOutcome,
@@ -34,7 +35,14 @@ from inari.physical_execution import (
     SqliteExecutionLedger,
 )
 from inari.physical_execution.models import IoPermit, PreparedDeviceWork
+from inari.physical_execution._worker import _submit_prepared_work
 from inari.print_jobs import OutputEvidence, PrintJobState
+from inari.printing.protocols import (
+    PrintJobResult,
+    PrinterCapabilities,
+    PrinterDevice,
+    PrinterTransport,
+)
 from inari.printing.renderers import EscPosImageReceiptRenderer
 from inari.runtime.store import RuntimeStore
 from inari.spool import ArtifactFileStore, SqlActiveAuthorityGuard
@@ -225,6 +233,35 @@ async def test_last_safe_point_rechecks_the_exact_client_grant(tmp_path: Path) -
 
 
 @pytest.mark.anyio
+async def test_managed_work_rechecks_device_authority_without_a_client_grant(
+    tmp_path: Path,
+) -> None:
+    fixture = await _fixture(tmp_path)
+    with sqlite3.connect(fixture.database_path) as connection:
+        connection.execute(
+            "DROP TRIGGER ck_device_work_admissions_identity_immutable"
+        )
+        connection.execute(
+            "UPDATE device_work_admissions SET "
+            "scope_kind = 'device_manager', managed_work_id = 'managed-1', "
+            "grant_id = NULL, grant_pairing_id = NULL, grant_generation = NULL, "
+            "grant_authorization_digest = NULL WHERE id = 'admission-1'"
+        )
+    claim = fixture.ledger.claim_next(OWNER, device_id=None, now=NOW)
+    assert claim is not None
+    assert claim.managed_work_id == "managed-1"
+    assert claim.grant_id is None
+    fixture.ledger.mark_prepared(claim, now=NOW)
+    fixture.trust_store.save_grant(
+        replace(fixture.grant, lifecycle=GrantLifecycle.REVOKED)
+    )
+
+    permit = fixture.ledger.mark_io_started(claim, now=NOW + timedelta(seconds=1))
+
+    assert permit.job_id == claim.job_id
+
+
+@pytest.mark.anyio
 async def test_device_evidence_is_required_for_output_confirmation(
     tmp_path: Path,
 ) -> None:
@@ -323,6 +360,117 @@ async def test_encrypted_spool_persists_and_reuses_derived_printer_bytes(
     stored = (fixture.spool_path / "objects" / derived[0][0]).read_bytes()
     assert first.content not in stored
     assert not any((fixture.spool_path / "staging").iterdir())
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("media_type", "operation", "content"),
+    [
+        ("application/pdf", "report_pdf", b"%PDF-1.7\n%%EOF"),
+        (
+            "application/vnd.zebra-zpl",
+            "label_document",
+            b"^XA^FDInari^FS^XZ",
+        ),
+    ],
+)
+async def test_encrypted_spool_preserves_managed_document_bytes(
+    tmp_path: Path,
+    media_type: str,
+    operation: str,
+    content: bytes,
+) -> None:
+    fixture = await _fixture(tmp_path, content=content)
+    with sqlite3.connect(fixture.database_path) as connection:
+        connection.execute(
+            "DROP TRIGGER ck_device_work_admissions_identity_immutable"
+        )
+        connection.execute(
+            "UPDATE device_work_admissions SET media_type = ?, operation = ? "
+            "WHERE id = 'admission-1'",
+            (media_type, operation),
+        )
+    claim = fixture.ledger.claim_next(OWNER, device_id=None, now=NOW)
+    assert claim is not None
+    spool = EncryptedExecutionSpool(
+        store=RuntimeStore(fixture.database_path),
+        files=ArtifactFileStore(fixture.spool_path),
+        root_keys=SpoolRootKeyService(fixture.root_secrets),
+        renderer=EscPosImageReceiptRenderer(),
+        clock=lambda: NOW,
+    )
+
+    prepared = spool.prepare(claim)
+
+    assert prepared.content == content
+    assert prepared.media_type == media_type
+    with sqlite3.connect(fixture.database_path) as connection:
+        assert connection.execute(
+            "SELECT count(*) FROM spool_artifacts "
+            "WHERE job_id = 'job-1' AND artifact_kind = 'derived_raster'"
+        ).fetchone() == (0,)
+
+
+@dataclass(slots=True)
+class RecordingDocumentDriver:
+    documents: list[tuple[bytes, str, str]] = field(default_factory=list)
+    raw: list[tuple[bytes, str]] = field(default_factory=list)
+
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+    ) -> PrintJobResult:
+        self.documents.append((payload, media_type, document_name))
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.DOCUMENT,
+            bytes_written=len(payload),
+            job_id=7,
+        )
+
+    def submit_raw_job(
+        self, printer: PrinterDevice, payload: bytes, *, document_name: str
+    ) -> PrintJobResult:
+        self.raw.append((payload, document_name))
+        return PrintJobResult(
+            printer=printer,
+            transport=PrinterTransport.RAW,
+            bytes_written=len(payload),
+            job_id=8,
+        )
+
+
+def test_worker_routes_pdf_to_the_platform_document_backend() -> None:
+    driver = RecordingDocumentDriver()
+    printer = PrinterDevice(
+        name="Office",
+        driver_key="cups.printers",
+        identity=DeviceIdentity(
+            transport=DeviceTransport.SPOOLER,
+            os_instance_id="test-queue:office",
+        ),
+        capabilities=PrinterCapabilities(documents=True),
+    )
+    work = PreparedDeviceWork(
+        device_id="device-1",
+        driver_key="cups.printers",
+        device_name="Office",
+        operation="report_pdf",
+        media_type="application/pdf",
+        content=b"%PDF-1.7\n%%EOF",
+        content_sha256=sha256(b"%PDF-1.7\n%%EOF").digest(),
+        deadline=NOW + timedelta(minutes=1),
+    )
+
+    result = _submit_prepared_work(driver, printer, work)
+
+    assert result.transport is PrinterTransport.DOCUMENT
+    assert driver.documents == [(b"%PDF-1.7\n%%EOF", "application/pdf", "Inari Report")]
+    assert driver.raw == []
 
 
 @dataclass(slots=True)

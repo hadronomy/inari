@@ -258,6 +258,25 @@ class WindowsPrinterDriver(PrinterDriver):
             job_id=result.job_id,
         )
 
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+    ) -> PrintJobResult:
+        del payload, document_name
+        if not printer.supports_documents or media_type != "application/pdf":
+            raise PrinterServiceError(
+                "UNSUPPORTED_TRANSPORT",
+                f"Printer {printer.name!r} does not support {media_type!r} documents.",
+            )
+        raise PrinterServiceError(
+            "NO_DOCUMENT_BACKEND",
+            "The signed Inari PDF renderer is not installed.",
+        )
+
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.RAW)
         result = self.spooler.write_job(

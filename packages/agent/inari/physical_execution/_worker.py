@@ -11,6 +11,7 @@ from typing import Any
 from ..config import AgentSettings
 from ..drivers import DriverRegistry
 from ..printing.protocols import PrinterTransport
+from ..printing.protocols.types import PrintJobResult, PrinterDevice
 from ..print_jobs import OutputEvidence
 from .models import (
     DriverExecutionResult,
@@ -147,7 +148,7 @@ def _printer_process(
             or command[2] != work.device_id
         ):
             raise RuntimeError("The Device I/O permit is invalid.")
-        result = driver.submit_raw_job(device, work.content, document_name="Receipt")
+        result = _submit_prepared_work(driver, device, work)
         evidence = (
             OutputEvidence.SPOOLER
             if result.transport is not PrinterTransport.RAW
@@ -169,6 +170,32 @@ def _printer_process(
             pass
     finally:
         connection.close()
+
+
+def _submit_prepared_work(
+    driver: Any, device: PrinterDevice, work: PreparedDeviceWork
+) -> PrintJobResult:
+    if work.media_type == "application/pdf":
+        if work.driver_key not in {"cups.printers", "windows.printers"}:
+            raise RuntimeError(
+                "Report PDF output requires a platform document backend."
+            )
+        return driver.submit_document_job(
+            device,
+            work.content,
+            media_type=work.media_type,
+            document_name="Inari Report",
+        )
+    document_name = (
+        "Inari Label"
+        if work.media_type == "application/vnd.zebra-zpl"
+        else "Inari Receipt"
+    )
+    return driver.submit_raw_job(
+        device,
+        work.content,
+        document_name=document_name,
+    )
 
 
 __all__ = ["IsolatedPrinterWorker", "ProcessPreparedWorker"]

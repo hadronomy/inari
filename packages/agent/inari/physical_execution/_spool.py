@@ -31,8 +31,14 @@ from .models import (
 )
 
 
-_MAX_ORIGINAL_BYTES = 2 * 1024 * 1024
+_MAX_RECEIPT_BYTES = 2 * 1024 * 1024
+_MAX_REPORT_BYTES = 10 * 1024 * 1024
+_MAX_LABEL_BYTES = 2 * 1024 * 1024
 _MAX_DERIVED_BYTES = 16 * 1024 * 1024
+_RECEIPT_MEDIA_TYPE = "image/jpeg"
+_REPORT_MEDIA_TYPE = "application/pdf"
+_LABEL_MEDIA_TYPE = "application/vnd.zebra-zpl"
+_ESC_POS_MEDIA_TYPE = "application/vnd.inari.escpos"
 
 
 class EncryptedExecutionSpool:
@@ -58,35 +64,13 @@ class EncryptedExecutionSpool:
     def prepare(self, claim: ExecutionClaim) -> PreparedDeviceWork:
         try:
             data_key = self._data_key(claim)
-            derived = self._derived(claim)
-            if derived is None:
-                original = self._decrypt(
-                    claim,
-                    claim.original,
-                    data_key=data_key,
-                    max_plaintext_bytes=_MAX_ORIGINAL_BYTES,
-                )
-                rendered = self._renderer.render(original, mime_type=claim.media_type)
-                if not rendered or len(rendered) > _MAX_DERIVED_BYTES:
-                    raise PreparationFailed(
-                        "document_policy_rejected", "print.document_policy_rejected"
-                    )
-                content = self._persist_derived(
-                    claim, rendered=rendered, data_key=data_key
-                )
-            else:
-                content = self._decrypt(
-                    claim,
-                    derived,
-                    data_key=data_key,
-                    max_plaintext_bytes=_MAX_DERIVED_BYTES,
-                )
+            content, media_type = self._prepare_content(claim, data_key=data_key)
             return PreparedDeviceWork(
                 device_id=claim.device_id,
                 driver_key=claim.driver_key,
                 device_name=claim.device_name,
                 operation=claim.operation,
-                media_type="application/vnd.inari.escpos",
+                media_type=media_type,
                 content=content,
                 content_sha256=sha256(content).digest(),
                 deadline=claim.expires_at,
@@ -95,6 +79,51 @@ class EncryptedExecutionSpool:
             raise
         except Exception:
             raise PreparationFailed() from None
+
+    def _prepare_content(
+        self, claim: ExecutionClaim, *, data_key: bytes
+    ) -> tuple[bytes, str]:
+        if claim.media_type == _RECEIPT_MEDIA_TYPE:
+            return self._prepare_receipt(claim, data_key=data_key), _ESC_POS_MEDIA_TYPE
+        limit = {
+            _REPORT_MEDIA_TYPE: _MAX_REPORT_BYTES,
+            _LABEL_MEDIA_TYPE: _MAX_LABEL_BYTES,
+        }.get(claim.media_type)
+        if limit is None:
+            raise PreparationFailed(
+                "document_policy_rejected", "print.document_policy_rejected"
+            )
+        return (
+            self._decrypt(
+                claim,
+                claim.original,
+                data_key=data_key,
+                max_plaintext_bytes=limit,
+            ),
+            claim.media_type,
+        )
+
+    def _prepare_receipt(self, claim: ExecutionClaim, *, data_key: bytes) -> bytes:
+        derived = self._derived(claim)
+        if derived is not None:
+            return self._decrypt(
+                claim,
+                derived,
+                data_key=data_key,
+                max_plaintext_bytes=_MAX_DERIVED_BYTES,
+            )
+        original = self._decrypt(
+            claim,
+            claim.original,
+            data_key=data_key,
+            max_plaintext_bytes=_MAX_RECEIPT_BYTES,
+        )
+        rendered = self._renderer.render(original, mime_type=claim.media_type)
+        if not rendered or len(rendered) > _MAX_DERIVED_BYTES:
+            raise PreparationFailed(
+                "document_policy_rejected", "print.document_policy_rejected"
+            )
+        return self._persist_derived(claim, rendered=rendered, data_key=data_key)
 
     def release(self, claim: ExecutionClaim, receipt: ExecutionReceipt) -> None:
         del receipt

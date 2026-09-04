@@ -32,6 +32,7 @@ JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 class GatewayMessageType(StrEnum):
     CONTROLLER_EXECUTE_DEVICE_COMMAND = "controller.command.execute_device_command"
     CONTROLLER_CANCEL_JOB = "controller.command.cancel_job"
+    CONTROLLER_DISPATCH_DEVICE_WORK = "controller.command.dispatch_device_work"
     AGENT_COMMAND_ACCEPTED = "agent.command.accepted"
     AGENT_COMMAND_REJECTED = "agent.command.rejected"
     AGENT_RUNTIME_EVENT = "agent.runtime.event"
@@ -213,6 +214,19 @@ class DispatchEncryptionKeyPayload(GatewayProtocolModel):
     public_key_base64url: str = Field(min_length=43, max_length=43)
 
 
+class AgentManagedScopePayload(GatewayProtocolModel):
+    organization_id: str = Field(min_length=1, max_length=256)
+    site_id: str = Field(min_length=1, max_length=256)
+    agent_id: str = Field(min_length=1, max_length=256)
+
+
+class ManagedDispatchEnrollmentPayload(GatewayProtocolModel):
+    scope: AgentManagedScopePayload
+    issuer: str = Field(min_length=1, max_length=256)
+    epoch: int = Field(ge=1)
+    verification_jwk: Ed25519PublicJwk
+
+
 class EnrollmentRequestPayload(GatewayProtocolModel):
     protocol: GatewayProtocolDescriptor = Field(
         default_factory=GatewayProtocolDescriptor
@@ -234,7 +248,115 @@ class EnrollmentResponsePayload(GatewayProtocolModel):
     )
     data_plane: EnrollmentDataPlanePayload
     certificate: EnrollmentCertificatePayload | None = None
+    managed_dispatch: ManagedDispatchEnrollmentPayload | None = None
     enrolled_at: datetime
+
+
+class ManagedWorkScopePayload(GatewayProtocolModel):
+    database: str = Field(min_length=1, max_length=256)
+    company_id: str = Field(min_length=1, max_length=256)
+    organization_id: str = Field(min_length=1, max_length=256)
+    site_id: str = Field(min_length=1, max_length=256)
+    agent_id: str = Field(min_length=1, max_length=256)
+
+
+class ReportBindingClaimPayload(GatewayProtocolModel):
+    report_binding_id: str = Field(min_length=1, max_length=256)
+    binding_revision_id: str = Field(min_length=1, max_length=256)
+    report_action_id: str = Field(min_length=1, max_length=256)
+    report_contract_digest: str = Field(min_length=1, max_length=256)
+    template_digest: str = Field(min_length=1, max_length=256)
+    command_profile_id: str | None = None
+    layout_profile_id: str | None = None
+    hardware_matrix_digest: str | None = None
+
+
+class RecordsReportSourcePayload(GatewayProtocolModel):
+    kind: Literal["records"] = "records"
+    model: str = Field(min_length=1, max_length=256)
+    ordered_ids: tuple[int, ...]
+
+
+class WizardReportSourcePayload(GatewayProtocolModel):
+    kind: Literal["wizard"] = "wizard"
+    model: str = Field(min_length=1, max_length=256)
+    input_digest: str = Field(min_length=1, max_length=256)
+
+
+ReportSourcePayload = Annotated[
+    RecordsReportSourcePayload | WizardReportSourcePayload,
+    Field(discriminator="kind"),
+]
+
+
+class ReportPrintOriginPayload(GatewayProtocolModel):
+    binding: ReportBindingClaimPayload
+    route: Literal["manual", "automatic"]
+    source: ReportSourcePayload
+    rendered_document_index: int = Field(ge=0)
+    copy_ordinal: int = Field(ge=1)
+
+
+class ReportPdfPayload(GatewayProtocolModel):
+    operation: Literal["report_pdf"] = "report_pdf"
+    content_base64: str
+
+
+class LabelDocumentPayload(GatewayProtocolModel):
+    operation: Literal["label_document"] = "label_document"
+    content_base64: str
+
+
+ManagedDocumentPayload = Annotated[
+    ReportPdfPayload | LabelDocumentPayload,
+    Field(discriminator="operation"),
+]
+
+
+class ManagedDeviceWorkPayload(GatewayProtocolModel):
+    contract_major: Literal[1] = 1
+    scope: ManagedWorkScopePayload
+    print_intent_id: str = Field(min_length=1, max_length=256)
+    device_id: str = Field(min_length=1, max_length=256)
+    origin: ReportPrintOriginPayload
+    document: ManagedDocumentPayload
+    normalized_device_options: JsonObject = Field(default_factory=dict)
+
+
+class ManagedDispatchAuthenticatedDataPayload(GatewayProtocolModel):
+    organization_id: str = Field(min_length=1, max_length=256)
+    site_id: str = Field(min_length=1, max_length=256)
+    agent_id: str = Field(min_length=1, max_length=256)
+    managed_work_id: str = Field(min_length=1, max_length=256)
+    print_intent_id: str = Field(min_length=1, max_length=256)
+    payload_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dispatch_epoch: int = Field(ge=1)
+    sequence: int = Field(ge=1)
+    issued_at: int
+    expires_at: int
+
+
+class SealedManagedDispatchPayload(GatewayProtocolModel):
+    protocol_version: Literal[1] = 1
+    key_id: str = Field(min_length=1, max_length=256)
+    suite: Literal["dhkem_x25519_hkdf_sha256_hkdf_sha256_aes256_gcm"] = (
+        "dhkem_x25519_hkdf_sha256_hkdf_sha256_aes256_gcm"
+    )
+    encapsulated_key_base64url: str = Field(min_length=1)
+    ciphertext_base64url: str = Field(min_length=1)
+
+
+class DispatchDeviceWorkPayload(GatewayProtocolModel):
+    managed_work_id: str = Field(min_length=1, max_length=256)
+    authenticated_data: ManagedDispatchAuthenticatedDataPayload
+    sealed_envelope: SealedManagedDispatchPayload
+
+
+class ManagedDispatchClaimsPayload(GatewayProtocolModel):
+    iss: str = Field(min_length=1, max_length=256)
+    aud: str = Field(min_length=1, max_length=256)
+    authenticated_data: ManagedDispatchAuthenticatedDataPayload
+    work: ManagedDeviceWorkPayload
 
 
 class GatewayCommandTargetPayload(GatewayProtocolModel):
@@ -302,8 +424,21 @@ class ControllerCancelJobMessage(GatewayProtocolModel):
     job_id: str
 
 
+class ControllerDispatchDeviceWorkMessage(GatewayProtocolModel):
+    type: Literal[GatewayMessageType.CONTROLLER_DISPATCH_DEVICE_WORK] = (
+        GatewayMessageType.CONTROLLER_DISPATCH_DEVICE_WORK
+    )
+    message_id: str
+    command_id: str
+    sequence: int = Field(ge=1)
+    issued_at: datetime
+    payload: DispatchDeviceWorkPayload
+
+
 ControllerCommandMessage = Annotated[
-    ControllerExecuteDeviceCommandMessage | ControllerCancelJobMessage,
+    ControllerExecuteDeviceCommandMessage
+    | ControllerCancelJobMessage
+    | ControllerDispatchDeviceWorkMessage,
     Field(discriminator="type"),
 ]
 

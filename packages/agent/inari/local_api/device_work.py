@@ -230,7 +230,7 @@ def _admission_request(
             context=context,
             document=ReceiptImage(content=document),
         ),
-        grant=admission_grant,
+        authorization=admission_grant,
         media_type=envelope.media_type,
         options={},
     )

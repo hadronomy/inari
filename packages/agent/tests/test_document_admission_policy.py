@@ -19,12 +19,19 @@ from inari.documents import (
     DocumentWork,
     DurableAdmission,
     LabelDocument,
+    ManagedAdmissionAuthorization,
+    ManagedAdmissionScope,
+    ManagedSubmissionContext,
     PosPrintOrigin,
     ReceiptImage,
+    RecordsReportSource,
+    ReportBinding,
+    ReportPrintOrigin,
     ReportPdf,
     SubmissionContext,
 )
 from tests.support.device_authority import StaticAdmissionAuthority
+from inari.device_authority import ScopeKind
 
 NOW = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
 
@@ -52,7 +59,10 @@ class RecordingStore:
         )
 
 
-def receipt_work(document: object = None, **context_changes: object) -> DocumentWork:
+def receipt_work(
+    document: ReceiptImage | ReportPdf | LabelDocument | None = None,
+    **context_changes: object,
+) -> DocumentWork:
     origin = PosPrintOrigin(
         database="odoo",
         pos_configuration_id="pos_config_7",
@@ -104,6 +114,63 @@ def grant(**changes: object) -> AdmissionGrant:
     return AdmissionGrant(**values)
 
 
+def managed_work(document: ReportPdf | LabelDocument) -> DocumentWork:
+    binding = ReportBinding(
+        report_binding_id="report-binding-1",
+        binding_revision_id="binding_revision_9",
+        report_action_id="stock.action_report_delivery",
+        report_contract_digest="contract-digest",
+        template_digest="template-digest",
+        command_profile_id=None,
+        layout_profile_id=None,
+        hardware_matrix_digest=None,
+    )
+    context = ManagedSubmissionContext(
+        contract_major=1,
+        database="odoo",
+        company_id="7",
+        organization_id="org_1",
+        site_id="site_1",
+        managed_work_id="mw_1",
+        print_intent_id="pi_report_1",
+        origin_submission_key="report:origin-1",
+        origin=ReportPrintOrigin(
+            binding=binding,
+            route="manual",
+            source=RecordsReportSource(
+                model="stock.picking",
+                ordered_ids=(17,),
+            ),
+            rendered_document_index=0,
+            copy_ordinal=1,
+        ),
+        binding_revision_id=binding.binding_revision_id,
+        device_id="dev_receipt_1",
+        actor_id="controller:primary",
+        authorization_digest="dispatch-authorization",
+        copy_ordinal=1,
+    )
+    return DocumentWork(
+        idempotency_key="mw_1",
+        context=context,
+        document=document,
+    )
+
+
+def managed_authorization(operation: DocumentKind) -> ManagedAdmissionAuthorization:
+    return ManagedAdmissionAuthorization(
+        managed_work_id="mw_1",
+        organization_id="org_1",
+        site_id="site_1",
+        database="odoo",
+        actor_id="controller:primary",
+        device_id="dev_receipt_1",
+        binding_revision_id="binding_revision_9",
+        operation=operation,
+        authorization_digest="dispatch-authorization",
+    )
+
+
 def request(
     work: DocumentWork | None = None,
     *,
@@ -114,7 +181,7 @@ def request(
 ) -> AdmissionRequest:
     return AdmissionRequest(
         work=work or receipt_work(),
-        grant=admission_grant or grant(),
+        authorization=admission_grant or grant(),
         media_type=media_type,
         options=options if options is not None else {"density": 203, "cut": True},
         trusted_managed_expires_at=managed_expires_at,
@@ -126,6 +193,7 @@ def service(
     authority: StaticAdmissionAuthority | None = None,
     now: datetime = NOW,
     monotonic_now: float = 100.0,
+    pdf_validator=None,
 ) -> tuple[DocumentAdmissionService, RecordingStore, StaticAdmissionAuthority]:
     store = RecordingStore()
     selected_authority = authority or StaticAdmissionAuthority()
@@ -134,8 +202,53 @@ def service(
         authority=selected_authority,
         clock=lambda: now,
         monotonic_clock=lambda: monotonic_now,
+        pdf_validator=pdf_validator,
     )
     return admission, store, selected_authority
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("document", "operation", "media_type", "purpose"),
+    [
+        (
+            ReportPdf(content=b"%PDF-1.7\n%%EOF"),
+            DocumentKind.REPORT_PDF,
+            "application/pdf",
+            "report_pdf",
+        ),
+        (
+            LabelDocument(content=b"^XA^FO20,20^FDInari^FS^XZ"),
+            DocumentKind.LABEL_DOCUMENT,
+            "application/vnd.zebra-zpl",
+            "label_document",
+        ),
+    ],
+)
+async def test_admission_accepts_managed_report_documents_with_site_authority(
+    document,
+    operation: DocumentKind,
+    media_type: str,
+    purpose: str,
+) -> None:
+    admission, store, authority = service(pdf_validator=lambda content: None)
+    work = managed_work(document)
+
+    accepted = await admission.admit(
+        AdmissionRequest(
+            work=work,
+            authorization=managed_authorization(operation),
+            media_type=media_type,
+            options={"copies": 1},
+            trusted_managed_expires_at=NOW + timedelta(minutes=2),
+        )
+    )
+
+    assert accepted.print_job_id == "job_01"
+    assert store.admission is not None
+    assert isinstance(store.admission.authorization_scope, ManagedAdmissionScope)
+    assert authority.targets[0].scope.kind is ScopeKind.SITE
+    assert authority.targets[0].purpose == purpose
 
 
 @pytest.mark.anyio
@@ -147,7 +260,7 @@ async def test_admission_accepts_after_document_grant_and_authority_checks() -> 
     assert accepted.print_job_id == "job_01"
     assert len(authority.targets) == 1
     assert store.admission is not None
-    assert store.admission.grant_scope == grant().scope()
+    assert store.admission.authorization_scope == grant().scope()
     assert store.admission.deadline.expires_at == NOW + timedelta(minutes=5)
     assert store.admission.deadline.monotonic_deadline == 400.0
     assert len(store.admission.payload_fingerprint) == 32
@@ -170,7 +283,7 @@ async def test_admission_accepts_after_document_grant_and_authority_checks() -> 
     ],
 )
 async def test_admission_rejects_closed_or_invalid_documents(
-    document: object, code: str
+    document: ReceiptImage | ReportPdf | LabelDocument, code: str
 ) -> None:
     admission, store, authority = service()
 

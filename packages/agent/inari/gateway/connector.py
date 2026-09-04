@@ -25,6 +25,7 @@ from .protocol import (
     AgentStatusSnapshotMessage,
     ControllerCancelJobMessage,
     ControllerExecuteDeviceCommandMessage,
+    ControllerDispatchDeviceWorkMessage,
     GatewaySnapshotPayload,
 )
 from .repositories import GatewayRepository
@@ -250,6 +251,10 @@ class GatewayConnector:
             )
         elif isinstance(message, ControllerCancelJobMessage):
             await self.command_dispatcher.handle_cancel_job(
+                message, enrollment=enrollment
+            )
+        elif isinstance(message, ControllerDispatchDeviceWorkMessage):
+            await self.command_dispatcher.handle_dispatch_device_work(
                 message, enrollment=enrollment
             )
         await self._update_status(

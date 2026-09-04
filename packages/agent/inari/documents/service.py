@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import re
@@ -36,12 +37,20 @@ from .models import (
     DurableAdmission,
     LabelDocument,
     LocalPrintOrigin,
+    ManagedAdmissionAuthorization,
+    ManagedAdmissionScope,
+    ManagedSubmissionContext,
     PosPrintOrigin,
     PreparationPrintOrigin,
     ReceiptImage,
+    RecordsReportSource,
+    ReportPrintOrigin,
     ReportPdf,
+    SubmissionContext,
+    WizardReportSource,
 )
 from .ports import DocumentAdmissionStore
+from .validators import QpdfDocumentValidator, validate_label_document
 
 _RECEIPT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 _RECEIPT_IMAGE_MAX_PIXELS = 32_000_000
@@ -60,11 +69,13 @@ class DocumentAdmissionService:
         authority: AdmissionAuthorizer,
         clock: Callable[[], datetime] = lambda: datetime.now(tz=UTC),
         monotonic_clock: Callable[[], float] = time.monotonic,
+        pdf_validator: Callable[[bytes], None] | None = None,
     ) -> None:
         self._store = store
         self._authority = authority
         self._clock = clock
         self._monotonic_clock = monotonic_clock
+        self._pdf_validator = pdf_validator or QpdfDocumentValidator().validate
 
     async def admit(self, request: AdmissionRequest) -> AdmissionAccepted:
         """Validate, fingerprint, and durably accept one Device Work item."""
@@ -82,14 +93,19 @@ class DocumentAdmissionService:
 
         # Validate content before reading mutable device facts. This keeps
         # malformed payloads from causing device lookups or driver work.
-        self._validate_document(work.document)
-        if operation is not DocumentKind.RECEIPT_IMAGE or media_type != "image/jpeg":
+        await asyncio.to_thread(self._validate_document, work.document)
+        expected_media_type = {
+            DocumentKind.RECEIPT_IMAGE: "image/jpeg",
+            DocumentKind.REPORT_PDF: "application/pdf",
+            DocumentKind.LABEL_DOCUMENT: "application/vnd.zebra-zpl",
+        }[operation]
+        if media_type != expected_media_type:
             raise DocumentAdmissionError(
                 "document_policy_rejected",
-                "Only receipt-image JPEG Device Work is enabled.",
+                "The media type does not match the document operation.",
             )
 
-        grant_scope = _grant_scope(request.grant, work)
+        authorization_scope = _authorization_scope(request.authorization, work)
 
         deadline = self._resolve_deadline(request.trusted_managed_expires_at)
         if deadline.is_expired(
@@ -107,16 +123,11 @@ class DocumentAdmissionService:
 
         context = work.context
         origin = context.origin
+        authority_scope = _authority_scope(context)
         try:
             permit = self._authority.authorize(
                 CapabilityAdmissionTarget(
-                    scope=AuthorityScope(
-                        database=origin.database,
-                        organization_id=context.organization_id,
-                        site_id=context.site_id,
-                        kind=ScopeKind.POS_CONFIGURATION,
-                        pos_configuration_id=origin.pos_configuration_id,
-                    ),
+                    scope=authority_scope,
                     purpose=_device_purpose(operation, origin),
                     device_id=context.device_id,
                     binding_revision_id=context.binding_revision_id,
@@ -153,7 +164,7 @@ class DocumentAdmissionService:
         return await self._store.accept(
             DurableAdmission(
                 work=work,
-                grant_scope=grant_scope,
+                authorization_scope=authorization_scope,
                 deadline=deadline,
                 payload_fingerprint=payload_fingerprint,
                 media_type=media_type,
@@ -201,7 +212,6 @@ class DocumentAdmissionService:
         for label, value in {
             "organization": context.organization_id,
             "site": context.site_id,
-            "paired client": context.paired_client_id,
             "print intent": context.print_intent_id,
             "origin submission": context.origin_submission_key,
             "binding revision": context.binding_revision_id,
@@ -219,6 +229,29 @@ class DocumentAdmissionService:
                 "payload_invalid", "Device Work copy ordinal must be positive."
             )
 
+        if isinstance(context, SubmissionContext):
+            if not isinstance(work.document, ReceiptImage):
+                raise DocumentAdmissionError(
+                    "document_policy_rejected",
+                    "Local client work only accepts receipt images.",
+                )
+            DocumentAdmissionService._validate_local_context(context)
+            return
+        if isinstance(context, ManagedSubmissionContext):
+            if not isinstance(work.document, ReportPdf | LabelDocument):
+                raise DocumentAdmissionError(
+                    "document_policy_rejected",
+                    "Managed report work only accepts PDF or label documents.",
+                )
+            DocumentAdmissionService._validate_managed_context(context)
+            return
+        raise DocumentAdmissionError(
+            "payload_invalid", "The Device Work context has an invalid shape."
+        )
+
+    @staticmethod
+    def _validate_local_context(context: SubmissionContext) -> None:
+        _validate_string("paired client", context.paired_client_id)
         origin = context.origin
         if not isinstance(origin, PosPrintOrigin | PreparationPrintOrigin):
             raise DocumentAdmissionError(
@@ -263,16 +296,67 @@ class DocumentAdmissionService:
                     "Preparation segment index must be between 0 and 63.",
                 )
 
-    @classmethod
-    def _validate_document(cls, document: Document) -> None:
+    @staticmethod
+    def _validate_managed_context(context: ManagedSubmissionContext) -> None:
+        if not isinstance(context.origin, ReportPrintOrigin):
+            raise DocumentAdmissionError(
+                "payload_invalid", "The report origin has an invalid shape."
+            )
+        for label, value in {
+            "database": context.database,
+            "company": context.company_id,
+            "Managed Work": context.managed_work_id,
+            "report binding": context.origin.binding.report_binding_id,
+            "report action": context.origin.binding.report_action_id,
+            "report contract digest": context.origin.binding.report_contract_digest,
+            "template digest": context.origin.binding.template_digest,
+        }.items():
+            _validate_string(label, value)
+        for label, value in {
+            "command profile": context.origin.binding.command_profile_id,
+            "layout profile": context.origin.binding.layout_profile_id,
+            "hardware matrix digest": context.origin.binding.hardware_matrix_digest,
+        }.items():
+            if value is not None:
+                _validate_string(label, value)
+        if context.binding_revision_id != context.origin.binding.binding_revision_id:
+            raise DocumentAdmissionError(
+                "payload_invalid",
+                "The report origin Binding Revision does not match the work context.",
+            )
+        if context.origin.route not in {"manual", "automatic"}:
+            raise DocumentAdmissionError(
+                "payload_invalid", "The report route is invalid."
+            )
+        if (
+            not isinstance(context.origin.rendered_document_index, int)
+            or isinstance(context.origin.rendered_document_index, bool)
+            or context.origin.rendered_document_index < 0
+            or context.origin.copy_ordinal != context.copy_ordinal
+        ):
+            raise DocumentAdmissionError(
+                "payload_invalid", "The report document or copy ordinal is invalid."
+            )
+        source = context.origin.source
+        _validate_string("report source model", source.model)
+        if isinstance(source, WizardReportSource):
+            _validate_string("report wizard digest", source.input_digest)
+        elif not isinstance(source, RecordsReportSource) or not source.ordered_ids or any(
+            isinstance(record_id, bool) or record_id < 1
+            for record_id in source.ordered_ids
+        ):
+            raise DocumentAdmissionError(
+                "payload_invalid", "The report record source is invalid."
+            )
+
+    def _validate_document(self, document: Document) -> None:
         match document:
             case ReceiptImage(content=content):
-                cls._validate_receipt_image(content)
-            case ReportPdf() | LabelDocument():
-                raise DocumentAdmissionError(
-                    "document_policy_rejected",
-                    "This document operation is not enabled.",
-                )
+                self._validate_receipt_image(content)
+            case ReportPdf(content=content):
+                self._validate_report_pdf(content)
+            case LabelDocument(content=content):
+                validate_label_document(content)
             case _:
                 assert_never(document)
 
@@ -313,9 +397,25 @@ class DocumentAdmissionService:
                 "payload_invalid", "Receipt image must be a valid JPEG."
             ) from exc
 
+    def _validate_report_pdf(self, content: bytes) -> None:
+        self._pdf_validator(content)
+
+
+def _authorization_scope(
+    authorization: AdmissionGrant | ManagedAdmissionAuthorization,
+    work: DocumentWork,
+) -> AdmissionGrantScope | ManagedAdmissionScope:
+    if isinstance(authorization, AdmissionGrant):
+        return _grant_scope(authorization, work)
+    if isinstance(authorization, ManagedAdmissionAuthorization):
+        return _managed_scope(authorization, work)
+    raise DocumentAdmissionError(
+        "permission_denied", "The admission authorization has an invalid shape."
+    )
+
 
 def _grant_scope(grant: AdmissionGrant, work: DocumentWork) -> AdmissionGrantScope:
-    if not isinstance(grant, AdmissionGrant):
+    if not isinstance(work.context, SubmissionContext):
         raise DocumentAdmissionError(
             "permission_denied", "The Client Grant does not permit this Device Work."
         )
@@ -340,15 +440,65 @@ def _grant_scope(grant: AdmissionGrant, work: DocumentWork) -> AdmissionGrantSco
     return grant.scope()
 
 
-def _device_purpose(operation: DocumentKind, origin: LocalPrintOrigin) -> str:
+def _managed_scope(
+    authorization: ManagedAdmissionAuthorization,
+    work: DocumentWork,
+) -> ManagedAdmissionScope:
+    context = work.context
+    if (
+        not isinstance(context, ManagedSubmissionContext)
+        or not isinstance(authorization.operation, DocumentKind)
+        or authorization.managed_work_id != context.managed_work_id
+        or authorization.organization_id != context.organization_id
+        or authorization.site_id != context.site_id
+        or authorization.database != context.database
+        or authorization.actor_id != context.actor_id
+        or authorization.device_id != context.device_id
+        or authorization.binding_revision_id != context.binding_revision_id
+        or authorization.operation is not work.operation
+        or authorization.authorization_digest != context.authorization_digest
+    ):
+        raise DocumentAdmissionError(
+            "permission_denied",
+            "The Controller authorization does not permit this Managed Device Work.",
+        )
+    return authorization.scope()
+
+
+def _device_purpose(
+    operation: DocumentKind,
+    origin: LocalPrintOrigin | ReportPrintOrigin,
+) -> str:
     if operation is DocumentKind.RECEIPT_IMAGE:
         return (
             "pos_preparation"
             if isinstance(origin, PreparationPrintOrigin)
             else "pos_receipt"
         )
-    raise DocumentAdmissionError(
-        "document_policy_rejected", "This document operation is not enabled."
+    if operation is DocumentKind.REPORT_PDF:
+        return "report_pdf"
+    if operation is DocumentKind.LABEL_DOCUMENT:
+        return "label_document"
+    raise DocumentAdmissionError("document_policy_rejected", "Unknown document operation.")
+
+
+def _authority_scope(
+    context: SubmissionContext | ManagedSubmissionContext,
+) -> AuthorityScope:
+    if isinstance(context, ManagedSubmissionContext):
+        return AuthorityScope(
+            database=context.database,
+            organization_id=context.organization_id,
+            site_id=context.site_id,
+            kind=ScopeKind.SITE,
+            pos_configuration_id=None,
+        )
+    return AuthorityScope(
+        database=context.origin.database,
+        organization_id=context.organization_id,
+        site_id=context.site_id,
+        kind=ScopeKind.POS_CONFIGURATION,
+        pos_configuration_id=context.origin.pos_configuration_id,
     )
 
 

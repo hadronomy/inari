@@ -408,7 +408,7 @@ def _admission(work: DocumentWork) -> DurableAdmission:
     )
     return DurableAdmission(
         work=work,
-        grant_scope=AdmissionGrantScope(
+        authorization_scope=AdmissionGrantScope(
             grant_id="grant-1",
             pairing_id="pairing-1",
             generation=1,
@@ -865,7 +865,9 @@ async def test_durable_boundary_rejects_tampered_grant_or_fingerprint(
         await store.accept(
             replace(
                 admission,
-                grant_scope=replace(admission.grant_scope, actor_id="other-actor"),
+            authorization_scope=replace(
+                admission.authorization_scope, actor_id="other-actor"
+            ),
             )
         )
     assert _code(grant_error.value) == "permission_denied"

@@ -657,10 +657,10 @@ async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
     assert admission.submitted_work.context.site_id == "site_1"
     assert admission.submitted_work.context.paired_client_id == "pairing_1"
     assert admission.submitted_work.context.actor_id == "res.users:7"
-    assert admission.submitted_request.grant.grant_id == "grant_1"
-    assert admission.submitted_request.grant.generation == 1
+    assert admission.submitted_request.authorization.grant_id == "grant_1"
+    assert admission.submitted_request.authorization.generation == 1
     assert (
-        admission.submitted_request.grant.authorization_digest
+        admission.submitted_request.authorization.authorization_digest
         == "authorization_digest_1"
     )
 

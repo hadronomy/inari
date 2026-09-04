@@ -65,7 +65,7 @@ from .types import AdmissionPlan
 
 
 _ROOT_ROTATION_PERIOD = timedelta(days=90)
-_MAX_ENCRYPTED_RECEIPT_BYTES = 2 * MIB + 16
+_MAX_ENCRYPTED_DOCUMENT_BYTES = 10 * MIB + 16
 
 
 class _RestartAdmission(Exception):
@@ -200,7 +200,7 @@ class DurableSpoolAdmissionStore:
                 )
                 staged = self._files.stage_bytes(
                     encrypted.ciphertext,
-                    max_bytes=_MAX_ENCRYPTED_RECEIPT_BYTES,
+                    max_bytes=_MAX_ENCRYPTED_DOCUMENT_BYTES,
                 )
                 self._ledger.record_staged_artifact(
                     plan,
@@ -508,7 +508,7 @@ class DurableSpoolAdmissionStore:
         if row is None:
             raise SpoolAdmissionError(ProblemCode.RECOVERY_UNCERTAIN)
         ciphertext = self._files.read_bytes(
-            row["storage_ref"], max_bytes=_MAX_ENCRYPTED_RECEIPT_BYTES
+            row["storage_ref"], max_bytes=_MAX_ENCRYPTED_DOCUMENT_BYTES
         )
         plaintext = self._crypto.decrypt_artifact(
             data_key=data_key,
@@ -591,7 +591,7 @@ class DurableSpoolAdmissionStore:
                     paired_client_id=row["paired_client_id"],
                     origin_kind=row["origin_kind"],
                     origin_json=row["origin_json"],
-                    managed_work_id=None,
+                    managed_work_id=row["managed_work_id"],
                     state="accepted",
                     state_version=1,
                     accepted_at=timestamp,

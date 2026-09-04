@@ -103,7 +103,7 @@ def admission_grant() -> AdmissionGrant:
 def admission_request(work: DocumentWork) -> AdmissionRequest:
     return AdmissionRequest(
         work=work,
-        grant=admission_grant(),
+        authorization=admission_grant(),
         media_type="image/jpeg",
         options={},
     )

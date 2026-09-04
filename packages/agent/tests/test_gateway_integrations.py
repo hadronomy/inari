@@ -269,6 +269,66 @@ async def test_enrollment_rejects_unsupported_selected_protocol_version(
 
 
 @pytest.mark.anyio
+async def test_enrollment_persists_exact_managed_dispatch_trust(tmp_path: Path) -> None:
+    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    agent_id = identity_service.get_or_create_identity().agent_id
+    certificate_service = CertificateLifecycleService(
+        certificate_path=tmp_path / "upstream-client-cert.pem",
+        private_key_path=tmp_path / "identity.pem",
+        ca_path=tmp_path / "upstream-ca.pem",
+    )
+    payload = _enrollment_response_payload(
+        controller_actions=("managed_work:dispatch",),
+        certificate=None,
+        managed_dispatch={
+            "scope": {
+                "organization_id": "org_test",
+                "site_id": "site_test",
+                "agent_id": agent_id,
+            },
+            "issuer": "controller-1",
+            "epoch": 7,
+            "verification_jwk": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "a" * 43,
+                "kid": "dispatch-key-1",
+                "alg": "EdDSA",
+                "use": "sig",
+            },
+        },
+    )
+    service = GatewayEnrollmentService(
+        settings=AgentSettings(
+            gateway_mode=GatewayMode.MANAGED,
+            upstream_base_url="https://controller.example.com",
+            upstream_certificate_mode=UpstreamCertificateMode.NONE,
+            upstream_enrollment_token="bootstrap-token",
+        ),
+        identity_service=identity_service,
+        secret_store=MemorySecretStore(),
+        tls_context_factory=TlsContextFactory(AgentSettings()),
+        certificate_service=certificate_service,
+        auth_provider=cast(UpstreamAuthProvider, StaticAuthProvider({})),
+        metadata_path=tmp_path / "upstream-enrollment.json",
+        snapshot_provider=_gateway_snapshot_payload,
+        http_client_factory=_http_client_factory(FakeAsyncHttpClient(payload)),
+    )
+
+    record = await service.ensure_enrolled()
+
+    assert record is not None
+    assert record.managed_dispatch is not None
+    assert record.managed_dispatch.scope.organization_id == "org_test"
+    assert record.managed_dispatch.scope.agent_id == agent_id
+    assert record.managed_dispatch.epoch == 7
+    assert record.managed_dispatch.verification_jwk.kid == "dispatch-key-1"
+    reloaded = service.load_enrollment()
+    assert reloaded is not None
+    assert reloaded.managed_dispatch == record.managed_dispatch
+
+
+@pytest.mark.anyio
 async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
     tmp_path: Path,
 ) -> None:
@@ -891,6 +951,7 @@ def _enrollment_response_payload(
     *,
     controller_actions: tuple[str, ...] = (),
     certificate: dict[str, object] | None = None,
+    managed_dispatch: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "selected_protocol_version": GATEWAY_PROTOCOL_VERSION,
@@ -909,5 +970,6 @@ def _enrollment_response_payload(
             "tls": {"close_link_on_expiration": True},
         },
         "certificate": certificate,
+        "managed_dispatch": managed_dispatch,
         "enrolled_at": "2026-04-13T00:00:00Z",
     }
