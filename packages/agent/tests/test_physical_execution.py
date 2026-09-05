@@ -52,6 +52,7 @@ from tests import test_durable_spool_admission as spool_support
 
 NOW = datetime(2026, 8, 28, 10, tzinfo=UTC)
 OWNER = ExecutionOwner("agent-test", 1)
+pytestmark = pytest.mark.usefixtures("ample_spool_volume")
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,9 +239,7 @@ async def test_managed_work_rechecks_device_authority_without_a_client_grant(
 ) -> None:
     fixture = await _fixture(tmp_path)
     with sqlite3.connect(fixture.database_path) as connection:
-        connection.execute(
-            "DROP TRIGGER ck_device_work_admissions_identity_immutable"
-        )
+        connection.execute("DROP TRIGGER ck_device_work_admissions_identity_immutable")
         connection.execute(
             "UPDATE device_work_admissions SET "
             "scope_kind = 'device_manager', managed_work_id = 'managed-1', "
@@ -382,9 +381,7 @@ async def test_encrypted_spool_preserves_managed_document_bytes(
 ) -> None:
     fixture = await _fixture(tmp_path, content=content)
     with sqlite3.connect(fixture.database_path) as connection:
-        connection.execute(
-            "DROP TRIGGER ck_device_work_admissions_identity_immutable"
-        )
+        connection.execute("DROP TRIGGER ck_device_work_admissions_identity_immutable")
         connection.execute(
             "UPDATE device_work_admissions SET media_type = ?, operation = ? "
             "WHERE id = 'admission-1'",
