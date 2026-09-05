@@ -36,6 +36,7 @@ class PrinterDriver(DeviceDriver, Protocol):
         *,
         media_type: str,
         document_name: str,
+        dpi: int,
     ) -> PrintJobResult:
         """Send a document through the platform document pipeline."""
 

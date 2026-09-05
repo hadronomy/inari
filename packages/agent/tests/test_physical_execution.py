@@ -477,7 +477,7 @@ async def test_encrypted_spool_preserves_managed_document_bytes(
 
 @dataclass(slots=True)
 class RecordingDocumentDriver:
-    documents: list[tuple[bytes, str, str]] = field(default_factory=list)
+    documents: list[tuple[bytes, str, str, int]] = field(default_factory=list)
     raw: list[tuple[bytes, str]] = field(default_factory=list)
 
     def submit_document_job(
@@ -487,8 +487,9 @@ class RecordingDocumentDriver:
         *,
         media_type: str,
         document_name: str,
+        dpi: int,
     ) -> PrintJobResult:
-        self.documents.append((payload, media_type, document_name))
+        self.documents.append((payload, media_type, document_name, dpi))
         return PrintJobResult(
             printer=printer,
             transport=PrinterTransport.DOCUMENT,
@@ -534,7 +535,9 @@ def test_worker_routes_pdf_to_the_platform_document_backend() -> None:
     result = _submit_prepared_work(driver, printer, work)
 
     assert result.transport is PrinterTransport.DOCUMENT
-    assert driver.documents == [(b"%PDF-1.7\n%%EOF", "application/pdf", "Inari Report")]
+    assert driver.documents == [
+        (b"%PDF-1.7\n%%EOF", "application/pdf", "Inari Report", 203)
+    ]
     assert driver.raw == []
 
 

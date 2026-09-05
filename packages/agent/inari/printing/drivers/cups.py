@@ -44,6 +44,8 @@ class CupsConnection(Protocol):
 
     def finishDocument(self, printer_name: str) -> int: ...
 
+    def cancelJob(self, job_id: int, purge_job: bool = False) -> None: ...
+
 
 class CupsAPI(Protocol):
     def Connection(self) -> CupsConnection: ...
@@ -110,6 +112,7 @@ class CupsPrinterDriver(PrinterDriver):
             payload=payload,
             document_name=document_name,
             document_format="application/vnd.cups-raw",
+            options={},
         )
         return PrintJobResult(
             printer=printer,
@@ -125,18 +128,27 @@ class CupsPrinterDriver(PrinterDriver):
         *,
         media_type: str,
         document_name: str,
+        dpi: int,
     ) -> PrintJobResult:
         if not printer.supports_documents or media_type != "application/pdf":
             raise PrinterServiceError(
                 "UNSUPPORTED_TRANSPORT",
                 f"Printer {printer.name!r} does not support {media_type!r} documents.",
             )
-        self._require_document_format(printer.name, media_type)
+        if type(dpi) is not int or dpi not in {150, 203, 300}:
+            raise PrinterServiceError(
+                "DOCUMENT_POLICY_REJECTED", "The Report PDF resolution is invalid."
+            )
+        connection = self._connection(optional=False)
+        assert connection is not None
+        self._require_document_format(connection, printer.name, media_type, dpi)
         job_id = self._submit_document_bytes(
             printer_name=printer.name,
             payload=payload,
             document_name=document_name,
             document_format=media_type,
+            options={"printer-resolution": f"{dpi}dpi", "copies": "1"},
+            connection=connection,
         )
         return PrintJobResult(
             printer=printer,
@@ -204,33 +216,62 @@ class CupsPrinterDriver(PrinterDriver):
         payload: bytes,
         document_name: str,
         document_format: str,
-    ) -> int | None:
+        options: Mapping[str, str],
+        connection: CupsConnection | None = None,
+    ) -> int:
+        job_id: int | None = None
         try:
-            connection = self._connection(optional=False)
+            if connection is None:
+                connection = self._connection(optional=False)
             if connection is None:  # pragma: no cover - narrowed by optional=False
                 self._raise_cups_unavailable()
-            job_id = connection.createJob(printer_name, document_name, {})
-            connection.startDocument(
+            job_id = connection.createJob(printer_name, document_name, options)
+            if type(job_id) is not int or job_id <= 0:
+                job_id = None
+                raise PrinterServiceError("PRINT_FAILED", "CUPS did not create a job.")
+            status = connection.startDocument(
                 printer_name,
                 job_id,
                 document_name,
                 document_format,
                 1,
             )
-            connection.writeRequestData(payload, len(payload))
-            connection.finishDocument(printer_name)
+            if status != 100:
+                raise PrinterServiceError(
+                    "PRINT_FAILED", "CUPS did not start the document."
+                )
+            for offset in range(0, len(payload), 64 * 1024):
+                chunk = payload[offset : offset + 64 * 1024]
+                if connection.writeRequestData(chunk, len(chunk)) != 100:
+                    raise PrinterServiceError(
+                        "PRINT_FAILED", "CUPS did not receive the document."
+                    )
+            if connection.finishDocument(printer_name) != 0:
+                raise PrinterServiceError(
+                    "PRINT_FAILED", "CUPS did not accept the document."
+                )
             return job_id
-        except PrinterServiceError:
-            raise
         except Exception as exc:
+            if job_id is not None:
+                self._cancel_incomplete_job(job_id)
+            if isinstance(exc, PrinterServiceError):
+                raise
             raise PrinterServiceError(
                 "PRINT_FAILED", "CUPS rejected the print document."
             ) from exc
 
-    def _require_document_format(self, printer_name: str, media_type: str) -> None:
-        connection = self._connection(optional=False)
-        if connection is None:  # pragma: no cover - narrowed by optional=False
-            self._raise_cups_unavailable()
+    def _cancel_incomplete_job(self, job_id: int) -> None:
+        # An interrupted Send-Document can leave its connection inside a request.
+        try:
+            connection = self._connection(optional=False)
+            assert connection is not None
+            connection.cancelJob(job_id)
+        except Exception:
+            logger.warning("CUPS could not cancel incomplete job %s", job_id)
+
+    def _require_document_format(
+        self, connection: CupsConnection, printer_name: str, media_type: str, dpi: int
+    ) -> None:
         try:
             attributes = connection.getPrinterAttributes(printer_name)
         except Exception as exc:
@@ -245,6 +286,17 @@ class CupsPrinterDriver(PrinterDriver):
             raise PrinterServiceError(
                 "UNSUPPORTED_TRANSPORT",
                 f"Printer {printer_name!r} does not advertise {media_type!r}.",
+            )
+        if attributes.get("printer-is-accepting-jobs") is not True or attributes.get(
+            "printer-state"
+        ) not in {3, 4}:
+            raise PrinterServiceError(
+                "DEVICE_PREFLIGHT_FAILED", "The CUPS queue does not accept output."
+            )
+        if (dpi, dpi, 3) not in attributes.get("printer-resolution-supported", ()):
+            raise PrinterServiceError(
+                "DEVICE_PREFLIGHT_FAILED",
+                "The CUPS queue does not support the admitted resolution.",
             )
 
     def _connection(self, *, optional: bool) -> CupsConnection | None:

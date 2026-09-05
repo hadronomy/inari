@@ -265,6 +265,7 @@ class WindowsPrinterDriver(PrinterDriver):
         *,
         media_type: str,
         document_name: str,
+        dpi: int,
     ) -> PrintJobResult:
         del payload, document_name
         if not printer.supports_documents or media_type != "application/pdf":

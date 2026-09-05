@@ -79,6 +79,7 @@ class FakePrinterDriver(PrinterDriver):
         *,
         media_type: str,
         document_name: str,
+        dpi: int,
     ) -> PrintJobResult:
         del media_type
         return self.submit_raw_job(printer, payload, document_name=document_name)

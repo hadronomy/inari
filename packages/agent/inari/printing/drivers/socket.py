@@ -71,6 +71,7 @@ class RawSocketPrinterDriver(PrinterDriver):
         *,
         media_type: str,
         document_name: str,
+        dpi: int,
     ) -> PrintJobResult:
         del payload, media_type, document_name
         raise PrinterServiceError(

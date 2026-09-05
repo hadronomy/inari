@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import multiprocessing
+import json
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from typing import Any
@@ -185,6 +186,7 @@ def _submit_prepared_work(
             work.content,
             media_type=work.media_type,
             document_name="Inari Report",
+            dpi=json.loads(work.normalized_options)["dpi"],
         )
     document_name = (
         "Inari Label"

@@ -60,7 +60,12 @@ def test_list_devices_from_cups_api_and_stream_raw_job() -> None:
             return "Office Printer"
 
         def getPrinterAttributes(self, printer_name):
-            return {"document-format-supported": ["application/pdf"]}
+            return {
+                "document-format-supported": ["application/pdf"],
+                "printer-is-accepting-jobs": True,
+                "printer-state": 3,
+                "printer-resolution-supported": [(203, 203, 3)],
+            }
 
         def createJob(self, printer_name, title, options):
             submissions.append(("create", (printer_name, title, options)))
@@ -138,7 +143,12 @@ def test_cups_streams_pdf_with_an_explicit_document_format() -> None:
 
         def getPrinterAttributes(self, printer_name):
             calls.append(("attributes", printer_name))
-            return {"document-format-supported": ["application/pdf"]}
+            return {
+                "document-format-supported": ["application/pdf"],
+                "printer-is-accepting-jobs": True,
+                "printer-state": 3,
+                "printer-resolution-supported": [(203, 203, 3)],
+            }
 
         def createJob(self, printer_name, title, options):
             calls.append(("create", (printer_name, title, options)))
@@ -168,6 +178,7 @@ def test_cups_streams_pdf_with_an_explicit_document_format() -> None:
         b"%PDF-1.7\n%%EOF",
         media_type="application/pdf",
         document_name="Inari Report",
+        dpi=203,
     )
 
     assert result.transport is PrinterTransport.DOCUMENT
