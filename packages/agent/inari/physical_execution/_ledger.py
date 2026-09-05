@@ -632,6 +632,7 @@ class SqliteExecutionLedger:
             operation=str(admission["operation"]),
             media_type=str(admission["media_type"]),
             normalized_options_digest=bytes(admission["normalized_options_digest"]),
+            normalized_options=bytes(admission["normalized_options"]),
             binding_revision_id=str(admission["binding_revision_id"]),
             scope_kind=scope_kind,
             managed_work_id=(

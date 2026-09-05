@@ -63,6 +63,13 @@ class EncryptedExecutionSpool:
 
     def prepare(self, claim: ExecutionClaim) -> PreparedDeviceWork:
         try:
+            if (
+                sha256(claim.normalized_options).digest()
+                != claim.normalized_options_digest
+            ):
+                raise PreparationFailed(
+                    "document_policy_rejected", "print.document_policy_rejected"
+                )
             data_key = self._data_key(claim)
             content, media_type = self._prepare_content(claim, data_key=data_key)
             return PreparedDeviceWork(
@@ -73,6 +80,7 @@ class EncryptedExecutionSpool:
                 media_type=media_type,
                 content=content,
                 content_sha256=sha256(content).digest(),
+                normalized_options=claim.normalized_options,
                 deadline=claim.expires_at,
             )
         except PreparationFailed:

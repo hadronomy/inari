@@ -9,6 +9,7 @@ import asyncio
 import sqlite3
 
 from PIL import Image
+from alembic import command
 import pytest
 
 from inari.client_trust import (
@@ -24,6 +25,7 @@ from inari.client_trust import (
 )
 from inari.client_trust.store import SqliteClientTrustStore
 from inari.drivers import DeviceIdentity, DeviceTransport
+from inari.db.migrations import DatabaseMigrator
 from inari.physical_execution import (
     DriverExecutionResult,
     DriverOutcome,
@@ -34,7 +36,11 @@ from inari.physical_execution import (
     PhysicalExecution,
     SqliteExecutionLedger,
 )
-from inari.physical_execution.models import IoPermit, PreparedDeviceWork
+from inari.physical_execution.models import (
+    IoPermit,
+    PreparationFailed,
+    PreparedDeviceWork,
+)
 from inari.physical_execution._worker import _submit_prepared_work
 from inari.print_jobs import OutputEvidence, PrintJobState
 from inari.printing.protocols import (
@@ -350,6 +356,9 @@ async def test_encrypted_spool_persists_and_reuses_derived_printer_bytes(
     assert first.content == second.content
     assert first.content.startswith(b"\x1b@")
     assert first.content_sha256 == sha256(first.content).digest()
+    assert first.normalized_options == claim.normalized_options
+    with pytest.raises(PreparationFailed, match="document_policy_rejected"):
+        spool.prepare(replace(claim, normalized_options=b'{"dpi":300}'))
     with sqlite3.connect(fixture.database_path) as connection:
         derived = connection.execute(
             "SELECT storage_ref FROM spool_artifacts "
@@ -359,6 +368,64 @@ async def test_encrypted_spool_persists_and_reuses_derived_printer_bytes(
     stored = (fixture.spool_path / "objects" / derived[0][0]).read_bytes()
     assert first.content not in stored
     assert not any((fixture.spool_path / "staging").iterdir())
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("drained", [False, True])
+async def test_options_upgrade_requires_drained_work_and_preserves_outcomes(
+    tmp_path: Path,
+    drained: bool,
+) -> None:
+    fixture = await _fixture(tmp_path)
+    migrator = DatabaseMigrator(fixture.database_path)
+    config = migrator._build_alembic_config()
+    claim = fixture.ledger.claim_next(OWNER, device_id=None, now=NOW)
+    assert claim is not None
+    if drained:
+        fixture.ledger.mark_prepared(claim, now=NOW)
+        permit = fixture.ledger.mark_io_started(claim, now=NOW)
+        fixture.ledger.note_permission_delivered(claim, permit, now=NOW)
+        fixture.ledger.finish(
+            claim, DriverExecutionResult(DriverOutcome.UNKNOWN), now=NOW
+        )
+    before = dict(_job(fixture.database_path))
+    command.downgrade(config, "20260904_0013")
+
+    if not drained:
+        with pytest.raises(RuntimeError, match="Drain Device Work"):
+            migrator.ensure_current()
+        with sqlite3.connect(fixture.database_path) as connection:
+            assert connection.execute(
+                "SELECT version_num FROM alembic_version"
+            ).fetchone() == ("20260904_0013",)
+            assert "normalized_options" not in {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(device_work_admissions)"
+                )
+            }
+        assert dict(_job(fixture.database_path)) == before
+        return
+
+    result = migrator.ensure_current()
+    assert result.backup_path is not None
+    assert result.backup_path.is_file()
+    assert dict(_job(fixture.database_path)) == before
+    with sqlite3.connect(fixture.database_path) as connection:
+        assert connection.execute(
+            "SELECT normalized_options, normalized_options_digest FROM device_work_admissions"
+        ).fetchone() == (None, claim.normalized_options_digest)
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+@pytest.mark.anyio
+async def test_admitted_options_are_immutable(tmp_path: Path) -> None:
+    fixture = await _fixture(tmp_path)
+    with sqlite3.connect(fixture.database_path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="options are immutable"):
+            connection.execute(
+                "UPDATE device_work_admissions SET normalized_options = X'7b7d'"
+            )
 
 
 @pytest.mark.anyio
@@ -460,6 +527,7 @@ def test_worker_routes_pdf_to_the_platform_document_backend() -> None:
         media_type="application/pdf",
         content=b"%PDF-1.7\n%%EOF",
         content_sha256=sha256(b"%PDF-1.7\n%%EOF").digest(),
+        normalized_options=b'{"dpi":203}',
         deadline=NOW + timedelta(minutes=1),
     )
 
@@ -484,6 +552,7 @@ class RecordingSpool:
             media_type="application/vnd.inari.escpos",
             content=content,
             content_sha256=sha256(content).digest(),
+            normalized_options=claim.normalized_options,
             deadline=claim.expires_at,
         )
 

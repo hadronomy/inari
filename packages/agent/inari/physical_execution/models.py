@@ -69,6 +69,7 @@ class ExecutionClaim:
     operation: str
     media_type: str
     normalized_options_digest: bytes
+    normalized_options: bytes
     binding_revision_id: str
     scope_kind: str
     managed_work_id: str | None
@@ -94,6 +95,7 @@ class PreparedDeviceWork:
     media_type: str
     content: bytes
     content_sha256: bytes
+    normalized_options: bytes
     deadline: datetime
 
     def __post_init__(self) -> None:

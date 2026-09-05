@@ -48,7 +48,7 @@ def test_upgrade_merges_duplicate_devices_and_rewrites_all_references(
         _insert_references(connection, old_b)
         _insert_json_references(connection, old_a, old_b)
 
-    _upgrade_to_head(database_path)
+    _upgrade_identity(database_path)
     expected_id = build_device_id(
         kind=DeviceKind.PRINTER,
         identity=DeviceIdentity(
@@ -63,7 +63,13 @@ def test_upgrade_merges_duplicate_devices_and_rewrites_all_references(
             "SELECT id, first_seen_at, last_seen_at, updated_at, is_default FROM devices"
         ).fetchall()
         assert devices == [
-            (expected_id, "2026-07-01T00:00:00Z", "2026-08-03T00:00:00Z", "2026-08-03T00:00:00Z", 1)
+            (
+                expected_id,
+                "2026-07-01T00:00:00Z",
+                "2026-08-03T00:00:00Z",
+                "2026-08-03T00:00:00Z",
+                1,
+            )
         ]
         for table in (
             "device_events",
@@ -72,7 +78,9 @@ def test_upgrade_merges_duplicate_devices_and_rewrites_all_references(
             "device_work_admissions",
             "spool_reservations",
         ):
-            assert connection.execute(f"SELECT DISTINCT device_id FROM {table}").fetchall() == [(expected_id,)]
+            assert connection.execute(
+                f"SELECT DISTINCT device_id FROM {table}"
+            ).fetchall() == [(expected_id,)]
         payload = connection.execute(
             "SELECT payload_json FROM device_events WHERE sequence = 1"
         ).fetchone()
@@ -99,7 +107,7 @@ def test_upgrade_rewrites_legacy_fallback_with_normalized_unicode_name(
             identity_os_instance_id=" legacy:old.driver:raw name ",
         )
 
-    _upgrade_to_head(database_path)
+    _upgrade_identity(database_path)
     expected_id = build_device_id(
         kind=DeviceKind.PRINTER,
         identity=DeviceIdentity(
@@ -114,10 +122,13 @@ def test_upgrade_rewrites_legacy_fallback_with_normalized_unicode_name(
 
     config = DatabaseMigrator(database_path)._build_alembic_config()
     command.downgrade(config, "20260827_0005")
-    expected_old_id = "dev_" + uuid5(
-        NAMESPACE,
-        "printer\0driver.one\0os:spooler:legacy:driver.one:  Cafe\u0301  ",
-    ).hex
+    expected_old_id = (
+        "dev_"
+        + uuid5(
+            NAMESPACE,
+            "printer\0driver.one\0os:spooler:legacy:driver.one:  Cafe\u0301  ",
+        ).hex
+    )
     with sqlite3.connect(database_path) as connection:
         assert connection.execute(
             "SELECT id, identity_os_instance_id FROM devices"
@@ -134,12 +145,14 @@ def test_upgrade_validates_before_write_and_rolls_back_invalid_json(
             "UPDATE devices SET metadata_json = '{invalid' WHERE id = 'old-device'"
         )
     with pytest.raises(RuntimeError, match="Invalid or too-deep JSON"):
-        _upgrade_to_head(database_path)
+        _upgrade_identity(database_path)
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("SELECT id FROM devices").fetchone() == ("old-device",)
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "20260827_0005",
+        assert connection.execute("SELECT id FROM devices").fetchone() == (
+            "old-device",
         )
+        assert connection.execute(
+            "SELECT version_num FROM alembic_version"
+        ).fetchone() == ("20260827_0005",)
 
 
 def test_nonduplicate_upgrade_and_downgrade_restore_the_0004_id(
@@ -148,14 +161,17 @@ def test_nonduplicate_upgrade_and_downgrade_restore_the_0004_id(
     database_path = _database_at_0005(tmp_path)
     with sqlite3.connect(database_path) as connection:
         _insert_device(connection, "old-device")
-    _upgrade_to_head(database_path)
+    _upgrade_identity(database_path)
     config = DatabaseMigrator(database_path)._build_alembic_config()
     command.downgrade(config, "20260827_0005")
 
-    expected_id = "dev_" + uuid5(
-        NAMESPACE,
-        "printer\0driver.one\0hardware:1234:5678: serial-1 ",
-    ).hex
+    expected_id = (
+        "dev_"
+        + uuid5(
+            NAMESPACE,
+            "printer\0driver.one\0hardware:1234:5678: serial-1 ",
+        ).hex
+    )
     with sqlite3.connect(database_path) as connection:
         assert connection.execute("SELECT id FROM devices").fetchone() == (expected_id,)
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -169,9 +185,9 @@ def _database_at_0005(tmp_path: Path) -> Path:
     return database_path
 
 
-def _upgrade_to_head(database_path: Path) -> None:
+def _upgrade_identity(database_path: Path) -> None:
     migrator = DatabaseMigrator(database_path)
-    command.upgrade(migrator._build_alembic_config(), "head")
+    command.upgrade(migrator._build_alembic_config(), "20260828_0006")
 
 
 def _insert_device(
@@ -239,7 +255,14 @@ def _insert_references(connection: sqlite3.Connection, device_id: str) -> None:
         ) VALUES (?, ?, ?, ?, 'paired_client', 'org-1', 'site-1', 'pos-1',
             'client-1', 'pos', '{}', 'accepted', 1, ?, ?, 0, 'v1')
         """,
-        (f"public-{suffix}", f"admission-{suffix}", f"intent-{suffix}", device_id, NOW, EXPIRY),
+        (
+            f"public-{suffix}",
+            f"admission-{suffix}",
+            f"intent-{suffix}",
+            device_id,
+            NOW,
+            EXPIRY,
+        ),
     )
     connection.execute(
         """

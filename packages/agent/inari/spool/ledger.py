@@ -141,6 +141,7 @@ class SpoolAdmissionLedger:
                     operation=manifest.operation,
                     media_type=manifest.media_type,
                     normalized_options_digest=manifest.normalized_options_digest,
+                    normalized_options=manifest.normalized_options,
                     grant_scope_digest=manifest.grant_scope_digest,
                     grant_id=manifest.grant_id,
                     grant_pairing_id=manifest.grant_pairing_id,

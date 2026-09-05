@@ -25,6 +25,7 @@ class AdmissionManifest:
     operation: str
     media_type: str
     normalized_options_digest: bytes
+    normalized_options: bytes
     grant_scope_digest: bytes
     origin_submission_key: str
     origin_kind: str

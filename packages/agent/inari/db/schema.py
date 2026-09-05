@@ -380,6 +380,7 @@ device_work_admissions_table = Table(
     Column("operation", String, nullable=False),
     Column("media_type", String, nullable=False),
     Column("normalized_options_digest", LargeBinary, nullable=False),
+    Column("normalized_options", LargeBinary),
     Column("grant_scope_digest", LargeBinary, nullable=False),
     # The exact Client Grant used for admission. These fields let execution
     # recheck the same grant after queueing without storing bearer material.

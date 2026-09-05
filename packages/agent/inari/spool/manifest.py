@@ -188,9 +188,8 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
         operation=work.operation.value,
         media_type=admission.media_type,
         normalized_options_digest=bytes.fromhex(normalized_options_digest),
-        grant_scope_digest=hashlib.sha256(
-            rfc8785.dumps(authorization_values)
-        ).digest(),
+        normalized_options=admission.normalized_options,
+        grant_scope_digest=hashlib.sha256(rfc8785.dumps(authorization_values)).digest(),
         origin_submission_key=context.origin_submission_key,
         origin_kind=origin_kind,
         origin_json=origin_json,
@@ -226,6 +225,7 @@ def manifest_from_row(
         operation=row["operation"],
         media_type=row["media_type"],
         normalized_options_digest=row["normalized_options_digest"],
+        normalized_options=bytes(row["normalized_options"]),
         grant_scope_digest=row["grant_scope_digest"],
         origin_submission_key=row["origin_submission_key"],
         origin_kind=row["origin_kind"],
