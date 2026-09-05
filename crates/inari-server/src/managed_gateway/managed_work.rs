@@ -3,14 +3,16 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{TimeDelta, Utc};
+use inari_gateway::ManagedWorkAdmission;
 use inari_gateway::protocol::{
     DeviceCapability, DeviceState, MANAGED_WORK_CONTRACT_MAJOR, ManagedDocumentOperation,
     ManagedPreflightId, ManagedWorkId, ManagedWorkPreflightRequest, ManagedWorkPreflightResult,
     ManagedWorkPreflightState, ManagedWorkReceipt, ManagedWorkRecord, ManagedWorkSubmission,
 };
 use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
 
-use super::ManagedGatewayController;
+use super::{ManagedGatewayController, StoredControllerCommand};
 use crate::error::{AppError, AppResult};
 
 const PREFLIGHT_TTL: Duration = Duration::from_secs(2 * 60);
@@ -95,9 +97,9 @@ impl ManagedGatewayController {
         submission: ManagedWorkSubmission,
     ) -> AppResult<ManagedWorkReceipt> {
         self.ensure_enabled()?;
-        let signer = self
+        let security = self
             .inner
-            .dispatch_signer
+            .security
             .clone()
             .ok_or_else(|| {
                 AppError::service_unavailable("Managed Work dispatch is not enabled.")
@@ -117,45 +119,91 @@ impl ManagedGatewayController {
             ));
         }
         let payload_bytes = payload.len();
-        let request_fingerprint: [u8; 32] = Sha256::digest(serde_json::to_vec(&submission)?).into();
+        let request_fingerprint: [u8; 32] =
+            Sha256::digest(serde_json_canonicalizer::to_vec(&submission.work)?).into();
+        if let Some((persisted, command)) = self
+            .inner
+            .store
+            .replay_managed_work(
+                &managed_work_id,
+                &submission.work.scope.organization_id,
+                &idempotency_key,
+                submission.work.print_intent_id.as_str(),
+                &request_fingerprint,
+            )
+            .await?
+        {
+            self.publish_managed_dispatch(command)
+                .await?;
+            return Ok(ManagedWorkReceipt {
+                managed_work_id: persisted.managed_work_id,
+                state: persisted.state,
+            });
+        }
+        let protected_aad =
+            serde_json_canonicalizer::to_vec(&inari_gateway::ManagedPayloadContext {
+                organization_id: submission
+                    .work
+                    .scope
+                    .organization_id
+                    .to_string(),
+                managed_work_id: managed_work_id.clone(),
+                idempotency_key: idempotency_key.clone(),
+                payload_fingerprint: hex::encode(payload_fingerprint),
+                request_fingerprint: hex::encode(request_fingerprint),
+            })?;
+        let prepared_payload = self
+            .payload_protector()?
+            .prepare(protected_aad)
+            .await?;
         let dispatch_submission = submission.clone();
         let dispatch_idempotency_key = idempotency_key.clone();
         let (persisted, command) = self
             .inner
             .store
             .admit_managed_work(
-                &managed_work_id,
-                &submission,
-                &request_fingerprint,
-                &payload_fingerprint,
-                i64::try_from(payload_bytes).map_err(|_| {
-                    AppError::bad_request("Managed Work payload size is out of range.")
-                })?,
-                move |actual_managed_work_id,
-                      sequence,
-                      command_id,
-                      message_id,
-                      issued_at,
-                      recipient_key,
-                      work_expires_at| {
-                    signer
-                        .command(
-                            actual_managed_work_id.clone(),
-                            dispatch_idempotency_key,
-                            dispatch_submission,
-                            recipient_key,
-                            work_expires_at,
-                            message_id.to_owned(),
-                            command_id.to_owned(),
-                            sequence,
-                            issued_at,
-                        )
+                ManagedWorkAdmission {
+                    managed_work_id: &managed_work_id,
+                    idempotency_key: &idempotency_key,
+                    submission: &submission,
+                    request_fingerprint: &request_fingerprint,
+                    payload_fingerprint: &payload_fingerprint,
+                    payload_bytes: i64::try_from(payload_bytes).map_err(|_| {
+                        AppError::bad_request("Managed Work payload size is out of range.")
+                    })?,
+                    admitted_at: Utc::now(),
+                },
+                move |allocation| {
+                    let command = security
+                        .dispatch_signer
+                        .command(allocation, dispatch_idempotency_key, dispatch_submission)
+                        .map_err(|error| {
+                            inari_gateway::GatewayError::Unavailable(error.to_string())
+                        })?;
+                    let plaintext =
+                        Zeroizing::new(serde_json_canonicalizer::to_vec(&command).map_err(
+                            |error| inari_gateway::GatewayError::Unavailable(error.to_string()),
+                        )?);
+                    prepared_payload
+                        .seal(&plaintext)
                         .map_err(|error| {
                             inari_gateway::GatewayError::Unavailable(error.to_string())
                         })
                 },
             )
             .await?;
+        self.publish_managed_dispatch(command)
+            .await?;
+        Ok(ManagedWorkReceipt {
+            managed_work_id: persisted.managed_work_id,
+            state: persisted.state,
+        })
+    }
+
+    async fn publish_managed_dispatch(
+        &self,
+        command: Option<StoredControllerCommand>,
+    ) -> AppResult<()> {
         if let Some(command) = command {
             match self
                 .publish_live_command(&command)
@@ -180,10 +228,7 @@ impl ManagedGatewayController {
                 },
             }
         }
-        Ok(ManagedWorkReceipt {
-            managed_work_id: persisted.managed_work_id,
-            state: persisted.state,
-        })
+        Ok(())
     }
 
     pub async fn managed_work(
@@ -361,6 +406,9 @@ fn decoded_document(submission: &ManagedWorkSubmission) -> AppResult<Vec<u8>> {
 }
 
 #[cfg(test)]
+mod persistence_tests;
+
+#[cfg(test)]
 mod tests {
     use inari_gateway::protocol::{
         ManagedDeviceWork, ManagedDocument, ManagedPreflightId, ManagedWorkScope,
@@ -369,7 +417,7 @@ mod tests {
 
     use super::{decoded_document, validate_submission};
 
-    fn submission() -> ManagedWorkSubmission {
+    pub(super) fn submission() -> ManagedWorkSubmission {
         ManagedWorkSubmission {
             contract_major: 1,
             preflight_id: "mpf_test"

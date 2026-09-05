@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use inari_gateway::protocol::AgentPublication;
 use zenoh::bytes::Encoding;
 use zenoh::sample::SampleKind;
@@ -10,6 +12,28 @@ use crate::zenoh::CurrentSession;
 
 impl ManagedGatewayController {
     pub async fn run_data_plane(self, shutdown: ShutdownCoordinator) -> AppResult<()> {
+        tokio::try_join!(self.run_transport(shutdown.clone()), self.run_payload_cleanup(shutdown),)?;
+        Ok(())
+    }
+
+    async fn run_payload_cleanup(&self, shutdown: ShutdownCoordinator) -> AppResult<()> {
+        if !self.inner.config.enabled || !self.inner.store.is_available() {
+            shutdown.wait_for_shutdown().await;
+            return Ok(());
+        }
+        let mut ticks = tokio::time::interval(Duration::from_secs(1));
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = shutdown.wait_for_shutdown() => return Ok(()),
+                _ = ticks.tick() => {
+                    self.inner.store.repository()?.expire_managed_payloads(chrono::Utc::now()).await?;
+                }
+            }
+        }
+    }
+
+    async fn run_transport(&self, shutdown: ShutdownCoordinator) -> AppResult<()> {
         if !self.inner.config.enabled || !self.inner.zenoh_config.enabled {
             shutdown.wait_for_shutdown().await;
             return Ok(());
@@ -149,11 +173,16 @@ impl ManagedGatewayController {
         let Some(agent_id) = self.agent_id_from_key(key) else {
             return Ok(None);
         };
-        self.inner
+        let (selected_protocol_version, stored_commands) = self
+            .inner
             .store
             .command_history(&agent_id, from_sequence)
-            .await
-            .map(Some)
+            .await?;
+        let mut commands = Vec::with_capacity(stored_commands.len());
+        for command in stored_commands {
+            commands.push(self.dispatch_message(&command).await?);
+        }
+        Ok(Some(CommandHistory { selected_protocol_version, commands }))
     }
 
     async fn record_publication_from_key(

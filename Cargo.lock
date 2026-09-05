@@ -48,6 +48,7 @@ dependencies = [
  "cipher 0.5.2",
  "cpubits",
  "cpufeatures 0.3.0",
+ "zeroize",
 ]
 
 [[package]]
@@ -62,6 +63,7 @@ dependencies = [
  "ctr",
  "ctutils",
  "ghash",
+ "zeroize",
 ]
 
 [[package]]
@@ -2278,7 +2280,9 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
+ "getrandom 0.4.2",
  "hybrid-array",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -3577,6 +3581,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
 dependencies = [
  "polyval",
+ "zeroize",
 ]
 
 [[package]]
@@ -4915,6 +4920,7 @@ dependencies = [
 name = "inari-server"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "aes-gcm",
  "axum",
  "axum-extra",
  "base64 0.22.1",
@@ -4941,6 +4947,7 @@ dependencies = [
  "openidconnect",
  "qrcode",
  "rand_core 0.6.4",
+ "reqwest 0.13.4",
  "sea-orm",
  "secrecy 0.10.3",
  "serde",
@@ -4965,6 +4972,7 @@ dependencies = [
  "usage-rs",
  "x509-parser",
  "zenoh",
+ "zeroize",
 ]
 
 [[package]]
@@ -7369,6 +7377,7 @@ dependencies = [
  "cpubits",
  "cpufeatures 0.3.0",
  "universal-hash",
+ "zeroize",
 ]
 
 [[package]]
@@ -13907,9 +13916,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.8.2"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
+checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
  "zeroize_derive",
 ]

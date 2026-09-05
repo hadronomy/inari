@@ -29,6 +29,7 @@ repository  = "https://github.com/hadronomy/inari"
 version     = "0.1.0-alpha.1"
 
 [workspace.dependencies]
+aes-gcm = { version = "0.11", features = ["zeroize"] }
 axum = { version = "0.8", features = ["http1", "json", "macros", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 async-tungstenite = { version = "0.34", default-features = false, features = [

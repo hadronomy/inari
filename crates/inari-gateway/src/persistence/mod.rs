@@ -10,10 +10,11 @@ mod publications;
 use chrono::{DateTime, FixedOffset, Utc};
 use jsonwebtoken::jwk::Jwk;
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait};
+use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
     AgentId, AgentPublication, ControllerCommand, DispatchEncryptionKey, GatewaySnapshot, JobId,
-    JobState, OrganizationId, ProtocolVersion, SiteId,
+    JobState, ManagedWorkId, ManagedWorkSubmission, OrganizationId, ProtocolVersion, SiteId,
 };
 use crate::{GatewayError, GatewayResult};
 
@@ -53,10 +54,17 @@ pub struct PersistedCommand {
     pub message_id: String,
     pub sequence: u64,
     pub state: JobState,
-    pub command: ControllerCommand,
+    pub command: CommandContent,
     pub issued_at: DateTime<Utc>,
     pub published_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum CommandContent {
+    Inline(Box<ControllerCommand>),
+    ManagedWork { managed_work_id: ManagedWorkId },
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +124,52 @@ pub struct PersistedManagedWork {
 pub struct PersistedManagedWorkDispatch {
     pub managed_work: PersistedManagedWork,
     pub command: Option<PersistedCommand>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewManagedPayload {
+    pub ciphertext: Vec<u8>,
+    pub nonce: [u8; 12],
+    pub wrapped_data_key: String,
+    pub wrapping_key_version: u32,
+    pub authenticated_data_digest: [u8; 32],
+    pub plaintext_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ManagedPayloadContext {
+    pub organization_id: String,
+    pub managed_work_id: ManagedWorkId,
+    pub idempotency_key: String,
+    pub payload_fingerprint: String,
+    pub request_fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PersistedManagedPayload {
+    pub protection: NewManagedPayload,
+    pub context: ManagedPayloadContext,
+}
+
+pub struct ManagedDispatchAllocation<'a> {
+    pub managed_work_id: &'a ManagedWorkId,
+    pub sequence: u64,
+    pub command_id: &'a str,
+    pub message_id: &'a str,
+    pub issued_at: DateTime<Utc>,
+    pub recipient_key: &'a crate::protocol::DispatchEncryptionKey,
+    pub work_expires_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ManagedWorkAdmission<'a> {
+    pub managed_work_id: &'a ManagedWorkId,
+    pub idempotency_key: &'a str,
+    pub submission: &'a ManagedWorkSubmission,
+    pub request_fingerprint: &'a [u8; 32],
+    pub payload_fingerprint: &'a [u8; 32],
+    pub payload_bytes: i64,
+    pub admitted_at: DateTime<Utc>,
 }
 
 fn stored_time(value: DateTime<Utc>) -> DateTime<FixedOffset> {

@@ -20,7 +20,7 @@ pub use self::identity::{IdentityConfig, OidcConfig};
 pub use self::managed_gateway::{
     ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode, ManagedGatewayConfig,
     ManagedGatewayDataPlaneConfig, ManagedGatewayDispatchConfig, ManagedGatewayOnboardingConfig,
-    StepCaSigningAlgorithm,
+    ManagedGatewayPayloadProtectionConfig, StepCaSigningAlgorithm,
 };
 pub use self::platform::{DatabaseConfig, OrganizationConfig};
 

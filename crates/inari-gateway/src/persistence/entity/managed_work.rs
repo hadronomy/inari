@@ -2,7 +2,6 @@ use sea_orm::entity::prelude::*;
 
 use super::value::{
     ManagedDocumentOperationValue, ManagedWorkStateValue, StoredReportBindingClaim,
-    StoredSealedManagedDispatch,
 };
 
 #[sea_orm::model]
@@ -13,6 +12,7 @@ pub struct Model {
     pub managed_work_id: String,
     pub preflight_id: String,
     pub organization_id: String,
+    pub idempotency_key: String,
     pub database_name: String,
     pub company_id: String,
     pub site_id: String,
@@ -27,9 +27,9 @@ pub struct Model {
     pub binding_claim: StoredReportBindingClaim,
     pub payload_fingerprint: Vec<u8>,
     pub request_fingerprint: Vec<u8>,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub sealed_document: StoredSealedManagedDispatch,
     pub payload_bytes: i64,
+    #[sea_orm(column_type = "TimestampWithTimeZone", nullable)]
+    pub payload_deleted_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(column_type = "Text", nullable)]
     pub print_job_id: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]

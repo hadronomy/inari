@@ -1,17 +1,16 @@
 use chrono::Utc;
 use inari_gateway::protocol::{
-    AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord, ManagedWorkId, ManagedWorkSubmission,
+    AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord, ManagedWorkId,
 };
 use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
 use inari_gateway::{
-    AgentEnrollmentRecord, GatewayRepository, ManagedWorkTargetRecord, NewManagedWorkPreflight,
-    PersistedManagedWork, PersistedManagedWorkDispatch,
+    AgentEnrollmentRecord, GatewayRepository, ManagedWorkAdmission, ManagedWorkTargetRecord,
+    NewManagedWorkPreflight, PersistedManagedWork, PersistedManagedWorkDispatch,
 };
 use sha2::{Digest, Sha256};
 
 use super::models::{
-    AgentPublicationList, CommandHistory, JobList, JobRequest, StoredAgentEnrollment,
-    StoredControllerCommand,
+    AgentPublicationList, JobList, JobRequest, StoredAgentEnrollment, StoredControllerCommand,
 };
 use crate::error::{AppError, AppResult};
 
@@ -148,12 +147,23 @@ impl ManagedGatewayStore {
         &self,
         agent_id: &str,
         from_sequence: u64,
-    ) -> AppResult<CommandHistory> {
+    ) -> AppResult<(inari_gateway::protocol::ProtocolVersion, Vec<StoredControllerCommand>)> {
         let (selected_protocol_version, commands) = self
             .repository()?
             .command_history(agent_id, from_sequence)
             .await?;
-        Ok(CommandHistory { selected_protocol_version, commands })
+        Ok((
+            selected_protocol_version,
+            commands
+                .into_iter()
+                .map(|command| StoredControllerCommand {
+                    agent_id: command.agent_id,
+                    namespace: command.namespace,
+                    command_id: command.command_id,
+                    command: command.command,
+                })
+                .collect(),
+        ))
     }
 
     pub(super) async fn job(&self, job_id: &JobId) -> AppResult<JobRecord> {
@@ -222,36 +232,17 @@ impl ManagedGatewayStore {
 
     pub(super) async fn admit_managed_work<F>(
         &self,
-        managed_work_id: &ManagedWorkId,
-        submission: &ManagedWorkSubmission,
-        request_fingerprint: &[u8; 32],
-        payload_fingerprint: &[u8; 32],
-        payload_bytes: i64,
+        admission: ManagedWorkAdmission<'_>,
         build_command: F,
     ) -> AppResult<(PersistedManagedWork, Option<StoredControllerCommand>)>
     where
         F: FnOnce(
-            &ManagedWorkId,
-            u64,
-            &str,
-            &str,
-            chrono::DateTime<Utc>,
-            &inari_gateway::protocol::DispatchEncryptionKey,
-            chrono::DateTime<Utc>,
-        )
-            -> inari_gateway::GatewayResult<inari_gateway::protocol::ControllerCommand>,
+            inari_gateway::ManagedDispatchAllocation<'_>,
+        ) -> inari_gateway::GatewayResult<inari_gateway::NewManagedPayload>,
     {
         let PersistedManagedWorkDispatch { managed_work, command } = self
             .repository()?
-            .admit_managed_work(
-                managed_work_id,
-                submission,
-                request_fingerprint,
-                payload_fingerprint,
-                payload_bytes,
-                Utc::now(),
-                build_command,
-            )
+            .admit_managed_work(admission, build_command)
             .await?;
         let command = command.map(|command| StoredControllerCommand {
             agent_id: command.agent_id,
@@ -260,6 +251,35 @@ impl ManagedGatewayStore {
             command: command.command,
         });
         Ok((managed_work, command))
+    }
+
+    pub(super) async fn replay_managed_work(
+        &self,
+        managed_work_id: &ManagedWorkId,
+        organization_id: &OrganizationId,
+        idempotency_key: &str,
+        print_intent_id: &str,
+        request_fingerprint: &[u8; 32],
+    ) -> AppResult<Option<(PersistedManagedWork, Option<StoredControllerCommand>)>> {
+        Ok(self
+            .repository()?
+            .replay_managed_work(
+                managed_work_id,
+                organization_id.as_str(),
+                idempotency_key,
+                print_intent_id,
+                request_fingerprint,
+            )
+            .await?
+            .map(|PersistedManagedWorkDispatch { managed_work, command }| {
+                let command = command.map(|command| StoredControllerCommand {
+                    agent_id: command.agent_id,
+                    namespace: command.namespace,
+                    command_id: command.command_id,
+                    command: command.command,
+                });
+                (managed_work, command)
+            }))
     }
 
     pub(super) async fn managed_work_target(

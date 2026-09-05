@@ -44,6 +44,21 @@ async fn embedded_migration_is_idempotent_and_owns_sessions() {
             .await
             .expect("session table should be inspected");
     assert!(session_table);
+    let managed_payload_table =
+        sqlx::query_scalar::<_, bool>("SELECT to_regclass('public.managed_payloads') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await
+            .expect("Managed Payload table should be inspected");
+    assert!(managed_payload_table);
+    let obsolete_sealed_document = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+         WHERE table_schema = 'public' AND table_name = 'managed_work' \
+         AND column_name = 'sealed_document')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("Managed Work columns should be inspected");
+    assert!(!obsolete_sealed_document);
 
     let store =
         std::sync::Arc::new(tower_sessions_sqlx_store::PostgresStore::new(database.pool().clone()));

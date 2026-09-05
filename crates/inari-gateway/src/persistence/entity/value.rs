@@ -4,8 +4,8 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{
-    AgentPublication, ControllerCommand, DeviceCapability, DispatchEncryptionKey, GatewaySnapshot,
-    ManagedWorkPreflightRequest, ReportBindingClaim, SealedManagedDispatch, StructuredFields,
+    AgentPublication, DeviceCapability, DispatchEncryptionKey, GatewaySnapshot,
+    ManagedWorkPreflightRequest, ReportBindingClaim, StructuredFields,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
@@ -21,7 +21,7 @@ pub struct StoredActions(pub Vec<String>);
 pub struct StoredSnapshot(pub GatewaySnapshot);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
-pub struct StoredCommand(pub ControllerCommand);
+pub struct StoredCommand(pub super::super::CommandContent);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredPublication(pub AgentPublication);
@@ -31,9 +31,6 @@ pub struct StoredCapabilities(pub Vec<DeviceCapability>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredReportBindingClaim(pub ReportBindingClaim);
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
-pub struct StoredSealedManagedDispatch(pub SealedManagedDispatch);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredManagedWorkPreflightRequest(pub ManagedWorkPreflightRequest);

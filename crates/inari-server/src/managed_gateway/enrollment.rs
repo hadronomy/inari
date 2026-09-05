@@ -115,18 +115,20 @@ impl ManagedGatewayController {
             certificate,
             managed_dispatch: self
                 .inner
-                .dispatch_signer
+                .security
                 .as_ref()
-                .map(|signer| {
-                    signer.enrollment(AgentManagedScope {
-                        organization_id: self.inner.organization.id.clone(),
-                        site_id: self
-                            .inner
-                            .organization
-                            .default_site_id
-                            .clone(),
-                        agent_id: request.agent_id.clone(),
-                    })
+                .map(|security| {
+                    security
+                        .dispatch_signer
+                        .enrollment(AgentManagedScope {
+                            organization_id: self.inner.organization.id.clone(),
+                            site_id: self
+                                .inner
+                                .organization
+                                .default_site_id
+                                .clone(),
+                            agent_id: request.agent_id.clone(),
+                        })
                 }),
             enrolled_at: now,
         })

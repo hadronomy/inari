@@ -28,7 +28,7 @@ pub enum ControllerCommand {
         command_id: String,
         sequence: u64,
         issued_at: DateTime<Utc>,
-        payload: DispatchDeviceWork,
+        payload: Box<DispatchDeviceWork>,
     },
 }
 

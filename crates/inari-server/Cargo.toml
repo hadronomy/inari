@@ -10,6 +10,7 @@ publish.workspace     = true
 repository.workspace  = true
 
 [dependencies]
+aes-gcm.workspace               = true
 axum.workspace               = true
 axum-extra.workspace         = true
 base64.workspace             = true
@@ -38,6 +39,7 @@ leptos_axum.workspace        = true
 mime.workspace               = true
 openidconnect.workspace      = true
 qrcode.workspace             = true
+reqwest.workspace            = true
 secrecy.workspace            = true
 sea-orm.workspace            = true
 serde.workspace              = true
@@ -59,6 +61,7 @@ tracing.workspace            = true
 tracing-subscriber.workspace = true
 url.workspace                = true
 x509-parser.workspace        = true
+zeroize.workspace            = true
 zenoh.workspace              = true
 
 [dev-dependencies]

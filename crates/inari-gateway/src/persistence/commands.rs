@@ -7,7 +7,9 @@ use sea_orm::{
 
 use super::entity::value::{CommandState, StoredCommand};
 use super::entity::{agent, command};
-use super::{GatewayRepository, PersistedCommand, require_agent, stored_time, utc_time};
+use super::{
+    CommandContent, GatewayRepository, PersistedCommand, require_agent, stored_time, utc_time,
+};
 use crate::protocol::{ControllerCommand, JobId, JobState};
 use crate::{GatewayError, GatewayResult};
 
@@ -64,13 +66,18 @@ impl GatewayRepository {
         let message_id = format!("msg_{command_id}");
         let issued_at = Utc::now();
         let command_message = build(sequence, &command_id, &message_id, issued_at)?;
+        if matches!(command_message, ControllerCommand::DispatchDeviceWork { .. }) {
+            return Err(GatewayError::InvalidInput(
+                "Managed Work requires protected payload admission".into(),
+            ));
+        }
         let model = command::ActiveModel {
             command_id: Set(command_id),
             agent_id: Set(agent_id.to_owned()),
             message_id: Set(message_id),
             sequence: Set(next),
             state: Set(CommandState::Queued),
-            command: Set(StoredCommand(command_message)),
+            command: Set(StoredCommand(CommandContent::Inline(Box::new(command_message)))),
             request_fingerprint: Set(request_fingerprint.to_vec()),
             issued_at: Set(stored_time(issued_at)),
             published_at: Set(None),
@@ -93,6 +100,11 @@ impl GatewayRepository {
             .col_expr(command::COLUMN.published_at, Expr::value(stored_time(now)))
             .col_expr(command::COLUMN.updated_at, Expr::value(stored_time(now)))
             .filter(command::COLUMN.agent_id.eq(agent_id))
+            .filter(
+                command::COLUMN
+                    .state
+                    .is_in([CommandState::Queued, CommandState::Published]),
+            )
             .filter(
                 command::COLUMN
                     .command_id
@@ -128,7 +140,7 @@ impl GatewayRepository {
         &self,
         agent_id: &str,
         from_sequence: u64,
-    ) -> GatewayResult<(crate::protocol::ProtocolVersion, Vec<ControllerCommand>)> {
+    ) -> GatewayResult<(crate::protocol::ProtocolVersion, Vec<PersistedCommand>)> {
         let managed_agent = agent::Entity::find_by_id(agent_id)
             .one(&self.database)
             .await?
@@ -144,8 +156,8 @@ impl GatewayRepository {
             .all(&self.database)
             .await?
             .into_iter()
-            .map(|model| model.command.0)
-            .collect();
+            .map(|model| persisted_command(model, managed_agent.namespace.clone()))
+            .collect::<GatewayResult<Vec<_>>>()?;
         Ok((managed_agent.protocol_version.parse()?, commands))
     }
 }
@@ -181,6 +193,13 @@ pub(super) fn persisted_command(
     model: command::Model,
     namespace: String,
 ) -> GatewayResult<PersistedCommand> {
+    if let CommandContent::Inline(message) = &model.command.0
+        && matches!(**message, ControllerCommand::DispatchDeviceWork { .. })
+    {
+        return Err(GatewayError::CorruptState(
+            "Managed Work content exists outside protected payload storage".into(),
+        ));
+    }
     Ok(PersistedCommand {
         agent_id: model.agent_id.parse()?,
         namespace,

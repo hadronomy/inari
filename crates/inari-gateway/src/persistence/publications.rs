@@ -2,18 +2,19 @@ use chrono::{DateTime, Utc};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    QuerySelect, TransactionTrait,
 };
 
 use super::entity::value::{
-    CommandState, InvitationState, PublicationType, StoredPublication, StoredSnapshot,
+    CommandState, InvitationState, ManagedWorkStateValue, PublicationType, StoredPublication,
+    StoredSnapshot,
 };
-use super::entity::{agent, command, invitation, publication};
+use super::entity::{agent, command, invitation, managed_payload, managed_work, publication};
 use super::{
-    GatewayRepository, PersistedAgentStatus, PersistedPublication, require_agent, stored_time,
-    utc_time,
+    CommandContent, GatewayRepository, PersistedAgentStatus, PersistedPublication, require_agent,
+    stored_time, utc_time,
 };
-use crate::protocol::AgentPublication;
+use crate::protocol::{AgentPublication, StructuredValue};
 use crate::{GatewayError, GatewayResult};
 
 impl GatewayRepository {
@@ -91,6 +92,8 @@ impl GatewayRepository {
                     )
                     .exec(&transaction)
                     .await?;
+                reconcile_managed_dispatch(&transaction, agent_id, command_id, message, now)
+                    .await?;
             }
         }
         transaction.commit().await?;
@@ -151,4 +154,101 @@ impl GatewayRepository {
             })
             .transpose()
     }
+}
+
+async fn reconcile_managed_dispatch(
+    transaction: &sea_orm::DatabaseTransaction,
+    agent_id: &str,
+    command_id: &str,
+    message: &AgentPublication,
+    now: DateTime<Utc>,
+) -> GatewayResult<()> {
+    let Some(command) = command::Entity::find_by_id(command_id)
+        .filter(command::Column::AgentId.eq(agent_id))
+        .one(transaction)
+        .await?
+    else {
+        return Ok(());
+    };
+    let CommandContent::ManagedWork { managed_work_id } = command.command.0 else {
+        return Ok(());
+    };
+    let Some(work) = managed_work::Entity::find_by_id(managed_work_id.as_str())
+        .lock_exclusive()
+        .one(transaction)
+        .await?
+    else {
+        return Err(GatewayError::CorruptState("Managed Work dispatch metadata is missing".into()));
+    };
+    let (state, print_job_id, error_code, message_key) = match message {
+        AgentPublication::CommandAccepted { job, accepted_at, .. } => {
+            let print_job_id = job
+                .as_ref()
+                .and_then(|job| job.get("print_job_id"))
+                .and_then(|value| match value {
+                    StructuredValue::Text(value) => Some(value.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    GatewayError::CorruptState(
+                        "Managed Work acceptance has no Print Job identity".into(),
+                    )
+                })?;
+            if *accepted_at > utc_time(work.expires_at) {
+                return Err(GatewayError::Conflict(
+                    "Agent acceptance is later than the Managed Work deadline".into(),
+                ));
+            }
+            if work.state == ManagedWorkStateValue::Accepted
+                && work.print_job_id.as_ref() == Some(&print_job_id)
+            {
+                return Ok(());
+            }
+            if !matches!(
+                work.state,
+                ManagedWorkStateValue::Dispatching | ManagedWorkStateValue::RecoveryUncertain
+            ) {
+                return Err(GatewayError::Conflict(
+                    "Agent acceptance conflicts with the Managed Work state".into(),
+                ));
+            }
+            (
+                ManagedWorkStateValue::Accepted,
+                Some(print_job_id),
+                None,
+                "managed_work.accepted".to_owned(),
+            )
+        },
+        AgentPublication::CommandRejected { code, .. } => {
+            if work.state == ManagedWorkStateValue::Rejected
+                && work.error_code.as_ref() == Some(code)
+            {
+                return Ok(());
+            }
+            if work.state != ManagedWorkStateValue::Dispatching {
+                return Err(GatewayError::Conflict(
+                    "Agent rejection conflicts with the Managed Work state".into(),
+                ));
+            }
+            (
+                ManagedWorkStateValue::Rejected,
+                None,
+                Some(code.clone()),
+                "managed_work.rejected".to_owned(),
+            )
+        },
+        _ => return Ok(()),
+    };
+    let mut update: managed_work::ActiveModel = work.into();
+    update.state = Set(state);
+    update.print_job_id = Set(print_job_id);
+    update.error_code = Set(error_code);
+    update.message_key = Set(message_key);
+    update.payload_deleted_at = Set(Some(stored_time(now)));
+    update.updated_at = Set(stored_time(now));
+    update.update(transaction).await?;
+    managed_payload::Entity::delete_by_id(managed_work_id.as_str())
+        .exec(transaction)
+        .await?;
+    Ok(())
 }

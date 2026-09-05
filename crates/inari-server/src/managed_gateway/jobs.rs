@@ -1,8 +1,10 @@
 use std::str::FromStr;
 
 use bytes::Bytes;
+use inari_gateway::CommandContent;
 use inari_gateway::protocol::{
-    AgentId, JobId, JobKind, JobList, JobReceipt, JobRecord, JobRequest, JobState,
+    AgentId, ControllerCommand, JobId, JobKind, JobList, JobReceipt, JobRecord, JobRequest,
+    JobState,
 };
 use sha2::{Digest, Sha256};
 use zenoh::bytes::Encoding;
@@ -78,6 +80,43 @@ impl ManagedGatewayController {
         .await
     }
 
+    pub(super) async fn dispatch_message(
+        &self,
+        command: &StoredControllerCommand,
+    ) -> AppResult<ControllerCommand> {
+        let managed_work_id = match &command.command {
+            CommandContent::Inline(message) => return Ok((**message).clone()),
+            CommandContent::ManagedWork { managed_work_id } => managed_work_id,
+        };
+        let persisted = self
+            .inner
+            .store
+            .repository()?
+            .managed_payload(managed_work_id)
+            .await?;
+        let aad = serde_json_canonicalizer::to_vec(&persisted.context)?;
+        let plaintext = self
+            .payload_protector()?
+            .open(&persisted.protection, &aad)
+            .await?;
+        let message: ControllerCommand = serde_json::from_slice(&plaintext)?;
+        let ControllerCommand::DispatchDeviceWork { command_id, payload, .. } = &message else {
+            return Err(AppError::service_unavailable(
+                "Managed Payload contains another command type.",
+            ));
+        };
+        if command_id != command.command_id.as_str()
+            || payload.managed_work_id != *managed_work_id
+            || payload.authenticated_data.agent_id != command.agent_id
+            || payload.authenticated_data.expires_at <= chrono::Utc::now().timestamp()
+        {
+            return Err(AppError::service_unavailable(
+                "Managed Payload does not match its dispatch metadata or deadline.",
+            ));
+        }
+        Ok(message)
+    }
+
     pub(super) async fn publish_live_command(
         &self,
         command: &StoredControllerCommand,
@@ -93,7 +132,8 @@ impl ManagedGatewayController {
             .map_err(|source| {
                 AppError::bad_request(format!("Invalid Zenoh command key: {source}"))
             })?;
-        let payload = serde_json::to_vec(&command.command).map_err(|source| {
+        let message = self.dispatch_message(command).await?;
+        let payload = serde_json::to_vec(&message).map_err(|source| {
             AppError::internal(
                 "managed_gateway_command_serialization",
                 "Failed to serialize controller command.",

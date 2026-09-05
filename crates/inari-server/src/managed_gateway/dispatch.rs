@@ -2,18 +2,17 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use chrono::{DateTime, Utc};
 use ed25519_dalek::pkcs8::DecodePrivateKey;
 use ed25519_dalek::{Signer, SigningKey};
 use hpke::aead::AesGcm256;
 use hpke::kdf::HkdfSha256;
 use hpke::kem::X25519HkdfSha256;
 use hpke::{Deserializable, OpModeS, Serializable};
+use inari_gateway::ManagedDispatchAllocation;
 use inari_gateway::protocol::{
     AgentManagedScope, ControllerCommand, DispatchDeviceWork, DispatchEncryptionKey,
     DispatchHpkeSuite, MANAGED_DISPATCH_VERSION, ManagedDispatchAuthenticatedData,
-    ManagedDispatchClaims, ManagedDispatchEnrollment, ManagedWorkId, ManagedWorkSubmission,
-    SealedManagedDispatch,
+    ManagedDispatchClaims, ManagedDispatchEnrollment, ManagedWorkSubmission, SealedManagedDispatch,
 };
 use jsonwebtoken::jwk::Jwk;
 use serde::Serialize;
@@ -120,16 +119,19 @@ impl ManagedDispatchSigner {
 
     pub fn command(
         &self,
-        managed_work_id: ManagedWorkId,
+        allocation: ManagedDispatchAllocation<'_>,
         idempotency_key: String,
         submission: ManagedWorkSubmission,
-        recipient_key: &DispatchEncryptionKey,
-        work_expires_at: DateTime<Utc>,
-        message_id: String,
-        command_id: String,
-        sequence: u64,
-        issued_at: DateTime<Utc>,
     ) -> AppResult<ControllerCommand> {
+        let ManagedDispatchAllocation {
+            managed_work_id,
+            sequence,
+            command_id,
+            message_id,
+            issued_at,
+            recipient_key,
+            work_expires_at,
+        } = allocation;
         let dispatch_expires_at = issued_at
             + chrono::TimeDelta::from_std(self.envelope_ttl).map_err(|source| {
                 AppError::internal(
@@ -165,11 +167,15 @@ impl ManagedDispatchSigner {
         let sealed_envelope =
             seal_dispatch(signed_envelope.as_bytes(), &authenticated_data, recipient_key)?;
         Ok(ControllerCommand::DispatchDeviceWork {
-            message_id,
-            command_id,
+            message_id: message_id.to_owned(),
+            command_id: command_id.to_owned(),
             sequence,
             issued_at,
-            payload: DispatchDeviceWork { managed_work_id, authenticated_data, sealed_envelope },
+            payload: Box::new(DispatchDeviceWork {
+                managed_work_id: managed_work_id.clone(),
+                authenticated_data,
+                sealed_envelope,
+            }),
         })
     }
 
@@ -320,15 +326,17 @@ mod tests {
             .expect("Managed Work ID should parse");
         let command = signer
             .command(
-                work_id.clone(),
+                inari_gateway::ManagedDispatchAllocation {
+                    managed_work_id: &work_id,
+                    recipient_key: &recipient_key,
+                    work_expires_at: issued_at + TimeDelta::minutes(5),
+                    message_id: "msg_dispatch_test",
+                    command_id: "job_dispatch_test",
+                    sequence: 42,
+                    issued_at,
+                },
                 "report:manual:42:1".into(),
                 submission(),
-                &recipient_key,
-                issued_at + TimeDelta::minutes(5),
-                "msg_dispatch_test".into(),
-                "job_dispatch_test".into(),
-                42,
-                issued_at,
             )
             .expect("dispatch command should sign");
         let ControllerCommand::DispatchDeviceWork { payload, .. } = command else {
