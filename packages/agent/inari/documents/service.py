@@ -13,6 +13,7 @@ from typing import Any, assert_never
 import rfc8785
 from PIL import Image, UnidentifiedImageError
 from PIL.Image import DecompressionBombError, DecompressionBombWarning
+from inari_print_contracts import LabelContractError, ZplLayout
 
 from ..device_authority import (
     AdmissionAuthorizer,
@@ -69,13 +70,15 @@ class DocumentAdmissionService:
         authority: AdmissionAuthorizer,
         clock: Callable[[], datetime] = lambda: datetime.now(tz=UTC),
         monotonic_clock: Callable[[], float] = time.monotonic,
-        pdf_validator: Callable[[bytes], None] | None = None,
+        pdf_validator: Callable[[bytes, int], None] | None = None,
     ) -> None:
         self._store = store
         self._authority = authority
         self._clock = clock
         self._monotonic_clock = monotonic_clock
-        self._pdf_validator = pdf_validator or QpdfDocumentValidator().validate
+        self._pdf_validator = pdf_validator or (
+            lambda content, dpi: QpdfDocumentValidator().validate(content, dpi=dpi)
+        )
 
     async def admit(self, request: AdmissionRequest) -> AdmissionAccepted:
         """Validate, fingerprint, and durably accept one Device Work item."""
@@ -93,7 +96,7 @@ class DocumentAdmissionService:
 
         # Validate content before reading mutable device facts. This keeps
         # malformed payloads from causing device lookups or driver work.
-        await asyncio.to_thread(self._validate_document, work.document)
+        await asyncio.to_thread(self._validate_document, work, request.options)
         expected_media_type = {
             DocumentKind.RECEIPT_IMAGE: "image/jpeg",
             DocumentKind.REPORT_PDF: "application/pdf",
@@ -341,24 +344,41 @@ class DocumentAdmissionService:
         _validate_string("report source model", source.model)
         if isinstance(source, WizardReportSource):
             _validate_string("report wizard digest", source.input_digest)
-        elif not isinstance(source, RecordsReportSource) or not source.ordered_ids or any(
-            isinstance(record_id, bool) or record_id < 1
-            for record_id in source.ordered_ids
+        elif (
+            not isinstance(source, RecordsReportSource)
+            or not source.ordered_ids
+            or any(
+                isinstance(record_id, bool) or record_id < 1
+                for record_id in source.ordered_ids
+            )
         ):
             raise DocumentAdmissionError(
                 "payload_invalid", "The report record source is invalid."
             )
 
-    def _validate_document(self, document: Document) -> None:
-        match document:
+    def _validate_document(
+        self, work: DocumentWork, options: Mapping[str, Any]
+    ) -> None:
+        match work.document:
             case ReceiptImage(content=content):
                 self._validate_receipt_image(content)
             case ReportPdf(content=content):
-                self._validate_report_pdf(content)
+                dpi = options.get("dpi")
+                if (
+                    set(options) != {"dpi"}
+                    or type(dpi) is not int
+                    or dpi not in {150, 203, 300}
+                ):
+                    raise DocumentAdmissionError(
+                        "document_policy_rejected",
+                        "Report PDF options require one supported DPI.",
+                    )
+                self._pdf_validator(content, dpi)
             case LabelDocument(content=content):
-                validate_label_document(content)
+                layout = _label_layout(work, options)
+                validate_label_document(content, layout=layout)
             case _:
-                assert_never(document)
+                assert_never(work.document)
 
     @staticmethod
     def _validate_receipt_image(content: bytes) -> None:
@@ -397,8 +417,29 @@ class DocumentAdmissionService:
                 "payload_invalid", "Receipt image must be a valid JPEG."
             ) from exc
 
-    def _validate_report_pdf(self, content: bytes) -> None:
-        self._pdf_validator(content)
+
+def _label_layout(work: DocumentWork, options: Mapping[str, Any]) -> ZplLayout:
+    try:
+        if set(options) != {"layout"} or not isinstance(options["layout"], dict):
+            raise LabelContractError("Label Document options require an exact layout.")
+        layout = ZplLayout(**options["layout"])
+        context = work.context
+        if not isinstance(context, ManagedSubmissionContext):
+            raise LabelContractError("A Label Document requires Managed Device Work.")
+        binding = context.origin.binding
+        if (
+            layout.profile_id != binding.layout_profile_id
+            or binding.command_profile_id != "zpl_v1"
+            or not binding.hardware_matrix_digest
+        ):
+            raise LabelContractError(
+                "The label layout does not match its Report Binding."
+            )
+        return layout
+    except (LabelContractError, TypeError) as error:
+        raise DocumentAdmissionError(
+            "document_policy_rejected", "The Label Document layout contract is invalid."
+        ) from error
 
 
 def _authorization_scope(
@@ -479,7 +520,9 @@ def _device_purpose(
         return "report_pdf"
     if operation is DocumentKind.LABEL_DOCUMENT:
         return "label_document"
-    raise DocumentAdmissionError("document_policy_rejected", "Unknown document operation.")
+    raise DocumentAdmissionError(
+        "document_policy_rejected", "Unknown document operation."
+    )
 
 
 def _authority_scope(

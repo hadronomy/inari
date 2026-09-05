@@ -2731,8 +2731,9 @@ printer URIs, printer UUID, job URI, job value, and capability digest.
 
 SumatraPDF, Ghostscript, and AGPL MuPDF are not production Agent dependencies.
 
-Every Report PDF first enters a disposable `qpdf` preflight worker. Only a
-`qpdf --check` exit status of `0` can continue. A warning or error stops work.
+Every Report PDF first enters a disposable `qpdf` preflight worker. The worker
+uses pikepdf to inspect the source bytes in memory. Its qpdf syntax check must
+return no warnings or errors before work can continue.
 
 The worker also inspects the structured qpdf object model. Syntax success does
 not replace the document policy.

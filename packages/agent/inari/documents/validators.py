@@ -1,53 +1,68 @@
 from __future__ import annotations
 
-import re
 import subprocess
+import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+
+from inari_print_contracts.zpl import LabelContractError, ZplLayout, split_labels
 
 from .models import DocumentAdmissionError
 
 _PDF_MAX_BYTES = 10 * 1024 * 1024
-_LABEL_MAX_BYTES = 2 * 1024 * 1024
-_ZPL_COMMAND = re.compile(r"([\^~])([A-Z0-9@]{2})")
-_ZPL_ALLOWED_COMMANDS = frozenset(
-    {
-        "A0",
-        "B3",
-        "BC",
-        "BQ",
-        "BY",
-        "CF",
-        "CI",
-        "FB",
-        "FD",
-        "FO",
-        "FR",
-        "FS",
-        "FT",
-        "FW",
-        "GB",
-        "GC",
-        "LH",
-        "LL",
-        "LS",
-        "LT",
-        "PO",
-        "PW",
-        "XA",
-        "XZ",
-    }
-)
+_WORKER_OUTPUT_LIMIT = 64 * 1024
+
+
+def _run_worker(
+    command: list[str], *, input: bytes, timeout: float
+) -> subprocess.CompletedProcess[bytes]:
+    with subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        env={"LC_ALL": "C", "TZ": "UTC"},
+    ) as process:
+        if process.stdin is None or process.stdout is None:
+            process.kill()
+            raise OSError("The PDF worker pipes are unavailable.")
+        input_stream, output_stream = process.stdin, process.stdout
+
+        def send() -> None:
+            try:
+                input_stream.write(input)
+                input_stream.close()
+            except BrokenPipeError:
+                pass
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            sent = pool.submit(send)
+            received = pool.submit(output_stream.read, _WORKER_OUTPUT_LIMIT + 1)
+            try:
+                output = received.result(timeout=timeout)
+                if len(output) > _WORKER_OUTPUT_LIMIT:
+                    raise OSError("The PDF worker exceeded its output limit.")
+                sent.result(timeout=1)
+                return subprocess.CompletedProcess(
+                    command, process.wait(timeout=1), output, b""
+                )
+            except TimeoutError as error:
+                process.kill()
+                raise subprocess.TimeoutExpired(command, timeout) from error
+            finally:
+                if process.poll() is None:
+                    process.kill()
 
 
 class QpdfDocumentValidator:
     def __init__(
         self,
         *,
-        runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+        runner: Callable[..., subprocess.CompletedProcess[bytes]] = _run_worker,
     ) -> None:
         self._runner = runner
 
-    def validate(self, content: bytes) -> None:
+    def validate(self, content: bytes, *, dpi: int = 300) -> None:
         _validate_bytes(content, label="Report PDF", limit=_PDF_MAX_BYTES)
         if not content.startswith(b"%PDF-"):
             raise DocumentAdmissionError(
@@ -55,12 +70,16 @@ class QpdfDocumentValidator:
             )
         try:
             result = self._runner(
-                ["qpdf", "--check", "-"],
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-m",
+                    "inari.documents._pdf_worker",
+                    str(dpi),
+                ],
                 input=content,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=5,
-                check=False,
+                timeout=30,
             )
         except FileNotFoundError as exc:
             raise DocumentAdmissionError(
@@ -77,94 +96,22 @@ class QpdfDocumentValidator:
                 "service_unavailable",
                 "The isolated PDF validator could not start.",
             ) from exc
+        if result.returncode == 3:
+            raise DocumentAdmissionError(
+                "service_unavailable", "The PDF worker isolation is unavailable."
+            )
         if result.returncode != 0:
             raise DocumentAdmissionError(
-                "payload_invalid", "Report PDF content failed structural validation."
-            )
-
-
-def validate_label_document(content: bytes) -> None:
-    _validate_bytes(content, label="Label document", limit=_LABEL_MAX_BYTES)
-    try:
-        source = content.decode("ascii")
-    except UnicodeDecodeError as exc:
-        raise DocumentAdmissionError(
-            "payload_invalid", "Label document content must use ASCII ZPL."
-        ) from exc
-    if any(character < " " and character not in "\r\n\t" for character in source):
-        raise DocumentAdmissionError(
-            "payload_invalid", "Label document content has invalid control bytes."
-        )
-
-    matches = tuple(_ZPL_COMMAND.finditer(source))
-    if not matches or source[: matches[0].start()].strip():
-        raise DocumentAdmissionError(
-            "payload_invalid", "Label document content must start with ^XA."
-        )
-    if len(matches) > 4096:
-        raise DocumentAdmissionError(
-            "payload_invalid", "Label document contains too many ZPL commands."
-        )
-
-    in_format = False
-    field_open = False
-    field_count = 0
-    for index, match in enumerate(matches):
-        prefix, command = match.groups()
-        next_start = (
-            matches[index + 1].start() if index + 1 < len(matches) else len(source)
-        )
-        arguments = source[match.end() : next_start]
-        if prefix != "^" or command not in _ZPL_ALLOWED_COMMANDS:
-            raise DocumentAdmissionError(
                 "document_policy_rejected",
-                f"Label document command {prefix}{command} is not permitted.",
-            )
-        if command == "XA":
-            if in_format or arguments.strip():
-                raise DocumentAdmissionError(
-                    "payload_invalid", "Label document has an invalid ^XA boundary."
-                )
-            in_format = True
-            field_open = False
-            continue
-        if command == "XZ":
-            if not in_format or field_open or arguments.strip():
-                raise DocumentAdmissionError(
-                    "payload_invalid", "Label document has an invalid ^XZ boundary."
-                )
-            in_format = False
-            continue
-        if not in_format:
-            raise DocumentAdmissionError(
-                "payload_invalid", "ZPL commands must be inside ^XA and ^XZ."
-            )
-        if command == "FD":
-            if field_open:
-                raise DocumentAdmissionError(
-                    "payload_invalid", "Label document has nested field data."
-                )
-            field_open = True
-            field_count += 1
-        elif command == "FS":
-            if not field_open or arguments.strip():
-                raise DocumentAdmissionError(
-                    "payload_invalid", "Label document has an unmatched ^FS command."
-                )
-            field_open = False
-        elif field_open:
-            raise DocumentAdmissionError(
-                "payload_invalid", "Label field data must end with ^FS."
+                "Report PDF content failed structural validation or document policy.",
             )
 
-    if in_format or field_open or field_count == 0:
-        raise DocumentAdmissionError(
-            "payload_invalid", "Label document has an incomplete ZPL format."
-        )
-    if source[matches[-1].end() :].strip():
-        raise DocumentAdmissionError(
-            "payload_invalid", "Label document has data after its final command."
-        )
+
+def validate_label_document(content: bytes, *, layout: ZplLayout) -> None:
+    try:
+        split_labels(content, layout, max_labels=1)
+    except LabelContractError as error:
+        raise DocumentAdmissionError("label_data_invalid", str(error)) from error
 
 
 def _validate_bytes(content: bytes, *, label: str, limit: int) -> None:

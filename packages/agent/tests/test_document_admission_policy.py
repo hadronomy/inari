@@ -121,9 +121,9 @@ def managed_work(document: ReportPdf | LabelDocument) -> DocumentWork:
         report_action_id="stock.action_report_delivery",
         report_contract_digest="contract-digest",
         template_digest="template-digest",
-        command_profile_id=None,
-        layout_profile_id=None,
-        hardware_matrix_digest=None,
+        command_profile_id="zpl_v1",
+        layout_profile_id="test_4x6",
+        hardware_matrix_digest="matrix-digest",
     )
     context = ManagedSubmissionContext(
         contract_major=1,
@@ -218,7 +218,7 @@ def service(
             "report_pdf",
         ),
         (
-            LabelDocument(content=b"^XA^FO20,20^FDInari^FS^XZ"),
+            LabelDocument(content=b"^XA^CI28^FO20,20^A0N,30,30^FH_^FDInari^FS^XZ"),
             DocumentKind.LABEL_DOCUMENT,
             "application/vnd.zebra-zpl",
             "label_document",
@@ -231,7 +231,7 @@ async def test_admission_accepts_managed_report_documents_with_site_authority(
     media_type: str,
     purpose: str,
 ) -> None:
-    admission, store, authority = service(pdf_validator=lambda content: None)
+    admission, store, authority = service(pdf_validator=lambda content, dpi: None)
     work = managed_work(document)
 
     accepted = await admission.admit(
@@ -239,7 +239,15 @@ async def test_admission_accepts_managed_report_documents_with_site_authority(
             work=work,
             authorization=managed_authorization(operation),
             media_type=media_type,
-            options={"copies": 1},
+            options={"dpi": 300}
+            if operation is DocumentKind.REPORT_PDF
+            else {
+                "layout": {
+                    "profile_id": "test_4x6",
+                    "width_dots": 812,
+                    "height_dots": 1218,
+                }
+            },
             trusted_managed_expires_at=NOW + timedelta(minutes=2),
         )
     )
