@@ -77,6 +77,7 @@ impl ManagedGatewayStore {
                     jwk_thumbprint: enrollment.public_jwk_fingerprint,
                     public_jwk: enrollment.public_jwk,
                     dispatch_key: enrollment.dispatch_key,
+                    state_signing_jwk: enrollment.state_signing_jwk,
                     certificate_pem: enrollment.certificate_pem,
                     namespace: enrollment.namespace,
                     protocol_version: enrollment.protocol_version,

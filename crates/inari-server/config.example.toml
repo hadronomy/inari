@@ -53,7 +53,7 @@ allow_admin_space = false
 enabled = false
 controller_name = "Inari Controller"
 controller_instance_id = "controller-prod-1"
-supported_protocol_versions = ["2026-07-12"]
+supported_protocol_versions = ["2026-09-06"]
 controller_actions = [
   "system:read",
   "devices:read",

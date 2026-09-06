@@ -16,6 +16,7 @@ pub struct EnrollmentRequest {
     pub key_id: String,
     pub public_jwk: Jwk,
     pub dispatch_key: DispatchEncryptionKey,
+    pub state_signing_jwk: Jwk,
     #[serde(default)]
     pub certificate_pem: Option<String>,
     pub csr_pem: String,

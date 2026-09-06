@@ -17,6 +17,7 @@ pub(super) struct StoredAgentEnrollment {
     pub(super) public_jwk_fingerprint: String,
     pub(super) public_jwk: Jwk,
     pub(super) dispatch_key: DispatchEncryptionKey,
+    pub(super) state_signing_jwk: Jwk,
     pub(super) certificate_pem: Option<String>,
     pub(super) namespace: String,
     pub(super) protocol_version: ProtocolVersion,

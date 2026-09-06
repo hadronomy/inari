@@ -9,7 +9,9 @@ use inari_gateway::protocol::{
     EnrollmentPermissions, EnrollmentRequest, EnrollmentResponse, ProtocolVersion, Serialization,
     SessionMode, StepCaEnrollment,
 };
-use inari_gateway::security::{validate_dispatch_key, validate_identity};
+use inari_gateway::security::{
+    validate_dispatch_key, validate_identity, validate_state_signing_key,
+};
 
 use super::{ManagedGatewayController, StoredAgentEnrollment};
 use crate::config::ManagedGatewayCertificateMode;
@@ -33,6 +35,7 @@ impl ManagedGatewayController {
             request.certificate_pem.as_deref(),
         )?;
         validate_dispatch_key(&request.dispatch_key)?;
+        validate_state_signing_key(&request.state_signing_jwk, &identity.public_key)?;
 
         let selected_protocol_version = self.select_protocol_version(&request)?;
         let namespace = self.namespace_for_agent(request.agent_id.as_str())?;
@@ -60,6 +63,7 @@ impl ManagedGatewayController {
             public_jwk_fingerprint: identity.jwk_thumbprint,
             public_jwk: request.public_jwk.clone(),
             dispatch_key: request.dispatch_key.clone(),
+            state_signing_jwk: request.state_signing_jwk.clone(),
             certificate_pem: request.certificate_pem.clone(),
             namespace: namespace.clone(),
             protocol_version: selected_protocol_version.clone(),

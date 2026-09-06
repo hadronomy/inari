@@ -10,6 +10,8 @@ use crate::zenoh::ZenohHandle;
 mod certificate;
 mod dispatch;
 mod enrollment;
+#[cfg(test)]
+mod enrollment_tests;
 mod fleet;
 mod jobs;
 mod keyspace;

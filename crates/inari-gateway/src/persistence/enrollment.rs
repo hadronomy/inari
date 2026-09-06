@@ -1,10 +1,15 @@
+use jsonwebtoken::jwk::{Jwk, ThumbprintHash};
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QuerySelect, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, DatabaseTransaction, EntityTrait, QuerySelect,
+    TransactionTrait,
+};
 
 use super::entity::value::{
-    InvitationState, StoredActions, StoredDispatchEncryptionKey, StoredJwk, StoredSnapshot,
+    AgentKeyPurpose, InvitationState, StoredActions, StoredDispatchEncryptionKey, StoredJwk,
+    StoredSnapshot,
 };
-use super::entity::{agent, invitation};
+use super::entity::{agent, agent_verification_key, invitation};
 use super::{AgentEnrollmentRecord, GatewayRepository, stored_time};
 use crate::audit::{AuditAction, AuditEventDraft, AuditOutcome, AuditResource};
 use crate::identity::ActorId;
@@ -45,7 +50,7 @@ impl GatewayRepository {
             site_id: Set(enrollment.site_id.as_str().to_owned()),
             key_id: Set(enrollment.key_id.clone()),
             jwk_thumbprint: Set(enrollment.jwk_thumbprint),
-            public_jwk: Set(StoredJwk(enrollment.public_jwk)),
+            public_jwk: Set(StoredJwk(enrollment.public_jwk.clone())),
             dispatch_key: Set(Some(StoredDispatchEncryptionKey(enrollment.dispatch_key))),
             certificate_pem: Set(enrollment.certificate_pem),
             namespace: Set(enrollment.namespace),
@@ -75,6 +80,20 @@ impl GatewayRepository {
         .exec(&transaction)
         .await?;
 
+        for (purpose, jwk) in [
+            (AgentKeyPurpose::TransportIdentity, enrollment.public_jwk),
+            (AgentKeyPurpose::AgentState, enrollment.state_signing_jwk),
+        ] {
+            register_verification_key(
+                &transaction,
+                enrollment.agent_id.as_str(),
+                purpose,
+                jwk,
+                enrolled_at,
+            )
+            .await?;
+        }
+
         invitation.state = InvitationState::Enrolled;
         invitation.enrolled_at = Some(enrolled_at);
         invitation.latest_snapshot = Some(StoredSnapshot(snapshot.clone()));
@@ -97,4 +116,50 @@ impl GatewayRepository {
         transaction.commit().await?;
         Ok(())
     }
+}
+
+async fn register_verification_key(
+    transaction: &DatabaseTransaction,
+    agent_id: &str,
+    purpose: AgentKeyPurpose,
+    public_jwk: Jwk,
+    registered_at: chrono::DateTime<chrono::FixedOffset>,
+) -> GatewayResult<()> {
+    let key_id = public_jwk
+        .common
+        .key_id
+        .clone()
+        .ok_or_else(|| GatewayError::InvalidInput("verification keys require a kid".into()))?;
+    let thumbprint = public_jwk.thumbprint(ThumbprintHash::SHA256);
+    agent_verification_key::Entity::insert(agent_verification_key::ActiveModel {
+        key_id: Set(key_id.clone()),
+        agent_id: Set(agent_id.to_owned()),
+        purpose: Set(purpose.clone()),
+        jwk_thumbprint: Set(thumbprint.clone()),
+        public_jwk: Set(StoredJwk(public_jwk)),
+        registered_at: Set(registered_at),
+    })
+    .on_conflict(
+        OnConflict::new()
+            .do_nothing()
+            .to_owned(),
+    )
+    .try_insert()
+    .exec(transaction)
+    .await?;
+    let registered = agent_verification_key::Entity::find_by_id(key_id)
+        .one(transaction)
+        .await?
+        .ok_or_else(|| {
+            GatewayError::Conflict("verification key already has another identity".into())
+        })?;
+    if registered.agent_id != agent_id
+        || registered.purpose != purpose
+        || registered.jwk_thumbprint != thumbprint
+    {
+        return Err(GatewayError::Conflict(
+            "verification key owner and purpose are immutable".into(),
+        ));
+    }
+    Ok(())
 }

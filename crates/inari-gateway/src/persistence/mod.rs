@@ -39,6 +39,7 @@ pub struct AgentEnrollmentRecord {
     pub jwk_thumbprint: String,
     pub public_jwk: Jwk,
     pub dispatch_key: DispatchEncryptionKey,
+    pub state_signing_jwk: Jwk,
     pub certificate_pem: Option<String>,
     pub namespace: String,
     pub protocol_version: ProtocolVersion,

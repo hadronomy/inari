@@ -11,6 +11,15 @@ use crate::protocol::{
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredJwk(pub Jwk);
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Text")]
+pub enum AgentKeyPurpose {
+    #[sea_orm(string_value = "transport_identity")]
+    TransportIdentity,
+    #[sea_orm(string_value = "agent_state")]
+    AgentState,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredDispatchEncryptionKey(pub DispatchEncryptionKey);
 

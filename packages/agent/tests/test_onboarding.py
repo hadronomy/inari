@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from inari.config import AgentSettings
+from inari.core.version import GATEWAY_PROTOCOL_VERSION
 from inari.drivers import DeviceIdentity, DeviceKind, DeviceTransport
 from inari.gateway.models import (
     UpstreamCertificateMode,
@@ -104,7 +105,7 @@ def preview_client_factory(**kwargs):
                 "state": "created",
                 "controller_name": "Inari Production",
                 "controller_instance_id": "controller-1",
-                "supported_protocol_versions": ["2026-07-12"],
+                "supported_protocol_versions": [GATEWAY_PROTOCOL_VERSION],
                 "certificate_mode": "step_ca",
                 "requires_mutual_tls_after_issuance": True,
             },

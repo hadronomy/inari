@@ -27,6 +27,45 @@ pub struct ValidatedDispatchKey {
     pub fingerprint: String,
 }
 
+pub fn validate_state_signing_key(jwk: &Jwk, identity_key: &[u8; 32]) -> GatewayResult<()> {
+    if jwk.common.key_algorithm != Some(KeyAlgorithm::EdDSA)
+        || jwk.common.public_key_use != Some(PublicKeyUse::Signature)
+        || jwk.common.key_operations.is_some()
+    {
+        return Err(GatewayError::InvalidInput(
+            "Agent State JWK must declare EdDSA and sig".into(),
+        ));
+    }
+    let AlgorithmParameters::OctetKeyPair(parameters) = &jwk.algorithm else {
+        return Err(GatewayError::InvalidInput("Agent State JWK must be an OKP key".into()));
+    };
+    if parameters.curve != EllipticCurve::Ed25519 {
+        return Err(GatewayError::InvalidInput("Agent State JWK curve must be Ed25519".into()));
+    }
+    let public_key = URL_SAFE_NO_PAD
+        .decode(&parameters.x)
+        .map_err(|_| {
+            GatewayError::InvalidInput("Agent State JWK x is not canonical base64url".into())
+        })?;
+    let public_key: [u8; 32] = public_key.try_into().map_err(|_| {
+        GatewayError::InvalidInput("Agent State public keys must be 32 bytes".into())
+    })?;
+    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&public_key)
+        .map_err(|_| GatewayError::InvalidInput("Agent State public key is invalid".into()))?;
+    if verifying_key.is_weak() || &public_key == identity_key {
+        return Err(GatewayError::InvalidInput(
+            "Agent State requires a separate, valid signing key".into(),
+        ));
+    }
+    let expected_id = format!("agent_state_{:x}", Sha256::digest(public_key));
+    if jwk.common.key_id.as_deref() != Some(expected_id.as_str()) {
+        return Err(GatewayError::InvalidInput(
+            "Agent State kid must identify its public key".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_dispatch_key(key: &DispatchEncryptionKey) -> GatewayResult<ValidatedDispatchKey> {
     if key.key_id.is_empty()
         || key.key_id.len() > 256
@@ -133,12 +172,16 @@ pub fn validate_identity(
 
 #[cfg(test)]
 mod tests {
+    use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use ed25519_dalek::SigningKey;
     use jsonwebtoken::jwk::Jwk;
     use serde_json::json;
+    use sha2::{Digest, Sha256};
 
     use crate::protocol::{DispatchEncryptionKey, DispatchKem};
 
-    use super::{validate_dispatch_key, validate_identity};
+    use super::{validate_dispatch_key, validate_identity, validate_state_signing_key};
 
     const CSR: &str = "-----BEGIN CERTIFICATE REQUEST-----\nMIGSMEYCAQAwEzERMA8GA1UEAwwIYWd0X3Rlc3QwKjAFBgMrZXADIQAhvMvqGoKi\nttgqTZhDbzMb8IFPEaHQvEGR9AOkm+qecaAAMAUGAytlcANBAA8BTmcCjYiBRLuZ\nqNcH8/6K/ZYHnbHl7xksiR9pzqqi+jbcKi8gKJ62q5ApmtDm++N8z2MHzNPyxgFf\neZcf8wQ=\n-----END CERTIFICATE REQUEST-----\n";
 
@@ -195,5 +238,48 @@ mod tests {
 
         assert_eq!(validated.public_key, [0x11; 32]);
         assert!(!validated.fingerprint.is_empty());
+    }
+
+    fn state_jwk() -> (serde_json::Value, [u8; 32]) {
+        let public_key = SigningKey::from_bytes(&[42; 32])
+            .verifying_key()
+            .to_bytes();
+        (
+            json!({
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "alg": "EdDSA",
+                "use": "sig",
+                "kid": format!("agent_state_{:x}", Sha256::digest(public_key)),
+                "x": URL_SAFE_NO_PAD.encode(public_key),
+            }),
+            public_key,
+        )
+    }
+
+    #[test]
+    fn state_signing_key_has_a_distinct_purpose_and_content_bound_identifier() {
+        let (value, public_key) = state_jwk();
+        let jwk = serde_json::from_value(value).unwrap();
+        validate_state_signing_key(&jwk, &[1; 32]).unwrap();
+        assert!(validate_state_signing_key(&jwk, &public_key).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_state_key_descriptors() {
+        for (field, replacement) in [
+            ("kid", json!("state_arbitrary")),
+            ("alg", json!("ES256")),
+            ("use", json!("enc")),
+            ("key_ops", json!(["sign"])),
+            ("x", json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")),
+            ("x", json!("invalid")),
+            ("x", json!("ERERERERERERERERERERERERERERERERERERERERERERF")),
+        ] {
+            let (mut value, _) = state_jwk();
+            value[field] = replacement;
+            let key = serde_json::from_value(value).unwrap();
+            assert!(validate_state_signing_key(&key, &[1; 32]).is_err(), "{field}");
+        }
     }
 }

@@ -150,6 +150,11 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
     assert record.data_plane.kind is UpstreamDataPlaneKind.ZENOH
     assert record.data_plane.namespace == "iot/v1/agents/agt_test"
     assert http_client.last_post_headers["Authorization"] == "Bearer zitadel-token"
+    state_jwk = http_client.last_post_json["state_signing_jwk"]
+    assert state_jwk == service.state_signing_keys.public_jwk()
+    assert state_jwk["x"] != identity_service.get_or_create_identity().public_jwk["x"]
+    assert "d" not in state_jwk
+    assert service.load_enrollment() == record
 
 
 @pytest.mark.anyio

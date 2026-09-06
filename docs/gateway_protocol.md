@@ -19,7 +19,7 @@ used as defined by [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 
 ## Version and compatibility
 
-The current draft version is `2026-07-12`.
+The current draft version is `2026-09-06`.
 
 An enrollment request contains the agent’s preferred version and the versions
 it supports. The controller MUST return one of those versions as
@@ -96,8 +96,8 @@ Content-Type: application/json
 ```json
 {
   "protocol": {
-    "version": "2026-07-12",
-    "supported_versions": ["2026-07-12"]
+    "version": "2026-09-06",
+    "supported_versions": ["2026-09-06"]
   },
   "agent_id": "agt_123",
   "key_id": "kid_123",
@@ -114,6 +114,14 @@ Content-Type: application/json
     "kem": "dhkem_x25519_hkdf_sha256",
     "public_key_base64url": "..."
   },
+  "state_signing_jwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "alg": "EdDSA",
+    "use": "sig",
+    "kid": "agent_state_<sha256-of-raw-public-key>",
+    "x": "..."
+  },
   "certificate_pem": null,
   "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n",
   "snapshot": {
@@ -128,11 +136,28 @@ Content-Type: application/json
 }
 ```
 
-`agent_id`, `key_id`, `public_jwk`, `dispatch_key`, `csr_pem`, and `snapshot` are
-required. The snapshot describes the Agent’s observed state and capabilities.
+`agent_id`, `key_id`, `public_jwk`, `dispatch_key`, `state_signing_jwk`, `csr_pem`,
+and `snapshot` are required. The snapshot describes the Agent’s observed state and capabilities.
 It never grants permissions to the Controller. The Agent keeps the dispatch
 private key in its protected secret store. The Controller stores only the public
 key.
+
+`state_signing_jwk` registers the separate Ed25519 Agent State signing key.
+Its `kid` is `agent_state_` followed by the lowercase SHA-256 digest of the
+32-byte public key. The Agent stores its private key in protected storage.
+A storage failure or corrupt key stops enrollment. The Agent never replaces
+a corrupt key or sends a private JWK field.
+
+The Controller retains each registered Agent verification key with its owner,
+purpose, public-key thumbprint, and first registration time. Enrollment cannot
+assign a registered key to another Agent or another purpose. Registration of a
+new state key preserves the previous public key. The state key must differ from
+the Agent transport identity.
+
+Protocol `2026-09-06` requires this field. Upgrade the Agent and Controller
+together, apply the Controller migrations, and enroll each Agent with a new
+invitation. Cached enrollment without the current state-key identity is invalid.
+The migration registers existing Agent transport keys before new enrollments.
 
 All API errors use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
 details with `Content-Type: application/problem+json`.
@@ -141,7 +166,7 @@ details with `Content-Type: application/problem+json`.
 
 ```json
 {
-  "selected_protocol_version": "2026-07-12",
+  "selected_protocol_version": "2026-09-06",
   "controller": {
     "name": "Acme Inari Controller",
     "instance_id": "controller-01"
