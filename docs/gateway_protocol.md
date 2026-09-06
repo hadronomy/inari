@@ -363,6 +363,37 @@ before sending them and removes them from its outbox after Zenoh accepts the
 publish. A future protocol version may add controller receipts; this version
 does not claim end-to-end acknowledgement beyond that point.
 
+### Signed Print Job observations
+
+For a managed Print Job, `agent.runtime.event` uses `resource_kind: "print_job"`.
+Its `resource_id` and top-level `job_id` identify the public Print Job.
+The event payload contains `state_envelope`, an attached compact JWS signed with
+the registered Agent State key. Its protected header uses `alg: "EdDSA"`, the
+registered `kid`, and `typ: "application/inari-agent-state+jws"`.
+The signed payload uses RFC 8785 canonical JSON.
+
+Each envelope contains the Agent ID, Agent Boot ID, Dispatch Epoch,
+reconciliation session ID, envelope ID, and observation and issue times.
+The envelope sequence and durable state sequence use the local Print Job journal
+position. The nested `job` contains the public Print Job and Print Intent IDs,
+Managed Work ID, Device ID, Print Origin, state, state version, lifecycle times,
+contract version, and optional error or Output Evidence.
+The Payload Fingerprint uses the `sha256:<lowercase-hex>` form.
+`output_confirmed` requires Device Output Evidence.
+
+The Agent commits each signed publication and its journal cursor in one SQLite
+transaction. A restart preserves the exact pending envelope. Historical events
+retain their original state and state version. The projection can recover an
+admitted Print Job even when its command acceptance reply was not recorded.
+
+Managed replies, signed observations, and projection cursors are bound to the
+original Agent, Organization, and Site. An enrollment change does not send pending
+managed publications to the new recipient. Migration `20260906_0015` adds this
+scope to existing managed replies from their stored dispatch command.
+
+These observations provide signed evidence for reconciliation. Zenoh publication
+success alone does not prove that the Controller persisted the observation.
+
 ## Replay and reconnect
 
 Live delivery is not sufficient. The agent persists the last applied controller

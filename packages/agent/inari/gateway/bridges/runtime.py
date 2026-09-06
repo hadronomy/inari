@@ -13,6 +13,7 @@ from ...local_api.schemas import (
 from ...runtime.events import EventHub
 from ...runtime.jobs.service import JobService
 from ..models import (
+    AgentManagedScope,
     ControllerAction,
     GatewayEnrollmentRecord,
     GatewayInboundCommandState,
@@ -111,6 +112,8 @@ class GatewayCommandDispatcher:
             message,
             enrollment=enrollment,
         )
+        assert enrollment.managed_dispatch is not None
+        recipient_scope = enrollment.managed_dispatch.scope
         record, created = self.gateway_repository.record_inbound_command(
             command_id=message.command_id,
             message_id=message.message_id,
@@ -119,7 +122,7 @@ class GatewayCommandDispatcher:
             message_type=message.type,
             payload=message.model_dump(mode="json"),
         )
-        if not created and self._replay_record(record):
+        if not created and self._replay_record(record, recipient_scope=recipient_scope):
             return
         try:
             accepted_work = await self.document_admission.admit(
@@ -130,6 +133,7 @@ class GatewayCommandDispatcher:
                 message.command_id,
                 dispatch_epoch=verified.dispatch_epoch,
                 exc=exc,
+                recipient_scope=recipient_scope,
             )
             return
 
@@ -159,6 +163,7 @@ class GatewayCommandDispatcher:
             payload=accepted.model_dump(mode="json"),
             correlation_id=message.command_id,
             dedupe_key=f"command-accepted:{message.command_id}",
+            recipient_scope=recipient_scope,
         )
 
     async def _handle_job_submission(
@@ -216,7 +221,9 @@ class GatewayCommandDispatcher:
                 status_code=403,
             )
 
-    def _replay_record(self, record) -> bool:
+    def _replay_record(
+        self, record, *, recipient_scope: AgentManagedScope | None = None
+    ) -> bool:
         if record.response_payload is None:
             return False
         message_type = str(
@@ -232,6 +239,7 @@ class GatewayCommandDispatcher:
             payload=record.response_payload,
             correlation_id=record.command_id,
             dedupe_key=f"{dedupe_prefix}:{record.command_id}",
+            recipient_scope=recipient_scope,
         )
         self.gateway_repository.requeue_outbound(outbound.message_id)
         return True
@@ -264,6 +272,7 @@ class GatewayCommandDispatcher:
         *,
         dispatch_epoch: int,
         exc: Exception,
+        recipient_scope: AgentManagedScope,
     ) -> None:
         error = _coerce_error(exc)
         rejected = AgentCommandRejectedMessage(
@@ -285,6 +294,7 @@ class GatewayCommandDispatcher:
             payload=rejected.model_dump(mode="json"),
             correlation_id=command_id,
             dedupe_key=f"command-rejected:{command_id}",
+            recipient_scope=recipient_scope,
         )
 
 

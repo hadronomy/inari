@@ -11,6 +11,8 @@ from ..gateway.data_plane import ZenohGatewayTransport
 from ..gateway.enrollment import GatewayEnrollmentService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..gateway.repositories import GatewayRepository
+from ..gateway.state_events import GatewayStateEventProjector
+from ..device_streams import DeviceStreamService
 from ..gateway.managed_dispatch import ManagedDispatchVerifier
 from ..gateway.bridges.runtime import (
     GatewayCommandDispatcher,
@@ -84,6 +86,7 @@ class GatewayProvider(Provider):
         gateway_command_dispatcher: GatewayCommandDispatcher,
         gateway_runtime_event_forwarder: GatewayRuntimeEventForwarder,
         zenoh_gateway_transport: ZenohGatewayTransport,
+        device_stream_service: DeviceStreamService,
     ) -> GatewayStack:
         snapshot_builder = GatewaySnapshotBuilder(
             settings=settings,
@@ -121,6 +124,11 @@ class GatewayProvider(Provider):
             snapshot_provider=snapshot_builder.build_snapshot,
             gateway_repository=gateway_repository,
             command_dispatcher=gateway_command_dispatcher,
+            state_event_projector=GatewayStateEventProjector(
+                store=gateway_repository.store,
+                signing_keys=enrollment_service.state_signing_keys,
+                agent_boot_id=device_stream_service.agent_boot_id,
+            ),
             data_plane_transport=zenoh_gateway_transport,
         )
         gateway_service = GatewayService(

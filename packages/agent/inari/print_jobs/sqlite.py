@@ -71,7 +71,9 @@ class SqlitePrintJobReader:
                 .where(*predicates)
             ).scalar_one()
 
-        jobs_by_intent = {str(row["intent_id"]): _job_from_row(row) for row in rows}
+        jobs_by_intent = {
+            str(row["intent_id"]): print_job_from_row(row) for row in rows
+        }
         jobs = tuple(
             jobs_by_intent[print_intent_id]
             for print_intent_id in query.print_intent_ids
@@ -116,7 +118,7 @@ def _scope_predicates(
     return tuple(predicates)
 
 
-def _job_from_row(row: RowMapping) -> PrintJob:
+def print_job_from_row(row: Mapping[str, Any] | RowMapping) -> PrintJob:
     origin_values = _origin_values(row["origin_json"])
     origin_kind = str(row["origin_kind"])
     if origin_kind == "pos":
@@ -147,7 +149,9 @@ def _job_from_row(row: RowMapping) -> PrintJob:
     )
 
 
-def _report_origin(row: RowMapping, values: Mapping[str, Any]) -> ReportPrintOrigin:
+def _report_origin(
+    row: Mapping[str, Any] | RowMapping, values: Mapping[str, Any]
+) -> ReportPrintOrigin:
     if any(
         values.get(name) != row[name]
         for name in ("organization_id", "site_id", "managed_work_id")

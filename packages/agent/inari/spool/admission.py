@@ -811,6 +811,8 @@ class DurableSpoolAdmissionStore:
                 return 0
             snapshot = canonical_json(
                 {
+                    "accepted_at": job["accepted_at"],
+                    "contract_version": job["contract_version"],
                     "device_id": job["device_id"],
                     "error_code": ProblemCode.SERVICE_UNAVAILABLE.value,
                     "intent_id": job["intent_id"],

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import uuid
+import json
+from dataclasses import asdict
 from typing import Any, Mapping
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import OperationalError
 
@@ -16,6 +18,7 @@ from ..db.schema import (
 from ..runtime.models import normalize_timestamp, timestamp_to_iso, utc_now
 from ..runtime.store import RuntimeStore, dump_json, load_json
 from .models import (
+    AgentManagedScope,
     GatewayInboundCommandRecord,
     GatewayInboundCommandState,
     GatewayOutboxRecord,
@@ -94,9 +97,11 @@ class GatewayRepository:
                         status_code=409,
                     )
             if dispatch_epoch is not None:
-                state = connection.execute(
-                    select(gateway_managed_dispatch_state_table)
-                ).mappings().first()
+                state = (
+                    connection.execute(select(gateway_managed_dispatch_state_table))
+                    .mappings()
+                    .first()
+                )
                 if state is not None and dispatch_epoch < int(state["dispatch_epoch"]):
                     raise AgentError(
                         "MANAGED_DISPATCH_EPOCH_STALE",
@@ -267,9 +272,11 @@ class GatewayRepository:
             }:
                 return _row_to_inbound(inbound)
             sequence = int(inbound["sequence"])
-            dispatch_state = connection.execute(
-                select(gateway_managed_dispatch_state_table)
-            ).mappings().first()
+            dispatch_state = (
+                connection.execute(select(gateway_managed_dispatch_state_table))
+                .mappings()
+                .first()
+            )
             if dispatch_state is None:
                 connection.execute(
                     insert(gateway_managed_dispatch_state_table).values(
@@ -318,6 +325,7 @@ class GatewayRepository:
         payload: Mapping[str, Any],
         correlation_id: str | None = None,
         dedupe_key: str | None = None,
+        recipient_scope: AgentManagedScope | None = None,
     ) -> GatewayOutboxRecord:
         if dedupe_key is not None:
             existing = self.find_outbox_by_dedupe_key(dedupe_key)
@@ -332,6 +340,7 @@ class GatewayRepository:
             payload_json=dump_json(payload),
             correlation_id=correlation_id,
             dedupe_key=dedupe_key,
+            recipient_scope=recipient_scope_key(recipient_scope),
             created_at=timestamp_to_iso(now),
             updated_at=timestamp_to_iso(now),
             sent_at=None,
@@ -342,11 +351,18 @@ class GatewayRepository:
         return self.get_outbox(message_id) or _missing_outbox(message_id)
 
     def list_pending_outbox(
-        self, *, limit: int = 128
+        self, *, limit: int = 128, recipient_scope: AgentManagedScope | None = None
     ) -> tuple[GatewayOutboxRecord, ...]:
         stmt = (
             select(gateway_outbox_table)
             .where(gateway_outbox_table.c.state == GatewayOutboxState.PENDING.value)
+            .where(
+                or_(
+                    gateway_outbox_table.c.recipient_scope.is_(None),
+                    gateway_outbox_table.c.recipient_scope
+                    == recipient_scope_key(recipient_scope),
+                )
+            )
             .order_by(gateway_outbox_table.c.created_at.asc())
             .limit(limit)
         )
@@ -449,9 +465,7 @@ def _row_to_inbound(row: RowMapping | Mapping[str, Any]) -> GatewayInboundComman
         message_id=str(row["message_id"]),
         sequence=int(row["sequence"]) if row["sequence"] is not None else None,
         dispatch_epoch=(
-            int(row["dispatch_epoch"])
-            if row["dispatch_epoch"] is not None
-            else None
+            int(row["dispatch_epoch"]) if row["dispatch_epoch"] is not None else None
         ),
         received_at=normalize_timestamp(str(row["received_at"])) or utc_now(),
         updated_at=normalize_timestamp(str(row["updated_at"])) or utc_now(),
@@ -514,3 +528,13 @@ def _assert_exact_inbound_replay(
 
 def _missing_outbox(message_id: str) -> GatewayOutboxRecord:
     raise LookupError(f"Missing gateway outbox message {message_id!r}.")
+
+
+def recipient_scope_key(scope: AgentManagedScope | None) -> str | None:
+    return (
+        None
+        if scope is None
+        else json.dumps(
+            asdict(scope), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    )

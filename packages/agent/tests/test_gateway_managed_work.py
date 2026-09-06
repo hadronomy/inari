@@ -96,14 +96,25 @@ async def test_dispatcher_admits_and_replays_managed_work_once(tmp_path: Path) -
     assert isinstance(request.work.context, ManagedSubmissionContext)
     assert request.work.context.managed_work_id == "mw_test"
     assert request.work.document.content == b"^XA^FDInari^FS^XZ"
-    pending = repository.list_pending_outbox()
+    trust = _enrollment().managed_dispatch
+    assert trust is not None
+    assert repository.list_pending_outbox() == ()
+    assert (
+        repository.list_pending_outbox(
+            recipient_scope=AgentManagedScope(
+                organization_id="org_other", site_id="site_other", agent_id="agt_other"
+            )
+        )
+        == ()
+    )
+    pending = repository.list_pending_outbox(recipient_scope=trust.scope)
     assert len(pending) == 1
     repository.mark_outbox_sent(pending[0].message_id)
 
     await dispatcher.handle_dispatch_device_work(message, enrollment=_enrollment())
 
     assert len(admission.requests) == 1
-    assert len(repository.list_pending_outbox()) == 1
+    assert len(repository.list_pending_outbox(recipient_scope=trust.scope)) == 1
 
 
 @pytest.mark.anyio

@@ -172,6 +172,14 @@ Index(
     unique=True,
     sqlite_where=gateway_inbound_commands_table.c.dispatch_epoch.is_not(None),
 )
+Index(
+    "idx_gateway_inbound_managed_work",
+    func.json_extract(
+        gateway_inbound_commands_table.c.payload_json, "$.payload.managed_work_id"
+    ),
+    sqlite_where=gateway_inbound_commands_table.c.message_type
+    == "controller.command.dispatch_device_work",
+)
 
 gateway_managed_dispatch_state_table = Table(
     "gateway_managed_dispatch_state",
@@ -196,6 +204,7 @@ gateway_outbox_table = Table(
     Column("payload_json", Text, nullable=False),
     Column("correlation_id", String),
     Column("dedupe_key", String),
+    Column("recipient_scope", Text),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
     Column("sent_at", String),
@@ -211,6 +220,17 @@ Index(
     "idx_gateway_outbox_state_created_at",
     gateway_outbox_table.c.state,
     gateway_outbox_table.c.created_at,
+)
+
+gateway_print_job_cursors_table = Table(
+    "gateway_print_job_cursors",
+    metadata,
+    Column("recipient_scope", Text, primary_key=True),
+    Column("last_sequence", Integer, nullable=False),
+    CheckConstraint(
+        "last_sequence BETWEEN 0 AND 9007199254740991",
+        name="ck_gateway_print_job_cursor_sequence",
+    ),
 )
 
 public_print_jobs_table = Table(

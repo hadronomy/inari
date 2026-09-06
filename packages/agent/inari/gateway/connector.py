@@ -29,6 +29,7 @@ from .protocol import (
     GatewaySnapshotPayload,
 )
 from .repositories import GatewayRepository
+from .state_events import GatewayStateEventProjector
 from .bridges.runtime import GatewayCommandDispatcher
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class GatewayConnector:
         snapshot_provider: Callable[[], GatewaySnapshotPayload],
         gateway_repository: GatewayRepository,
         command_dispatcher: GatewayCommandDispatcher,
+        state_event_projector: GatewayStateEventProjector,
         data_plane_transport: GatewayDataPlaneTransport | None = None,
     ) -> None:
         self.settings = settings
@@ -52,6 +54,7 @@ class GatewayConnector:
         self.snapshot_provider = snapshot_provider
         self.gateway_repository = gateway_repository
         self.command_dispatcher = command_dispatcher
+        self.state_event_projector = state_event_projector
         self.data_plane_transport = data_plane_transport
         mutual_tls_policy = resolve_mutual_tls_policy(
             settings.upstream_mutual_tls_mode,
@@ -202,8 +205,19 @@ class GatewayConnector:
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None:
             return
+        if enrollment.managed_dispatch is not None:
+            self.state_event_projector.project(
+                scope=enrollment.managed_dispatch.scope,
+                dispatch_epoch=enrollment.managed_dispatch.epoch,
+                limit=min(self.settings.gateway_outbox_batch_size, 1024),
+            )
         pending = self.gateway_repository.list_pending_outbox(
-            limit=self.settings.gateway_outbox_batch_size
+            limit=self.settings.gateway_outbox_batch_size,
+            recipient_scope=(
+                None
+                if enrollment.managed_dispatch is None
+                else enrollment.managed_dispatch.scope
+            ),
         )
         if not pending:
             return
