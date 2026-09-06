@@ -12,6 +12,10 @@ Controller derives the Managed Work deadline from operation policy at
 Controller Admission. Odoo does not supply it, and the Agent checks its exact
 value.
 
+The acceptance receipt must match the stored Managed Work, Print Intent, and
+Device identities. The Controller rejects an invalid Print Job identity,
+receipt state, state version, or replay flag before it deletes protected content.
+
 The Controller keeps a unique `(Organization, Idempotency Key)` pair for 90
 days. An exact Payload Fingerprint returns the existing record. A conflict
 returns `409`.

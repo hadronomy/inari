@@ -14,7 +14,7 @@ use super::{
     CommandContent, GatewayRepository, PersistedAgentStatus, PersistedPublication, require_agent,
     stored_time, utc_time,
 };
-use crate::protocol::{AgentPublication, StructuredValue};
+use crate::protocol::{AgentPublication, StructuredFields, StructuredValue};
 use crate::{GatewayError, GatewayResult};
 
 impl GatewayRepository {
@@ -182,18 +182,7 @@ async fn reconcile_managed_dispatch(
     };
     let (state, print_job_id, error_code, message_key) = match message {
         AgentPublication::CommandAccepted { job, accepted_at, .. } => {
-            let print_job_id = job
-                .as_ref()
-                .and_then(|job| job.get("print_job_id"))
-                .and_then(|value| match value {
-                    StructuredValue::Text(value) => Some(value.clone()),
-                    _ => None,
-                })
-                .ok_or_else(|| {
-                    GatewayError::CorruptState(
-                        "Managed Work acceptance has no Print Job identity".into(),
-                    )
-                })?;
+            let print_job_id = accepted_print_job_id(job.as_ref(), &work)?;
             if *accepted_at > utc_time(work.expires_at) {
                 return Err(GatewayError::Conflict(
                     "Agent acceptance is later than the Managed Work deadline".into(),
@@ -251,4 +240,51 @@ async fn reconcile_managed_dispatch(
         .exec(transaction)
         .await?;
     Ok(())
+}
+
+fn accepted_print_job_id(
+    job: Option<&StructuredFields>,
+    work: &managed_work::Model,
+) -> GatewayResult<String> {
+    let job = job.ok_or_else(|| {
+        GatewayError::InvalidInput("Managed Work acceptance has no Print Job identity".into())
+    })?;
+    for (field, expected) in [
+        ("managed_work_id", work.managed_work_id.as_str()),
+        ("print_intent_id", work.print_intent_id.as_str()),
+        ("device_id", work.device_id.as_str()),
+        ("state", "accepted"),
+    ] {
+        if !matches!(job.get(field), Some(StructuredValue::Text(value)) if value == expected) {
+            return Err(GatewayError::Conflict(format!(
+                "Managed Work acceptance does not match its {field}"
+            )));
+        }
+    }
+    if !matches!(
+        job.get("state_version"),
+        Some(StructuredValue::Unsigned(1..) | StructuredValue::Signed(1..))
+    ) || !matches!(job.get("replayed"), Some(StructuredValue::Boolean(_)))
+    {
+        return Err(GatewayError::InvalidInput(
+            "Managed Work acceptance has an invalid receipt version or replay flag".into(),
+        ));
+    }
+    match job.get("print_job_id") {
+        Some(StructuredValue::Text(value))
+            if value.len() <= 128
+                && value
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._:/-".contains(&byte)) =>
+        {
+            Ok(value.clone())
+        },
+        _ => Err(GatewayError::InvalidInput(
+            "Managed Work acceptance has an invalid Print Job identity".into(),
+        )),
+    }
 }

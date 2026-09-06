@@ -330,10 +330,43 @@ async fn managed_payload_admission_replay_and_deletion() {
         "message_id": "accepted_test",
         "command_id": command_id,
         "accepted_at": Utc::now(),
-        "job": {"print_job_id": "pj_test"},
+        "job": {
+            "managed_work_id": "mw_test", "print_intent_id": "pi_v1_test",
+            "print_job_id": "pj_test", "device_id": "dev_printer", "state": "accepted",
+            "state_version": 1, "replayed": false,
+        },
         "detail": "accepted",
     }))
     .unwrap();
+    for (field, value) in [
+        ("managed_work_id", serde_json::json!("mw_another")),
+        ("print_intent_id", serde_json::json!("pi_v1_another")),
+        ("device_id", serde_json::json!("dev_another")),
+        ("print_job_id", serde_json::json!("")),
+        ("print_job_id", serde_json::json!("invalid job identity")),
+        ("state", serde_json::json!("output_confirmed")),
+        ("state_version", serde_json::json!(0)),
+        ("state_version", serde_json::json!(-1)),
+        ("replayed", serde_json::json!("false")),
+    ] {
+        let mut wrong_identity = serde_json::to_value(&accepted).unwrap();
+        wrong_identity["job"][field] = value;
+        let wrong_identity = serde_json::from_value(wrong_identity).unwrap();
+        assert!(
+            repository
+                .record_publication("agt_example", "test", &wrong_identity, Utc::now())
+                .await
+                .is_err(),
+            "acceptance must validate {field} before deleting the protected payload"
+        );
+        let retained: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM managed_payloads WHERE managed_work_id = 'mw_test'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(retained, 1);
+    }
     repository
         .record_publication("agt_example", "test", &accepted, Utc::now())
         .await
