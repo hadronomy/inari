@@ -402,6 +402,7 @@ impl GatewayRepository {
             payload_bytes: Set(payload_bytes),
             payload_deleted_at: Set(None),
             print_job_id: Set(None),
+            print_job_observation: Set(None),
             error_code: Set(None),
             message_key: Set("managed_work.dispatching".into()),
             expires_at: Set(stored_time(work_expires_at)),
@@ -674,6 +675,9 @@ fn persisted_managed_work(model: managed_work::Model) -> GatewayResult<Persisted
         operation: model.operation.into(),
         state: model.state.into(),
         print_job_id: model.print_job_id,
+        print_job_observation: model
+            .print_job_observation
+            .map(|value| value.0),
         error_code: model.error_code,
         message_key: model.message_key,
         admitted_at: utc_time(model.admitted_at),

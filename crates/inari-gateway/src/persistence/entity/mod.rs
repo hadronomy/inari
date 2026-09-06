@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_state_observation;
 pub mod agent_verification_key;
 pub mod audit_event;
 pub mod command;

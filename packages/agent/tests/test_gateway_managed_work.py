@@ -167,6 +167,7 @@ def _message(*, sequence: int) -> ControllerDispatchDeviceWorkMessage:
                     "sequence": sequence,
                     "issued_at": int(NOW.timestamp()),
                     "expires_at": int((NOW + timedelta(minutes=2)).timestamp()),
+                    "work_expires_at": (NOW + timedelta(minutes=2)).isoformat(),
                 },
                 "sealed_envelope": {
                     "protocol_version": 1,

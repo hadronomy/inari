@@ -6,7 +6,6 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 
 import rfc8785
 from cryptography.exceptions import InvalidSignature
@@ -16,6 +15,7 @@ from pyhpke import AEADId, KDFId, KEMId, CipherSuite
 from pydantic import ValidationError
 
 from ..core.exceptions import AgentError
+from ..documents.fingerprint import DeviceWorkFingerprintInput, fingerprint_device_work
 from ..security.dispatch_keys import DispatchEncryptionKeyService
 from .models import ControllerAction, GatewayEnrollmentRecord
 from .protocol import (
@@ -149,10 +149,33 @@ class ManagedDispatchVerifier:
                 "The signed work does not match the authenticated dispatch scope.",
             )
         document_bytes = _decode_document(work)
-        if sha256(document_bytes).hexdigest() != aad.payload_fingerprint:
+        if (
+            aad.work_expires_at.tzinfo is None
+            or aad.work_expires_at.timestamp() < aad.expires_at
+        ):
+            raise _dispatch_error(
+                "MANAGED_DISPATCH_DEADLINE_INVALID",
+                "The dispatch credential cannot outlive its Device Work.",
+            )
+        fingerprint = fingerprint_device_work(
+            DeviceWorkFingerprintInput(
+                contract_major=work.contract_major,
+                operation=work.document.operation,
+                device_id=work.device_id,
+                media_type=(
+                    "application/pdf"
+                    if work.document.operation == "report_pdf"
+                    else "application/vnd.zebra-zpl"
+                ),
+                document=document_bytes,
+                options=work.normalized_device_options,
+                expires_at=aad.work_expires_at,
+            )
+        )
+        if fingerprint.hex() != aad.payload_fingerprint:
             raise _dispatch_error(
                 "MANAGED_DISPATCH_FINGERPRINT_MISMATCH",
-                "The signed document does not match its payload fingerprint.",
+                "The signed Device Work does not match its Payload Fingerprint.",
             )
 
         return VerifiedManagedDispatch(
@@ -162,7 +185,7 @@ class ManagedDispatchVerifier:
             document_bytes=document_bytes,
             dispatch_epoch=aad.dispatch_epoch,
             sequence=aad.sequence,
-            expires_at=datetime.fromtimestamp(aad.expires_at, tz=UTC),
+            expires_at=aad.work_expires_at,
         )
 
     def _decrypt(self, message: ControllerDispatchDeviceWorkMessage) -> bytes:

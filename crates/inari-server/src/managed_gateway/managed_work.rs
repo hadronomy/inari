@@ -2,12 +2,13 @@ use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use chrono::{TimeDelta, Utc};
+use chrono::{SubsecRound, TimeDelta, Utc};
 use inari_gateway::ManagedWorkAdmission;
 use inari_gateway::protocol::{
     DeviceCapability, DeviceState, MANAGED_WORK_CONTRACT_MAJOR, ManagedDocumentOperation,
     ManagedPreflightId, ManagedWorkId, ManagedWorkPreflightRequest, ManagedWorkPreflightResult,
     ManagedWorkPreflightState, ManagedWorkReceipt, ManagedWorkRecord, ManagedWorkSubmission,
+    managed_work_fingerprint,
 };
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -54,7 +55,7 @@ impl ManagedGatewayController {
             return Ok(blocked_preflight(&request, "print_not_supported"));
         }
 
-        let now = Utc::now();
+        let now = Utc::now().trunc_subsecs(6);
         let submit_before = now + duration_delta(PREFLIGHT_TTL)?;
         let expires_at = now + duration_delta(WORK_TTL)?;
         let idempotency_expires_at = now + duration_delta(IDEMPOTENCY_TTL)?;
@@ -112,15 +113,12 @@ impl ManagedGatewayController {
         }
         let payload_fingerprint = decode_fingerprint(&submission.payload_fingerprint)?;
         let payload = decoded_document(&submission)?;
-        let actual_payload_fingerprint: [u8; 32] = Sha256::digest(&payload).into();
-        if actual_payload_fingerprint != payload_fingerprint {
-            return Err(AppError::bad_request(
-                "Managed Work payload fingerprint does not match the document.",
-            ));
-        }
         let payload_bytes = payload.len();
-        let request_fingerprint: [u8; 32] =
-            Sha256::digest(serde_json_canonicalizer::to_vec(&submission.work)?).into();
+        let request_fingerprint: [u8; 32] = Sha256::digest(serde_json_canonicalizer::to_vec(&(
+            &submission.work,
+            &submission.payload_fingerprint,
+        ))?)
+        .into();
         if let Some((persisted, command)) = self
             .inner
             .store
@@ -174,6 +172,11 @@ impl ManagedGatewayController {
                     admitted_at: Utc::now(),
                 },
                 move |allocation| {
+                    if managed_work_fingerprint(&dispatch_submission.work, allocation.work_expires_at)? != payload_fingerprint {
+                        return Err(inari_gateway::GatewayError::InvalidInput(
+                            "Managed Work Payload Fingerprint does not match its normalized envelope and deadline".into(),
+                        ));
+                    }
                     let command = security
                         .dispatch_signer
                         .command(allocation, dispatch_idempotency_key, dispatch_submission)
@@ -250,6 +253,7 @@ impl ManagedGatewayController {
             media_type: persisted.operation.media_type().into(),
             state: persisted.state,
             print_job_id: persisted.print_job_id,
+            print_job_observation: persisted.print_job_observation,
             error_code: persisted.error_code,
             message_key: persisted.message_key,
             admitted_at: persisted.admitted_at,
@@ -455,7 +459,8 @@ mod tests {
                     copy_ordinal: 1,
                 },
                 document: ManagedDocument::ReportPdf { content_base64: "JVBERi0xLjQ=".into() },
-                normalized_device_options: Default::default(),
+                normalized_device_options: serde_json::from_value(serde_json::json!({"dpi":300}))
+                    .unwrap(),
             },
         }
     }

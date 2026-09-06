@@ -1,6 +1,9 @@
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, Utc};
 use jsonwebtoken::jwk::Jwk;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::{
     AgentId, DeviceId, ManagedPreflightId, ManagedWorkId, OrganizationId, PrintIntentId, SiteId,
@@ -229,6 +232,7 @@ pub struct ManagedWorkRecord {
     pub media_type: String,
     pub state: ManagedWorkState,
     pub print_job_id: Option<String>,
+    pub print_job_observation: Option<super::SignedAgentStateObservation>,
     pub error_code: Option<String>,
     pub message_key: String,
     pub admitted_at: DateTime<Utc>,
@@ -257,6 +261,55 @@ pub struct ManagedDispatchAuthenticatedData {
     pub sequence: u64,
     pub issued_at: i64,
     pub expires_at: i64,
+    #[serde(serialize_with = "serialize_work_deadline")]
+    pub work_expires_at: DateTime<Utc>,
+}
+
+fn serialize_work_deadline<S: serde::Serializer>(
+    deadline: &DateTime<Utc>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&deadline.to_rfc3339_opts(chrono::SecondsFormat::Micros, true))
+}
+
+/// Hashes the normalized Device Work fields with the Agent's versioned length-prefix format.
+pub fn managed_work_fingerprint(
+    work: &ManagedDeviceWork,
+    expires_at: DateTime<Utc>,
+) -> crate::GatewayResult<[u8; 32]> {
+    let content_base64 = match &work.document {
+        ManagedDocument::ReportPdf { content_base64 }
+        | ManagedDocument::LabelDocument { content_base64 } => content_base64,
+    };
+    let document = STANDARD
+        .decode(content_base64)
+        .map_err(|_| {
+            crate::GatewayError::InvalidInput("Managed Work document is not valid base64".into())
+        })?;
+    let options = serde_json_canonicalizer::to_vec(&work.normalized_device_options)?;
+    let operation = match work.document.operation() {
+        ManagedDocumentOperation::ReportPdf => "report_pdf",
+        ManagedDocumentOperation::LabelDocument => "label_document",
+    };
+    let contract_major = u32::from(work.contract_major).to_be_bytes();
+    let deadline = expires_at
+        .format("%Y-%m-%dT%H:%M:%S%.6fZ")
+        .to_string();
+    let mut digest = Sha256::new();
+    digest.update(b"inari-device-work-fingerprint\0\x01");
+    for field in [
+        contract_major.as_slice(),
+        operation.as_bytes(),
+        work.device_id.as_str().as_bytes(),
+        work.document.media_type().as_bytes(),
+        document.as_slice(),
+        options.as_slice(),
+        deadline.as_bytes(),
+    ] {
+        digest.update((field.len() as u64).to_be_bytes());
+        digest.update(field);
+    }
+    Ok(digest.finalize().into())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -276,7 +329,28 @@ mod tests {
 
     use super::{
         MANAGED_WORK_CONTRACT_MAJOR, ManagedDeviceWork, ManagedDocument, ManagedDocumentOperation,
+        managed_work_fingerprint,
     };
+
+    #[test]
+    fn payload_fingerprint_matches_the_python_agent_with_microsecond_deadlines() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/device-work-fingerprint.json"))
+                .unwrap();
+        let work: ManagedDeviceWork = serde_json::from_value(fixture["work"].clone()).unwrap();
+        let expires_at = serde_json::from_value(fixture["expires_at"].clone()).unwrap();
+        let fingerprint = managed_work_fingerprint(&work, expires_at).unwrap();
+        assert_eq!(hex::encode(fingerprint), fixture["payload_fingerprint"]);
+        assert_ne!(
+            managed_work_fingerprint(&work, expires_at + chrono::TimeDelta::microseconds(1))
+                .unwrap(),
+            fingerprint
+        );
+        let mut changed = work.clone();
+        changed.normalized_device_options =
+            serde_json::from_value(serde_json::json!({"dpi":203})).unwrap();
+        assert_ne!(managed_work_fingerprint(&changed, expires_at).unwrap(), fingerprint);
+    }
 
     #[test]
     fn document_variants_fix_the_operation_and_media_type() {

@@ -6,6 +6,7 @@ mod fleet;
 mod managed_work;
 mod onboarding;
 mod publications;
+mod state_observations;
 
 use chrono::{DateTime, FixedOffset, Utc};
 use jsonwebtoken::jwk::Jwk;
@@ -114,6 +115,7 @@ pub struct PersistedManagedWork {
     pub operation: crate::protocol::ManagedDocumentOperation,
     pub state: crate::protocol::ManagedWorkState,
     pub print_job_id: Option<String>,
+    pub print_job_observation: Option<crate::protocol::SignedAgentStateObservation>,
     pub error_code: Option<String>,
     pub message_key: String,
     pub admitted_at: DateTime<Utc>,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import UTC, datetime
-from hashlib import sha256
 
 import pytest
 import rfc8785
@@ -11,6 +11,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pyhpke import AEADId, KDFId, KEMId, CipherSuite
 
 from inari.core.exceptions import AgentError
+from inari.documents.fingerprint import (
+    DeviceWorkFingerprintInput,
+    fingerprint_device_work,
+)
 from inari.gateway.managed_dispatch import ManagedDispatchVerifier
 from inari.gateway.models import (
     AgentManagedScope,
@@ -43,6 +47,7 @@ def test_verifier_opens_a_canonical_signed_hpke_dispatch() -> None:
     assert verified.work.device_id == "dev_label"
     assert verified.dispatch_epoch == 7
     assert verified.sequence == 42
+    assert verified.expires_at == datetime(2026, 9, 4, 12, 5, tzinfo=UTC)
 
 
 def test_verifier_rejects_outer_authenticated_data_changes() -> None:
@@ -79,6 +84,41 @@ def test_verifier_rejects_expired_dispatch_before_decryption() -> None:
     assert captured.value.code == "MANAGED_DISPATCH_EXPIRED"
 
 
+def test_verifier_rejects_a_document_digest_in_place_of_the_payload_fingerprint() -> (
+    None
+):
+    fixture = _dispatch_fixture(document_digest_only=True)
+    with pytest.raises(AgentError) as captured:
+        fixture.verifier.verify(
+            fixture.message,
+            enrollment=fixture.enrollment,
+            now=datetime(2026, 9, 4, 12, 0, 30, tzinfo=UTC),
+        )
+    assert captured.value.code == "MANAGED_DISPATCH_FINGERPRINT_MISMATCH"
+
+
+def test_dispatch_credential_cannot_outlive_device_work() -> None:
+    fixture = _dispatch_fixture(work_expires_at=datetime(2026, 9, 4, 12, 1, tzinfo=UTC))
+    with pytest.raises(AgentError) as captured:
+        fixture.verifier.verify(
+            fixture.message,
+            enrollment=fixture.enrollment,
+            now=datetime(2026, 9, 4, 12, 0, 30, tzinfo=UTC),
+        )
+    assert captured.value.code == "MANAGED_DISPATCH_DEADLINE_INVALID"
+
+
+def test_dispatch_preserves_microseconds_with_trailing_zeros() -> None:
+    deadline = datetime(2026, 9, 4, 12, 5, 0, 123000, tzinfo=UTC)
+    fixture = _dispatch_fixture(work_expires_at=deadline)
+    verified = fixture.verifier.verify(
+        fixture.message,
+        enrollment=fixture.enrollment,
+        now=datetime(2026, 9, 4, 12, 0, 30, tzinfo=UTC),
+    )
+    assert verified.expires_at == deadline
+
+
 class _DispatchFixture:
     def __init__(
         self,
@@ -92,7 +132,11 @@ class _DispatchFixture:
         self.enrollment = enrollment
 
 
-def _dispatch_fixture() -> _DispatchFixture:
+def _dispatch_fixture(
+    *,
+    work_expires_at: datetime = datetime(2026, 9, 4, 12, 5, tzinfo=UTC),
+    document_digest_only: bool = False,
+) -> _DispatchFixture:
     dispatch_keys = DispatchEncryptionKeyService(MemorySecretStore())
     recipient = dispatch_keys.get_or_create()
     signing_key = Ed25519PrivateKey.generate()
@@ -107,12 +151,27 @@ def _dispatch_fixture() -> _DispatchFixture:
         "agent_id": "agt_test",
         "managed_work_id": "mw_test",
         "idempotency_key": "report:manual:17:1",
-        "payload_fingerprint": sha256(document).hexdigest(),
+        "payload_fingerprint": fingerprint_device_work(
+            DeviceWorkFingerprintInput(
+                contract_major=1,
+                operation="label_document",
+                device_id="dev_label",
+                media_type="application/vnd.zebra-zpl",
+                document=document,
+                options={"copies": 1},
+                expires_at=work_expires_at,
+            )
+        ).hex(),
         "dispatch_epoch": 7,
         "sequence": 42,
         "issued_at": 1_788_523_200,
         "expires_at": 1_788_523_320,
+        "work_expires_at": work_expires_at.isoformat(timespec="microseconds").replace(
+            "+00:00", "Z"
+        ),
     }
+    if document_digest_only:
+        aad["payload_fingerprint"] = hashlib.sha256(document).hexdigest()
     claims = {
         "iss": "controller-primary",
         "aud": "agt_test",

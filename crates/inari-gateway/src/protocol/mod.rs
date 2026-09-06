@@ -5,6 +5,7 @@ mod jobs;
 mod managed_work;
 mod publications;
 mod snapshot;
+mod state_envelopes;
 mod structured;
 mod version;
 
@@ -15,5 +16,6 @@ pub use self::jobs::*;
 pub use self::managed_work::*;
 pub use self::publications::*;
 pub use self::snapshot::*;
+pub use self::state_envelopes::*;
 pub use self::structured::*;
 pub use self::version::*;

@@ -43,13 +43,27 @@ impl GatewayRepository {
         })
         .on_conflict(
             OnConflict::column(publication::COLUMN.message_id)
-                .update_column(publication::COLUMN.key_expr)
-                .update_column(publication::COLUMN.message_type)
-                .update_column(publication::COLUMN.payload)
-                .update_column(publication::COLUMN.received_at)
+                .do_nothing()
                 .to_owned(),
         )
+        .try_insert()
         .exec(&transaction)
+        .await?;
+        let stored = publication::Entity::find_by_id(message.message_id())
+            .one(&transaction)
+            .await?
+            .ok_or_else(|| GatewayError::CorruptState("publication was not stored".into()))?;
+        if stored.agent_id != agent_id || stored.payload.0 != *message {
+            return Err(GatewayError::Conflict(
+                "publication message ID was reused for different content".into(),
+            ));
+        }
+        super::state_observations::reconcile_state_observation(
+            &transaction,
+            agent_id,
+            message,
+            now,
+        )
         .await?;
         if let Some(snapshot) = message.snapshot()
             && let Some(model) = invitation::Entity::find()

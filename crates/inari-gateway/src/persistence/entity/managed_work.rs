@@ -32,6 +32,8 @@ pub struct Model {
     pub payload_deleted_at: Option<DateTimeWithTimeZone>,
     #[sea_orm(column_type = "Text", nullable)]
     pub print_job_id: Option<String>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub print_job_observation: Option<super::value::StoredAgentStateObservation>,
     #[sea_orm(column_type = "Text", nullable)]
     pub error_code: Option<String>,
     pub message_key: String,

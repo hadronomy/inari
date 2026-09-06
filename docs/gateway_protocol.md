@@ -287,11 +287,18 @@ request must match the database, company, and Organization in the token.
 Preflight checks the durable Agent and Device scope, online state, print
 capability, and current dispatch key. A ready result fixes the work deadline,
 idempotency deadline, payload media type, and dispatch key before Odoo renders
-and seals the document.
+the document.
 
-Submission requires `Idempotency-Key`. The Controller stores the sealed HPKE
-document, fingerprints, binding claim, scope, deadlines, and state in one
-transaction. It does not receive or store the plaintext PDF or Label Document.
+Submission requires `Idempotency-Key` and sends one PDF or Label Document over
+HTTPS. The Payload Fingerprint covers the Contract Major, operation, Device ID,
+media type, exact document bytes, canonical options, and resolved work deadline.
+The Controller checks this full fingerprint against the preflight deadline.
+Changing the fingerprint during replay is a conflict.
+
+The Controller signs and seals the Agent dispatch with HPKE. It encrypts the
+pending dispatch at rest with a per-payload key protected by OpenBao Transit.
+Protected payload, fingerprints, Binding claim, scope, deadlines, and state commit
+in one transaction. Plaintext document bytes remain in memory during admission.
 The PDF plaintext limit is 10 MiB. The Label Document plaintext limit is 2 MiB.
 Queue admission returns HTTP 429 when the Agent or Organization limit is full.
 
@@ -305,10 +312,24 @@ Every controller command has:
 - an optional `issued_at` time;
 - a discriminating `type`.
 
-Managed document delivery does not use a broad print command. The gateway
-command union does not accept raw, text, HTML, structured receipt, base64,
-printer-name, or transport-selection fields. Encrypted Managed Device Work is
-outside this protocol version until its dispatch contract is implemented.
+Managed document delivery uses `controller.command.dispatch_device_work`.
+The dispatch contains signed Managed Device Work inside an HPKE envelope addressed
+to the Agent dispatch key. It names a stable Device ID and a Report Binding.
+
+Authenticated data binds the Agent, Organization, Site, Managed Work, sequence,
+Dispatch Epoch, Payload Fingerprint, and deadlines. `expires_at` limits the
+dispatch credential. `work_expires_at` fixes the Device Work deadline and uses UTC
+with six fractional digits. The dispatch credential cannot outlive Device Work.
+The Agent fingerprints and admits work with `work_expires_at`; a shorter dispatch
+credential lifetime does not shorten the admitted Print Job deadline.
+
+Upgrade the Controller, Agent, and submitting clients together for this contract.
+Stop new admissions before the upgrade. The Controller migration refuses active
+pending or dispatching work until it finishes or expires. It then deletes retained
+payloads, marks expired pending work `Expired`, and marks expired dispatching work
+`RecoveryUncertain`. Historical fingerprints remain unchanged. Records with the
+old document-only fingerprint cannot reconcile against full Device Work evidence;
+the upgrade does not infer a Print Job outcome or authorize another print.
 
 ### Execute a device command
 
@@ -393,6 +414,27 @@ scope to existing managed replies from their stored dispatch command.
 
 These observations provide signed evidence for reconciliation. Zenoh publication
 success alone does not prove that the Controller persisted the observation.
+
+The Controller verifies the envelope with the registered State key for the
+authenticated Agent. It checks the signed scope, Print Intent, Device, Report
+Binding, Payload Fingerprint, and deadline against Managed Work before recording
+the observation. Transport identity keys cannot sign Agent State.
+
+The Managed Work response includes `print_job_observation` when verified evidence
+exists. This field contains the parsed `observation` and original `state_envelope`
+for independent signature verification. Managed Work remains `accepted` while
+the nested Print Job state describes physical execution.
+
+A valid observation proves Agent acceptance even if the command acceptance reply
+was lost. The Controller records the observation, stops dispatch, and deletes the
+protected payload in one transaction. Lower state versions cannot replace the
+current projection. A changed snapshot at the same state version is a conflict.
+Terminal states remain immutable, including `outcome_unknown`.
+
+Migration `m20260906_223031_store_agent_state_observations` adds the current
+projection and signed observation history. It also requires each Agent Print Job
+ID to identify one Managed Work record. Existing Managed Work has no observation
+until the Controller receives verified Agent evidence.
 
 ## Replay and reconnect
 

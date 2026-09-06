@@ -42,6 +42,9 @@ pub struct StoredCapabilities(pub Vec<DeviceCapability>);
 pub struct StoredReportBindingClaim(pub ReportBindingClaim);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
+pub struct StoredAgentStateObservation(pub crate::protocol::SignedAgentStateObservation);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, FromJsonQueryResult)]
 pub struct StoredManagedWorkPreflightRequest(pub ManagedWorkPreflightRequest);
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, FromJsonQueryResult)]

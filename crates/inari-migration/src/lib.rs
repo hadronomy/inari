@@ -10,6 +10,7 @@ mod m20260712_223027_create_sessions;
 mod m20260903_223028_create_managed_work;
 mod m20260905_223029_protect_managed_payloads;
 mod m20260906_223030_register_agent_verification_keys;
+mod m20260906_223031_store_agent_state_observations;
 
 pub struct Migrator;
 
@@ -24,6 +25,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260903_223028_create_managed_work::Migration),
             Box::new(m20260905_223029_protect_managed_payloads::Migration),
             Box::new(m20260906_223030_register_agent_verification_keys::Migration),
+            Box::new(m20260906_223031_store_agent_state_observations::Migration),
         ]
     }
 }

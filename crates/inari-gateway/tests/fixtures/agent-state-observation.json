@@ -1,0 +1,56 @@
+{
+  "public_jwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "alg": "EdDSA",
+    "use": "sig",
+    "kid": "agent_state_b600306cfa76723fdec395e53a9b3d9fdb78b1e2d7a23c32fcbcd2dc6d0c4092",
+    "x": "GX9rI-FshTLGq8g4-s1ep4m-DHaykgM0A5v6iz02jWE"
+  },
+  "claims": {
+    "contract_major": 1,
+    "envelope_id": "ase_report",
+    "agent_id": "agt_test",
+    "agent_boot_id": "boot_test",
+    "reconciliation_session_id": "recon_test",
+    "dispatch_epoch": 1,
+    "envelope_sequence": 1,
+    "durable_state_sequence": 1,
+    "observed_at": "2026-09-06T12:00:00Z",
+    "issued_at": "2026-09-06T12:00:00Z",
+    "payload_fingerprint": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "job": {
+      "print_job_id": "job_report",
+      "print_intent_id": "pi_v1_report",
+      "device_id": "dev_report",
+      "origin": {
+        "kind": "report",
+        "organization_id": "org_test",
+        "site_id": "site_test",
+        "database": "odoo",
+        "company_id": "7",
+        "report_binding_id": "binding_report",
+        "report_route": "automatic",
+        "report_action": "stock.action_report_delivery",
+        "source_model": "stock.picking",
+        "record_ids": [
+          "17"
+        ],
+        "wizard_input_digest": null,
+        "rendered_document_index": 0
+      },
+      "managed_work_id": "mw_report",
+      "state": "accepted",
+      "state_version": 1,
+      "accepted_at": "2026-09-06T12:00:00Z",
+      "started_at": null,
+      "terminal_at": null,
+      "expires_at": "2026-09-06T12:05:00Z",
+      "error_code": null,
+      "message_key": null,
+      "confirmation_evidence": null,
+      "contract_version": "v1"
+    }
+  },
+  "state_envelope": "eyJhbGciOiJFZERTQSIsImtpZCI6ImFnZW50X3N0YXRlX2I2MDAzMDZjZmE3NjcyM2ZkZWMzOTVlNTNhOWIzZDlmZGI3OGIxZTJkN2EyM2MzMmZjYmNkMmRjNmQwYzQwOTIiLCJ0eXAiOiJhcHBsaWNhdGlvbi9pbmFyaS1hZ2VudC1zdGF0ZStqd3MifQ.eyJhZ2VudF9ib290X2lkIjoiYm9vdF90ZXN0IiwiYWdlbnRfaWQiOiJhZ3RfdGVzdCIsImNvbnRyYWN0X21ham9yIjoxLCJkaXNwYXRjaF9lcG9jaCI6MSwiZHVyYWJsZV9zdGF0ZV9zZXF1ZW5jZSI6MSwiZW52ZWxvcGVfaWQiOiJhc2VfcmVwb3J0IiwiZW52ZWxvcGVfc2VxdWVuY2UiOjEsImlzc3VlZF9hdCI6IjIwMjYtMDktMDZUMTI6MDA6MDBaIiwiam9iIjp7ImFjY2VwdGVkX2F0IjoiMjAyNi0wOS0wNlQxMjowMDowMFoiLCJjb25maXJtYXRpb25fZXZpZGVuY2UiOm51bGwsImNvbnRyYWN0X3ZlcnNpb24iOiJ2MSIsImRldmljZV9pZCI6ImRldl9yZXBvcnQiLCJlcnJvcl9jb2RlIjpudWxsLCJleHBpcmVzX2F0IjoiMjAyNi0wOS0wNlQxMjowNTowMFoiLCJtYW5hZ2VkX3dvcmtfaWQiOiJtd19yZXBvcnQiLCJtZXNzYWdlX2tleSI6bnVsbCwib3JpZ2luIjp7ImNvbXBhbnlfaWQiOiI3IiwiZGF0YWJhc2UiOiJvZG9vIiwia2luZCI6InJlcG9ydCIsIm9yZ2FuaXphdGlvbl9pZCI6Im9yZ190ZXN0IiwicmVjb3JkX2lkcyI6WyIxNyJdLCJyZW5kZXJlZF9kb2N1bWVudF9pbmRleCI6MCwicmVwb3J0X2FjdGlvbiI6InN0b2NrLmFjdGlvbl9yZXBvcnRfZGVsaXZlcnkiLCJyZXBvcnRfYmluZGluZ19pZCI6ImJpbmRpbmdfcmVwb3J0IiwicmVwb3J0X3JvdXRlIjoiYXV0b21hdGljIiwic2l0ZV9pZCI6InNpdGVfdGVzdCIsInNvdXJjZV9tb2RlbCI6InN0b2NrLnBpY2tpbmciLCJ3aXphcmRfaW5wdXRfZGlnZXN0IjpudWxsfSwicHJpbnRfaW50ZW50X2lkIjoicGlfdjFfcmVwb3J0IiwicHJpbnRfam9iX2lkIjoiam9iX3JlcG9ydCIsInN0YXJ0ZWRfYXQiOm51bGwsInN0YXRlIjoiYWNjZXB0ZWQiLCJzdGF0ZV92ZXJzaW9uIjoxLCJ0ZXJtaW5hbF9hdCI6bnVsbH0sIm9ic2VydmVkX2F0IjoiMjAyNi0wOS0wNlQxMjowMDowMFoiLCJwYXlsb2FkX2ZpbmdlcnByaW50Ijoic2hhMjU2OjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYiLCJyZWNvbmNpbGlhdGlvbl9zZXNzaW9uX2lkIjoicmVjb25fdGVzdCJ9.YeQcyBOcB_wg6J8Qn1HCxN8BWBrVNrKWR5KObiWHNPLoE0OPNLCgLa3ufWY5Up3LWhhpeg6b1p9wRNgTbxZtAQ"
+}

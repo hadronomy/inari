@@ -156,6 +156,7 @@ impl ManagedDispatchSigner {
             sequence,
             issued_at: issued_at.timestamp(),
             expires_at: expires_at.timestamp(),
+            work_expires_at,
         };
         let claims = ManagedDispatchClaims {
             issuer: self.issuer.clone(),
@@ -278,7 +279,7 @@ struct DispatchHeader<'a> {
 #[cfg(test)]
 mod tests {
     use base64::Engine;
-    use chrono::{TimeDelta, Utc};
+    use chrono::{SubsecRound, TimeDelta, Utc};
     use ed25519_dalek::{Signature, Verifier};
     use hpke::aead::AesGcm256;
     use hpke::kdf::HkdfSha256;
@@ -313,7 +314,7 @@ mod tests {
             .expect("verification JWK should parse"),
             signing_key,
         };
-        let issued_at = Utc::now();
+        let issued_at = Utc::now().trunc_subsecs(6);
         let (recipient_private_key, recipient_public_key) = X25519HkdfSha256::gen_keypair();
         let recipient_key = DispatchEncryptionKey {
             key_id: "agent-dispatch-key-1".into(),

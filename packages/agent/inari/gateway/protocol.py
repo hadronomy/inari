@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    field_serializer,
+)
 
 from ..gateway.models import (
     ControllerAction,
@@ -335,6 +343,15 @@ class ManagedDispatchAuthenticatedDataPayload(GatewayProtocolModel):
     sequence: int = Field(ge=1)
     issued_at: int
     expires_at: int
+    work_expires_at: AwareDatetime
+
+    @field_serializer("work_expires_at", when_used="json")
+    def serialize_work_deadline(self, value: datetime) -> str:
+        return (
+            value.astimezone(UTC)
+            .isoformat(timespec="microseconds")
+            .replace("+00:00", "Z")
+        )
 
 
 class SealedManagedDispatchPayload(GatewayProtocolModel):

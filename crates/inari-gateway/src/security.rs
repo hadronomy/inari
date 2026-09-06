@@ -12,6 +12,10 @@ use x509_parser::prelude::FromDer;
 use crate::protocol::{DispatchEncryptionKey, DispatchKem};
 use crate::{GatewayError, GatewayResult};
 
+mod state_envelopes;
+
+pub use state_envelopes::UnverifiedAgentStateEnvelope;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedIdentity {
     pub key_id: String,
@@ -28,6 +32,16 @@ pub struct ValidatedDispatchKey {
 }
 
 pub fn validate_state_signing_key(jwk: &Jwk, identity_key: &[u8; 32]) -> GatewayResult<()> {
+    let key = state_verifying_key(jwk)?;
+    if key.as_bytes() == identity_key {
+        return Err(GatewayError::InvalidInput(
+            "Agent State requires a separate signing key".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn state_verifying_key(jwk: &Jwk) -> GatewayResult<ed25519_dalek::VerifyingKey> {
     if jwk.common.key_algorithm != Some(KeyAlgorithm::EdDSA)
         || jwk.common.public_key_use != Some(PublicKeyUse::Signature)
         || jwk.common.key_operations.is_some()
@@ -52,7 +66,7 @@ pub fn validate_state_signing_key(jwk: &Jwk, identity_key: &[u8; 32]) -> Gateway
     })?;
     let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&public_key)
         .map_err(|_| GatewayError::InvalidInput("Agent State public key is invalid".into()))?;
-    if verifying_key.is_weak() || &public_key == identity_key {
+    if verifying_key.is_weak() {
         return Err(GatewayError::InvalidInput(
             "Agent State requires a separate, valid signing key".into(),
         ));
@@ -63,7 +77,7 @@ pub fn validate_state_signing_key(jwk: &Jwk, identity_key: &[u8; 32]) -> Gateway
             "Agent State kid must identify its public key".into(),
         ));
     }
-    Ok(())
+    Ok(verifying_key)
 }
 
 pub fn validate_dispatch_key(key: &DispatchEncryptionKey) -> GatewayResult<ValidatedDispatchKey> {
