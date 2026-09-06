@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Sequence
@@ -94,8 +95,67 @@ class ZenohGatewayTransport:
         await self._ensure_runtime_resources(enrollment)
         keyspace = self._keyspace(enrollment)
         for message in messages:
+            if (
+                isinstance(message, AgentRuntimeEventMessage)
+                and message.event.resource_kind == "print_job"
+            ):
+                await self._commit_state(keyspace, message)
+                continue
             key = _publication_key(keyspace, message)
             await self._put_json(key, message.model_dump(mode="json"))
+
+    async def _commit_state(
+        self, keyspace: GatewayZenohKeyspace, message: AgentRuntimeEventMessage
+    ) -> None:
+        envelope = message.event.payload.get("state_envelope")
+        if not isinstance(envelope, str) or set(message.event.payload) != {
+            "state_envelope"
+        }:
+            raise ValueError(
+                "A managed Print Job publication requires a signed observation."
+            )
+        key = keyspace.state_commit()
+        expected = {
+            "contract_major": 1,
+            "message_id": message.message_id,
+            "state_envelope_sha256": hashlib.sha256(
+                envelope.encode("utf-8")
+            ).hexdigest(),
+        }
+        payload = dump_json_payload(message.model_dump(mode="json"))
+        replies = await asyncio.to_thread(self._send_state_commit, key, payload)
+        for reply in replies:
+            sample = getattr(reply, "ok", None)
+            if sample is None or str(sample.key_expr) != key:
+                continue
+            try:
+                receipt = load_json_payload(sample.payload.to_string())
+            except (ValueError, TypeError):
+                continue
+            if (
+                isinstance(receipt, dict)
+                and type(receipt.get("contract_major")) is int
+                and receipt == expected
+            ):
+                return
+        raise AgentError(
+            "UPSTREAM_STATE_COMMIT_UNCONFIRMED",
+            "The Controller has not confirmed storage of the Print Job observation.",
+            status_code=503,
+        )
+
+    def _send_state_commit(self, key: str, payload: str) -> list[Any]:
+        session = self._session
+        if session is None:
+            raise RuntimeError("Zenoh session is not connected.")
+        return list(
+            session.get(
+                key,
+                payload=payload,
+                encoding=zenoh.Encoding.APPLICATION_JSON,
+                timeout=self.settings.zenoh_query_timeout_seconds,
+            )
+        )
 
     async def close(self) -> None:
         async with self._lock:

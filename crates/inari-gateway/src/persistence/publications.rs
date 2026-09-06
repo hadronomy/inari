@@ -30,7 +30,7 @@ impl GatewayRepository {
             .await?
             .is_none()
         {
-            return Ok(());
+            return Err(GatewayError::NotFound(format!("Agent {agent_id} is not enrolled")));
         }
         let transaction = self.database.begin().await?;
         publication::Entity::insert(publication::ActiveModel {

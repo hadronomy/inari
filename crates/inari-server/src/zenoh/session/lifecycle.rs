@@ -170,6 +170,27 @@ fn apply_access_control(config: &mut Config, settings: &ZenohConfig) -> AppResul
                 ],
             },
             {
+                "id": "managed-agent-state-commit",
+                "permission": "allow",
+                "flows": ["ingress"],
+                "messages": ["query"],
+                "key_exprs": [format!("{namespace_prefix}/*/state/commit")],
+            },
+            {
+                "id": "managed-agent-state-receipt",
+                "permission": "allow",
+                "flows": ["egress"],
+                "messages": ["reply", "declare_queryable"],
+                "key_exprs": [format!("{namespace_prefix}/*/state/commit")],
+            },
+            {
+                "id": "managed-agent-state-receipt-source",
+                "permission": "deny",
+                "flows": ["ingress"],
+                "messages": ["reply", "declare_queryable"],
+                "key_exprs": [format!("{namespace_prefix}/*/state/commit")],
+            },
+            {
                 "id": "managed-agent-command-read",
                 "permission": "allow",
                 "messages": ["declare_subscriber", "query", "reply"],
@@ -184,6 +205,9 @@ fn apply_access_control(config: &mut Config, settings: &ZenohConfig) -> AppResul
             {
                 "rules": [
                     "managed-agent-publications",
+                    "managed-agent-state-commit",
+                    "managed-agent-state-receipt",
+                    "managed-agent-state-receipt-source",
                     "managed-agent-command-read",
                 ],
                 "subjects": ["managed-agents"],
@@ -245,6 +269,109 @@ mod tests {
         ZenohAccessControlConfig, ZenohAclPermission, ZenohAdminSpaceConfig, ZenohConfig,
         ZenohMode, ZenohTlsConfig,
     };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn state_commit_acl_allows_controller_receipts_and_blocks_remote_receipt_sources() {
+        use std::time::Duration;
+
+        let key = "iot/v1/agents/agt_test/state/commit";
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
+        drop(listener);
+        let mut router_config = Config::default();
+        configure_zenoh(
+            &mut router_config,
+            &ZenohConfig {
+                mode: ZenohMode::Router,
+                listen_endpoints: vec![endpoint.clone()],
+                access_control: ZenohAccessControlConfig {
+                    enabled: true,
+                    default_permission: ZenohAclPermission::Deny,
+                    managed_gateway_namespace_prefix: Some("iot/v1/agents".into()),
+                    managed_gateway_cert_common_names: vec![],
+                },
+                ..ZenohConfig::default()
+            },
+        )
+        .unwrap();
+        router_config
+            .insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        let router = zenoh::open(router_config)
+            .await
+            .unwrap();
+        let mut client_config = Config::default();
+        client_config
+            .insert_json5("mode", "\"client\"")
+            .unwrap();
+        client_config
+            .insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        client_config
+            .insert_json5("connect/endpoints", &serde_json::json!([endpoint]).to_string())
+            .unwrap();
+        let queryable = router
+            .declare_queryable(key)
+            .await
+            .unwrap();
+        let impostor = zenoh::open(client_config.clone())
+            .await
+            .unwrap();
+        let impostor_queryable = impostor
+            .declare_queryable(key)
+            .await
+            .unwrap();
+        let client = zenoh::open(client_config)
+            .await
+            .unwrap();
+        let replies = client
+            .get(key)
+            .payload("observation")
+            .target(zenoh::query::QueryTarget::All)
+            .timeout(Duration::from_secs(2))
+            .await
+            .unwrap();
+        let query = tokio::time::timeout(Duration::from_secs(2), queryable.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            query
+                .payload()
+                .unwrap()
+                .try_to_string()
+                .unwrap(),
+            "observation"
+        );
+        query
+            .reply(key, "stored")
+            .await
+            .unwrap();
+        drop(query);
+        let reply = tokio::time::timeout(Duration::from_secs(2), replies.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reply
+                .result()
+                .as_ref()
+                .unwrap()
+                .payload()
+                .try_to_string()
+                .unwrap(),
+            "stored"
+        );
+        assert!(
+            impostor_queryable
+                .try_recv()
+                .unwrap()
+                .is_none()
+        );
+        client.close().await.unwrap();
+        impostor.close().await.unwrap();
+        router.close().await.unwrap();
+    }
 
     #[test]
     fn configure_zenoh_applies_mode() {

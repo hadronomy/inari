@@ -363,7 +363,11 @@ class GatewayRepository:
                     == recipient_scope_key(recipient_scope),
                 )
             )
-            .order_by(gateway_outbox_table.c.created_at.asc())
+            .order_by(
+                gateway_outbox_table.c.updated_at.asc(),
+                gateway_outbox_table.c.created_at.asc(),
+                gateway_outbox_table.c.message_id.asc(),
+            )
             .limit(limit)
         )
         with self.store.connection() as connection:

@@ -109,3 +109,11 @@ pub struct SignedAgentStateObservation {
     pub observation: AgentStateObservation,
     pub state_envelope: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentStateReceipt {
+    pub contract_major: u16,
+    pub message_id: String,
+    pub state_envelope_sha256: String,
+}

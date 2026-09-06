@@ -256,12 +256,33 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     );
     sqlx::query("UPDATE managed_work SET state = 'recovery_uncertain' WHERE managed_work_id = 'mw_observation'")
         .execute(&pool).await.unwrap();
+    let commit_key = "iot/v1/agents/agt_example/state/commit";
+    let commit_payload = serde_json::to_vec(&terminal).unwrap();
+    for key in [
+        "iot/v1/agents/agt_unknown/state/commit",
+        "iot/v1/agents/agt_example/extra/state/commit",
+        "iot/v1/agents/*/state/commit",
+    ] {
+        assert!(
+            controller
+                .commit_state_publication(key, &commit_payload)
+                .await
+                .is_err()
+        );
+    }
     let (first, replay) = tokio::join!(
-        repository.record_publication("agt_example", "test", &terminal, now),
-        repository.record_publication("agt_example", "test", &terminal, now)
+        controller.commit_state_publication(commit_key, &commit_payload),
+        controller.commit_state_publication(commit_key, &commit_payload)
     );
-    first.unwrap();
-    replay.unwrap();
+    let first = first.unwrap();
+    assert_eq!(first, replay.unwrap());
+    assert_eq!(first.contract_major, 1);
+    assert_eq!(first.message_id, observation.envelope_id);
+    let envelope = serde_json::to_value(&terminal).unwrap()["event"]["payload"]["state_envelope"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(first.state_envelope_sha256, hex::encode(Sha256::digest(envelope.as_bytes())));
     let recovered = controller
         .managed_work(&receipt.managed_work_id)
         .await

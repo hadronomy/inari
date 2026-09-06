@@ -252,6 +252,7 @@ The controller assigns one namespace per agent. With
 | Command replay query | `iot/v1/agents/agt_123/commands/history` |
 | Command result | `iot/v1/agents/agt_123/results/{command_id}` |
 | Runtime event | `iot/v1/agents/agt_123/events/{message_id}` |
+| Signed Print Job commit query | `iot/v1/agents/agt_123/state/commit` |
 | Agent error | `iot/v1/agents/agt_123/errors/{message_id}` |
 
 The agent holds a liveliness token at `{namespace}/presence/agent`. Presence is
@@ -379,10 +380,10 @@ The agent publishes a discriminated message for each outcome:
 - `agent.runtime.event` — local job or device event;
 - `agent.error` — managed transport or execution failure.
 
-Each publication has a stable `message_id`. The agent persists publications
-before sending them and removes them from its outbox after Zenoh accepts the
-publish. A future protocol version may add controller receipts; this version
-does not claim end-to-end acknowledgement beyond that point.
+Each publication has a stable `message_id`. The Agent persists publications
+before sending them. Signed Print Job observations require a Controller storage
+receipt before the Agent marks them sent. Other publications become sent after
+Zenoh accepts the publish; these do not have end-to-end storage receipts.
 
 ### Signed Print Job observations
 
@@ -412,8 +413,29 @@ original Agent, Organization, and Site. An enrollment change does not send pendi
 managed publications to the new recipient. Migration `20260906_0015` adds this
 scope to existing managed replies from their stored dispatch command.
 
-These observations provide signed evidence for reconciliation. Zenoh publication
-success alone does not prove that the Controller persisted the observation.
+The Agent sends each signed publication as the JSON payload of a Zenoh query to
+`{namespace}/state/commit`. The request is limited to 128 KiB. The Controller
+returns a JSON receipt only after it commits the verified observation:
+
+```json
+{
+  "contract_major": 1,
+  "message_id": "ase_example",
+  "state_envelope_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+```
+
+The digest covers the exact UTF-8 compact JWS. The Agent requires the same query
+key, message ID, digest, and contract version. An absent or invalid receipt leaves
+the publication pending. Retries keep the original message and envelope. A lost
+reply after commit therefore causes an idempotent retry, not another print.
+Migration `20260906_0016` requeues previously sent signed observations once, so
+transport-only delivery does not become an assumed storage receipt.
+
+The managed router permits incoming state commit queries and outgoing receipts.
+It rejects Agent declarations and replies on this key. Deploy this policy with
+the Controller and Agent update. Receipt trust depends on the authenticated
+router connection and these direction-specific permissions.
 
 The Controller verifies the envelope with the registered State key for the
 authenticated Agent. It checks the signed scope, Print Intent, Device, Report
