@@ -11,9 +11,10 @@ from uuid import uuid4
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
+from ..services.http_client import RemoteServiceError
+
 from ..services import (
     PAIRING_PERMISSION_ORDER,
-    PairingSigningError,
     build_pairing_assertion_signer,
     pos_pairing_permissions,
 )
@@ -284,7 +285,7 @@ class InariPairingAssertion(models.Model):
                 database=self.env.cr.dbname,
                 company_id=session.company_id.id,
             ).sign(claims)
-        except PairingSigningError as exc:
+        except RemoteServiceError as exc:
             raise UserError(
                 _(
                     "Odoo could not sign the Pairing Assertion. "

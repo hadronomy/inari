@@ -41,6 +41,7 @@ pub(super) fn router() -> Router<AppState> {
             post(submit_managed_work).layer(DefaultBodyLimit::max(MANAGED_WORK_BODY_LIMIT)),
         )
         .route("/managed-work/{managed_work_id}", get(get_managed_work))
+        .route("/managed-work/by-idempotency-key", get(find_managed_work))
         .route("/audit-events", get(list_audit_events))
 }
 
@@ -109,6 +110,15 @@ async fn get_managed_work(
         .await?;
     principal.require_scope(&record.scope)?;
     Ok(Json(record))
+}
+
+async fn find_managed_work(
+    principal: WorkloadPrincipal,
+    state: State<AppState>,
+    idempotency_key: IdempotencyKey,
+) -> Result<Json<ManagedWorkRecord>, AppError> {
+    let managed_work_id = idempotency_key.managed_work_id(&principal.identity().organization_id)?;
+    get_managed_work(principal, state, ApiPath(managed_work_id)).await
 }
 
 #[derive(Debug, serde::Deserialize)]
