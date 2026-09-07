@@ -105,6 +105,19 @@ spec:
             {{- end }}
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.managedGateway.dispatch.enabled }}
+            - name: dispatch-signing-key
+              mountPath: /var/run/secrets/inari/dispatch
+              readOnly: true
+            - name: openbao-identity
+              mountPath: /var/run/secrets/inari/openbao-identity
+              readOnly: true
+            {{- if .Values.managedGateway.payloadProtection.caCertificateSecret }}
+            - name: openbao-ca
+              mountPath: /var/run/secrets/inari/openbao-ca
+              readOnly: true
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
       volumes:
@@ -146,6 +159,29 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.controller.tmpSizeLimit }}
+        {{- if .Values.managedGateway.dispatch.enabled }}
+        - name: dispatch-signing-key
+          secret:
+            secretName: {{ .Values.managedGateway.dispatch.signingKey.name }}
+            items:
+              - key: {{ .Values.managedGateway.dispatch.signingKey.key }}
+                path: signing-key.der
+        - name: openbao-identity
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: {{ .Values.managedGateway.payloadProtection.serviceAccountTokenAudience | quote }}
+                  expirationSeconds: {{ .Values.managedGateway.payloadProtection.serviceAccountTokenExpirationSeconds }}
+                  path: token
+        {{- with .Values.managedGateway.payloadProtection.caCertificateSecret }}
+        - name: openbao-ca
+          secret:
+            secretName: {{ .name }}
+            items:
+              - key: {{ .key }}
+                path: ca.crt
+        {{- end }}
+        {{- end }}
       {{- with .Values.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

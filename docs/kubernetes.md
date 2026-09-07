@@ -68,6 +68,8 @@ variables.
 | `managedGateway.certificate.stepCa.signingKey` | `provisioner-key.pem` | Encrypted step-ca provisioner key |
 | `zenoh.tls.controllerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Controller Zenoh client identity |
 | `zenoh.tls.routerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Router server and mesh identity |
+| `managedGateway.dispatch.signingKey` | `signing-key.der` | Ed25519 PKCS#8 DER key for Dispatch Envelopes |
+| `managedGateway.payloadProtection.caCertificateSecret` | configured key | Optional PEM CA bundle for OpenBao |
 
 Create them with the organization’s secret controller—External Secrets,
 SOPS, Sealed Secrets, or a CSI provider are all reasonable. Never put secret
@@ -120,6 +122,48 @@ mise exec -- just check-kubernetes
 That gate runs Helm and chart-testing lint, JSON Schema negative cases, renders
 against supported Kubernetes versions, validates with Kubeconform and
 KubeLinter, inflates the Kustomize overlay, and checks the packaged chart.
+
+### Enable managed report and label work
+
+Managed dispatch is disabled until its security dependencies are provisioned.
+Create the Dispatch Envelope signing-key Secret and an OpenBao Transit key.
+Then configure:
+
+```yaml
+managedGateway:
+  dispatch:
+    enabled: true
+    epoch: 1
+    signingKeyId: production-dispatch-1
+    signingKey:
+      name: inari-managed-dispatch
+      key: signing-key.der
+  payloadProtection:
+    address: https://openbao.example.com
+    kubernetesRole: inari-controller
+    serviceAccountTokenAudience: openbao
+    transitKeyName: inari-managed-payload
+```
+
+Bind the OpenBao Kubernetes role to the Controller ServiceAccount and namespace.
+Its audience must match `serviceAccountTokenAudience`. The chart mounts a
+short-lived projected token only when dispatch is enabled. General Kubernetes
+API token mounting remains disabled. Configure the role's Transit permissions
+as described in [Managed Payload storage](managed_payloads.md).
+
+Set `payloadProtection.caCertificateSecret` when OpenBao uses a private CA.
+Allow Controller egress to OpenBao through NetworkPolicy. The default policy
+allows HTTPS on port 443; an internal endpoint on port 8200 needs an explicit
+egress rule.
+
+Keep the Dispatch Epoch consistent across Controller replicas. Recovery must
+advance it through the coordinated recovery procedure. Changing the signing key
+or its identifier also requires updated Agent enrollment trust.
+
+The chart uses gateway protocol `2026-09-06` and a 16 MiB HTTP body limit.
+The limit fits a 10 MiB Report PDF after base64 encoding. Set the ingress body
+limit to at least 16 MiB as well. Enabling dispatch rejects smaller Controller
+body limits. Report Bindings and tested Device Capabilities remain required.
 
 When Docker is available, add the API-server exercise:
 

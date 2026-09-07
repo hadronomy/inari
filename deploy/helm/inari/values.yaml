@@ -98,7 +98,8 @@ server:
   publicUrl: https://inari.example.com
   requestTimeout: 30s
   shutdownGracePeriod: 30s
-  maxBodySizeBytes: 1048576
+  # Fits a 10 MiB Report PDF encoded as base64 plus its Managed Work envelope.
+  maxBodySizeBytes: 16777216
 
 database:
   secret:
@@ -147,13 +148,36 @@ managedGateway:
   controllerName: Inari Controller
   controllerInstanceId: controller-production
   supportedProtocolVersions:
-    - "2026-07-12"
+    - "2026-09-06"
   controllerActions:
     - system:read
     - devices:read
     - events:read
     - jobs:cancel
     - commands:execute
+    - managed_work:dispatch
+  dispatch:
+    # Enable after provisioning the signing key and OpenBao Transit policy.
+    enabled: false
+    epoch: 1
+    signingKeyId: inari-managed-dispatch
+    signingKey:
+      name: inari-managed-dispatch
+      key: signing-key.der
+    envelopeTtl: 2m
+  payloadProtection:
+    address: https://openbao.example.com
+    kubernetesRole: inari-controller
+    kubernetesAuthMount: kubernetes
+    transitMount: transit
+    transitKeyName: inari-managed-payload
+    # Must match the audience configured on the OpenBao Kubernetes role.
+    serviceAccountTokenAudience: openbao
+    serviceAccountTokenExpirationSeconds: 600
+    namespace: ""
+    # Optional existing Secret with a PEM CA bundle: {name: ..., key: ca.crt}.
+    caCertificateSecret: null
+    requestTimeout: 5s
   onboarding:
     enabled: true
     invitationTtl: 10m

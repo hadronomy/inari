@@ -110,6 +110,17 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and .Values.managedGateway.enabled (not .Values.zenoh.enabled) -}}
 {{- fail "zenoh.enabled must be true when managedGateway.enabled is true" -}}
 {{- end -}}
+{{- if .Values.managedGateway.dispatch.enabled -}}
+{{- if not .Values.managedGateway.enabled -}}
+{{- fail "managedGateway.dispatch.enabled requires managedGateway.enabled=true" -}}
+{{- end -}}
+{{- if not (has "managed_work:dispatch" .Values.managedGateway.controllerActions) -}}
+{{- fail "managedGateway.dispatch.enabled requires the managed_work:dispatch Controller action" -}}
+{{- end -}}
+{{- if lt (int .Values.server.maxBodySizeBytes) 16777216 -}}
+{{- fail "managedGateway.dispatch.enabled requires server.maxBodySizeBytes>=16777216 for Report PDFs" -}}
+{{- end -}}
+{{- end -}}
 {{- if and .Values.managedGateway.enabled (ne .Values.managedGateway.certificate.mode "step_ca") -}}
 {{- fail "managedGateway.certificate.mode must be step_ca for a production managed gateway" -}}
 {{- end -}}

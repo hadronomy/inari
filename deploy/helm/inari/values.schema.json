@@ -290,7 +290,7 @@
     "managedGateway": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "controllerName", "controllerInstanceId", "supportedProtocolVersions", "controllerActions", "onboarding", "dataPlane", "certificate"],
+      "required": ["enabled", "controllerName", "controllerInstanceId", "supportedProtocolVersions", "controllerActions", "dispatch", "payloadProtection", "onboarding", "dataPlane", "certificate"],
       "properties": {
         "enabled": { "type": "boolean" },
         "controllerName": { "type": "string", "minLength": 1 },
@@ -306,6 +306,99 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
+        },
+        "dispatch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "epoch",
+            "signingKeyId",
+            "signingKey",
+            "envelopeTtl"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "epoch": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "signingKeyId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "signingKey": {
+              "$ref": "#/definitions/secretKeyReference"
+            },
+            "envelopeTtl": {
+              "$ref": "#/definitions/duration"
+            }
+          }
+        },
+        "payloadProtection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "address",
+            "kubernetesRole",
+            "kubernetesAuthMount",
+            "transitMount",
+            "transitKeyName",
+            "serviceAccountTokenAudience",
+            "serviceAccountTokenExpirationSeconds",
+            "namespace",
+            "requestTimeout"
+          ],
+          "properties": {
+            "address": {
+              "type": "string",
+              "pattern": "^https://[^/@?#]+/?$"
+            },
+            "kubernetesRole": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "kubernetesAuthMount": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "transitMount": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "transitKeyName": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            },
+            "serviceAccountTokenAudience": {
+              "type": "string",
+              "minLength": 1
+            },
+            "serviceAccountTokenExpirationSeconds": {
+              "type": "integer",
+              "minimum": 600,
+              "maximum": 3600
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "caCertificateSecret": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/definitions/secretKeyReference"
+                }
+              ]
+            },
+            "requestTimeout": {
+              "$ref": "#/definitions/duration"
+            }
+          }
         },
         "onboarding": {
           "type": "object",
