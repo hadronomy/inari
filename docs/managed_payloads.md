@@ -49,10 +49,11 @@ If OpenBao cannot wrap a key, new Managed Work returns `503` before Controller
 Admission. If OpenBao cannot unwrap a key, affected dispatch stops. Existing
 Managed Work queries and exact Retry receipts remain available.
 
-Agent acceptance and rejection update Managed Work and delete its ciphertext
-and wrapped key in one PostgreSQL transaction. The deletion time remains in
-Managed Work metadata. A conflicting later publication cannot change a terminal
-result. A delayed publication marker cannot reset an accepted command.
+Verified Agent State updates Managed Work and deletes its ciphertext and wrapped
+key in one PostgreSQL transaction. The deletion time remains in Managed Work
+metadata. Unsigned acceptance and rejection receipts cannot change this state
+or delete content. A conflicting later observation cannot change a terminal
+Print Job result. A delayed publication marker cannot reset an accepted command.
 
 The Controller checks expired content once per second, including while Zenoh is
 offline. Expired Pending Agent work becomes Expired Managed Work. Expired

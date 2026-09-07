@@ -702,37 +702,94 @@ async fn managed_payload_admission_replay_and_deletion() {
         "detail": "accepted",
     }))
     .unwrap();
-    for (field, value) in [
-        ("managed_work_id", serde_json::json!("mw_another")),
-        ("print_intent_id", serde_json::json!("pi_v1_another")),
-        ("device_id", serde_json::json!("dev_another")),
-        ("print_job_id", serde_json::json!("")),
-        ("print_job_id", serde_json::json!("invalid job identity")),
-        ("state", serde_json::json!("output_confirmed")),
-        ("state_version", serde_json::json!(0)),
-        ("state_version", serde_json::json!(-1)),
-        ("replayed", serde_json::json!("false")),
-    ] {
-        let mut wrong_identity = serde_json::to_value(&accepted).unwrap();
-        wrong_identity["job"][field] = value;
-        let wrong_identity = serde_json::from_value(wrong_identity).unwrap();
-        assert!(
-            repository
-                .record_publication("agt_example", "test", &wrong_identity, Utc::now())
-                .await
-                .is_err(),
-            "acceptance must validate {field} before deleting the protected payload"
-        );
+    let rejected: AgentPublication = serde_json::from_value(serde_json::json!({
+        "type": "agent.command.rejected", "message_id": "unsigned_rejection", "command_id": command_id,
+        "rejected_at": Utc::now(), "code": "invalid_work", "detail": "rejected",
+    })).unwrap();
+    let initial_command_state: String =
+        sqlx::query_scalar("SELECT state FROM commands WHERE command_id = $1")
+            .bind(&command_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    for publication in [&accepted, &rejected] {
+        repository
+            .record_publication("agt_example", "test", publication, Utc::now())
+            .await
+            .unwrap();
         let retained: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM managed_payloads WHERE managed_work_id = 'mw_test'",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(retained, 1);
+        assert_eq!(retained, 1, "unsigned receipts cannot delete Managed Payloads");
+        let work = controller
+            .managed_work(&receipt.managed_work_id)
+            .await
+            .unwrap();
+        assert_eq!(work.state, ManagedWorkState::Dispatching);
+        assert!(work.print_job_id.is_none());
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT state FROM commands WHERE command_id = $1")
+                .bind(&command_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            initial_command_state
+        );
     }
+
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../inari-gateway/tests/fixtures/agent-state-observation.json"
+    ))
+    .unwrap();
+    let key = &fixture["public_jwk"];
+    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_example', 'agent_state', 'state-test', $2, now())")
+        .bind(key["kid"].as_str().unwrap()).bind(key).execute(&pool).await.unwrap();
+    let mut observation: AgentStateObservation =
+        serde_json::from_value(fixture["claims"].clone()).unwrap();
+    let work = controller
+        .managed_work(&receipt.managed_work_id)
+        .await
+        .unwrap();
+    let now = Utc::now();
+    observation.agent_id = work.scope.agent_id.clone();
+    observation.observed_at = now;
+    observation.issued_at = now;
+    observation.payload_fingerprint = format!("sha256:{}", sqlx::query_scalar::<_, String>("SELECT encode(payload_fingerprint, 'hex') FROM managed_work WHERE managed_work_id = 'mw_test'").fetch_one(&pool).await.unwrap());
+    observation.job.managed_work_id = work.managed_work_id.clone();
+    observation.job.print_intent_id = work.print_intent_id.clone();
+    observation.job.print_job_id = "pj_test".into();
+    observation.job.device_id = work.device_id.clone();
+    observation.job.accepted_at = now;
+    observation.job.expires_at = work.expires_at;
+    observation.job.origin.organization_id = work.scope.organization_id.clone();
+    observation.job.origin.site_id = work.scope.site_id.clone();
+    observation.job.origin.database = work.scope.database.clone();
+    observation.job.origin.company_id = work.scope.company_id.clone();
+    observation.job.origin.report_route = submission.work.origin.route;
+    observation.job.origin.source_model = "sale.order".into();
+    observation.job.origin.record_ids = vec!["42".into()];
+    observation.job.origin.report_binding_id = submission
+        .work
+        .origin
+        .binding
+        .report_binding_id
+        .clone();
+    observation.job.origin.report_action = submission
+        .work
+        .origin
+        .binding
+        .report_action_id
+        .clone();
     repository
-        .record_publication("agt_example", "test", &accepted, Utc::now())
+        .record_publication(
+            "agt_example",
+            "test",
+            &state_publication(&observation, &command_id),
+            now,
+        )
         .await
         .unwrap();
     let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM managed_payloads")
@@ -774,11 +831,17 @@ async fn managed_payload_admission_replay_and_deletion() {
         "type": "agent.command.rejected", "message_id": "conflicting_rejection", "command_id": command_id,
         "rejected_at": Utc::now(), "code": "invalid_work", "detail": "rejected",
     })).unwrap();
-    assert!(
-        repository
-            .record_publication("agt_example", "test", &rejected, Utc::now())
+    repository
+        .record_publication("agt_example", "test", &rejected, Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM commands WHERE command_id = $1")
+            .bind(&command_id)
+            .fetch_one(&pool)
             .await
-            .is_err()
+            .unwrap(),
+        "accepted"
     );
     assert_eq!(
         controller

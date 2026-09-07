@@ -385,6 +385,12 @@ before sending them. Signed Print Job observations require a Controller storage
 receipt before the Agent marks them sent. Other publications become sent after
 Zenoh accepts the publish; these do not have end-to-end storage receipts.
 
+For Managed Work, unsigned `agent.command.accepted` and `agent.command.rejected`
+publications are informational. The Controller MUST NOT use them to change
+Managed Work or its dispatch state, or to delete a Managed Payload. Acceptance
+requires a verified Agent State Envelope. A rejection receipt does not prove
+that durable Agent acceptance did not occur.
+
 ### Signed Print Job observations
 
 For a managed Print Job, `agent.runtime.event` uses `resource_kind: "print_job"`.
