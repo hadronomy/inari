@@ -230,6 +230,11 @@ zenoh:
     accessControl:
       enabled: true
       defaultPermission: deny
+      # Exact certificate common names reserved for the Controller and routers.
+      # Issue their TLS certificates with these names; never issue them to Agents.
+      trustedPeerCommonNames:
+        - inari-controller
+        - inari-router
   tls:
     controllerSecret:
       name: inari-controller-zenoh-tls

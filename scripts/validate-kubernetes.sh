@@ -58,6 +58,13 @@ if helm template inari "${CHART}" \
   exit 1
 fi
 
+if helm template inari "${CHART}" \
+  --set-json 'zenoh.config.accessControl.trustedPeerCommonNames=[]' \
+  >"${workspace}/invalid-zenoh-principals.log" 2>&1; then
+  printf 'chart accepted generated Zenoh configuration without trusted principals\n' >&2
+  exit 1
+fi
+
 for kubernetes_version in "${MINIMUM_KUBERNETES_VERSION}" "${CURRENT_KUBERNETES_VERSION}"; do
   manifest="${workspace}/helm-${kubernetes_version}.yaml"
   helm template inari "${CHART}" \

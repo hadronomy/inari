@@ -76,6 +76,12 @@ values in `--set`; Helm persists release values in the cluster.
 The controller and router are different principals and must not share a private
 key.
 
+The generated Zenoh policy reserves certificate common names `inari-controller`
+and `inari-router` for these principals. Set
+`zenoh.config.accessControl.trustedPeerCommonNames` to the exact common names
+in your certificates. The router SANs still need to cover its DNS endpoints.
+The CA must never issue these reserved common names to an Agent.
+
 ## Prepare values
 
 Choose the chart version from the
@@ -202,6 +208,16 @@ NetworkPolicy rules before exposing the Service.
 Set `zenoh.config.existingConfigMap` when another system owns the router JSON5.
 The named ConfigMap must contain `zenoh.config.key`. Because the chart cannot
 checksum external content, that owner must also trigger router rollouts.
+
+The generated access rules allow only trusted Controller and router certificates
+to publish commands or answer command-history and state-commit queries. Agent
+certificates can publish observations, subscribe to commands, and send queries.
+A state-commit reply proves durable storage, so an Agent must never be able to
+provide one. Custom router configuration must enforce the same boundary.
+
+These static rules separate Controller authority from Agent traffic. They do
+not bind each Agent certificate to its own key-expression namespace. Signed
+Agent State Envelopes remain necessary to authenticate Print Job observations.
 
 ## Network policy
 
