@@ -19,8 +19,8 @@ access_inari_test_operator,Inari Test read,model_inari_device_test_result,inari_
 access_inari_test_manager,Inari Test manager,model_inari_device_test_result,inari_devices.group_inari_manager,1,1,1,0
 access_inari_report_operator,Inari Report Binding read,model_inari_report_binding,inari_devices.group_inari_operator,1,0,0,0
 access_inari_report_manager,Inari Report Binding manager,model_inari_report_binding,inari_devices.group_inari_manager,1,1,1,0
-access_inari_report_sequence,Inari Report Sequence,model_inari_report_sequence,inari_devices.group_inari_manager,1,1,1,0
-access_inari_report_document,Inari Report Document,model_inari_report_sequence_document,inari_devices.group_inari_manager,1,1,1,0
+access_inari_report_sequence,Inari Report Sequence,model_inari_report_sequence,inari_devices.group_inari_operator,1,0,0,0
+access_inari_report_document,Inari Report Document,model_inari_report_sequence_document,inari_devices.group_inari_operator,1,0,0,0
 access_inari_intent_operator,Inari Print Intent,model_inari_print_intent,inari_devices.group_inari_operator,1,1,1,0
 access_inari_audit_operator,Inari Print Audit,model_inari_print_audit,inari_devices.group_inari_operator,1,0,1,0
 access_inari_recovery_operator,Inari Recovery Task,model_inari_recovery_task,inari_devices.group_inari_operator,1,1,1,0

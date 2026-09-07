@@ -83,6 +83,43 @@ The Agent and Odoo use its `fingerprint_device_work` function for the Payload
 Fingerprint. The contract uses RFC 8785 for Device options and includes the exact
 Controller deadline. A document digest alone cannot replace this fingerprint.
 
+## Report request preparation
+
+`inari.report.binding.prepare_managed_report` accepts a stored contextual action
+identity and this versioned request:
+
+```json
+{
+  "version": 1,
+  "binding_id": 2,
+  "binding_revision_id": 3,
+  "report_action_id": 4,
+  "source_model": "res.partner",
+  "source_ids": [7, 5],
+  "site_id": 8,
+  "report_type": "qweb-pdf",
+  "copies": 1,
+  "wizard_data": {}
+}
+```
+
+Version 1 accepts at most 500 distinct source identifiers and 10 copies. It
+preserves source order. Generic requests accept empty wizard data only. Device
+identities, document bytes, Idempotency Keys, Copy Ordinals, and sequence
+identities are not request fields.
+
+Preparation checks the stored action marker, current company, report groups,
+source-record rules, Site, active Binding Revision, and tested Driver Profile.
+A POS order resolves its Site through `pos.config.inari_site_id`. An automatic
+report needs a registered Site resolver. A generic manual request must name the
+Site of its selected Report Binding.
+
+Successful preparation creates a content-free report sequence and returns a
+random action ticket. It creates no Print Intent. Odoo stores only the ticket
+digest and binds it to the actor and company. Operators can read sequence
+records but cannot change their authority fields. Invalid requests return a
+handled result with `report.request_invalid` before sequence creation.
+
 ## Verification
 
 Run the isolated transport and identity tests from the repository root:
@@ -91,4 +128,12 @@ Run the isolated transport and identity tests from the repository root:
 uv run --all-packages --group odoo-tests pytest \
   packages/odoo-inari/tests/test_managed_work_client.py \
   packages/odoo-inari/tests/test_report_fingerprint.py
+```
+
+Run the model and access-rule tests against a disposable Odoo 19 database with
+the addon installed:
+
+```sh
+odoo --addons-path=addons,packages/odoo-inari -d inari_test \
+  -u inari_devices --test-enable --test-tags /inari_devices --stop-after-init
 ```
