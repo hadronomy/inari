@@ -22,7 +22,7 @@ from inari.documents import (
     ReportPrintOrigin,
     WizardReportSource,
 )
-from inari.documents.fingerprint import (
+from inari_print_contracts.fingerprint import (
     DeviceWorkFingerprintInput,
     fingerprint_device_work,
 )

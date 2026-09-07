@@ -24,7 +24,7 @@ from ..device_authority import (
     ScopeKind,
 )
 
-from .fingerprint import DeviceWorkFingerprintInput, fingerprint_device_work
+from inari_print_contracts.fingerprint import DeviceWorkFingerprintInput, fingerprint_device_work
 from .models import (
     AdmissionAccepted,
     AdmissionDeadline,

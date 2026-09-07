@@ -3,7 +3,7 @@ name = "inari-print-contracts"
 version = "1.20.0-alpha.10"
 description = "Shared Inari document contracts for the Agent and Odoo"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["rfc8785>=0.1.4,<1.0.0"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

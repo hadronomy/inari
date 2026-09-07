@@ -76,11 +76,19 @@ These client operations support the Report Binding workflow. They do not
 render reports, choose Devices, or authorize physical output. Signed Agent State
 remains necessary for authoritative Print Job observations.
 
+## Shared document contract
+
+Install the matching `inari-print-contracts` package in the Odoo Python runtime.
+The Agent and Odoo use its `fingerprint_device_work` function for the Payload
+Fingerprint. The contract uses RFC 8785 for Device options and includes the exact
+Controller deadline. A document digest alone cannot replace this fingerprint.
+
 ## Verification
 
 Run the isolated transport and identity tests from the repository root:
 
 ```sh
 uv run --all-packages --group odoo-tests pytest \
-  packages/odoo-inari/tests/test_managed_work_client.py
+  packages/odoo-inari/tests/test_managed_work_client.py \
+  packages/odoo-inari/tests/test_report_fingerprint.py
 ```

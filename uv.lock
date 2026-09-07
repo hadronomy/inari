@@ -805,6 +805,12 @@ source = { editable = "packages/brand" }
 name = "inari-print-contracts"
 version = "1.20.0a10"
 source = { editable = "packages/print-contracts" }
+dependencies = [
+    { name = "rfc8785" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "rfc8785", specifier = ">=0.1.4,<1.0.0" }]
 
 [[package]]
 name = "iniconfig"
