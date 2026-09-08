@@ -6,9 +6,10 @@ import {
 } from "@point_of_sale/app/services/pos_printer_service";
 import { HardwareProxy } from "@point_of_sale/app/services/hardware_proxy_service";
 import { PosStore } from "@point_of_sale/app/services/pos_store";
+import { registry } from "@web/core/registry";
 
 import { InariAgentClient, InariAgentError, canonicalJson } from "../../src/agent_client";
-import { InariDeviceService } from "../../src/inari_device_service";
+import { InariDeviceService, inariDeviceService } from "../../src/inari_device_service";
 import { PrintRecoveryCoordinator } from "../../src/print_recovery";
 import { MemoryRecoveryStore } from "../../src/recovery_store";
 import { createSubmissionContext, envelopeFor } from "../../src/submission_context";

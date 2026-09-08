@@ -452,7 +452,7 @@ function dispatchEvent(event) {
 }
 
 /** Parse a bounded fetch-SSE body across arbitrary byte chunks. */
-export async function* readSseFrames(body) {
+async function* readSseFrames(body) {
     if (!body || typeof body.getReader !== "function") {
         fail("stream_protocol_invalid", "The Agent returned no SSE body");
     }
@@ -507,6 +507,8 @@ export async function* readSseFrames(body) {
         reader.releaseLock();
     }
 }
+
+export { readSseFrames };
 
 export const deviceStreamProtocolLimits = Object.freeze({
     maxEventBytes: MAX_EVENT_BYTES,
