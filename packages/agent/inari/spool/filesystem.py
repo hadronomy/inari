@@ -54,6 +54,7 @@ _STORAGE_REF_BYTES: Final = 32
 _DEFAULT_CHUNK_BYTES: Final = 64 * 1024
 _MAX_COMMIT_ATTEMPTS: Final = 8
 _NOFOLLOW: Final = getattr(os, "O_NOFOLLOW", 0)
+_BINARY: Final = getattr(os, "O_BINARY", 0)
 
 
 class ArtifactFileStore:
@@ -93,7 +94,7 @@ class ArtifactFileStore:
             try:
                 fd = os.open(
                     staging_path,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _BINARY,
                     0o600,
                 )
             except FileExistsError:
@@ -145,7 +146,7 @@ class ArtifactFileStore:
         destination = self.objects_root / staged.storage_ref
         source_fd = -1
         try:
-            source_fd = os.open(source, os.O_RDONLY | _NOFOLLOW)
+            source_fd = os.open(source, os.O_RDONLY | _NOFOLLOW | _BINARY)
             source_stat = _regular_file_stat(source_fd)
             _assert_destination_absent(destination)
             # A hard link publishes the complete file without replacing a
@@ -224,8 +225,8 @@ class ArtifactFileStore:
         source_fd = -1
         destination_fd = -1
         try:
-            source_fd = os.open(staged.staging_path, os.O_RDONLY | _NOFOLLOW)
-            destination_fd = os.open(destination, os.O_RDONLY | _NOFOLLOW)
+            source_fd = os.open(staged.staging_path, os.O_RDONLY | _NOFOLLOW | _BINARY)
+            destination_fd = os.open(destination, os.O_RDONLY | _NOFOLLOW | _BINARY)
             if not _same_file(
                 _regular_file_stat(source_fd),
                 _regular_file_stat(destination_fd),
@@ -296,7 +297,7 @@ class ArtifactFileStore:
             fd = -1
             try:
                 _assert_regular_file(path)
-                fd = os.open(path, os.O_RDONLY | _NOFOLLOW)
+                fd = os.open(path, os.O_RDONLY | _NOFOLLOW | _BINARY)
                 _assert_regular_fd(fd)
                 total = 0
                 while True:

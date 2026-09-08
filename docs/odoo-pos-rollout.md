@@ -100,3 +100,16 @@ physical output on the 80-VII-UL.
 When updating an existing addon, rebuild Odoo's asset attachments and restart
 its workers. Verify the POS without `debug=assets`; a cached production bundle
 can retain old code after source files change.
+
+The native Windows run found two additional blockers: text-mode spool writes
+changed encrypted bytes, and the service secret store misread a pywin32 ACL
+result. Both fixes passed on the workstation. The spool and execution suites
+passed 81 tests with two POSIX-only skips. Both secret-store tests passed,
+including real DPAPI storage and the restricted service ACL.
+
+An isolated production-mode Agent then started with a temporary HTTPS
+certificate. Certificate verification passed against the explicit test trust
+anchor. The exact production Odoo origin received HTTP 200 for its receipt
+preflight. An untrusted origin received HTTP 400. An unauthenticated receipt
+submission received HTTP 401. The probe stopped the Agent after these checks.
+This does not install a production certificate or pair the live POS browser.
