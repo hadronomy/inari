@@ -16,9 +16,11 @@ app = typer.Typer(
 db_app = typer.Typer(help="Inspect and upgrade the runtime database.")
 service_app = typer.Typer(help="Install and manage the Inari as a platform service.")
 config_app = typer.Typer(help="Generate and write agent configuration files.")
+authority_app = typer.Typer(help="Install signed Controller Device authority.")
 app.add_typer(db_app, name="db")
 app.add_typer(service_app, name="service")
 app.add_typer(config_app, name="config")
+app.add_typer(authority_app, name="authority")
 
 ConfigOption = Annotated[
     Path | None,
@@ -190,6 +192,18 @@ def config_write_default(
     from .commands.config import run_write_default
 
     run_write_default(config, profile=profile, force=force)
+
+
+@authority_app.command("install")
+def authority_install(
+    bundle: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    trust: Annotated[Path, typer.Option(exists=True, dir_okay=False, readable=True)],
+    config: ConfigOption = None,
+) -> None:
+    """Verify and install a Controller bundle with administrator-provisioned trust."""
+    from .commands.authority import run_install
+
+    run_install(config, bundle, trust)
 
 
 def main(argv: list[str] | None = None) -> None:

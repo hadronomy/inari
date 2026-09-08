@@ -28,6 +28,8 @@ and test result before marking it complete.
 - [x] Verify HTTPS and CORS for the exact production Odoo origin in isolation.
 - [x] Stage matching Agent and shared-contract wheels with checksums.
 - [ ] Install Controller-signed authority through a supported runtime path.
+  - [x] Add and test the atomic `inari authority install` command.
+  - [ ] Provision the production Controller trust and signed bundle.
 - [ ] Publish current signed Device observations from real Driver discovery.
 - [ ] Prepare the Odoo runtime with the addon and shared-contract dependency.
 - [ ] Prepare the required Controller, Organization, Site, and policy setup.
@@ -63,10 +65,11 @@ is ready. Complete the software tasks before requesting that connection.
 
 ## Newly confirmed implementation blockers
 
-The Agent's production composition reads Device authority from SQLite. No
-runtime writer installs signed authority or publishes signed Device
-observations. The admission tests use test authority records. A production
-installation therefore needs these runtime paths before it can admit receipts.
+The Agent can now install signed Device authority through the
+[administrator command](device-authority-installation.md). The SQLite-backed
+admission test passes after that import. Production still needs its Controller
+trust and signed bundle. Current signed Device observations also need a runtime
+publisher before the Agent can admit receipts.
 
 Keep the Inari artifact separate from the MZE artifact, as required by
 [ADR 0021](adr/0021-keep-addon-artifacts-separate.md). Package the shared Python

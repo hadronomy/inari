@@ -34,6 +34,7 @@ from .models import (
     OutputEvidence,
     RevocationSubjectKind,
     SignerPurpose,
+    SignerRecord,
     SignerState,
     SignedDeviceObservation,
     SignedDeviceTestEvidence,
@@ -765,34 +766,51 @@ class DeviceCapabilityAuthority:
         purpose: SignerPurpose,
         now: datetime,
     ) -> None:
-        if _digest(payload) != digest:
-            _reject(
-                AuthorityErrorCode.SIGNATURE_INVALID,
-                "The signed digest does not match.",
-            )
-        signer = self._projections.read_signer(signer_key_id, purpose)
-        if signer is None:
-            _reject(
-                AuthorityErrorCode.SIGNATURE_INVALID, "The signing key is not trusted."
-            )
-        if signer.purpose is not purpose:
-            _reject(
-                AuthorityErrorCode.SIGNER_PURPOSE_MISMATCH,
-                "The signing key has a different purpose.",
-            )
-        if (
-            signer.state is not SignerState.ACTIVE
-            or now < signer.not_before
-            or (signer.not_after is not None and now >= signer.not_after)
-        ):
-            _reject(AuthorityErrorCode.REVOKED, "The signing key is not active.")
-        try:
-            Ed25519PublicKey.from_public_bytes(signer.public_key).verify(
-                signature,
-                _canonical_payload(payload),
-            )
-        except (InvalidSignature, ValueError):
-            _reject(AuthorityErrorCode.SIGNATURE_INVALID, "The signature is invalid.")
+        verify_signed(
+            payload=payload,
+            digest=digest,
+            signer=self._projections.read_signer(signer_key_id, purpose),
+            signature=signature,
+            purpose=purpose,
+            now=now,
+        )
+
+
+def verify_signed(
+    *,
+    payload: object,
+    digest: str,
+    signer: SignerRecord | None,
+    signature: bytes,
+    purpose: SignerPurpose,
+    now: datetime,
+) -> None:
+    """Verify a record against an independently trusted, purpose-bound key."""
+    if _digest(payload) != digest:
+        _reject(
+            AuthorityErrorCode.SIGNATURE_INVALID,
+            "The signed digest does not match.",
+        )
+    if signer is None:
+        _reject(AuthorityErrorCode.SIGNATURE_INVALID, "The signing key is not trusted.")
+    if signer.purpose is not purpose:
+        _reject(
+            AuthorityErrorCode.SIGNER_PURPOSE_MISMATCH,
+            "The signing key has a different purpose.",
+        )
+    if (
+        signer.state is not SignerState.ACTIVE
+        or now < signer.not_before
+        or (signer.not_after is not None and now >= signer.not_after)
+    ):
+        _reject(AuthorityErrorCode.REVOKED, "The signing key is not active.")
+    try:
+        Ed25519PublicKey.from_public_bytes(signer.public_key).verify(
+            signature,
+            _canonical_payload(payload),
+        )
+    except (InvalidSignature, ValueError):
+        _reject(AuthorityErrorCode.SIGNATURE_INVALID, "The signature is invalid.")
 
 
 @dataclass(frozen=True, slots=True)
