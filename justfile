@@ -12,14 +12,14 @@ sync:
 # Format every language surface.
 format:
     cargo fmt
-    uv run --no-sync --group dev ruff format packages/agent deploy/windows
+    uv run --no-sync --group dev ruff format packages/agent deploy/windows deploy/odoo
     bun run format
 
 # Lint the Python packages with Ruff and every Rust target with Clippy.
 lint:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo clippy -p inari-web --no-default-features --features ssr -- -D warnings
-    uv run --no-sync --group dev ruff check packages/agent deploy/windows
+    uv run --no-sync --group dev ruff check packages/agent deploy/windows deploy/odoo
     bun run lint
 
 # Validate the hydration crate for the browser target.
@@ -38,6 +38,7 @@ check-release:
     bun run typecheck
     bun test
     bun run build:release
+    bash deploy/odoo/check_artifact.sh
 
 # Lint the maintained Markdown documentation.
 check-docs:

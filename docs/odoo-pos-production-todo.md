@@ -34,6 +34,9 @@ and test result before marking it complete.
   - [x] Sign fresh discovery records with a separate protected Agent key.
   - [ ] Report the exact certification facts and readiness from the Windows receipt Driver.
 - [ ] Prepare the Odoo runtime with the addon and shared-contract dependency.
+  - [x] Stage the addon, shared contracts, and locked dependency in one Inari artifact.
+  - [ ] Publish a signed digest from the `main` release workflow.
+  - [ ] Pin, verify, and mount the artifact in the Odoo runtime.
 - [ ] Prepare the required Controller, Organization, Site, and policy setup.
 - [ ] Configure OpenBao to sign scoped Odoo Pairing Assertions.
 - [ ] Prepare the Windows Agent service and its trusted HTTPS certificate.
