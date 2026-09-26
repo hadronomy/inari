@@ -13,6 +13,18 @@ the service's config and protected storage. Keep the trust file under the same
 administrator access controls as that config. The trust file contains public
 key material; it must come from the approved Controller setup.
 
+Before the Controller signs the bundle, export the Agent's Device observation
+public key from the same protected storage:
+
+```sh
+inari authority observation-key --config /etc/inari/config.toml
+```
+
+The command prints `key_id` and `public_key` as JSON. Add that public key to the
+Controller-signed manifest as a signer with purpose `device_observation`. Keep
+the private key on the Agent Host. Receipt admission rejects observations if
+the manifest signer does not match that protected key.
+
 The trust document contains `scope` and `signer`. `scope` specifies the database,
 Organization, Site, scope kind, and POS configuration. `signer` is the
 Controller's `authority_revision` Ed25519 key record, including its validity
@@ -49,6 +61,8 @@ same-number revision replacements are rejected. Import cannot clear Agent
 Quarantine. Existing signed records remain available for audit and recovery.
 
 This command installs authority. It does not manufacture Device Test evidence,
-publish live Device observations, perform Device I/O, or establish Client
-Pairing. A receipt still needs the complete admission checks and a current
-signed observation before Device I/O.
+perform Device I/O, or establish Client Pairing. At admission, the Agent signs
+the latest Driver discovery record with its protected Device observation key.
+The Driver must report the platform backend, connection, media, firmware, and
+operating system. If a fact is absent or the Device is offline, admission stays
+closed.

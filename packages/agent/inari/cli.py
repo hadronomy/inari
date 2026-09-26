@@ -206,5 +206,13 @@ def authority_install(
     run_install(config, bundle, trust)
 
 
+@authority_app.command("observation-key")
+def authority_observation_key(config: ConfigOption = None) -> None:
+    """Print the Agent key that the Controller must authorize for observations."""
+    from .commands.authority import run_observation_key
+
+    run_observation_key(config)
+
+
 def main(argv: list[str] | None = None) -> None:
     app(args=argv, prog_name="inari", standalone_mode=False)

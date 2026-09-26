@@ -31,6 +31,8 @@ and test result before marking it complete.
   - [x] Add and test the atomic `inari authority install` command.
   - [ ] Provision the production Controller trust and signed bundle.
 - [ ] Publish current signed Device observations from real Driver discovery.
+  - [x] Sign fresh discovery records with a separate protected Agent key.
+  - [ ] Report the exact certification facts and readiness from the Windows receipt Driver.
 - [ ] Prepare the Odoo runtime with the addon and shared-contract dependency.
 - [ ] Prepare the required Controller, Organization, Site, and policy setup.
 - [ ] Configure OpenBao to sign scoped Odoo Pairing Assertions.
@@ -68,8 +70,10 @@ is ready. Complete the software tasks before requesting that connection.
 The Agent can now install signed Device authority through the
 [administrator command](device-authority-installation.md). The SQLite-backed
 admission test passes after that import. Production still needs its Controller
-trust and signed bundle. Current signed Device observations also need a runtime
-publisher before the Agent can admit receipts.
+trust and signed bundle. The Agent can sign current discovery records, but the
+Windows receipt Driver does not yet report all certification facts. Admission
+stays closed until the Driver reports those facts and the Controller authorizes
+the Agent's Device observation key.
 
 Keep the Inari artifact separate from the MZE artifact, as required by
 [ADR 0021](adr/0021-keep-addon-artifacts-separate.md). Package the shared Python

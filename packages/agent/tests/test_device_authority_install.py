@@ -109,6 +109,10 @@ def test_installed_bundle_authorizes_through_sqlite(installation):
     bundle = AuthorityBundle.model_validate_json(bundle_for().model_dump_json())
     assert installer.install(bundle, now=now)
     reader = SqliteDeviceAuthorityReader(store)
+    assert (
+        reader.read_active_certification_row(target.device_id).row.row_id
+        == bundle.manifest.certification_rows[0].row.row_id
+    )
     authority = DeviceCapabilityAuthority(
         projections=reader, observations=observations, current_agent_version="1.20.0"
     )

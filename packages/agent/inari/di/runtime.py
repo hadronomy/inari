@@ -12,6 +12,10 @@ from ..device_authority import (
     DeviceCapabilityAuthority,
     SqliteDeviceAuthorityReader,
 )
+from ..device_authority.observations import (
+    DeviceObservationSigningKey,
+    LiveDeviceObservationReader,
+)
 from ..documents import DocumentAdmission, DocumentAdmissionService
 from ..drawer_intents import DrawerIntentService
 from ..device_streams import (
@@ -76,12 +80,25 @@ class RuntimeProvider(Provider):
 
     @provide
     def device_capability_authority(
-        self, reader: SqliteDeviceAuthorityReader
+        self,
+        reader: SqliteDeviceAuthorityReader,
+        observations: LiveDeviceObservationReader,
     ) -> DeviceCapabilityAuthority:
         return DeviceCapabilityAuthority(
             projections=reader,
-            observations=reader,
+            observations=observations,
             current_agent_version=version("inari"),
+        )
+
+    @provide
+    def live_device_observations(
+        self,
+        devices: DeviceRepository,
+        reader: SqliteDeviceAuthorityReader,
+        signing_key: DeviceObservationSigningKey,
+    ) -> LiveDeviceObservationReader:
+        return LiveDeviceObservationReader(
+            devices=devices, authority=reader, signing_key=signing_key
         )
 
     @provide
