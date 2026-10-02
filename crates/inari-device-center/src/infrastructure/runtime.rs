@@ -19,6 +19,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 pub struct SetupResult {
+    pub agent_endpoint: Option<String>,
     pub snapshot: SetupSnapshot,
     pub diagnostic: Option<String>,
     pub identity_retry_available: bool,
@@ -85,6 +86,20 @@ impl AgentRuntime {
 
     pub fn jobs(&self) -> oneshot::Receiver<AgentClientResult<Vec<Job>>> {
         self.spawn(|client| async move { client.jobs().await })
+    }
+
+    pub fn open_api_reference(&self) {
+        let client = self.client.clone();
+        self.spawn_owned(async move {
+            match client.api_reference().await {
+                Ok(endpoint) => {
+                    if let Err(error) = open::that_detached(endpoint.as_str()) {
+                        tracing::warn!(%error, "could not open the local API reference");
+                    }
+                },
+                Err(error) => tracing::warn!(%error, "could not resolve the Agent Endpoint"),
+            }
+        });
     }
 
     pub fn preview(
@@ -237,12 +252,22 @@ impl AgentRuntime {
 }
 
 async fn read_setup(client: &AgentClient) -> SetupResult {
-    match client.setup().await {
-        Ok(snapshot) => SetupResult { snapshot, diagnostic: None, identity_retry_available: false },
+    let (agent_endpoint, result) = match client.endpoint().await {
+        Ok(endpoint) => (Some(endpoint.to_string()), client.setup().await),
+        Err(error) => (None, Err(error)),
+    };
+    match result {
+        Ok(snapshot) => SetupResult {
+            agent_endpoint,
+            snapshot,
+            diagnostic: None,
+            identity_retry_available: false,
+        },
         Err(error) => {
             let diagnostic = error_chain(&error);
             tracing::warn!(%diagnostic, "could not read Device Center setup state");
             SetupResult {
+                agent_endpoint,
                 snapshot: setup_failure(&error),
                 diagnostic: Some(diagnostic),
                 identity_retry_available: matches!(

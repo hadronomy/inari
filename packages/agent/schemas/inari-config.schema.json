@@ -26,6 +26,18 @@
         "cors": {
           "$ref": "#/definitions/ApiCorsConfig"
         },
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
         "exposure": {
           "$ref": "#/definitions/GatewayExposure",
           "default": "loopback"

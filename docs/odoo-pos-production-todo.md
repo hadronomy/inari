@@ -93,9 +93,21 @@ firmware revision date of February 26, 2025. The ticket does not identify the
 manufacturer. USB firmware queries returned no response. This ticket is hardware
 evidence, not a passed Inari Device Test.
 
-The Controller needs its production OIDC provider. The Windows desktop
-connection in Executor rejects its saved credential. SSH works for service
-operations, but it cannot operate the Device Center pairing controls.
+The operator authorized ZITADEL for the Controller's production OIDC provider.
+Infrastructure PRs 29 and 30 deploy it at
+`https://auth.eden.mizonaecologica.es` and permit its exact OpenBao secret path.
+The Helm release, database, API, and Login UI are ready. Trusted HTTPS discovery
+reports the exact issuer. OIDC client provisioning remains in progress.
+
+Executor's Windows SSH transport works. Its existing `windows-mcp-relay` task
+was stopped. Starting that task restored the desktop snapshot without a
+credential change. The installed Device Center uses a fixed loopback HTTP
+address and cannot reach the Agent's HTTPS listener. The native endpoint fix
+must pass its Windows checks and enter a signed release before Client Pairing.
+
+The operator supplied rear-label model `POS-8370` and serial `25103000100009`.
+Keep these facts separate from the self-test model and USB descriptor serial.
+The manufacturer remains unconfirmed.
 
 The software also needs a supported path that runs a real Device Test before
 binding activation. Existing signed Device Test models and the authority
