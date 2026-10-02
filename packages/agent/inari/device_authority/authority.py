@@ -127,7 +127,9 @@ class DeviceCapabilityAuthority:
         evidence_id = self._read_active_evidence_id(binding.revision_id)
         evidence = self._read_evidence(evidence_id)
         self._check_evidence(evidence, binding, capability, at)
-        observation = self._read_observation(binding.device_id)
+        observation = self._read_observation(
+            binding.device_id, binding.driver_profile_digest
+        )
         self._check_observation(observation, row.row, profile.profile, at)
         self._check_revocations(signed_binding, profile, row, evidence)
 
@@ -390,7 +392,9 @@ class DeviceCapabilityAuthority:
         )
         if _digest(snapshot) != proof.snapshot_digest:
             _reject(AuthorityErrorCode.GRAPH_MISMATCH, "The authority proof changed.")
-        observation = self._read_observation(proof.device_id)
+        observation = self._read_observation(
+            proof.device_id, binding.driver_profile_digest
+        )
         self._check_observation(
             observation,
             row.row,
@@ -518,8 +522,10 @@ class DeviceCapabilityAuthority:
                 "The active Device Test does not match this Binding Revision.",
             )
 
-    def _read_observation(self, device_id: str) -> SignedDeviceObservation:
-        observation = self._observations.read_current(device_id)
+    def _read_observation(
+        self, device_id: str, driver_profile_digest: str
+    ) -> SignedDeviceObservation:
+        observation = self._observations.read_current(device_id, driver_profile_digest)
         if observation is None:
             _reject(
                 AuthorityErrorCode.OBSERVATION_UNAVAILABLE,

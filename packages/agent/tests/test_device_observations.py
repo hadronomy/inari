@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import json
-from types import SimpleNamespace
 
 from inari.device_authority.authority import verify_signed
 from inari.device_authority.models import SignerPurpose, SignerRecord, SignerState
@@ -32,9 +31,6 @@ class Authority:
         if key_id == self.signer.key_id and purpose is self.signer.purpose:
             return self.signer
         return None
-
-    def read_active_certification_row(self, device_id):
-        return SimpleNamespace(row=SimpleNamespace(driver_profile_digest="a" * 64))
 
 
 class Devices:
@@ -76,10 +72,11 @@ def test_live_observation_is_signed_by_its_purpose_key():
         devices=devices, authority=authority, signing_key=key
     )
 
-    signed = reader.read_current(device.id)
+    signed = reader.read_current(device.id, "a" * 64)
 
     assert signed.observation.ready
     assert signed.observation.device_id == device.id
+    assert signed.observation.driver_profile_digest == "a" * 64
     verify_signed(
         payload=signed.observation,
         digest=signed.digest,
@@ -99,11 +96,12 @@ def test_missing_driver_facts_and_offline_device_cannot_claim_ready():
         devices=devices, authority=authority, signing_key=key
     )
     assert (
-        reader.read_current(device.id).observation.reason == "driver_facts_unavailable"
+        reader.read_current(device.id, "a" * 64).observation.reason
+        == "driver_facts_unavailable"
     )
 
     devices.device = device.with_connection_state(DeviceConnectionState.OFFLINE)
-    signed = reader.read_current(device.id)
+    signed = reader.read_current(device.id, "a" * 64)
     assert not signed.observation.ready
     assert signed.observation.reason == "device_offline"
 
@@ -115,7 +113,7 @@ def test_untrusted_observation_key_cannot_publish():
     reader = LiveDeviceObservationReader(
         devices=Devices(device), authority=authority, signing_key=key
     )
-    assert reader.read_current(device.id) is None
+    assert reader.read_current(device.id, "a" * 64) is None
 
 
 def test_observation_key_survives_a_new_service_instance():

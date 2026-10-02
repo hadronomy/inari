@@ -89,9 +89,7 @@ class DeviceAuthorityInstaller:
                         raise ValueError("The authority revision changed in place.")
                     return False
             for signer in (self._trusted_signer, *bundle.manifest.signers):
-                _insert_immutable(
-                    connection, device_authority_signer_keys_table, _signer_row(signer)
-                )
+                _install_signer(connection, _signer_row(signer))
             revision = bundle.revision
             _insert_immutable(
                 connection,
@@ -309,3 +307,37 @@ def _insert_immutable(
     )
     if any(existing[name] != values[name] for name in compared):
         raise ValueError(f"An immutable {table.name} record changed in place.")
+
+
+def _install_signer(connection: Connection, values: dict[str, Any]) -> None:
+    table = device_authority_signer_keys_table
+    existing = (
+        connection.execute(select(table).where(table.c.key_id == values["key_id"]))
+        .mappings()
+        .one_or_none()
+    )
+    if existing is None:
+        connection.execute(insert(table).values(**values))
+        return
+    if any(
+        existing[name] != values[name]
+        for name in ("key_id", "purpose", "public_key", "not_before", "not_after")
+    ):
+        raise ValueError("A Device authority signer changed its identity in place.")
+    if (
+        existing["state"] == values["state"]
+        and existing["retired_at"] == values["retired_at"]
+    ):
+        return
+    if (
+        existing["state"] != "active"
+        or values["state"] != "retired"
+        or existing["retired_at"] is not None
+        or values["retired_at"] is None
+    ):
+        raise ValueError("A Device authority signer changed outside retirement.")
+    connection.execute(
+        update(table)
+        .where(table.c.key_id == values["key_id"])
+        .values(state="retired", retired_at=values["retired_at"])
+    )

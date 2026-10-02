@@ -49,4 +49,6 @@ class AuthorityProjectionReader(Protocol):
 class DeviceObservationReader(Protocol):
     """Trusted read seam for the current Agent Device observation."""
 
-    def read_current(self, device_id: str) -> SignedDeviceObservation | None: ...
+    def read_current(
+        self, device_id: str, driver_profile_digest: str
+    ) -> SignedDeviceObservation | None: ...

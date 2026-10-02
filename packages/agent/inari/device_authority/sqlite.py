@@ -121,32 +121,6 @@ class SqliteDeviceAuthorityReader:
         )
         return None if row is None else _signed_matrix_row(row)
 
-    def read_active_certification_row(
-        self, device_id: str
-    ) -> SignedHardwareCertificationMatrixRow | None:
-        with self._store.connection() as connection:
-            row_ids = (
-                connection.execute(
-                    select(device_binding_revisions_table.c.matrix_row_id)
-                    .join(
-                        device_binding_authority_state_table,
-                        device_binding_authority_state_table.c.active_revision_id
-                        == device_binding_revisions_table.c.revision_id,
-                    )
-                    .where(
-                        device_binding_revisions_table.c.device_id == device_id,
-                        device_binding_authority_state_table.c.status == "active",
-                    )
-                    .distinct()
-                    .limit(2)
-                )
-                .scalars()
-                .all()
-            )
-        if len(row_ids) != 1:
-            return None
-        return self.read_certification_row(str(row_ids[0]))
-
     def read_device_test(self, evidence_id: str) -> SignedDeviceTestEvidence | None:
         row = self._one(
             select(device_test_evidence_table).where(

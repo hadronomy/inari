@@ -15,6 +15,7 @@ from inari.device_authority import (
     DeviceCapabilityAuthority,
     SignedAuthorityRevision,
     SignerPurpose,
+    SignerState,
     SqliteDeviceAuthorityReader,
     canonical_digest,
     canonical_json_bytes,
@@ -110,7 +111,9 @@ def test_installed_bundle_authorizes_through_sqlite(installation):
     assert installer.install(bundle, now=now)
     reader = SqliteDeviceAuthorityReader(store)
     assert (
-        reader.read_active_certification_row(target.device_id).row.row_id
+        reader.read_certification_row(
+            bundle.manifest.certification_rows[0].row.row_id
+        ).row.row_id
         == bundle.manifest.certification_rows[0].row.row_id
     )
     authority = DeviceCapabilityAuthority(
@@ -133,6 +136,35 @@ def test_rejects_manifest_tampering_without_writes(installation):
     with pytest.raises(ValueError, match="manifest digest"):
         installer.install(tampered, now=now)
     assert SqliteDeviceAuthorityReader(store).read_authority_state() is None
+
+
+def test_later_revision_can_retire_a_signer_but_cannot_reactivate_it(installation):
+    installer, store, bundle_for, _, _, now = installation
+    bundle = bundle_for()
+    installer.install(bundle, now=now)
+    signer = next(
+        item
+        for item in bundle.manifest.signers
+        if item.purpose is SignerPurpose.DEVICE_OBSERVATION
+    )
+    retired = replace(signer, state=SignerState.RETIRED, retired_at=now)
+    manifest = bundle.manifest.model_copy(
+        update={
+            "signers": tuple(
+                retired if item.key_id == signer.key_id else item
+                for item in bundle.manifest.signers
+            )
+        }
+    )
+    assert installer.install(bundle_for(manifest, number=2), now=now)
+    assert (
+        SqliteDeviceAuthorityReader(store)
+        .read_signer(signer.key_id, signer.purpose)
+        .state
+        == "retired"
+    )
+    with pytest.raises(ValueError, match="outside retirement"):
+        installer.install(bundle_for(bundle.manifest, number=3), now=now)
 
 
 @pytest.mark.parametrize(

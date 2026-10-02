@@ -101,8 +101,16 @@ class ObservationStore:
     current: SignedDeviceObservation
     private_key: Ed25519PrivateKey
 
-    def read_current(self, device_id: str) -> SignedDeviceObservation | None:
-        return self.current if self.current.observation.device_id == device_id else None
+    def read_current(
+        self, device_id: str, driver_profile_digest: str
+    ) -> SignedDeviceObservation | None:
+        observation = self.current.observation
+        if (
+            observation.device_id == device_id
+            and observation.driver_profile_digest == driver_profile_digest
+        ):
+            return self.current
+        return None
 
 
 def _key(purpose: SignerPurpose, name: str) -> tuple[SignerRecord, Ed25519PrivateKey]:

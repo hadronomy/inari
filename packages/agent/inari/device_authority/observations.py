@@ -84,10 +84,11 @@ class LiveDeviceObservationReader:
         self._authority = authority
         self._signing_key = signing_key
 
-    def read_current(self, device_id: str) -> SignedDeviceObservation | None:
+    def read_current(
+        self, device_id: str, driver_profile_digest: str
+    ) -> SignedDeviceObservation | None:
         device = self._devices.get(device_id)
-        row = self._authority.read_active_certification_row(device_id)
-        if device is None or row is None:
+        if device is None:
             return None
         signer = self._authority.read_signer(
             self._signing_key.key_id(), SignerPurpose.DEVICE_OBSERVATION
@@ -95,7 +96,7 @@ class LiveDeviceObservationReader:
         if signer is None or signer.public_key != self._signing_key.public_key():
             return None
         try:
-            observation = _observation(device, row.row.driver_profile_digest)
+            observation = _observation(device, driver_profile_digest)
         except ValueError:
             return None
         return self._signing_key.sign(observation)
