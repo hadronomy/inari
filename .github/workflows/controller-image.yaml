@@ -1,0 +1,129 @@
+name: Controller image
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/controller-image.yaml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/inari-gateway/**
+      - crates/inari-migration/**
+      - crates/inari-server/**
+      - crates/inari-web/**
+      - crates/inari-web-frontend/**
+      - deploy/controller/**
+      - packages/brand/**
+      - patches/**
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: controller-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  image:
+    name: Build and verify Controller image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust browser target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Set up mbx
+        uses: jdx/mr-boxington-action@2bbb8f141e40e388b509cc68fe0bfbe7bc4b6818 # v1
+        with:
+          version: 0.4.0
+
+      - name: Install Leptos build tool
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tool_dir="${RUNNER_TEMP}/cargo-leptos"
+          mkdir -p "${tool_dir}"
+          gh release download v0.3.10 --repo leptos-rs/cargo-leptos \
+            --pattern 'cargo-leptos-x86_64-unknown-linux-gnu.tar.gz*' \
+            --dir "${tool_dir}"
+          cd "${tool_dir}"
+          sha256sum --check cargo-leptos-x86_64-unknown-linux-gnu.tar.gz.sha256
+          tar --extract --gzip --file cargo-leptos-x86_64-unknown-linux-gnu.tar.gz --strip-components=1
+          echo "${tool_dir}" >> "${GITHUB_PATH}"
+
+      - name: Build Controller and browser assets
+        run: |
+          mbx leptos build --release
+          git diff --exit-code -- Cargo.lock
+          mkdir -p "${RUNNER_TEMP}/inari-controller-image"
+          cp target/release/inari-server "${RUNNER_TEMP}/inari-controller-image/"
+          cp -a target/site "${RUNNER_TEMP}/inari-controller-image/site"
+
+      - name: Set up container builder
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build verification image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ${{ runner.temp }}/inari-controller-image
+          file: deploy/controller/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: inari-controller:verification
+
+      - name: Verify packaged runtime and browser assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --read-only inari-controller:verification --version
+          test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.js"
+          test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web_bg.wasm"
+
+      - name: Install signing tool
+        if: github.ref == 'refs/heads/main'
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: cosign
+          cache: true
+
+      - name: Authenticate to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish immutable Controller image
+        if: github.ref == 'refs/heads/main'
+        id: publish
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ${{ runner.temp }}/inari-controller-image
+          file: deploy/controller/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/hadronomy/inari-server:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          labels: |
+            org.opencontainers.image.source=https://github.com/hadronomy/inari
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Sign Controller image
+        if: github.ref == 'refs/heads/main'
+        env:
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/hadronomy/inari-server@${IMAGE_DIGEST}"

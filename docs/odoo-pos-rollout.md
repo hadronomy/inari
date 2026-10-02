@@ -85,6 +85,19 @@ deployment must pin the digest and verify the signer identity
 with issuer `https://token.actions.githubusercontent.com` before unpacking.
 Keep the Inari artifact separate from the MZE artifact.
 
+## Controller image
+
+The `controller-image.yaml` workflow builds the Controller and its matching
+browser assets. Pull requests verify the container runtime and asset files.
+Main publishes `ghcr.io/hadronomy/inari-server:sha-<commit>` with provenance,
+an SBOM, and a keyless Cosign signature.
+
+Pin the image digest in the Controller chart. Verify the signer identity
+`https://github.com/hadronomy/inari/.github/workflows/controller-image.yaml@refs/heads/main`
+with issuer `https://token.actions.githubusercontent.com`. The image contains
+no deployment credentials. PostgreSQL, OIDC, certificates, and Device authority
+still require the production configuration.
+
 ## Recovery retention
 
 A recovery task retains its original Agent channel independently of its Binding
