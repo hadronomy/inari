@@ -90,6 +90,11 @@ spec:
             - name: database
               mountPath: /var/run/secrets/inari/database
               readOnly: true
+            {{- if .Values.database.caCertificateSecret }}
+            - name: database-ca
+              mountPath: /var/run/secrets/inari/database-ca
+              readOnly: true
+            {{- end }}
             - name: oidc
               mountPath: /var/run/secrets/inari/oidc
               readOnly: true
@@ -136,6 +141,14 @@ spec:
             items:
               - key: {{ .Values.identity.oidc.clientSecret.key }}
                 path: client-secret
+        {{- with .Values.database.caCertificateSecret }}
+        - name: database-ca
+          secret:
+            secretName: {{ .name }}
+            items:
+              - key: {{ .key }}
+                path: ca.crt
+        {{- end }}
         {{- if eq .Values.managedGateway.certificate.mode "step_ca" }}
         - name: step-ca
           secret:

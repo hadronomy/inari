@@ -102,6 +102,7 @@ At minimum, review:
 - `server.environment` and `server.publicUrl`;
 - `identity.oidc` and its role mapping;
 - every existing Secret name and key;
+- `database.caCertificateSecret` for a private PostgreSQL CA;
 - `managedGateway.controllerInstanceId`;
 - `managedGateway.dataPlane.publicEndpoints`;
 - step-ca identity and certificate settings;

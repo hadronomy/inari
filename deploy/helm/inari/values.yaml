@@ -105,6 +105,9 @@ database:
   secret:
     name: inari-database
     key: url
+  # Mount a private database CA at /var/run/secrets/inari/database-ca/ca.crt.
+  # Reference this path with sslrootcert in the PostgreSQL URL.
+  caCertificateSecret: null
   minConnections: 2
   maxConnections: 32
 

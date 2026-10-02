@@ -113,7 +113,6 @@ Peripheral stream requests remain unavailable until a production Driver supplies
 Scale Readings or Barcode Events. Receipt submission and recovery use separate
 Interfaces and remain available.
 
-
 ## Physical acceptance
 
 A captured JPEG or simulated admission proves software behavior only. Before

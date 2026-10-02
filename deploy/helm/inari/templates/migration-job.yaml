@@ -56,6 +56,11 @@ spec:
             - name: database
               mountPath: /var/run/secrets/inari/database
               readOnly: true
+            {{- if .Values.database.caCertificateSecret }}
+            - name: database-ca
+              mountPath: /var/run/secrets/inari/database-ca
+              readOnly: true
+            {{- end }}
             - name: tmp
               mountPath: /tmp
           resources:
@@ -70,4 +75,12 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.controller.tmpSizeLimit }}
+        {{- with .Values.database.caCertificateSecret }}
+        - name: database-ca
+          secret:
+            secretName: {{ .name }}
+            items:
+              - key: {{ .key }}
+                path: ca.crt
+        {{- end }}
 {{- end }}
