@@ -1,0 +1,4 @@
+database:
+  caCertificateSecret:
+    name: inari-database-ca
+    key: ca.crt

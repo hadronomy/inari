@@ -38,6 +38,27 @@ for helm_version in 3.21.3 4.2.3; do
 done
 ct lint --config "${ROOT}/deploy/helm/ct.yaml" --charts "${CHART}"
 
+helm template inari "${CHART}" --namespace inari \
+  --values "${CHART}/ci/database-ca-values.yaml" \
+  >"${workspace}/database-ca.yaml"
+for kind in Deployment Job; do
+  yq --output-format json --no-doc \
+    "select(.kind == \"${kind}\") | .spec.template.spec" \
+    "${workspace}/database-ca.yaml" \
+    | jq --exit-status '
+        any(.volumes[]; .name == "database-ca"
+          and .secret.secretName == "inari-database-ca"
+          and .secret.items == [{"key": "ca.crt", "path": "ca.crt"}])
+        and any(.containers[0].volumeMounts[];
+          .name == "database-ca"
+          and .mountPath == "/var/run/secrets/inari/database-ca"
+          and .readOnly == true)
+      ' >/dev/null
+done
+kubeconform -strict -summary -kubernetes-version "${CURRENT_KUBERNETES_VERSION}" \
+  "${workspace}/database-ca.yaml"
+kube-linter lint "${workspace}/database-ca.yaml"
+
 if helm lint --strict "${CHART}" --set unexpectedValue=true >"${workspace}/invalid-values.log" 2>&1; then
   printf 'values.schema.json accepted an unknown top-level value\n' >&2
   exit 1

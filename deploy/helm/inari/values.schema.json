@@ -221,6 +221,12 @@
       "required": ["secret", "minConnections", "maxConnections"],
       "properties": {
         "secret": { "$ref": "#/definitions/secretKeyReference" },
+        "caCertificateSecret": {
+          "oneOf": [
+            { "$ref": "#/definitions/secretKeyReference" },
+            { "type": "null" }
+          ]
+        },
         "minConnections": { "type": "integer", "minimum": 0 },
         "maxConnections": { "type": "integer", "minimum": 1 }
       }

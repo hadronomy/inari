@@ -53,6 +53,7 @@ Secret values do not belong in Helm values. Point the chart at existing Secrets:
 | Purpose | Value | Default key |
 | --- | --- | --- |
 | PostgreSQL URL | `database.secret` | `url` |
+| PostgreSQL CA | `database.caCertificateSecret` | Explicit key |
 | OIDC client secret | `identity.oidc.clientSecret` | `client-secret` |
 | step-ca provisioner key | `managedGateway.certificate.stepCa.signingKey` | `provisioner-key.pem` |
 | Controller Zenoh identity | `zenoh.tls.controllerSecret` | `ca.crt`, `tls.crt`, `tls.key` |
@@ -61,6 +62,13 @@ Secret values do not belong in Helm values. Point the chart at existing Secrets:
 The router certificate must cover its client Service and every StatefulSet pod
 name in the generated mesh. Keep the controller and router private keys
 separate.
+
+For a private PostgreSQL CA, set `database.caCertificateSecret` to its Secret
+name and key. The chart mounts it in both the Controller and migration Job at
+`/var/run/secrets/inari/database-ca/ca.crt`. Include `sslmode=verify-full` and
+`sslrootcert=/var/run/secrets/inari/database-ca/ca.crt` in the PostgreSQL URL.
+Helm hook Jobs need this chart value because Flux does not apply post renderers
+to hooks in all supported versions.
 
 ## Router configuration
 
