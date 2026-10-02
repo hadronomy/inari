@@ -114,6 +114,23 @@ test -s "${workspace}/inari-server.toml"
 
 helm template inari "${CHART}" \
   --namespace inari \
+  --values "${CHART}/ci/managed-work-values.yaml" \
+  --show-only templates/configmap.yaml \
+  | yq --unwrapScalar '.data["inari-server.toml"]' \
+  >"${workspace}/managed-server.toml"
+python3 - "${workspace}/inari-server.toml" "${workspace}/managed-server.toml" <<'PYTHON'
+import sys
+import tomllib
+
+for path, enabled in zip(sys.argv[1:], (False, True), strict=True):
+    with open(path, "rb") as source:
+        managed = tomllib.load(source)["managed_gateway"]
+    assert managed["dispatch"]["enabled"] is enabled
+    assert ("managed_work:dispatch" in managed["controller_actions"]) is enabled
+PYTHON
+
+helm template inari "${CHART}" \
+  --namespace inari \
   --show-only templates/zenoh-configmap.yaml \
   | yq --unwrapScalar '.data["config.json5"]' \
   >"${workspace}/zenoh.json"

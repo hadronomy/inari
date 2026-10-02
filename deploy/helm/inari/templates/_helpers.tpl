@@ -114,9 +114,6 @@ app.kubernetes.io/component: {{ .component }}
 {{- if not .Values.managedGateway.enabled -}}
 {{- fail "managedGateway.dispatch.enabled requires managedGateway.enabled=true" -}}
 {{- end -}}
-{{- if not (has "managed_work:dispatch" .Values.managedGateway.controllerActions) -}}
-{{- fail "managedGateway.dispatch.enabled requires the managed_work:dispatch Controller action" -}}
-{{- end -}}
 {{- if lt (int .Values.server.maxBodySizeBytes) 16777216 -}}
 {{- fail "managedGateway.dispatch.enabled requires server.maxBodySizeBytes>=16777216 for Report PDFs" -}}
 {{- end -}}

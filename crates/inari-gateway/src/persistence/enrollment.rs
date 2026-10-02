@@ -134,17 +134,16 @@ async fn register_verification_key(
     if let Some(existing) = agent_verification_key::Entity::find_by_id(&key_id)
         .one(transaction)
         .await?
-    {
-        if existing.agent_id != agent_id
+        && (existing.agent_id != agent_id
             || existing.purpose != purpose
             || existing.jwk_thumbprint != thumbprint
-            || existing.retired_at.is_some()
-        {
-            return Err(GatewayError::Conflict(
-                "verification key identity is immutable and retirement is permanent".into(),
-            ));
-        }
+            || existing.retired_at.is_some())
+    {
+        return Err(GatewayError::Conflict(
+            "verification key identity is immutable and retirement is permanent".into(),
+        ));
     }
+
     agent_verification_key::Entity::update_many()
         .col_expr(
             agent_verification_key::Column::RetiredAt,
