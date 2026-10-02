@@ -1,27 +1,445 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Fix Windows service startup and window controls\n\nThe Windows agent now starts when the service has no attached console. Device Center also shows its window controls and supports title bar dragging.\n"
-    filename: 2026-08-24-8c21e7a4.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Start the packaged Windows agent\n\nThe Windows package now includes every database migration that the agent needs\nat startup. The service reports that it is running only after the API is ready.\n\n### Drag Device Center from its title bar\n\nThe empty title bar area now starts the native Windows move action. Status and\nwindow controls remain independent controls.\n"
+    filename: 2026-08-24-c4f18a2d.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Cleaner title bar drag wiring\n\nDevice Center declares its title bar drag region on every platform again instead of gating it per OS in the view. The Windows-only native drag workaround stays inside the platform module, where it stays until a gpui release ships fixed caption handling.\n"
+    filename: 2026-08-25-feac1459.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Define the Odoo device integration\n\nThe architecture now defines the complete Odoo 19 device contract. It covers\nPOS tickets, reports, labels, scales, scanners, drawers, recovery, security,\nrelease gates, and Decommission.\n"
+    filename: 2026-08-26-0d0019a1.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Add browser Client Trust\n\nThe Agent now pairs an Odoo browser with an exact Agent Endpoint and business scope.\n\nClient Grants use Ed25519 access tokens, browser-key DPoP proofs, durable nonces, and immediate revocation checks.\n"
+    filename: 2026-08-30-browser-client-trust.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Complete browser proof challenges\n\nThe Agent now issues browser-visible, single-use DPoP nonces through the standard protected-resource challenge flow.\n"
+    filename: 2026-08-30-browser-dpop-challenge.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Add durable Device Work admission\n\nThe Agent now validates signed Device Capability records before it accepts print work. It stores encrypted receipt content and content-free authority proof for safe recovery.\n"
+    filename: 2026-08-30-device-work-admission.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Execute admitted receipt work through the durable Device Spool\n\nThe Agent now rechecks the exact Client Grant and Device Capability before it permits printer I/O. It records an I/O marker first, runs printer submission in an isolated process, and reports uncertain output without an automatic retry.\n\nReceipt images stay encrypted at rest. The Agent creates and reuses deterministic printer bytes without a plaintext temporary file.\n"
+    filename: 2026-08-30-physical-device-work-execution.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Route POS preparation tickets through Inari\n\nOdoo preparation printers can now use an exact active Inari Binding Revision.\nOdoo keeps its product-category routing and ticket rendering. Inari gives each\nticket segment a durable print identity and sends it through the bound Agent.\n\nPreparation retries reuse the same Print Intent. Native Odoo preparation\nprinters continue to use their existing path.\n"
+    filename: 2026-08-31-a7c9e2d.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add secure browser Client Pairing\n\nThe Agent now exposes the complete Client Pairing flow for Odoo POS browsers.\nIt requires exact-origin Ed25519 proof, Device Manager approval, a signed Odoo\nPairing Assertion, short-lived DPoP access tokens, and key-bound offline renewal.\n"
+    filename: 2026-08-31-browser-client-pairing-api.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Pair each POS browser securely\n\nThe POS now guides an operator through Agent approval when a receipt printer\nneeds a Client Grant. It keeps the browser key non-exportable, resumes the same\nticket after approval, and renews short-lived access without exposing security\ncredentials to the operator.\n\nOdoo now validates and signs each approved Pairing Request through an Ed25519\nOpenBao Transit key. The private signing key stays outside Odoo.\n"
+    filename: 2026-08-31-odoo-browser-pairing.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Add the Odoo 19 device foundation\n\nOdoo can now project Inari organizations, sites, agents, devices, and\ncapabilities. Device managers can create immutable bindings, approve tested\nrevisions, and inspect content-free print records from Odoo.\n"
+    filename: 2026-08-31-odoo-device-foundation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: minor\n---\n\n### Route Odoo POS receipts through Inari\n\nOdoo 19 can now keep an active Inari receipt binding authoritative from receipt rendering through durable Agent admission.\n\nThe browser retries one standard DPoP nonce challenge without changing the receipt identity. An unresolved Inari print stays in recovery and never falls through to native or browser printing.\n"
+    filename: 2026-08-31-odoo-pos-receipts.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Recover interrupted POS prints safely\n\nOdoo POS now keeps content-free print recovery tasks across reloads. Operators\ncan check Agent state, retry exact same-tab content, use browser print for a\ncustomer receipt, or explicitly continue without a ticket. Preparation orders\ndo not advance until the Agent accepts the ticket or the operator dismisses the\nrecovery task.\n"
+    filename: 2026-08-31-odoo-print-recovery.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Reconcile local POS Print Jobs\n\nPOS browsers can now query their Agent for content-free Print Job status by\nPrint Intent ID. Agent scope checks hide all work owned by another pairing.\n"
+    filename: 2026-08-31-print-job-reconciliation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add safe cash-drawer intents\n\nThe local Agent now admits, executes, and reconciles durable cash-drawer intents. It prevents duplicate pulses and reports an uncertain outcome when a failure happens after device I/O starts.\n"
+    filename: 2026-09-01-4f6d821c.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Route POS cash drawers through Inari\n\nAn active cash-drawer binding now replaces Odoo's drawer pulse with a durable Inari Drawer Intent. The POS prevents duplicate pulses, keeps native behavior for unbound drawers, and warns operators when the physical result needs manager review.\n"
+    filename: 2026-09-01-a8c3e419.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add secure POS Device Streams\n\nThe Agent now provides signed, DPoP-protected Scale Reading and Barcode Event\nstreams. Agent-owned fencing leases prevent stale browser contexts from using\ndevice input.\n"
+    filename: 2026-09-01-device-streams.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add secure browser Device Streams\n\nThe Odoo POS browser can now hold and renew Agent Device Stream leases. It\nverifies signed Scale Readings and Barcode Events, coordinates open tabs, and\nreconciles device state before it accepts live input.\n"
+    filename: 2026-09-03-browser-device-streams.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add Certified Scale and scanner input\n\nThe Odoo POS now reads bound Certified Scales and Agent-hosted scanners through\nauthenticated Inari Device Streams. Scale acceptance uses exact decimals,\nfreshness and stability checks, and the active Certification Record. Barcode\nEvents use Odoo's native barcode handling after Inari removes duplicates.\n"
+    filename: 2026-09-03-certified-pos-inputs.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add secure Managed Work admission\n\nThe Controller now accepts preflighted, encrypted Report PDF and Label Document\nwork from an authorized Odoo backend. Agents publish a separate encryption key\nduring enrollment, so report content stays encrypted outside the target Agent.\n"
+    filename: 2026-09-03-managed-work-admission.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Validate Managed Work acceptance identities\n\nThe Controller checks the signed Agent State Envelope against the stored Managed\nWork, Print Intent, and Device. A mismatched receipt cannot link another Print\nJob or delete protected content.\n"
+    filename: 2026-09-05-3f201ae8.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Check PDF and label content before acceptance\n\nLinux PDF preflight now uses a confined qpdf library worker with bounded input,\nmemory, CPU time, and output. It rejects active content and checks embedded\nfont programs, referenced glyphs, page geometry, and decoded streams.\n\nLabel Documents now use the shared ZPL Contract Major 1 parser. The Agent checks\nthe exact layout, field escaping, barcode capacity, and single-copy envelope.\n"
+    filename: 2026-09-05-f80c2d6a.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Protect Managed Payload storage\n\nThe Controller encrypts stored Dispatch Envelopes with individual data keys\nprotected by OpenBao Transit. Command history retains only Managed Work\nreferences. Acceptance, rejection, and expiry remove the stored content.\n\nRetries now reject changes to the Device Work request, including its Device and\nPrint Origin. Exact retries retain their original identity during an OpenBao\noutage.\n\nThe upgrade requires coordinated Controller downtime. It blocks while older work\nremains pending and unexpired. Expired dispatches become Recovery Uncertain and\nrequire reconciliation. The previous Controller binary cannot use the upgraded\nschema.\n"
+    filename: 2026-09-05-managed-payload-protection.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Register separate Agent State signing keys\n\nAgents now keep a dedicated Ed25519 state-signing key in protected storage.\nEnrollment registers its public key with the Controller. The Controller retains\nprevious public keys and rejects reuse across Agents or key purposes.\n\nUpgrade the Agent and Controller together and apply the Controller migrations.\nEnroll each Agent with a new invitation for gateway protocol `2026-09-06`.\n"
+    filename: 2026-09-06-agent-state-keys.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Reconcile managed Print Jobs from signed Agent evidence\n\nThe Controller verifies and stores signed Agent State observations. Managed Work\nqueries now include the physical Print Job state and its original signed envelope.\nValid evidence can recover a lost acceptance reply and stop further dispatch.\nOlder events cannot replace terminal results.\n\n### Bind managed dispatch to the complete Device Work\n\nThe Controller and Agent now verify the same fingerprint for the document,\nDevice, options, and work deadline. A shorter dispatch credential lifetime does\nnot shorten the Print Job deadline. Stop new admissions and let pending work\nfinish or expire before upgrading the Controller and Agent together.\n"
+    filename: 2026-09-06-controller-state-reconciliation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Publish signed managed Print Job observations\n\nThe Agent signs managed Print Job state from its durable journal. Pending\nobservations survive restart and retain each historical state. Managed replies\nstay bound to their original Agent, Organization, and Site after enrollment changes.\n"
+    filename: 2026-09-06-managed-state-observations.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Retry Print Job observations until the Controller stores them\n\nThe Agent now requires a Controller storage receipt for signed Print Job\nobservations. A connection failure or lost reply keeps the same observation\npending for retry. The upgrade requeues previously sent observations once.\n"
+    filename: 2026-09-06-managed-state-receipts.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Reconcile managed report Print Jobs\n\nPrint Job queries now read the Report Origin stored by managed admission.\nThey preserve ordered report record IDs and wizard input digests, and reject\nan origin whose Organization, Site, or Managed Work does not match its Print Job.\n"
+    filename: 2026-09-06-report-origin-reconciliation.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Reject incomplete Windows spool writes\n\nWindows printing now checks the spool job identity and complete byte count.\nIf submission fails, the Agent attempts to abort the open spool job instead\nof finalizing a partial document. The physical outcome remains uncertain after\nan I/O attempt; the Agent does not automatically print it again.\n"
+    filename: 2026-09-06-windows-spool-write-checks.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n  group:controller-chart:\n    type: patch\n---\n\n### Restrict managed Zenoh authority\n\nThe Controller access rules now permit managed command delivery, history\nreplies, and Agent observations with access control enabled.\n\nGenerated router configuration reserves command and storage-receipt authority\nfor Controller and router certificates. Before upgrading, set\n`zenoh.config.accessControl.trustedPeerCommonNames` to their exact certificate\ncommon names. The defaults are `inari-controller` and `inari-router`. Reserve\nthese names in the CA policy so Agents cannot obtain them.\n"
+    filename: 2026-09-07-2ecaf48a.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Require signed evidence for Managed Work acceptance\n\nUnsigned command receipts no longer change Managed Work, stop dispatch, or\ndelete protected content. The Controller accepts managed Print Jobs only after\nit verifies their Agent State Envelopes. An unsigned rejection keeps the work\nunresolved until signed evidence arrives or its deadline requires Recovery\nUncertain.\n"
+    filename: 2026-09-07-70446c8b.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Add company-scoped Odoo Managed Work access\n\nThe Odoo backend can use short-lived OIDC tokens with company credentials stored\nin OpenBao. Controller requests reject mismatched company scope and use bounded\nHTTPS responses. Pairing Assertions share the same protected OpenBao transport.\n\nThe Controller adds a read-only Managed Work lookup by Idempotency Key. Odoo can\ncheck an uncertain submission before it retries the original Print Intent.\n"
+    filename: 2026-09-07-9d1e83a7.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Validate report requests before preparation\n\nOdoo rejects stale Report Bindings, changed Driver Profiles, inactive Sites,\nand inaccessible source records before it creates a report sequence. Prepared\naction tickets belong to one actor and company. Operators cannot rewrite their\nstored authority fields.\n"
+    filename: 2026-09-07-b710ee8c.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Restore Odoo 19 POS startup\n\nThe Inari POS addon now compiles correctly in the Odoo browser bundle and uses\nthe Odoo 19 RPC function. These changes prevent a blank POS screen and a missing\nservice error before the register opens.\n\n### Keep one receipt identity across repeated clicks\n\nRepeated receipt clicks now use the original Print Intent while that copy is\nunresolved. POS reloads recover its identity from the local journal. A changed\nrender cannot allocate a second Origin Submission Key for the same receipt copy.\n"
+    filename: 2026-09-08-58a239c7.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve encrypted print jobs on Windows\n\nThe Agent opens spool files in binary mode. Windows text conversion no longer\nchanges encrypted bytes or prevents receipt admission and recovery.\n\nThe Windows secret store also applies its service permissions through the\ncorrect pywin32 API, so protected-key setup can complete.\n"
+    filename: 2026-09-08-e194f680.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Protect Device observations\n\nThe Agent now signs current Device observations with a separate protected key.\nIt rejects receipt admission when Driver certification facts are unavailable.\n"
+    filename: 2026-09-26-9a74de52.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Package the Inari Odoo addon for production\n\nThe release workflow now publishes a signed Odoo addon artifact with its shared\nprint contracts and locked Python dependency.\n"
+    filename: 2026-09-26-e884c50d.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Declare compatibility in the signed Odoo artifact\n\nThe addon artifact includes a compatibility manifest for Odoo, Agent, Controller, shared contracts, and protocol versions. The shared-contract build backend uses an exact version.\n"
+    filename: 2026-10-02-pos-artifact-contracts.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Retire Device authority signers without changing their identity\n\nAuthority bundles permit signer retirement and reject signer reactivation. Device observations use the verified Driver Profile for the requested Binding Revision, including Devices that expose more than one capability.\n"
+    filename: 2026-10-02-pos-device-authority.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n  group:controller-chart:\n    type: patch\n---\n\n### Retire Agent verification keys when enrollment rotates them\n\nRetired keys can replay stored observations for reconciliation. They cannot authorize new observations. A database migration retires obsolete keys and requires new enrollment when historical keys are ambiguous. Managed Work preserves the exact signed idempotency key. Controller dispatch permission follows the Helm dispatch configuration.\n"
+    filename: 2026-10-02-pos-managed-authority.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Commit drawer intent identities before Device I/O\n\nCash drawer recovery waits for the browser storage transaction to commit. An Odoo upgrade preserves existing drawer capability and binding identities. Input streams reject requests until a production Driver supplies Scale Readings or Barcode Events.\n"
+    filename: 2026-10-02-pos-peripheral-safety.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve receipt recovery across POS reloads\n\nCompleted receipt copies leave the active recovery list. A content-free journal preserves their Print Intent for 90 days. Recovery uses the original Agent channel after a Device Binding changes. Authorized clients can query a Print Job by its durable identifier.\n"
+    filename: 2026-10-02-pos-receipt-recovery.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve browser trust and execution leases\n\nA first protected request can receive a DPoP nonce challenge without an invented nonce. Client Grant renewal requires its original Client Pairing. Physical execution renews its lease during receipt preparation and worker startup.\n"
+    filename: 2026-10-02-pos-trust-leases.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Report current Windows printer facts\n\nThe Agent reads the Windows queue port, driver, media width, and readiness on\neach discovery pass. A missing or blocked queue cannot claim readiness.\nFirmware remains unavailable until the Device reports it. The Agent does not\nuse the Windows driver version as Device firmware.\n"
+    filename: 2026-10-02-windows-device-observations.md
+    v: 0.0.0
+  - content: "---\npackages:\n  pip:inari:\n    type: patch\n---\n\n### Preserve admitted document options\n\nThe Agent stores validated document options for execution after a restart.\nExecution checks the stored options against their admitted digest before it\nprepares output.\n\nDrain active Device Work before this upgrade. The database migration preserves\nhistorical outcomes and stops if active work still needs its missing options.\n"
+    filename: 2026-09-05-26f54a91.md
+    v: 0.0.0
+  - content: "---\npackages:\n  pip:inari:\n    type: patch\n---\n\n### Honor document resolution in CUPS\n\nCUPS submission uses the admitted PDF resolution and requires the queue to\nadvertise that resolution and accept output. The Agent checks every submission\nresponse and cancels incomplete CUPS jobs after an error.\n"
+    filename: 2026-09-05-c1751ad4.md
+    v: 0.0.0
+  - content: "---\npackages:\n  pip:inari:\n    type: patch\n---\n\n### Install signed Device authority\n\nAgent Administrators can import Controller-signed Device authority for an exact\nAgent and Odoo scope. Installation verifies signatures and applies the complete\nactivation set in one transaction. It rejects revision rollback and preserves\nAgent Quarantine.\n"
+    filename: 2026-09-08-f67b328a.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: minor\n---\n\n### Say where each configuration setting came from\n\n`inari-server config explain` now names the layer behind every setting that is\nnot at its built-in default, and the file path or the environment that supplied\nit.\n\n```\n2 of 75 settings are overridden:\n  organization.name  /etc/inari/inari-server.toml\n  server.bind        environment\n```\n\nThe command previously printed the precedence order and the list of files it\nhad read. That answered which layers exist, not which one won a given setting,\nso the effect of a stray environment variable had to be worked out by hand.\nThe report is read from the values the loader actually merged, so it cannot\ndescribe a precedence the loader no longer applies.\n\n### Accept an explicit --redact\n\n`config print-effective` now takes `--redact` alongside `--no-redact`. Output\nis redacted unless `--no-redact` is given, exactly as before; the new flag\nstates that intent rather than relying on the default.\n"
+    filename: 2026-08-26-7d6f28cf.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Configure managed report dispatch on Kubernetes\n\nThe chart now provides Dispatch Envelope signing-key mounts and OpenBao payload\nprotection settings. Managed dispatch uses a projected ServiceAccount token with\nan explicit audience. An optional Secret supplies the OpenBao CA bundle.\n\nEnable `managedGateway.dispatch.enabled` after provisioning the signing key and\nOpenBao role. The chart now uses gateway protocol `2026-09-06` and a 16 MiB HTTP\nbody limit for base64-encoded Report PDFs. Configure the ingress body limit to\nmatch.\n"
+    filename: 2026-09-07-8af906f1.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Publish the Controller runtime\n\nMain releases now publish a signed Controller image with its matching browser\nassets. Deployments can pin the image digest and verify its source identity.\n"
+    filename: 2026-10-02-controller-image.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+      - 2026-08-26-0d0019a1.md
+      - 2026-08-30-browser-client-trust.md
+      - 2026-08-30-browser-dpop-challenge.md
+      - 2026-08-30-device-work-admission.md
+      - 2026-08-30-physical-device-work-execution.md
+      - 2026-08-31-a7c9e2d.md
+      - 2026-08-31-browser-client-pairing-api.md
+      - 2026-08-31-odoo-browser-pairing.md
+      - 2026-08-31-odoo-device-foundation.md
+      - 2026-08-31-odoo-pos-receipts.md
+      - 2026-08-31-odoo-print-recovery.md
+      - 2026-08-31-print-job-reconciliation.md
+      - 2026-09-01-4f6d821c.md
+      - 2026-09-01-a8c3e419.md
+      - 2026-09-01-device-streams.md
+      - 2026-09-03-browser-device-streams.md
+      - 2026-09-03-certified-pos-inputs.md
+      - 2026-09-03-managed-work-admission.md
+      - 2026-09-05-3f201ae8.md
+      - 2026-09-05-f80c2d6a.md
+      - 2026-09-05-managed-payload-protection.md
+      - 2026-09-06-agent-state-keys.md
+      - 2026-09-06-controller-state-reconciliation.md
+      - 2026-09-06-managed-state-observations.md
+      - 2026-09-06-managed-state-receipts.md
+      - 2026-09-06-report-origin-reconciliation.md
+      - 2026-09-06-windows-spool-write-checks.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-70446c8b.md
+      - 2026-09-07-9d1e83a7.md
+      - 2026-09-07-b710ee8c.md
+      - 2026-09-08-58a239c7.md
+      - 2026-09-08-e194f680.md
+      - 2026-09-26-9a74de52.md
+      - 2026-09-26-e884c50d.md
+      - 2026-10-02-pos-artifact-contracts.md
+      - 2026-10-02-pos-device-authority.md
+      - 2026-10-02-pos-managed-authority.md
+      - 2026-10-02-pos-peripheral-safety.md
+      - 2026-10-02-pos-receipt-recovery.md
+      - 2026-10-02-pos-trust-leases.md
+      - 2026-10-02-windows-device-observations.md
     id: cargo:inari-agent-client
     updated: true
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+      - 2026-08-26-0d0019a1.md
+      - 2026-08-30-browser-client-trust.md
+      - 2026-08-30-browser-dpop-challenge.md
+      - 2026-08-30-device-work-admission.md
+      - 2026-08-30-physical-device-work-execution.md
+      - 2026-08-31-a7c9e2d.md
+      - 2026-08-31-browser-client-pairing-api.md
+      - 2026-08-31-odoo-browser-pairing.md
+      - 2026-08-31-odoo-device-foundation.md
+      - 2026-08-31-odoo-pos-receipts.md
+      - 2026-08-31-odoo-print-recovery.md
+      - 2026-08-31-print-job-reconciliation.md
+      - 2026-09-01-4f6d821c.md
+      - 2026-09-01-a8c3e419.md
+      - 2026-09-01-device-streams.md
+      - 2026-09-03-browser-device-streams.md
+      - 2026-09-03-certified-pos-inputs.md
+      - 2026-09-03-managed-work-admission.md
+      - 2026-09-05-3f201ae8.md
+      - 2026-09-05-f80c2d6a.md
+      - 2026-09-05-managed-payload-protection.md
+      - 2026-09-06-agent-state-keys.md
+      - 2026-09-06-controller-state-reconciliation.md
+      - 2026-09-06-managed-state-observations.md
+      - 2026-09-06-managed-state-receipts.md
+      - 2026-09-06-report-origin-reconciliation.md
+      - 2026-09-06-windows-spool-write-checks.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-70446c8b.md
+      - 2026-09-07-9d1e83a7.md
+      - 2026-09-07-b710ee8c.md
+      - 2026-09-08-58a239c7.md
+      - 2026-09-08-e194f680.md
+      - 2026-09-26-9a74de52.md
+      - 2026-09-26-e884c50d.md
+      - 2026-10-02-pos-artifact-contracts.md
+      - 2026-10-02-pos-device-authority.md
+      - 2026-10-02-pos-managed-authority.md
+      - 2026-10-02-pos-peripheral-safety.md
+      - 2026-10-02-pos-receipt-recovery.md
+      - 2026-10-02-pos-trust-leases.md
+      - 2026-10-02-windows-device-observations.md
     id: cargo:inari-device-center
     updated: true
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+      - 2026-08-26-0d0019a1.md
+      - 2026-08-30-browser-client-trust.md
+      - 2026-08-30-browser-dpop-challenge.md
+      - 2026-08-30-device-work-admission.md
+      - 2026-08-30-physical-device-work-execution.md
+      - 2026-08-31-a7c9e2d.md
+      - 2026-08-31-browser-client-pairing-api.md
+      - 2026-08-31-odoo-browser-pairing.md
+      - 2026-08-31-odoo-device-foundation.md
+      - 2026-08-31-odoo-pos-receipts.md
+      - 2026-08-31-odoo-print-recovery.md
+      - 2026-08-31-print-job-reconciliation.md
+      - 2026-09-01-4f6d821c.md
+      - 2026-09-01-a8c3e419.md
+      - 2026-09-01-device-streams.md
+      - 2026-09-03-browser-device-streams.md
+      - 2026-09-03-certified-pos-inputs.md
+      - 2026-09-03-managed-work-admission.md
+      - 2026-09-05-26f54a91.md
+      - 2026-09-05-3f201ae8.md
+      - 2026-09-05-c1751ad4.md
+      - 2026-09-05-f80c2d6a.md
+      - 2026-09-05-managed-payload-protection.md
+      - 2026-09-06-agent-state-keys.md
+      - 2026-09-06-controller-state-reconciliation.md
+      - 2026-09-06-managed-state-observations.md
+      - 2026-09-06-managed-state-receipts.md
+      - 2026-09-06-report-origin-reconciliation.md
+      - 2026-09-06-windows-spool-write-checks.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-70446c8b.md
+      - 2026-09-07-9d1e83a7.md
+      - 2026-09-07-b710ee8c.md
+      - 2026-09-08-58a239c7.md
+      - 2026-09-08-e194f680.md
+      - 2026-09-08-f67b328a.md
+      - 2026-09-26-9a74de52.md
+      - 2026-09-26-e884c50d.md
+      - 2026-10-02-pos-artifact-contracts.md
+      - 2026-10-02-pos-device-authority.md
+      - 2026-10-02-pos-managed-authority.md
+      - 2026-10-02-pos-peripheral-safety.md
+      - 2026-10-02-pos-receipt-recovery.md
+      - 2026-10-02-pos-trust-leases.md
+      - 2026-10-02-windows-device-observations.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+      - 2026-08-26-0d0019a1.md
+      - 2026-08-30-browser-client-trust.md
+      - 2026-08-30-browser-dpop-challenge.md
+      - 2026-08-30-device-work-admission.md
+      - 2026-08-30-physical-device-work-execution.md
+      - 2026-08-31-a7c9e2d.md
+      - 2026-08-31-browser-client-pairing-api.md
+      - 2026-08-31-odoo-browser-pairing.md
+      - 2026-08-31-odoo-device-foundation.md
+      - 2026-08-31-odoo-pos-receipts.md
+      - 2026-08-31-odoo-print-recovery.md
+      - 2026-08-31-print-job-reconciliation.md
+      - 2026-09-01-4f6d821c.md
+      - 2026-09-01-a8c3e419.md
+      - 2026-09-01-device-streams.md
+      - 2026-09-03-browser-device-streams.md
+      - 2026-09-03-certified-pos-inputs.md
+      - 2026-09-03-managed-work-admission.md
+      - 2026-09-05-3f201ae8.md
+      - 2026-09-05-f80c2d6a.md
+      - 2026-09-05-managed-payload-protection.md
+      - 2026-09-06-agent-state-keys.md
+      - 2026-09-06-controller-state-reconciliation.md
+      - 2026-09-06-managed-state-observations.md
+      - 2026-09-06-managed-state-receipts.md
+      - 2026-09-06-report-origin-reconciliation.md
+      - 2026-09-06-windows-spool-write-checks.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-70446c8b.md
+      - 2026-09-07-9d1e83a7.md
+      - 2026-09-07-b710ee8c.md
+      - 2026-09-08-58a239c7.md
+      - 2026-09-08-e194f680.md
+      - 2026-09-26-9a74de52.md
+      - 2026-09-26-e884c50d.md
+      - 2026-10-02-pos-artifact-contracts.md
+      - 2026-10-02-pos-device-authority.md
+      - 2026-10-02-pos-managed-authority.md
+      - 2026-10-02-pos-peripheral-safety.md
+      - 2026-10-02-pos-receipt-recovery.md
+      - 2026-10-02-pos-trust-leases.md
+      - 2026-10-02-windows-device-observations.md
     id: pip:inari-brand
     updated: true
-  - id: helm:inari
-    updated: false
   - changelogIds:
-      - 2026-08-24-8c21e7a4.md
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+      - 2026-08-26-0d0019a1.md
+      - 2026-08-30-browser-client-trust.md
+      - 2026-08-30-browser-dpop-challenge.md
+      - 2026-08-30-device-work-admission.md
+      - 2026-08-30-physical-device-work-execution.md
+      - 2026-08-31-a7c9e2d.md
+      - 2026-08-31-browser-client-pairing-api.md
+      - 2026-08-31-odoo-browser-pairing.md
+      - 2026-08-31-odoo-device-foundation.md
+      - 2026-08-31-odoo-pos-receipts.md
+      - 2026-08-31-odoo-print-recovery.md
+      - 2026-08-31-print-job-reconciliation.md
+      - 2026-09-01-4f6d821c.md
+      - 2026-09-01-a8c3e419.md
+      - 2026-09-01-device-streams.md
+      - 2026-09-03-browser-device-streams.md
+      - 2026-09-03-certified-pos-inputs.md
+      - 2026-09-03-managed-work-admission.md
+      - 2026-09-05-3f201ae8.md
+      - 2026-09-05-f80c2d6a.md
+      - 2026-09-05-managed-payload-protection.md
+      - 2026-09-06-agent-state-keys.md
+      - 2026-09-06-controller-state-reconciliation.md
+      - 2026-09-06-managed-state-observations.md
+      - 2026-09-06-managed-state-receipts.md
+      - 2026-09-06-report-origin-reconciliation.md
+      - 2026-09-06-windows-spool-write-checks.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-70446c8b.md
+      - 2026-09-07-9d1e83a7.md
+      - 2026-09-07-b710ee8c.md
+      - 2026-09-08-58a239c7.md
+      - 2026-09-08-e194f680.md
+      - 2026-09-26-9a74de52.md
+      - 2026-09-26-e884c50d.md
+      - 2026-10-02-pos-artifact-contracts.md
+      - 2026-10-02-pos-device-authority.md
+      - 2026-10-02-pos-managed-authority.md
+      - 2026-10-02-pos-peripheral-safety.md
+      - 2026-10-02-pos-receipt-recovery.md
+      - 2026-10-02-pos-trust-leases.md
+      - 2026-10-02-windows-device-observations.md
+    id: pip:inari-print-contracts
+    updated: true
+  - changelogIds:
+      - 2026-08-26-7d6f28cf.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-8af906f1.md
+      - 2026-10-02-controller-image.md
+      - 2026-10-02-pos-managed-authority.md
+    id: helm:inari
+    updated: true
+  - changelogIds:
+      - 2026-08-24-c4f18a2d.md
+      - 2026-08-25-feac1459.md
+      - 2026-08-26-0d0019a1.md
+      - 2026-08-30-browser-client-trust.md
+      - 2026-08-30-browser-dpop-challenge.md
+      - 2026-08-30-device-work-admission.md
+      - 2026-08-30-physical-device-work-execution.md
+      - 2026-08-31-a7c9e2d.md
+      - 2026-08-31-browser-client-pairing-api.md
+      - 2026-08-31-odoo-browser-pairing.md
+      - 2026-08-31-odoo-device-foundation.md
+      - 2026-08-31-odoo-pos-receipts.md
+      - 2026-08-31-odoo-print-recovery.md
+      - 2026-08-31-print-job-reconciliation.md
+      - 2026-09-01-4f6d821c.md
+      - 2026-09-01-a8c3e419.md
+      - 2026-09-01-device-streams.md
+      - 2026-09-03-browser-device-streams.md
+      - 2026-09-03-certified-pos-inputs.md
+      - 2026-09-03-managed-work-admission.md
+      - 2026-09-05-3f201ae8.md
+      - 2026-09-05-f80c2d6a.md
+      - 2026-09-05-managed-payload-protection.md
+      - 2026-09-06-agent-state-keys.md
+      - 2026-09-06-controller-state-reconciliation.md
+      - 2026-09-06-managed-state-observations.md
+      - 2026-09-06-managed-state-receipts.md
+      - 2026-09-06-report-origin-reconciliation.md
+      - 2026-09-06-windows-spool-write-checks.md
+      - 2026-09-07-2ecaf48a.md
+      - 2026-09-07-70446c8b.md
+      - 2026-09-07-9d1e83a7.md
+      - 2026-09-07-b710ee8c.md
+      - 2026-09-08-58a239c7.md
+      - 2026-09-08-e194f680.md
+      - 2026-09-26-9a74de52.md
+      - 2026-09-26-e884c50d.md
+      - 2026-10-02-pos-artifact-contracts.md
+      - 2026-10-02-pos-device-authority.md
+      - 2026-10-02-pos-managed-authority.md
+      - 2026-10-02-pos-peripheral-safety.md
+      - 2026-10-02-pos-receipt-recovery.md
+      - 2026-10-02-pos-trust-leases.md
+      - 2026-10-02-windows-device-observations.md
     id: msix:inari-device-center
     updated: true
