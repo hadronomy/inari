@@ -15,26 +15,11 @@ from ...printing.commands import (
     OpenCashDrawer as OpenCashDrawerDomain,
     PrintTestPage as PrintTestPageDomain,
 )
-from ...printing.jobs import (
-    HtmlDocumentContent,
-    PdfDocumentContent,
-    PrintJob,
-    RawDocumentContent,
-    ReceiptImageContent,
-    StructuredReceiptContent,
-    TextDocumentContent,
-)
-from ...printing.payloads import (
-    coerce_image_payload,
-    coerce_pdf_payload,
-    coerce_raw_payload,
-)
 from ...printing.protocols import CutMode, PrinterTransport
 from ...runtime.models import JobAttemptRecord, JobKind, JobRecord, JobState
 from ...runtime.jobs.operations import (
     DeviceTargetRef,
     QueuedDeviceCommandOperation,
-    QueuedPrintOperation,
 )
 
 
@@ -56,14 +41,10 @@ class QueueSummaryResponse(APIModel):
 
 
 class DeviceTargetInput(APIModel):
-    device_id: str | None = None
-    printer_name: str | None = None
+    device_id: str = Field(min_length=1, max_length=256)
 
     def to_domain(self) -> DeviceTargetRef:
-        return DeviceTargetRef(
-            device_id=self.device_id,
-            printer_name=self.printer_name,
-        )
+        return DeviceTargetRef(device_id=self.device_id)
 
 
 class JobTargetResponse(APIModel):
@@ -80,127 +61,6 @@ class JobTargetResponse(APIModel):
         )
 
 
-class PrintExecutionOptionsInput(APIModel):
-    transport: PrinterTransport = PrinterTransport.AUTO
-    open_cash_drawer: bool = False
-
-
-class BinaryContentInput(APIModel):
-    base64: str
-    declared_mime_type: str | None = None
-
-
-class StructuredReceiptContentInput(APIModel):
-    kind: Literal["structured_receipt"] = "structured_receipt"
-    data: dict[str, Any]
-    document_name: str = "Receipt"
-
-    def to_domain(self) -> StructuredReceiptContent:
-        return StructuredReceiptContent(
-            payload=self.data, document_name=self.document_name
-        )
-
-
-class ReceiptImageContentInput(APIModel):
-    kind: Literal["receipt_image"] = "receipt_image"
-    binary: BinaryContentInput
-    document_name: str = "Receipt"
-
-    def to_domain(self) -> ReceiptImageContent:
-        return ReceiptImageContent(
-            binary_payload=coerce_image_payload(
-                self.binary.base64,
-                label="receipt image",
-                declared_mime_type=self.binary.declared_mime_type,
-            ),
-            document_name=self.document_name,
-        )
-
-
-class TextDocumentContentInput(APIModel):
-    kind: Literal["text"] = "text"
-    text: str
-    document_name: str = "Text Document"
-
-    def to_domain(self) -> TextDocumentContent:
-        return TextDocumentContent(text=self.text, document_name=self.document_name)
-
-
-class HtmlDocumentContentInput(APIModel):
-    kind: Literal["html"] = "html"
-    html: str
-    document_name: str = "HTML Document"
-
-    def to_domain(self) -> HtmlDocumentContent:
-        return HtmlDocumentContent(html=self.html, document_name=self.document_name)
-
-
-class PdfDocumentContentInput(APIModel):
-    kind: Literal["pdf"] = "pdf"
-    binary: BinaryContentInput
-    document_name: str = "PDF Document"
-
-    def to_domain(self) -> PdfDocumentContent:
-        return PdfDocumentContent(
-            binary_payload=coerce_pdf_payload(
-                self.binary.base64,
-                label="PDF document",
-                declared_mime_type=self.binary.declared_mime_type,
-            ),
-            document_name=self.document_name,
-        )
-
-
-class RawDocumentContentInput(APIModel):
-    kind: Literal["raw"] = "raw"
-    binary: BinaryContentInput
-    data_type: str = "RAW"
-    document_name: str = "Raw Document"
-
-    def to_domain(self) -> RawDocumentContent:
-        return RawDocumentContent(
-            binary_payload=coerce_raw_payload(
-                self.binary.base64,
-                label="raw document",
-                declared_mime_type=self.binary.declared_mime_type,
-            ),
-            data_type=self.data_type,
-            document_name=self.document_name,
-        )
-
-
-PrintContentInput = Annotated[
-    StructuredReceiptContentInput
-    | ReceiptImageContentInput
-    | TextDocumentContentInput
-    | HtmlDocumentContentInput
-    | PdfDocumentContentInput
-    | RawDocumentContentInput,
-    Field(discriminator="kind"),
-]
-
-
-class PrintJobRequest(APIModel):
-    content: PrintContentInput
-    target: DeviceTargetInput = Field(default_factory=DeviceTargetInput)
-    options: PrintExecutionOptionsInput = Field(
-        default_factory=PrintExecutionOptionsInput
-    )
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    def to_operation(self) -> QueuedPrintOperation:
-        return QueuedPrintOperation(
-            target=self.target.to_domain(),
-            job=PrintJob(
-                content=self.content.to_domain(),
-                printer_name=self.target.printer_name,
-                transport=self.options.transport,
-                open_drawer=self.options.open_cash_drawer,
-                metadata=self.metadata,
-            ),
-        )
-
-
 class OpenCashDrawerCommandInput(APIModel):
     kind: Literal["open_cash_drawer"] = "open_cash_drawer"
 
@@ -210,10 +70,9 @@ class OpenCashDrawerCommandInput(APIModel):
 
 class PrintTestPageCommandInput(APIModel):
     kind: Literal["print_test_page"] = "print_test_page"
-    transport: PrinterTransport = PrinterTransport.AUTO
 
     def to_domain(self) -> PrintTestPageDomain:
-        return PrintTestPageDomain(transport=self.transport)
+        return PrintTestPageDomain()
 
 
 class FeedLinesCommandInput(APIModel):
@@ -251,7 +110,7 @@ DeviceCommandInput = Annotated[
 
 
 class DeviceCommandRequest(APIModel):
-    target: DeviceTargetInput = Field(default_factory=DeviceTargetInput)
+    target: DeviceTargetInput
     command: DeviceCommandInput
     metadata: dict[str, Any] = Field(default_factory=dict)
 

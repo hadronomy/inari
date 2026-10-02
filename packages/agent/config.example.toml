@@ -1,4 +1,4 @@
-#:schema ./schemas/inari-config.schema.json
+#:schema schemas/inari-config.schema.json
 
 # Generated configuration template for inari.
 # Uncomment only the settings you want to override.
@@ -65,14 +65,15 @@ config_version = 1
 # OS credential store namespace used by the agent.
 # secret_store_service_name = "inari"
 
+# Discovered-device preferences managed by the setup assistant.
+[devices]
+# Friendly labels keyed by stable Inari device id. These do not rename operating-system devices.
+# labels = "{}"
+
 # Default printer behavior and optional network printer definitions.
 [devices.printing]
 # Preferred printer label when jobs do not target a specific device.
 # default_printer = "Kitchen Printer"
-# Default transport strategy when a driver supports more than one mode.
-# default_transport = "auto"
-# Allow HTML receipt/document rendering.
-# enable_html = true
 
 # Repeat this block for each raw TCP or receipt printer that should be managed directly by the agent.
 # [[devices.printing.printers]]

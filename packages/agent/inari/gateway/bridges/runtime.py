@@ -7,7 +7,6 @@ from ...core.exceptions import AgentError
 from ...local_api.schemas import (
     DeviceCommandRequest,
     JobResponse,
-    PrintJobRequest,
     RuntimeEventResponse,
 )
 from ...runtime.events import EventHub
@@ -24,8 +23,6 @@ from ..protocol import (
     AgentRuntimeEventMessage,
     ControllerCancelJobMessage,
     ControllerExecuteDeviceCommandMessage,
-    ControllerSubmitPrintJobPayload,
-    ControllerSubmitPrintJobMessage,
 )
 from ..repositories import GatewayRepository
 
@@ -39,21 +36,6 @@ class GatewayCommandDispatcher:
     ) -> None:
         self.job_service = job_service
         self.gateway_repository = gateway_repository
-
-    async def handle_submit_print_job(
-        self,
-        message: ControllerSubmitPrintJobMessage,
-        *,
-        enrollment: GatewayEnrollmentRecord,
-    ) -> None:
-        await self._handle_job_submission(
-            message=message,
-            enrollment=enrollment,
-            required_action=ControllerAction.JOBS_CREATE,
-            enqueue=lambda: self.job_service.enqueue_print(
-                _protocol_print_job_request(message.payload).to_operation()
-            ),
-        )
 
     async def handle_execute_device_command(
         self,
@@ -114,8 +96,7 @@ class GatewayCommandDispatcher:
     async def _handle_job_submission(
         self,
         *,
-        message: ControllerSubmitPrintJobMessage
-        | ControllerExecuteDeviceCommandMessage,
+        message: ControllerExecuteDeviceCommandMessage,
         enrollment: GatewayEnrollmentRecord,
         required_action: ControllerAction,
         enqueue,
@@ -258,22 +239,6 @@ def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-def _protocol_print_job_request(
-    payload: ControllerSubmitPrintJobPayload,
-) -> PrintJobRequest:
-    return PrintJobRequest.model_validate(
-        {
-            "content": payload.content.model_dump(mode="json"),
-            "target": {
-                "device_id": payload.target.device_id,
-                "printer_name": payload.target.printer_name,
-            },
-            "options": payload.options.model_dump(mode="json"),
-            "metadata": dict(payload.metadata),
-        }
-    )
-
-
 def _protocol_device_command_request(
     payload: ControllerExecuteDeviceCommandPayload,
 ) -> DeviceCommandRequest:
@@ -281,7 +246,6 @@ def _protocol_device_command_request(
         {
             "target": {
                 "device_id": payload.target.device_id,
-                "printer_name": payload.target.printer_name,
             },
             "command": payload.command.model_dump(mode="json"),
             "metadata": dict(payload.metadata),

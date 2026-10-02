@@ -545,6 +545,13 @@
     "DevicesConfig": {
       "additionalProperties": false,
       "properties": {
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
         "printing": {
           "$ref": "#/definitions/DevicesPrintingConfig"
         }
@@ -566,22 +573,6 @@
           ],
           "default": null,
           "title": "Default Printer"
-        },
-        "default_transport": {
-          "default": "auto",
-          "enum": [
-            "auto",
-            "raw",
-            "text",
-            "document"
-          ],
-          "title": "Default Transport",
-          "type": "string"
-        },
-        "enable_html": {
-          "default": true,
-          "title": "Enable Html",
-          "type": "boolean"
         },
         "printers": {
           "items": {

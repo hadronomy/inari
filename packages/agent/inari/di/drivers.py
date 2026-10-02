@@ -13,8 +13,6 @@ from ..printing.drivers import (
     WindowsSpooler,
 )
 from ..printing.service import PrinterService
-from ..printing.protocols import PrinterTransport
-from ..printing.renderers import EscPosImageReceiptRenderer, EscPosRenderer
 
 
 def build_printer_drivers(
@@ -26,15 +24,10 @@ def build_printer_drivers(
         drivers.append(
             WindowsPrinterDriver(
                 spooler=WindowsSpooler(),
-                default_transport=PrinterTransport(settings.default_printer_mode),
             )
         )
     elif current_platform in {"Linux", "Darwin"}:
-        drivers.append(
-            CupsPrinterDriver(
-                default_transport=PrinterTransport(settings.default_printer_mode),
-            )
-        )
+        drivers.append(CupsPrinterDriver())
     if settings.network_printers:
         drivers.append(
             RawSocketPrinterDriver(
@@ -60,6 +53,4 @@ class DriverProvider(Provider):
         return PrinterService(
             settings=settings,
             driver_registry=driver_registry,
-            structured_receipt_renderer=EscPosRenderer(),
-            image_receipt_renderer=EscPosImageReceiptRenderer(),
         )

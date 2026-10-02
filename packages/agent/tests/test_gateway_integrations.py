@@ -110,7 +110,7 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
     )
     http_client = FakeAsyncHttpClient(
         response_payload=_enrollment_response_payload(
-            controller_actions=("jobs:create",),
+            controller_actions=("jobs:cancel",),
             certificate={
                 "mode": "step_ca",
                 "enrollment": {
@@ -165,7 +165,7 @@ async def test_enrollment_uses_bearer_enrollment_token_and_persists_step_ca_boot
     secret_store = MemorySecretStore()
     http_client = FakeAsyncHttpClient(
         response_payload=_enrollment_response_payload(
-            controller_actions=("jobs:create",),
+            controller_actions=("jobs:cancel",),
             certificate={
                 "mode": "step_ca",
                 "enrollment": {
@@ -290,7 +290,7 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
         http_client_factory=_http_client_factory(
             FakeAsyncHttpClient(
                 response_payload=_enrollment_response_payload(
-                    controller_actions=("jobs:create",),
+                    controller_actions=("jobs:cancel",),
                     certificate={
                         "mode": "step_ca",
                         "enrollment": {
@@ -337,7 +337,7 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
     secret_store = MemorySecretStore()
     http_client = FakeAsyncHttpClient(
         response_payload=_enrollment_response_payload(
-            controller_actions=("jobs:create",),
+            controller_actions=("jobs:cancel",),
             certificate={
                 "mode": "step_ca",
                 "enrollment": {
@@ -867,9 +867,8 @@ def _gateway_snapshot_payload() -> GatewaySnapshotPayload:
                 },
             },
             "capabilities": {
-                "supported_content_kinds": ["text"],
                 "supported_device_commands": ["cut_paper"],
-                "supported_controller_actions": ["jobs:create", "events:read"],
+                "supported_controller_actions": ["jobs:cancel", "events:read"],
                 "features": ["status_publication", "zenoh_data_plane"],
                 "transport": "https+zenoh",
                 "client_certificate_present": False,

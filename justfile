@@ -45,8 +45,8 @@ check-docs:
 
 # Regenerate and verify the local-agent contract consumed by the Rust client.
 check-contracts:
-    uv run --directory packages/agent python -m inari.local_api.openapi ../../contracts/local-agent.openapi.json
-    git diff --exit-code -- contracts/local-agent.openapi.json
+    uv run --directory packages/agent python -m inari.local_api.openapi ../../contracts/local-agent.openapi.json ../../contracts/local-agent.codegen.openapi.json
+    git diff --exit-code -- contracts/local-agent.openapi.json contracts/local-agent.codegen.openapi.json
 
 # Show the release changes Tegami would version without writing them.
 release-preview:

@@ -45,23 +45,38 @@ def _openapi_30(value: Any) -> Any:
     return schema
 
 
-def write_schema(destination: Path) -> None:
-    """Write the local-agent contract in a deterministic representation."""
-
+def _write_json(destination: Path, value: object) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
-        json.dumps(_openapi_30(app.openapi()), indent=2, sort_keys=True) + "\n",
+        json.dumps(value, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def write_contracts(canonical_destination: Path, codegen_destination: Path) -> None:
+    """Write the canonical contract and its OpenAPI 3.0 codegen projection."""
+
+    canonical = app.openapi()
+    _write_json(canonical_destination, canonical)
+    codegen = _openapi_30(canonical)
+    if not isinstance(codegen, dict):  # pragma: no cover - FastAPI contract invariant
+        raise TypeError("FastAPI returned a non-object OpenAPI contract")
+    codegen["openapi"] = "3.0.3"
+    codegen.pop("jsonSchemaDialect", None)
+    _write_json(codegen_destination, codegen)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Export the Inari local-agent OpenAPI contract."
     )
-    parser.add_argument("destination", type=Path)
+    parser.add_argument("canonical_destination", type=Path)
+    parser.add_argument("codegen_destination", type=Path)
     arguments = parser.parse_args()
-    write_schema(arguments.destination)
+    write_contracts(
+        arguments.canonical_destination,
+        arguments.codegen_destination,
+    )
 
 
 if __name__ == "__main__":

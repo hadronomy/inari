@@ -4,7 +4,7 @@ from dataclasses import MISSING, dataclass, fields
 from enum import Enum, StrEnum
 from typing import Any, ClassVar, Mapping, Self, TypeAlias, get_type_hints
 
-from .protocols import CutMode, PrinterTransport
+from .protocols import CutMode
 
 
 class DeviceCommandKind(StrEnum):
@@ -69,7 +69,6 @@ class OpenCashDrawer(DeviceCommand):
 
 @dataclass(slots=True, frozen=True)
 class PrintTestPage(DeviceCommand):
-    transport: PrinterTransport = PrinterTransport.AUTO
     kind: ClassVar[DeviceCommandKind] = DeviceCommandKind.PRINT_TEST_PAGE
 
 

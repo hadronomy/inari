@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
 from pathlib import Path
 from typing import cast
 
 import pytest
 
 from inari.config import AgentSettings
-from inari.drivers import DeviceIdentity, DeviceTransport
+from inari.db.migrations import DatabaseMigrator
 from inari.gateway.connector import GatewayConnector
 from inari.gateway.data_plane.base import GatewayDataPlaneTransport
 from inari.gateway.enrollment import GatewayEnrollmentService
@@ -28,23 +27,12 @@ from inari.gateway.bridges.runtime import (
     GatewayCommandDispatcher,
     GatewayRuntimeEventForwarder,
 )
-from inari.printing.protocols import (
-    PrinterCapabilities,
-    PrinterDevice,
-    PrinterTransport,
-)
 from inari.runtime.events import EventHub
 from inari.runtime.models import (
-    DeviceConnectionState,
-    DeviceRecord,
     JobEventRecord,
-    JobKind,
-    JobRecord,
-    JobState,
     RuntimeEventKind,
     utc_now,
 )
-from inari.runtime.jobs.service import JobService
 from inari.runtime.store import RuntimeStore
 from inari.security.models import GatewayMode
 from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
@@ -53,7 +41,7 @@ from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 @pytest.mark.anyio
 async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -> None:
     store = RuntimeStore(_database_path(tmp_path))
-    store.initialize()
+    DatabaseMigrator(store.database_path).ensure_current()
     connector = GatewayConnector(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
@@ -90,7 +78,7 @@ async def test_connector_marks_online_after_successful_status_sync(
         controller_instance_id="controller-1",
     )
     store = RuntimeStore(_database_path(tmp_path))
-    store.initialize()
+    DatabaseMigrator(store.database_path).ensure_current()
     transport = FakeDataPlaneTransport()
     connector = GatewayConnector(
         settings=AgentSettings(
@@ -120,50 +108,11 @@ async def test_connector_marks_online_after_successful_status_sync(
 
 
 @pytest.mark.anyio
-async def test_dispatcher_accepts_remote_print_job_and_persists_response(
-    tmp_path: Path,
-) -> None:
-    store = RuntimeStore(_database_path(tmp_path))
-    store.initialize()
-    repository = GatewayRepository(store)
-    dispatcher = GatewayCommandDispatcher(
-        job_service=cast(JobService, StubJobService()),
-        gateway_repository=repository,
-    )
-    enrollment = _enrollment_record(
-        controller_actions=(ControllerAction.JOBS_CREATE,),
-    )
-    from inari.gateway.protocol import ControllerSubmitPrintJobMessage
-
-    message = ControllerSubmitPrintJobMessage.model_validate(
-        {
-            "type": "controller.command.submit_print_job",
-            "message_id": "msg_1",
-            "command_id": "cmd_1",
-            "sequence": 1,
-            "payload": {
-                "content": {"kind": "text", "text": "Hello gateway"},
-                "target": {"printer_name": "Kitchen Printer"},
-            },
-        }
-    )
-
-    await dispatcher.handle_submit_print_job(message, enrollment=enrollment)
-
-    record = repository.get_inbound_command("cmd_1")
-    assert record is not None
-    assert record.state.value == "accepted"
-    outbox = repository.list_pending_outbox()
-    assert len(outbox) == 1
-    assert outbox[0].message_type == "agent.command.accepted"
-
-
-@pytest.mark.anyio
 async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
     tmp_path: Path,
 ) -> None:
     store = RuntimeStore(_database_path(tmp_path))
-    store.initialize()
+    DatabaseMigrator(store.database_path).ensure_current()
     repository = GatewayRepository(store)
     event_hub = EventHub()
     forwarder = GatewayRuntimeEventForwarder(
@@ -206,9 +155,6 @@ class FakeEnrollmentService:
 
 
 class FakeCommandDispatcher:
-    async def handle_submit_print_job(self, message, *, enrollment) -> None:
-        return None
-
     async def handle_execute_device_command(self, message, *, enrollment) -> None:
         return None
 
@@ -251,55 +197,6 @@ class _NullCertificateService:
         return None
 
 
-class StubJobService:
-    def __init__(self) -> None:
-        device = DeviceRecord.from_printer(
-            PrinterDevice(
-                name="Kitchen Printer",
-                driver_key="tests.fake-printers",
-                identity=DeviceIdentity(
-                    transport=DeviceTransport.SPOOLER,
-                    os_instance_id="test-queue:kitchen",
-                ),
-                is_default=True,
-                preferred_transport=PrinterTransport.RAW,
-                capabilities=PrinterCapabilities(
-                    raw=True, text=True, documents=True, cash_drawer=True
-                ),
-            ),
-            connection_state=DeviceConnectionState.ONLINE,
-        )
-        now = utc_now()
-        self.job = JobRecord(
-            id="job_remote_1",
-            kind=JobKind.PRINT,
-            operation="print_job",
-            device_id=device.id,
-            device_kind=device.kind,
-            device_name=device.name,
-            state=JobState.QUEUED,
-            request_payload={"content": {"kind": "text", "text": "Hello gateway"}},
-            request_metadata={"source": "remote"},
-            content_kind="text",
-            command_kind=None,
-            attempt_count=0,
-            max_attempts=3,
-            created_at=now,
-            updated_at=now,
-            queued_at=now,
-            next_run_at=now + timedelta(seconds=1),
-        )
-
-    async def enqueue_print(self, operation):
-        return self.job
-
-    async def enqueue_command(self, operation):
-        return self.job
-
-    async def cancel(self, job_id: str) -> JobRecord:
-        return self.job
-
-
 def _database_path(temp_dir: Path) -> Path:
     return temp_dir / "runtime.sqlite3"
 
@@ -335,9 +232,8 @@ def _snapshot_provider() -> GatewaySnapshotPayload:
                 },
             },
             "capabilities": {
-                "supported_content_kinds": ["text"],
                 "supported_device_commands": ["cut_paper"],
-                "supported_controller_actions": ["jobs:create", "events:read"],
+                "supported_controller_actions": ["jobs:cancel", "events:read"],
                 "features": ["status_publication", "zenoh_data_plane"],
                 "transport": "https+zenoh",
                 "client_certificate_present": False,

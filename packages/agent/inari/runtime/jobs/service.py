@@ -1,17 +1,15 @@
 from __future__ import annotations
 
+from ...config import AgentSettings
+from ...core.exceptions import AgentError
 from ..devices.service import DeviceCatalog
 from ..events import EventHub
 from ..models import JobEventRecord, JobKind, JobRecord, JobState, RuntimeEventKind
 from ..repositories import JobRepository
 from .operations import (
     QueuedDeviceCommandOperation,
-    QueuedPrintOperation,
     serialize_device_command_operation,
-    serialize_print_operation,
 )
-from ...config import AgentSettings
-from ...core.exceptions import AgentError
 
 
 class JobService:
@@ -27,24 +25,6 @@ class JobService:
         self.job_repository = job_repository
         self.device_catalog = device_catalog
         self.event_hub = event_hub
-
-    async def enqueue_print(self, operation: QueuedPrintOperation) -> JobRecord:
-        device = await self.device_catalog.resolve_target(operation.target)
-        canonical = operation.with_resolved_printer(
-            device_id=device.id, printer_name=device.name
-        )
-        job = self.job_repository.create(
-            kind=JobKind.PRINT,
-            operation="print_job",
-            device=device,
-            request_payload=serialize_print_operation(canonical),
-            request_metadata=canonical.job.metadata,
-            content_kind=canonical.job.content.kind.value,
-            command_kind=None,
-            max_attempts=self.settings.job_max_attempts,
-        )
-        await self.publish_event(RuntimeEventKind.JOB_QUEUED, job)
-        return job
 
     async def enqueue_command(
         self, operation: QueuedDeviceCommandOperation

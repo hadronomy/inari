@@ -17,7 +17,6 @@ from ..protocols.types import (
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
-    RenderedDocument,
 )
 from ...drivers.base import DeviceIdentity, DeviceKind, DeviceTransport, DriverMetadata
 from .base import PrinterDriver
@@ -39,7 +38,6 @@ class CupsAPI(Protocol):
 @dataclass(slots=True)
 class CupsPrinterDriver(PrinterDriver):
     cups_api: CupsAPI | None = None
-    default_transport: PrinterTransport = PrinterTransport.AUTO
     raw_name_hints: frozenset[str] = field(
         default_factory=lambda: RECEIPT_RAW_NAME_HINTS
     )
@@ -97,17 +95,6 @@ class CupsPrinterDriver(PrinterDriver):
                 logger.debug("Failed to query CUPS default printer", exc_info=True)
         return self._default_printer_from_cli(optional=True)
 
-    def resolve_transport(
-        self, printer: PrinterDevice, requested: PrinterTransport
-    ) -> PrinterTransport:
-        if requested is not PrinterTransport.AUTO:
-            self._ensure_transport_supported(printer, requested)
-            return requested
-        if self.default_transport is not PrinterTransport.AUTO:
-            self._ensure_transport_supported(printer, self.default_transport)
-            return self.default_transport
-        return printer.preferred_transport
-
     def submit_raw_job(
         self, printer: PrinterDevice, payload: bytes, *, document_name: str
     ) -> PrintJobResult:
@@ -122,41 +109,6 @@ class CupsPrinterDriver(PrinterDriver):
             printer=printer,
             transport=PrinterTransport.RAW,
             bytes_written=len(payload),
-            job_id=job_id,
-        )
-
-    def submit_text_job(
-        self, printer: PrinterDevice, text: str, *, document_name: str
-    ) -> PrintJobResult:
-        self._ensure_transport_supported(printer, PrinterTransport.TEXT)
-        payload = text.encode("utf-8", errors="replace")
-        job_id = self._submit_bytes(
-            printer_name=printer.name,
-            payload=payload,
-            document_name=document_name,
-            raw=False,
-        )
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.TEXT,
-            bytes_written=len(payload),
-            job_id=job_id,
-        )
-
-    def submit_document_job(
-        self, printer: PrinterDevice, document: RenderedDocument
-    ) -> PrintJobResult:
-        self._ensure_transport_supported(printer, PrinterTransport.DOCUMENT)
-        job_id = self._submit_bytes(
-            printer_name=printer.name,
-            payload=document.content,
-            document_name=document.document_name,
-            raw=document.data_type.upper() == "RAW",
-        )
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.DOCUMENT,
-            bytes_written=len(document.content),
             job_id=job_id,
         )
 
@@ -313,12 +265,7 @@ class CupsPrinterDriver(PrinterDriver):
     def _ensure_transport_supported(
         printer: PrinterDevice, transport: PrinterTransport
     ) -> None:
-        supported = {
-            PrinterTransport.RAW: printer.supports_raw,
-            PrinterTransport.TEXT: printer.supports_text,
-            PrinterTransport.DOCUMENT: printer.supports_documents,
-        }
-        if supported.get(transport, False):
+        if transport is PrinterTransport.RAW and printer.supports_raw:
             return
         raise PrinterServiceError(
             "UNSUPPORTED_TRANSPORT",

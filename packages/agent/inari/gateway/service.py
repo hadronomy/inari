@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable, Mapping, Protocol
 
 from ..printing.commands import DeviceCommandKind
-from ..printing.jobs import PrintContentKind
 from ..core.version import API_VERSION, SERVICE_NAME
 from .edge.caddy import CaddyControllerProfile
 from .models import SUPPORTED_CONTROLLER_ACTIONS, resolve_mutual_tls_policy
@@ -172,7 +171,6 @@ class GatewaySnapshotBuilder:
                 ),
             ),
             capabilities=GatewayCapabilityDescriptor(
-                supported_content_kinds=tuple(kind.value for kind in PrintContentKind),
                 supported_device_commands=tuple(
                     kind.value for kind in DeviceCommandKind
                 ),

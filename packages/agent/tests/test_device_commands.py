@@ -11,7 +11,7 @@ from inari.printing.commands import (
     FeedLines,
     PrintTestPage,
 )
-from inari.printing.protocols import CutMode, PrinterTransport
+from inari.printing.protocols import CutMode
 from inari.runtime.jobs.operations import (
     DeviceTargetRef,
     QueuedDeviceCommandOperation,
@@ -21,12 +21,12 @@ from inari.runtime.jobs.operations import (
 
 
 def test_device_command_roundtrip_uses_kind_registry() -> None:
-    payload = PrintTestPage(transport=PrinterTransport.RAW).to_payload()
+    payload = PrintTestPage().to_payload()
 
     command = DeviceCommand.from_payload(payload)
 
     assert isinstance(command, PrintTestPage)
-    assert command.transport is PrinterTransport.RAW
+    assert command.to_payload() == {"kind": "print_test_page"}
 
 
 @pytest.mark.parametrize("command_type", [FeedLines, FeedDots])

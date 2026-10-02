@@ -5,7 +5,6 @@ from .types import (
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
-    RenderedDocument,
 )
 
 __all__ = [
@@ -15,5 +14,4 @@ __all__ = [
     "PrinterCapabilities",
     "PrinterDevice",
     "PrinterTransport",
-    "RenderedDocument",
 ]

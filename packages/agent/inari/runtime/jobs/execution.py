@@ -16,13 +16,11 @@ from ...printing.commands import (
 )
 from ...printing.protocols import PrintJobResult
 from ...printing.service import PrinterService
-from ..models import DeviceRecord, JobKind, JobRecord, JobState, RuntimeEventKind
+from ..models import DeviceRecord, JobRecord, JobState, RuntimeEventKind
 from ..repositories import JobRepository
 from .operations import (
     QueuedDeviceCommandOperation,
-    QueuedPrintOperation,
     deserialize_device_command_operation,
-    deserialize_print_operation,
 )
 from .service import JobService
 
@@ -40,12 +38,13 @@ RETRYABLE_ERROR_CODES = {
 }
 
 
-class PrinterOperationExecutor:
-    def __init__(self, printer_service: PrinterService) -> None:
+class PrinterCommandExecutor:
+    def __init__(
+        self,
+        *,
+        printer_service: PrinterService,
+    ) -> None:
         self.printer_service = printer_service
-
-    def execute_print(self, operation: QueuedPrintOperation) -> PrintJobResult:
-        return self.printer_service.print_job(operation.job)
 
     def execute_command(
         self, operation: QueuedDeviceCommandOperation
@@ -55,10 +54,9 @@ class PrinterOperationExecutor:
         match command:
             case OpenCashDrawer():
                 return self.printer_service.open_cash_drawer(printer_name=printer_name)
-            case PrintTestPage(transport=transport):
+            case PrintTestPage():
                 return self.printer_service.print_test_ticket(
                     printer_name=printer_name,
-                    transport=transport,
                 )
             case FeedLines(count=count):
                 return self.printer_service.feed_lines(count, printer_name=printer_name)
@@ -73,13 +71,10 @@ class PrinterOperationExecutor:
 
 
 class RuntimeJobExecutor:
-    def __init__(self, printer_executor: PrinterOperationExecutor) -> None:
+    def __init__(self, printer_executor: PrinterCommandExecutor) -> None:
         self.printer_executor = printer_executor
 
     def execute(self, job: JobRecord) -> PrintJobResult:
-        if job.kind is JobKind.PRINT:
-            operation = deserialize_print_operation(job.request_payload)
-            return self.printer_executor.execute_print(operation)
         operation = deserialize_device_command_operation(job.request_payload)
         return self.printer_executor.execute_command(operation)
 

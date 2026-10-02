@@ -17,13 +17,24 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import Connection
 from alembic.runtime.migration import MigrationContext
 
-from .schema import MANAGED_TABLE_NAMES, create_database_engine
+from .schema import create_database_engine
 
 logger = logging.getLogger(__name__)
 
 BASELINE_REVISION = "20260414_0001"
 ALEMBIC_VERSION_TABLE = "alembic_version"
 _SQLITE_INTERNAL_TABLES = frozenset({"sqlite_sequence"})
+_BASELINE_TABLE_NAMES = frozenset(
+    {
+        "devices",
+        "device_events",
+        "jobs",
+        "job_attempts",
+        "job_events",
+        "gateway_inbound_commands",
+        "gateway_outbox",
+    }
+)
 
 
 class DatabaseMigrationError(RuntimeError):
@@ -54,7 +65,7 @@ class _DatabaseState:
 
     @property
     def is_legacy_compatible(self) -> bool:
-        return self.current_revision is None and MANAGED_TABLE_NAMES.issubset(
+        return self.current_revision is None and _BASELINE_TABLE_NAMES.issubset(
             self.user_tables
         )
 

@@ -21,6 +21,7 @@ pkcs8.workspace = true
 progenitor.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
+regress.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true

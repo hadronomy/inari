@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
 import pytest
 
-from inari.config import AgentSettings
+from inari.db.migrations import DatabaseMigrator
 from inari.drivers import (
     DeviceIdentity,
     DeviceKind,
@@ -16,37 +15,24 @@ from inari.drivers import (
     DriverRegistry,
 )
 from inari.printing.drivers.base import PrinterDriver
-from inari.local_api.schemas import PrintJobRequest
-from inari.printing.service import PrinterService
 from inari.printing.protocols import (
     PrintJobResult,
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
-    RenderedDocument,
 )
 from inari.runtime.devices.discovery import DiscoveryCoordinator
 from inari.runtime.events import EventHub
-from inari.runtime.jobs.execution import (
-    DeviceWorkerPool,
-    JobScheduler,
-    LeaseRecoveryCoordinator,
-    PrinterOperationExecutor,
-    RuntimeJobExecutor,
-)
-from inari.runtime.models import DeviceRecord, JobRecord, JobState, build_device_id
-from inari.runtime.repositories import DeviceRepository, JobRepository
-from inari.runtime.devices.service import DeviceCatalog
-from inari.runtime.jobs.service import JobService
+from inari.runtime.models import DeviceRecord, build_device_id
+from inari.runtime.repositories import DeviceRepository
 from inari.runtime.store import RuntimeStore
-from inari.runtime.supervisor import RuntimeSupervisor
 
 
 @dataclass(slots=True)
 class FakePrinterDriver(PrinterDriver):
     devices: tuple[PrinterDevice, ...]
     default_name: str | None = None
-    text_jobs: list[tuple[str, str, str]] = field(default_factory=list)
+    raw_jobs: list[tuple[str, bytes, str]] = field(default_factory=list)
 
     metadata: ClassVar[DriverMetadata] = DriverMetadata(
         key="tests.fake-printers",
@@ -70,18 +56,10 @@ class FakePrinterDriver(PrinterDriver):
     def get_default_device_name(self) -> str | None:
         return self.default_name
 
-    def resolve_transport(
-        self, printer: PrinterDevice, requested: PrinterTransport
-    ) -> PrinterTransport:
-        return (
-            requested
-            if requested is not PrinterTransport.AUTO
-            else printer.preferred_transport
-        )
-
     def submit_raw_job(
         self, printer: PrinterDevice, payload: bytes, *, document_name: str
     ) -> PrintJobResult:
+        self.raw_jobs.append((printer.name, payload, document_name))
         return PrintJobResult(
             printer=printer,
             transport=PrinterTransport.RAW,
@@ -89,30 +67,9 @@ class FakePrinterDriver(PrinterDriver):
             job_id=1,
         )
 
-    def submit_text_job(
-        self, printer: PrinterDevice, text: str, *, document_name: str
-    ) -> PrintJobResult:
-        self.text_jobs.append((printer.name, text, document_name))
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.TEXT,
-            bytes_written=len(text),
-            job_id=2,
-        )
-
-    def submit_document_job(
-        self, printer: PrinterDevice, document: RenderedDocument
-    ) -> PrintJobResult:
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.DOCUMENT,
-            bytes_written=len(document.content),
-            job_id=3,
-        )
-
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         return PrintJobResult(
-            printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=4
+            printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=2
         )
 
 
@@ -152,16 +109,16 @@ async def test_discovery_ignores_timestamp_only_device_changes(
             os_instance_id="test-queue:onenote",
         ),
         is_default=False,
-        preferred_transport=PrinterTransport.TEXT,
+        preferred_transport=PrinterTransport.RAW,
         capabilities=PrinterCapabilities(
-            raw=False, text=True, documents=True, cash_drawer=False
+            raw=True, text=False, documents=False, cash_drawer=False
         ),
         metadata={"source": "windows_spooler", "queue_name": "OneNote (Desktop)"},
     )
     driver = FakePrinterDriver(devices=(printer,))
     registry = DriverRegistry(drivers=(driver,))
     store = RuntimeStore(tmp_path / "runtime.sqlite3")
-    store.initialize()
+    DatabaseMigrator(store.database_path).ensure_current()
     repository = DeviceRepository(store)
     discovery = DiscoveryCoordinator(
         driver_registry=registry,
@@ -170,7 +127,6 @@ async def test_discovery_ignores_timestamp_only_device_changes(
     )
     device_id = build_device_id(
         kind=DeviceKind.PRINTER,
-        driver_key=printer.driver_key,
         identity=printer.identity,
     )
 
@@ -179,112 +135,3 @@ async def test_discovery_ignores_timestamp_only_device_changes(
 
     events = repository.list_events(device_id, limit=10)
     assert [event.event_type for event in events] == ["device.connected"]
-
-
-@pytest.mark.anyio
-@pytest.mark.timeout(10)
-async def test_supervisor_executes_queued_print_jobs_asynchronously(
-    tmp_path: Path,
-) -> None:
-    printer = PrinterDevice(
-        name="Kitchen Printer",
-        driver_key=FakePrinterDriver.metadata.key,
-        identity=DeviceIdentity(
-            transport=DeviceTransport.SPOOLER,
-            os_instance_id="test-queue:kitchen",
-        ),
-        is_default=True,
-        preferred_transport=PrinterTransport.TEXT,
-        capabilities=PrinterCapabilities(
-            raw=False, text=True, documents=True, cash_drawer=False
-        ),
-    )
-    driver = FakePrinterDriver(devices=(printer,), default_name=printer.name)
-    registry = DriverRegistry(drivers=(driver,))
-
-    settings = AgentSettings(
-        runtime_database_path=tmp_path / "runtime.sqlite3",
-        discovery_poll_interval_seconds=0.05,
-        scheduler_poll_interval_seconds=0.05,
-        scheduler_batch_size=8,
-        job_heartbeat_interval_seconds=0.05,
-        job_dispatch_lease_seconds=1,
-        job_execution_lease_seconds=1,
-        job_execution_timeout_seconds=5.0,
-        job_lease_recovery_interval_seconds=0.05,
-    )
-    printer_service = PrinterService(settings=settings, driver_registry=registry)
-    store = RuntimeStore(settings.resolved_runtime_database_path)
-    event_hub = EventHub()
-    device_repository = DeviceRepository(store)
-    job_repository = JobRepository(store)
-    discovery = DiscoveryCoordinator(
-        driver_registry=registry,
-        device_repository=device_repository,
-        event_hub=event_hub,
-    )
-    device_catalog = DeviceCatalog(
-        device_repository=device_repository,
-        discovery=discovery,
-        printer_service=printer_service,
-    )
-    job_service = JobService(
-        settings=settings,
-        job_repository=job_repository,
-        device_catalog=device_catalog,
-        event_hub=event_hub,
-    )
-    worker_pool = DeviceWorkerPool(
-        settings=settings,
-        job_repository=job_repository,
-        job_service=job_service,
-        executor=RuntimeJobExecutor(PrinterOperationExecutor(printer_service)),
-    )
-    supervisor = RuntimeSupervisor(
-        settings=settings,
-        store=store,
-        device_catalog=device_catalog,
-        job_service=job_service,
-        job_scheduler=JobScheduler(
-            settings=settings,
-            job_repository=job_repository,
-            job_service=job_service,
-            worker_pool=worker_pool,
-        ),
-        lease_recovery=LeaseRecoveryCoordinator(
-            settings=settings,
-            job_repository=job_repository,
-            job_service=job_service,
-        ),
-        worker_pool=worker_pool,
-    )
-
-    await supervisor.start()
-    try:
-        job = await job_service.enqueue_print(
-            PrintJobRequest.model_validate(
-                {
-                    "content": {"kind": "text", "text": "Hello queue"},
-                    "target": {"printer_name": printer.name},
-                    "options": {"transport": "text"},
-                }
-            ).to_operation()
-        )
-        completed = await wait_for_job(job_service, job.id)
-    finally:
-        await supervisor.stop()
-
-    assert job.state is JobState.QUEUED
-    assert completed.state is JobState.SUCCEEDED
-    assert driver.text_jobs == [(printer.name, "Hello queue", "Text Document")]
-
-
-async def wait_for_job(job_service: JobService, job_id: str) -> JobRecord:
-    deadline = asyncio.get_running_loop().time() + 2.0
-    while True:
-        job = job_service.get_job(job_id)
-        if job is not None and job.state is JobState.SUCCEEDED:
-            return job
-        if asyncio.get_running_loop().time() >= deadline:
-            raise AssertionError(f"Job {job_id!r} did not complete in time.")
-        await asyncio.sleep(0.05)

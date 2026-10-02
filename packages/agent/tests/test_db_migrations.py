@@ -63,7 +63,7 @@ def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(
     assert migrated_device is not None
     assert migrated_device[0].startswith("dev_")
     assert len(migrated_device[0]) == 36
-    assert migrated_device[1:] == ("spooler", "legacy:legacy.driver:Legacy Printer")
+    assert migrated_device[1:] == ("spooler", "legacy-name:Legacy Printer")
     assert outbox_state == ("sent",)
     assert "acknowledged_at" not in columns
 

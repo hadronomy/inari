@@ -53,8 +53,6 @@ pub struct RuntimeDescriptor {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CapabilityDescriptor {
     #[serde(default)]
-    pub supported_content_kinds: Vec<String>,
-    #[serde(default)]
     pub supported_device_commands: Vec<String>,
     #[serde(default)]
     pub supported_controller_actions: Vec<String>,

@@ -12,7 +12,6 @@ from ..protocols.types import (
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
-    RenderedDocument,
 )
 from ...drivers.base import DeviceIdentity, DeviceKind, DeviceTransport, DriverMetadata
 from .base import PrinterDriver
@@ -56,14 +55,6 @@ class RawSocketPrinterDriver(PrinterDriver):
                 return config.name
         return None
 
-    def resolve_transport(
-        self, printer: PrinterDevice, requested: PrinterTransport
-    ) -> PrinterTransport:
-        if requested is not PrinterTransport.AUTO:
-            self._ensure_transport_supported(printer, requested)
-            return requested
-        return printer.preferred_transport
-
     def submit_raw_job(
         self, printer: PrinterDevice, payload: bytes, *, document_name: str
     ) -> PrintJobResult:
@@ -71,30 +62,6 @@ class RawSocketPrinterDriver(PrinterDriver):
         bytes_written = self._send(printer.name, payload)
         return PrintJobResult(
             printer=printer, transport=PrinterTransport.RAW, bytes_written=bytes_written
-        )
-
-    def submit_text_job(
-        self, printer: PrinterDevice, text: str, *, document_name: str
-    ) -> PrintJobResult:
-        self._ensure_transport_supported(printer, PrinterTransport.TEXT)
-        config = self._require_config(printer.name)
-        payload = text.encode(config.encoding, errors="replace")
-        bytes_written = self._send(printer.name, payload)
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.TEXT,
-            bytes_written=bytes_written,
-        )
-
-    def submit_document_job(
-        self, printer: PrinterDevice, document: RenderedDocument
-    ) -> PrintJobResult:
-        self._ensure_transport_supported(printer, PrinterTransport.DOCUMENT)
-        bytes_written = self._send(printer.name, document.content)
-        return PrintJobResult(
-            printer=printer,
-            transport=PrinterTransport.DOCUMENT,
-            bytes_written=bytes_written,
         )
 
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
@@ -155,12 +122,7 @@ class RawSocketPrinterDriver(PrinterDriver):
     def _ensure_transport_supported(
         printer: PrinterDevice, transport: PrinterTransport
     ) -> None:
-        supported = {
-            PrinterTransport.RAW: printer.supports_raw,
-            PrinterTransport.TEXT: printer.supports_text,
-            PrinterTransport.DOCUMENT: printer.supports_documents,
-        }
-        if supported.get(transport, False):
+        if transport is PrinterTransport.RAW and printer.supports_raw:
             return
         raise PrinterServiceError(
             "UNSUPPORTED_TRANSPORT",

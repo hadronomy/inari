@@ -9,7 +9,7 @@ from .devices import DeviceDirectorySummaryResponse
 from .events import RuntimeEventResponse
 from .jobs import QueueSummaryResponse
 from ...printing.commands import DeviceCommandKind
-from ...printing.jobs import PrintContentKind
+from ...documents import DocumentKind
 
 
 class ServiceDescriptorResponse(APIModel):
@@ -23,7 +23,7 @@ class SystemStatusResponse(APIModel):
     service: ServiceDescriptorResponse
     devices: DeviceDirectorySummaryResponse
     queue: QueueSummaryResponse
-    supported_content_kinds: tuple[PrintContentKind, ...]
+    supported_document_kinds: tuple[DocumentKind, ...]
     supported_device_commands: tuple[DeviceCommandKind, ...]
 
 

@@ -28,25 +28,6 @@
         "title": "AuthenticatedPrincipalResponse",
         "type": "object"
       },
-      "BinaryContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "base64": {
-            "title": "Base64",
-            "type": "string"
-          },
-          "declared_mime_type": {
-            "nullable": true,
-            "title": "Declared Mime Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "base64"
-        ],
-        "title": "BinaryContentInput",
-        "type": "object"
-      },
       "CutMode": {
         "enum": [
           "full",
@@ -59,10 +40,8 @@
         "additionalProperties": false,
         "properties": {
           "kind": {
+            "const": "cut_paper",
             "default": "cut_paper",
-            "enum": [
-              "cut_paper"
-            ],
             "title": "Kind",
             "type": "string"
           },
@@ -155,6 +134,7 @@
           }
         },
         "required": [
+          "target",
           "command"
         ],
         "title": "DeviceCommandRequest",
@@ -228,8 +208,14 @@
             "type": "integer"
           },
           "default_device": {
-            "$ref": "#/components/schemas/DefaultDeviceSummaryResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefaultDeviceSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "kind_counts": {
             "additionalProperties": {
@@ -267,10 +253,8 @@
             "type": "array"
           },
           "ok": {
+            "const": true,
             "default": true,
-            "enum": [
-              true
-            ],
             "title": "Ok",
             "type": "boolean"
           }
@@ -314,8 +298,14 @@
             "$ref": "#/components/schemas/DeviceClass"
           },
           "driver": {
-            "$ref": "#/components/schemas/DriverResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DriverResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "driver_key": {
             "title": "Driver Key",
@@ -338,8 +328,14 @@
             "type": "string"
           },
           "printer": {
-            "$ref": "#/components/schemas/PrinterDetailsResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterDetailsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -357,18 +353,78 @@
         "additionalProperties": false,
         "properties": {
           "device_id": {
-            "nullable": true,
+            "maxLength": 256,
+            "minLength": 1,
             "title": "Device Id",
-            "type": "string"
-          },
-          "printer_name": {
-            "nullable": true,
-            "title": "Printer Name",
             "type": "string"
           }
         },
+        "required": [
+          "device_id"
+        ],
         "title": "DeviceTargetInput",
         "type": "object"
+      },
+      "DeviceWorkAcceptedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "ok": {
+            "const": true,
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "print_intent_id": {
+            "title": "Print Intent Id",
+            "type": "string"
+          },
+          "print_job_id": {
+            "title": "Print Job Id",
+            "type": "string"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "state": {
+            "const": "accepted",
+            "default": "accepted",
+            "title": "State",
+            "type": "string"
+          },
+          "state_version": {
+            "title": "State Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "print_intent_id",
+          "print_job_id",
+          "device_id",
+          "state_version",
+          "accepted_at",
+          "replayed"
+        ],
+        "title": "DeviceWorkAcceptedResponse",
+        "type": "object"
+      },
+      "DocumentKind": {
+        "enum": [
+          "receipt_image",
+          "report_pdf",
+          "label_document"
+        ],
+        "title": "DocumentKind",
+        "type": "string"
       },
       "DriverResponse": {
         "additionalProperties": false,
@@ -398,21 +454,95 @@
         "title": "DriverResponse",
         "type": "object"
       },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "correlation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]*$",
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProblemDetailsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error_code": {
+            "$ref": "#/components/schemas/ProblemCode"
+          },
+          "instance": {
+            "pattern": "^urn:inari:request:[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$",
+            "title": "Instance",
+            "type": "string"
+          },
+          "message_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Message Key",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "status": {
+            "maximum": 599.0,
+            "minimum": 400.0,
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "pattern": "^urn:inari:problem:v1:[a-z][a-z0-9_]*$",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "error_code",
+          "message_key",
+          "retryable",
+          "correlation_id"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
       "FeedDotsCommandInput": {
         "additionalProperties": false,
         "properties": {
           "count": {
-            "exclusiveMinimum": true,
+            "exclusiveMinimum": 0.0,
             "maximum": 255.0,
-            "minimum": 0.0,
             "title": "Count",
             "type": "integer"
           },
           "kind": {
+            "const": "feed_dots",
             "default": "feed_dots",
-            "enum": [
-              "feed_dots"
-            ],
             "title": "Kind",
             "type": "string"
           }
@@ -427,17 +557,14 @@
         "additionalProperties": false,
         "properties": {
           "count": {
-            "exclusiveMinimum": true,
+            "exclusiveMinimum": 0.0,
             "maximum": 24.0,
-            "minimum": 0.0,
             "title": "Count",
             "type": "integer"
           },
           "kind": {
+            "const": "feed_lines",
             "default": "feed_lines",
-            "enum": [
-              "feed_lines"
-            ],
             "title": "Kind",
             "type": "string"
           }
@@ -446,6 +573,46 @@
           "count"
         ],
         "title": "FeedLinesCommandInput",
+        "type": "object"
+      },
+      "FieldViolationCode": {
+        "enum": [
+          "required",
+          "invalid",
+          "unsupported",
+          "out_of_range",
+          "too_large",
+          "conflict"
+        ],
+        "title": "FieldViolationCode",
+        "type": "string"
+      },
+      "FieldViolationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/FieldViolationCode"
+          },
+          "message_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Message Key",
+            "type": "string"
+          },
+          "pointer": {
+            "maxLength": 512,
+            "pattern": "^(?:|/(?:[^~\\x00-\\x1f\\x7f]|~[01])*)$",
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pointer",
+          "code",
+          "message_key"
+        ],
+        "title": "FieldViolationResponse",
         "type": "object"
       },
       "GatewayExposure": {
@@ -468,9 +635,15 @@
             "type": "string"
           },
           "certificate_pem": {
-            "nullable": true,
-            "title": "Certificate Pem",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Pem"
           },
           "created_at": {
             "format": "date-time",
@@ -517,9 +690,15 @@
         "additionalProperties": false,
         "properties": {
           "base_url": {
-            "nullable": true,
-            "title": "Base Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
           },
           "certificate_bootstrap_pending": {
             "default": false,
@@ -527,8 +706,14 @@
             "type": "boolean"
           },
           "certificate_lifecycle": {
-            "$ref": "#/components/schemas/ManagedCertificateStatusResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedCertificateStatusResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "certificate_mode": {
             "$ref": "#/components/schemas/UpstreamCertificateMode"
@@ -539,41 +724,83 @@
             "type": "boolean"
           },
           "controller_instance_id": {
-            "nullable": true,
-            "title": "Controller Instance Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Instance Id"
           },
           "controller_name": {
-            "nullable": true,
-            "title": "Controller Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Name"
           },
           "data_plane_kind": {
-            "$ref": "#/components/schemas/UpstreamDataPlaneKind",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UpstreamDataPlaneKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "data_plane_namespace": {
-            "nullable": true,
-            "title": "Data Plane Namespace",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Plane Namespace"
           },
           "data_plane_session_mode": {
-            "$ref": "#/components/schemas/ZenohSessionMode",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ZenohSessionMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "detail": {
-            "nullable": true,
-            "title": "Detail",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
           },
           "edge_provider": {
             "$ref": "#/components/schemas/UpstreamEdgeProvider"
           },
           "enrolled_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Enrolled At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrolled At"
           },
           "failed_data_plane_connection_count": {
             "default": 0,
@@ -586,37 +813,73 @@
             "type": "integer"
           },
           "last_applied_controller_sequence": {
-            "nullable": true,
-            "title": "Last Applied Controller Sequence",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Applied Controller Sequence"
           },
           "last_command_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Command At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Command At"
           },
           "last_command_id": {
-            "nullable": true,
-            "title": "Last Command Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Command Id"
           },
           "last_data_plane_activity_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Data Plane Activity At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Data Plane Activity At"
           },
           "last_error": {
-            "nullable": true,
-            "title": "Last Error",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
           },
           "last_status_published_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Status Published At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status Published At"
           },
           "mode": {
             "$ref": "#/components/schemas/GatewayMode"
@@ -625,14 +888,26 @@
             "$ref": "#/components/schemas/MutualTlsMode"
           },
           "protocol_version": {
-            "nullable": true,
-            "title": "Protocol Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol Version"
           },
           "retry_delay_seconds": {
-            "nullable": true,
-            "title": "Retry Delay Seconds",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Delay Seconds"
           },
           "state": {
             "$ref": "#/components/schemas/UpstreamConnectionState"
@@ -671,33 +946,6 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
-      "HtmlDocumentContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "document_name": {
-            "default": "HTML Document",
-            "title": "Document Name",
-            "type": "string"
-          },
-          "html": {
-            "title": "Html",
-            "type": "string"
-          },
-          "kind": {
-            "default": "html",
-            "enum": [
-              "html"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "html"
-        ],
-        "title": "HtmlDocumentContentInput",
-        "type": "object"
-      },
       "JobAttemptResponse": {
         "additionalProperties": false,
         "properties": {
@@ -706,14 +954,26 @@
             "type": "integer"
           },
           "error": {
-            "$ref": "#/components/schemas/JobErrorResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobErrorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "finished_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Finished At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
           },
           "id": {
             "title": "Id",
@@ -748,10 +1008,8 @@
             "type": "array"
           },
           "ok": {
+            "const": true,
             "default": true,
-            "enum": [
-              true
-            ],
             "title": "Ok",
             "type": "boolean"
           },
@@ -793,9 +1051,15 @@
             "type": "integer"
           },
           "device_job_id": {
-            "nullable": true,
-            "title": "Device Job Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Job Id"
           },
           "target": {
             "$ref": "#/components/schemas/JobExecutionTargetResponse"
@@ -816,9 +1080,15 @@
         "additionalProperties": false,
         "properties": {
           "device_id": {
-            "nullable": true,
-            "title": "Device Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
           },
           "driver_key": {
             "title": "Driver Key",
@@ -862,10 +1132,8 @@
             "$ref": "#/components/schemas/JobResponse"
           },
           "ok": {
+            "const": true,
             "default": true,
-            "enum": [
-              true
-            ],
             "title": "Ok",
             "type": "boolean"
           }
@@ -880,7 +1148,6 @@
       },
       "JobKind": {
         "enum": [
-          "print_job",
           "device_command"
         ],
         "title": "JobKind",
@@ -893,10 +1160,8 @@
             "$ref": "#/components/schemas/JobResponse"
           },
           "ok": {
+            "const": true,
             "default": true,
-            "enum": [
-              true
-            ],
             "title": "Ok",
             "type": "boolean"
           }
@@ -915,14 +1180,26 @@
             "type": "integer"
           },
           "command_kind": {
-            "nullable": true,
-            "title": "Command Kind",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Kind"
           },
           "content_kind": {
-            "nullable": true,
-            "title": "Content Kind",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Kind"
           },
           "created_at": {
             "format": "date-time",
@@ -930,14 +1207,26 @@
             "type": "string"
           },
           "error": {
-            "$ref": "#/components/schemas/JobErrorResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobErrorResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "finished_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Finished At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
           },
           "id": {
             "title": "Id",
@@ -970,14 +1259,26 @@
             "type": "string"
           },
           "result": {
-            "$ref": "#/components/schemas/JobExecutionResultResponse",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobExecutionResultResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "started_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Started At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
           },
           "state": {
             "$ref": "#/components/schemas/JobState"
@@ -1055,9 +1356,15 @@
         "additionalProperties": false,
         "properties": {
           "client_id": {
-            "nullable": true,
-            "title": "Client Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
           },
           "purpose": {
             "$ref": "#/components/schemas/LocalChallengePurpose"
@@ -1110,9 +1417,15 @@
             "type": "string"
           },
           "origin": {
-            "nullable": true,
-            "title": "Origin",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "signature": {
             "title": "Signature",
@@ -1143,9 +1456,15 @@
             "type": "string"
           },
           "origin": {
-            "nullable": true,
-            "title": "Origin",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "pairing_secret": {
             "title": "Pairing Secret",
@@ -1216,8 +1535,14 @@
         "additionalProperties": false,
         "properties": {
           "attestation": {
-            "$ref": "#/components/schemas/LocalClientAttestationInput",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LocalClientAttestationInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "client_name": {
             "default": "local-client",
@@ -1225,12 +1550,18 @@
             "type": "string"
           },
           "requested_scopes": {
-            "items": {
-              "$ref": "#/components/schemas/AccessScope"
-            },
-            "nullable": true,
-            "title": "Requested Scopes",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AccessScope"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Scopes"
           }
         },
         "title": "LocalTokenRequest",
@@ -1249,10 +1580,16 @@
         "additionalProperties": false,
         "properties": {
           "active_pairing_expires_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Active Pairing Expires At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Pairing Expires At"
           },
           "paired": {
             "title": "Paired",
@@ -1335,15 +1672,27 @@
             "type": "boolean"
           },
           "current_expires_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Current Expires At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Expires At"
           },
           "detail": {
-            "nullable": true,
-            "title": "Detail",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
           },
           "failed_issue_count": {
             "default": 0,
@@ -1359,60 +1708,114 @@
             "$ref": "#/components/schemas/ManagedCertificateFailureReason"
           },
           "issuer": {
-            "nullable": true,
-            "title": "Issuer",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer"
           },
           "last_checked_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Checked At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
           },
           "last_failure_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Failure At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
           },
           "last_operation_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Operation At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Operation At"
           },
           "last_success_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Success At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
           },
           "next_action_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Next Action At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Action At"
           },
           "operation": {
             "$ref": "#/components/schemas/ManagedCertificateOperation"
           },
           "retry_delay_seconds": {
-            "nullable": true,
-            "title": "Retry Delay Seconds",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Delay Seconds"
           },
           "serial_number": {
-            "nullable": true,
-            "title": "Serial Number",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial Number"
           },
           "state": {
             "$ref": "#/components/schemas/ManagedCertificateState"
           },
           "subject": {
-            "nullable": true,
-            "title": "Subject",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
           },
           "successful_issue_count": {
             "default": 0,
@@ -1437,9 +1840,15 @@
         "additionalProperties": false,
         "properties": {
           "default_printer_device_id": {
-            "nullable": true,
-            "title": "Default Printer Device Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Printer Device Id"
           },
           "device_ids": {
             "default": [],
@@ -1464,10 +1873,16 @@
         "additionalProperties": false,
         "properties": {
           "controller_url": {
-            "maxLength": 2048,
-            "nullable": true,
-            "title": "Controller Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Url"
           },
           "invitation": {
             "maxLength": 2048,
@@ -1489,14 +1904,26 @@
             "$ref": "#/components/schemas/UpstreamCertificateMode"
           },
           "controller_instance_id": {
-            "nullable": true,
-            "title": "Controller Instance Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Instance Id"
           },
           "controller_name": {
-            "nullable": true,
-            "title": "Controller Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Name"
           },
           "controller_url": {
             "title": "Controller Url",
@@ -1546,14 +1973,26 @@
             "$ref": "#/components/schemas/UpstreamCertificateMode"
           },
           "controller_instance_id": {
-            "nullable": true,
-            "title": "Controller Instance Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Instance Id"
           },
           "controller_name": {
-            "nullable": true,
-            "title": "Controller Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Name"
           },
           "controller_url": {
             "title": "Controller Url",
@@ -1605,31 +2044,61 @@
         "additionalProperties": false,
         "properties": {
           "agent_id": {
-            "nullable": true,
-            "title": "Agent Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
           },
           "certificate_expires_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Certificate Expires At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Expires At"
           },
           "completed_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Completed At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
           },
           "controller_name": {
-            "nullable": true,
-            "title": "Controller Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Name"
           },
           "controller_url": {
-            "nullable": true,
-            "title": "Controller Url",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Controller Url"
           },
           "detail": {
             "title": "Detail",
@@ -1643,9 +2112,15 @@
             "type": "array"
           },
           "last_error": {
-            "nullable": true,
-            "title": "Last Error",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
           },
           "phase": {
             "enum": [
@@ -1661,9 +2136,15 @@
             "type": "string"
           },
           "protocol_version": {
-            "nullable": true,
-            "title": "Protocol Version",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol Version"
           },
           "restart_required": {
             "default": false,
@@ -1671,9 +2152,15 @@
             "type": "boolean"
           },
           "zenoh_namespace": {
-            "nullable": true,
-            "title": "Zenoh Namespace",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zenoh Namespace"
           }
         },
         "required": [
@@ -1696,41 +2183,13 @@
         "additionalProperties": false,
         "properties": {
           "kind": {
+            "const": "open_cash_drawer",
             "default": "open_cash_drawer",
-            "enum": [
-              "open_cash_drawer"
-            ],
             "title": "Kind",
             "type": "string"
           }
         },
         "title": "OpenCashDrawerCommandInput",
-        "type": "object"
-      },
-      "PdfDocumentContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "binary": {
-            "$ref": "#/components/schemas/BinaryContentInput"
-          },
-          "document_name": {
-            "default": "PDF Document",
-            "title": "Document Name",
-            "type": "string"
-          },
-          "kind": {
-            "default": "pdf",
-            "enum": [
-              "pdf"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "binary"
-        ],
-        "title": "PdfDocumentContentInput",
         "type": "object"
       },
       "PrincipalKind": {
@@ -1750,10 +2209,16 @@
             "type": "string"
           },
           "expires_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Expires At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
           },
           "issuer": {
             "title": "Issuer",
@@ -1774,9 +2239,15 @@
             "type": "string"
           },
           "token_id": {
-            "nullable": true,
-            "title": "Token Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Id"
           }
         },
         "required": [
@@ -1789,103 +2260,14 @@
         "title": "PrincipalResponse",
         "type": "object"
       },
-      "PrintContentKind": {
-        "enum": [
-          "structured_receipt",
-          "receipt_image",
-          "text",
-          "html",
-          "pdf",
-          "raw"
-        ],
-        "title": "PrintContentKind",
-        "type": "string"
-      },
-      "PrintExecutionOptionsInput": {
-        "additionalProperties": false,
-        "properties": {
-          "open_cash_drawer": {
-            "default": false,
-            "title": "Open Cash Drawer",
-            "type": "boolean"
-          },
-          "transport": {
-            "$ref": "#/components/schemas/PrinterTransport",
-            "default": "auto"
-          }
-        },
-        "title": "PrintExecutionOptionsInput",
-        "type": "object"
-      },
-      "PrintJobRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "discriminator": {
-              "mapping": {
-                "html": "#/components/schemas/HtmlDocumentContentInput",
-                "pdf": "#/components/schemas/PdfDocumentContentInput",
-                "raw": "#/components/schemas/RawDocumentContentInput",
-                "receipt_image": "#/components/schemas/ReceiptImageContentInput",
-                "structured_receipt": "#/components/schemas/StructuredReceiptContentInput",
-                "text": "#/components/schemas/TextDocumentContentInput"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/StructuredReceiptContentInput"
-              },
-              {
-                "$ref": "#/components/schemas/ReceiptImageContentInput"
-              },
-              {
-                "$ref": "#/components/schemas/TextDocumentContentInput"
-              },
-              {
-                "$ref": "#/components/schemas/HtmlDocumentContentInput"
-              },
-              {
-                "$ref": "#/components/schemas/PdfDocumentContentInput"
-              },
-              {
-                "$ref": "#/components/schemas/RawDocumentContentInput"
-              }
-            ],
-            "title": "Content"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
-          },
-          "options": {
-            "$ref": "#/components/schemas/PrintExecutionOptionsInput"
-          },
-          "target": {
-            "$ref": "#/components/schemas/DeviceTargetInput"
-          }
-        },
-        "required": [
-          "content"
-        ],
-        "title": "PrintJobRequest",
-        "type": "object"
-      },
       "PrintTestPageCommandInput": {
         "additionalProperties": false,
         "properties": {
           "kind": {
+            "const": "print_test_page",
             "default": "print_test_page",
-            "enum": [
-              "print_test_page"
-            ],
             "title": "Kind",
             "type": "string"
-          },
-          "transport": {
-            "$ref": "#/components/schemas/PrinterTransport",
-            "default": "auto"
           }
         },
         "title": "PrintTestPageCommandInput",
@@ -1914,8 +2296,14 @@
             "type": "boolean"
           },
           "preferred_transport": {
-            "$ref": "#/components/schemas/PrinterTransport",
-            "nullable": true
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterTransport"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "supported_transports": {
             "default": [],
@@ -1941,6 +2329,111 @@
         ],
         "title": "PrinterTransport",
         "type": "string"
+      },
+      "ProblemCode": {
+        "enum": [
+          "request_malformed",
+          "trust_required",
+          "permission_denied",
+          "resource_not_found",
+          "method_not_allowed",
+          "binding_required",
+          "request_conflict",
+          "idempotency_conflict",
+          "contract_mismatch",
+          "capability_changed",
+          "device_unavailable",
+          "paper_out",
+          "cover_open",
+          "queue_full",
+          "spool_quota_exceeded",
+          "spool_storage_low",
+          "payload_too_large",
+          "media_type_unsupported",
+          "payload_invalid",
+          "label_data_invalid",
+          "document_policy_rejected",
+          "document_processing_failed",
+          "certification_required",
+          "expired",
+          "recovery_fence",
+          "recovery_uncertain",
+          "outcome_unknown",
+          "service_unavailable",
+          "internal_error"
+        ],
+        "title": "ProblemCode",
+        "type": "string"
+      },
+      "ProblemDetailsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "field_violations": {
+            "items": {
+              "$ref": "#/components/schemas/FieldViolationResponse"
+            },
+            "maxItems": 32,
+            "title": "Field Violations",
+            "type": "array"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "managed_work_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed Work Id"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
+          }
+        },
+        "title": "ProblemDetailsResponse",
+        "type": "object"
       },
       "QueueSummaryResponse": {
         "additionalProperties": false,
@@ -1989,63 +2482,6 @@
           "total"
         ],
         "title": "QueueSummaryResponse",
-        "type": "object"
-      },
-      "RawDocumentContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "binary": {
-            "$ref": "#/components/schemas/BinaryContentInput"
-          },
-          "data_type": {
-            "default": "RAW",
-            "title": "Data Type",
-            "type": "string"
-          },
-          "document_name": {
-            "default": "Raw Document",
-            "title": "Document Name",
-            "type": "string"
-          },
-          "kind": {
-            "default": "raw",
-            "enum": [
-              "raw"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "binary"
-        ],
-        "title": "RawDocumentContentInput",
-        "type": "object"
-      },
-      "ReceiptImageContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "binary": {
-            "$ref": "#/components/schemas/BinaryContentInput"
-          },
-          "document_name": {
-            "default": "Receipt",
-            "title": "Document Name",
-            "type": "string"
-          },
-          "kind": {
-            "default": "receipt_image",
-            "enum": [
-              "receipt_image"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "binary"
-        ],
-        "title": "ReceiptImageContentInput",
         "type": "object"
       },
       "RuntimeEventKind": {
@@ -2130,34 +2566,6 @@
         "title": "ServiceDescriptorResponse",
         "type": "object"
       },
-      "StructuredReceiptContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "additionalProperties": true,
-            "title": "Data",
-            "type": "object"
-          },
-          "document_name": {
-            "default": "Receipt",
-            "title": "Document Name",
-            "type": "string"
-          },
-          "kind": {
-            "default": "structured_receipt",
-            "enum": [
-              "structured_receipt"
-            ],
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "StructuredReceiptContentInput",
-        "type": "object"
-      },
       "SystemStatusResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2165,10 +2573,8 @@
             "$ref": "#/components/schemas/DeviceDirectorySummaryResponse"
           },
           "ok": {
+            "const": true,
             "default": true,
-            "enum": [
-              true
-            ],
             "title": "Ok",
             "type": "boolean"
           },
@@ -2179,19 +2585,10 @@
             "$ref": "#/components/schemas/ServiceDescriptorResponse"
           },
           "status": {
+            "const": "healthy",
             "default": "healthy",
-            "enum": [
-              "healthy"
-            ],
             "title": "Status",
             "type": "string"
-          },
-          "supported_content_kinds": {
-            "items": {
-              "$ref": "#/components/schemas/PrintContentKind"
-            },
-            "title": "Supported Content Kinds",
-            "type": "array"
           },
           "supported_device_commands": {
             "items": {
@@ -2199,43 +2596,23 @@
             },
             "title": "Supported Device Commands",
             "type": "array"
+          },
+          "supported_document_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentKind"
+            },
+            "title": "Supported Document Kinds",
+            "type": "array"
           }
         },
         "required": [
           "service",
           "devices",
           "queue",
-          "supported_content_kinds",
+          "supported_document_kinds",
           "supported_device_commands"
         ],
         "title": "SystemStatusResponse",
-        "type": "object"
-      },
-      "TextDocumentContentInput": {
-        "additionalProperties": false,
-        "properties": {
-          "document_name": {
-            "default": "Text Document",
-            "title": "Document Name",
-            "type": "string"
-          },
-          "kind": {
-            "default": "text",
-            "enum": [
-              "text"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ],
-        "title": "TextDocumentContentInput",
         "type": "object"
       },
       "TokenResponse": {
@@ -2292,10 +2669,16 @@
             "type": "string"
           },
           "last_seen_at": {
-            "format": "date-time",
-            "nullable": true,
-            "title": "Last Seen At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
           },
           "origins": {
             "description": "Trusted browser origins for this local client. Native clients usually have none.",
@@ -2416,7 +2799,7 @@
     "title": "Inari",
     "version": "1.20.0a1"
   },
-  "openapi": "3.0.3",
+  "openapi": "3.1.0",
   "paths": {
     "/auth/local-challenge": {
       "post": {
@@ -2875,8 +3258,14 @@
             "name": "state",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/JobState",
-              "nullable": true,
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "State"
             }
           },
@@ -3212,47 +3601,6 @@
         ]
       }
     },
-    "/print-jobs": {
-      "post": {
-        "operationId": "submit_print_job",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PrintJobRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobResourceResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Submit Print Job",
-        "tags": [
-          "jobs"
-        ]
-      }
-    },
     "/system/status": {
       "get": {
         "operationId": "system_status",
@@ -3271,6 +3619,204 @@
         "summary": "System Status",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/device-work": {
+      "post": {
+        "operationId": "submit_device_work",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "document": {
+                  "contentType": "image/jpeg"
+                },
+                "envelope": {
+                  "contentType": "application/json"
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "document": {
+                    "description": "Exact JPEG receipt image.",
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "envelope": {
+                    "description": "RFC 8785 canonical receipt-image envelope.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "envelope",
+                  "document"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceWorkAcceptedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details",
+            "headers": {
+              "Cache-Control": {
+                "description": "Prevents storage of the nonce challenge.",
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              },
+              "DPoP-Nonce": {
+                "description": "Fresh single-use nonce for an RFC 9449 retry.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "WWW-Authenticate": {
+                "description": "DPoP challenge with the `use_dpop_nonce` error.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Submit Device Work",
+        "tags": [
+          "jobs"
         ]
       }
     }
