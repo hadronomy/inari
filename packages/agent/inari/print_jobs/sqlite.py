@@ -42,7 +42,7 @@ class SqlitePrintJobReader:
                 .mappings()
                 .one_or_none()
             )
-        return None if row is None else _job_from_row(row)
+        return None if row is None else print_job_from_row(row)
 
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         predicates = _scope_predicates(query.scope)
