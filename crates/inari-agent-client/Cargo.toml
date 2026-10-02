@@ -9,7 +9,7 @@ publish = false
 repository.workspace = true
 
 [dependencies]
-async-tungstenite.workspace = true
+async-tungstenite = { workspace = true, features = ["tokio-rustls-platform-verifier"] }
 base64.workspace = true
 chrono.workspace = true
 ed25519-dalek.workspace = true

@@ -27,7 +27,8 @@ enum IdentityState {
 
 #[derive(Clone, Debug)]
 pub struct AgentClientOptions {
-    pub endpoint: Url,
+    /// An explicit Agent Endpoint. None resolves it from the local bootstrap transport.
+    pub endpoint: Option<Url>,
     pub pairing_mode: PairingMode,
     pub request_timeout: Duration,
 }
@@ -35,8 +36,7 @@ pub struct AgentClientOptions {
 impl Default for AgentClientOptions {
     fn default() -> Self {
         Self {
-            endpoint: Url::parse(DEFAULT_AGENT_ENDPOINT)
-                .expect("the built-in local endpoint is valid"),
+            endpoint: None,
             pairing_mode: PairingMode::default(),
             request_timeout: Duration::from_secs(10),
         }
@@ -48,18 +48,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_the_agent_listener() {
-        assert_eq!(
+    fn defaults_to_local_endpoint_discovery() {
+        assert!(
             AgentClientOptions::default()
                 .endpoint
-                .as_str(),
-            DEFAULT_AGENT_ENDPOINT
+                .is_none()
         );
     }
 
     #[test]
     fn generated_transport_base_has_no_trailing_slash() {
-        let endpoint = AgentClientOptions::default().endpoint;
+        let endpoint = Url::parse(DEFAULT_AGENT_ENDPOINT).expect("valid fixture");
 
         assert_eq!(generated_transport_base(&endpoint), "http://127.0.0.1:7310");
     }
@@ -82,7 +81,7 @@ mod tests {
 }
 
 pub struct AgentClient {
-    endpoint: Url,
+    endpoint: Mutex<Option<Url>>,
     http: reqwest::Client,
     identity: Arc<dyn IdentityStore>,
     /// The outcome of reading [`Self::identity`], held for the life of the
@@ -108,11 +107,12 @@ impl AgentClient {
         identity: impl IdentityStore + 'static,
     ) -> AgentClientResult<Self> {
         let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(options.request_timeout)
             .build()
             .map_err(AgentClientError::Unavailable)?;
         Ok(Self {
-            endpoint: options.endpoint,
+            endpoint: Mutex::new(options.endpoint),
             http,
             identity: Arc::new(identity),
             resolved_identity: Mutex::new(IdentityState::Unread),
@@ -120,6 +120,31 @@ impl AgentClient {
             request_timeout: options.request_timeout,
             token: Mutex::new(None),
         })
+    }
+
+    /// Resolve the configured Agent Endpoint or discover it through the local bootstrap transport.
+    pub async fn endpoint(&self) -> AgentClientResult<Url> {
+        let mut endpoint = self.endpoint.lock().await;
+        if let Some(endpoint) = endpoint.as_ref() {
+            return Ok(endpoint.clone());
+        }
+        let resolved = match self.pairing_mode {
+            PairingMode::Loopback => {
+                Url::parse(DEFAULT_AGENT_ENDPOINT).map_err(AgentClientError::invalid_response)?
+            },
+            PairingMode::Native => {
+                #[cfg(windows)]
+                {
+                    crate::pairing::native_agent_endpoint().await?
+                }
+                #[cfg(not(windows))]
+                {
+                    return Err(AgentClientError::IdentityRequired);
+                }
+            },
+        };
+        *endpoint = Some(resolved.clone());
+        Ok(resolved)
     }
 
     pub fn has_identity(&self) -> AgentClientResult<bool> {
@@ -181,6 +206,13 @@ impl AgentClient {
             .await
             .map_err(map_transport_error)?;
         super::model::SetupSnapshot::try_from(response.into_inner())
+    }
+
+    pub async fn api_reference(&self) -> AgentClientResult<Url> {
+        self.endpoint()
+            .await?
+            .join("docs")
+            .map_err(AgentClientError::invalid_response)
     }
 
     pub async fn preview(
@@ -264,7 +296,7 @@ impl AgentClient {
 
     pub async fn events(&self) -> AgentClientResult<AgentEventStream> {
         let token = self.access_token().await?;
-        AgentEventStream::connect(&self.endpoint, &token.access_token).await
+        AgentEventStream::connect(&self.endpoint().await?, &token.access_token).await
     }
 
     async fn authorized_transport(&self) -> AgentClientResult<transport::Client> {
@@ -276,11 +308,15 @@ impl AgentClient {
         authorization.set_sensitive(true);
         headers.insert(AUTHORIZATION, authorization);
         let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers)
             .timeout(self.request_timeout)
             .build()
             .map_err(AgentClientError::Unavailable)?;
-        Ok(transport::Client::new_with_client(generated_transport_base(&self.endpoint), http))
+        Ok(transport::Client::new_with_client(
+            generated_transport_base(&self.endpoint().await?),
+            http,
+        ))
     }
 
     async fn access_token(&self) -> AgentClientResult<AccessToken> {
@@ -293,7 +329,7 @@ impl AgentClient {
 
         let identity = self.identity().await?;
         let transport = transport::Client::new_with_client(
-            generated_transport_base(&self.endpoint),
+            generated_transport_base(&self.endpoint().await?),
             self.http.clone(),
         );
         let request = self

@@ -64,6 +64,9 @@ impl DeviceCenter {
                         center.identity_retry_available = snapshot
                             .as_ref()
                             .is_some_and(|result| result.identity_retry_available);
+                        center.agent_endpoint = snapshot
+                            .as_ref()
+                            .and_then(|result| result.agent_endpoint.clone());
                         center.agent_error = snapshot
                             .as_ref()
                             .and_then(|result| result.diagnostic.clone());
