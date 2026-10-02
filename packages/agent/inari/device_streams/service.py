@@ -81,6 +81,7 @@ class DeviceStreamService:
         ledger: DeviceStreamLedger,
         authority: StreamAuthority,
         signer: StreamSigner,
+        input_kinds: frozenset[DeviceStreamKind],
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
         agent_boot_id: str | None = None,
@@ -97,6 +98,7 @@ class DeviceStreamService:
         self._ledger = ledger
         self._authority = authority
         self._signer = signer
+        self._input_kinds = input_kinds
         self._clock = clock
         self._monotonic = monotonic
         self._agent_boot_id = agent_boot_id or f"boot_{uuid4().hex}"
@@ -609,6 +611,8 @@ class DeviceStreamService:
         permits: dict[str, AdmissionPermit] = {}
         now = _utc(self._clock())
         for selection in selections:
+            if selection.kind not in self._input_kinds:
+                raise DomainFailure(ProblemCode.DEVICE_UNAVAILABLE)
             permission, purpose, operation = {
                 DeviceStreamKind.SCALE: (
                     Permission.SCALE,

@@ -197,6 +197,8 @@ class RuntimeProvider(Provider):
             ledger=ledger,
             authority=authority,
             signer=signer,
+            # No production Driver currently produces Scale Readings or Barcode Events.
+            input_kinds=frozenset(),
         )
 
     @provide

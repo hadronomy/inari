@@ -222,6 +222,7 @@ def build_service(clock: Clock | None = None):
     clock = clock or Clock()
     authority = Authority()
     service = DeviceStreamService(
+        input_kinds=frozenset(DeviceStreamKind),
         ledger=MemoryLedger(),
         authority=authority,
         signer=Signer(),
@@ -280,6 +281,21 @@ async def test_acquire_requires_exact_device_read_permission() -> None:
         )
 
     assert failure.value.code is ProblemCode.PERMISSION_DENIED
+
+
+@pytest.mark.anyio
+async def test_no_input_driver_cannot_issue_a_peripheral_stream_lease() -> None:
+    service = DeviceStreamService(
+        ledger=MemoryLedger(),
+        authority=Authority(),
+        signer=Signer(),
+        input_kinds=frozenset(),
+    )
+    with pytest.raises(DomainFailure) as failure:
+        await service.acquire(
+            EventLeaseRequest("holder_123456789", (scale_selection(),)), authorization()
+        )
+    assert failure.value.code is ProblemCode.DEVICE_UNAVAILABLE
 
 
 @pytest.mark.anyio
@@ -370,6 +386,7 @@ async def test_scanner_replays_until_ack_and_never_persists_value(
     store = RuntimeStore(tmp_path / "agent.sqlite3")
     metadata.create_all(store.engine)
     service = DeviceStreamService(
+        input_kinds=frozenset(DeviceStreamKind),
         ledger=SqliteDeviceStreamLedger(store),
         authority=Authority(),
         signer=Signer(),
@@ -444,6 +461,7 @@ async def test_scanner_replays_until_ack_and_never_persists_value(
 async def test_lease_expiry_emits_signed_terminal_message() -> None:
     clock = Clock()
     service = DeviceStreamService(
+        input_kinds=frozenset(DeviceStreamKind),
         ledger=MemoryLedger(),
         authority=Authority(),
         signer=Signer(),
@@ -478,6 +496,7 @@ async def test_lease_expiry_emits_signed_terminal_message() -> None:
 async def test_scale_lease_expiry_invalidates_scale_without_closing_transport() -> None:
     clock = Clock()
     service = DeviceStreamService(
+        input_kinds=frozenset(DeviceStreamKind),
         ledger=MemoryLedger(),
         authority=Authority(),
         signer=Signer(),

@@ -12,6 +12,14 @@ function requestResult(request) {
     });
 }
 
+function transactionDone(transaction) {
+    return new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error("Drawer Intent storage aborted"));
+    });
+}
+
 function openDatabase(indexedDBApi) {
     return new Promise((resolve, reject) => {
         const request = indexedDBApi.open(DATABASE_NAME, DATABASE_VERSION);
@@ -53,12 +61,10 @@ export class IndexedDbDrawerIntentStore {
     async put(record) {
         const database = await openDatabase(this.indexedDBApi);
         try {
-            await requestResult(
-                database
-                    .transaction(STORE_NAME, "readwrite")
-                    .objectStore(STORE_NAME)
-                    .put(Object.freeze({ ...record, saved_at: this.now() })),
-            );
+            const transaction = database.transaction(STORE_NAME, "readwrite");
+            const done = transactionDone(transaction);
+            transaction.objectStore(STORE_NAME).put(Object.freeze({ ...record, saved_at: this.now() }));
+            await done;
         } finally {
             database.close();
         }
@@ -67,12 +73,10 @@ export class IndexedDbDrawerIntentStore {
     async delete(scopeKey) {
         const database = await openDatabase(this.indexedDBApi);
         try {
-            await requestResult(
-                database
-                    .transaction(STORE_NAME, "readwrite")
-                    .objectStore(STORE_NAME)
-                    .delete(scopeKey),
-            );
+            const transaction = database.transaction(STORE_NAME, "readwrite");
+            const done = transactionDone(transaction);
+            transaction.objectStore(STORE_NAME).delete(scopeKey);
+            await done;
         } finally {
             database.close();
         }
