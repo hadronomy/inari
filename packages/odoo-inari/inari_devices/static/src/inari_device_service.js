@@ -144,7 +144,6 @@ export class InariDeviceService {
         this.pairing = null;
         this.channels = new Map();
         this.printers = new Map();
-        this.receiptPlans = new WeakMap();
         this.inputAdapters = new Map();
         this.inputPageHandler = null;
         this.blockedPreparationOrders = new Set();

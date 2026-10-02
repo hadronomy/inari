@@ -83,6 +83,11 @@ describe("Inari customer receipt printing", () => {
         expect(plan.print_intent_id).toBe(original.print_intent_id);
     });
 
+    test("Inari service dependencies exist in the installed Odoo registry", () => {
+        for (const dependency of inariDeviceService.dependencies) {
+            expect(registry.category("services").contains(dependency)).toBe(true);
+        }
+    });
     test("printer service receives the deep Inari service at composition", () => {
         const inariDevice = { marker: "inari" };
         const service = posPrinterService.start(
