@@ -1,3 +1,11 @@
+## inari@0.3.1
+
+### Trust a private PostgreSQL CA during deployment
+
+The chart can mount an existing database CA Secret in the Controller and its
+migration Job. Use `database.caCertificateSecret` with a PostgreSQL URL that
+requires `sslmode=verify-full` and points `sslrootcert` to the mounted CA.
+
 ## inari@0.3.0
 
 ### Say where each configuration setting came from
