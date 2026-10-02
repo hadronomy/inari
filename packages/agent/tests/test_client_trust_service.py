@@ -437,7 +437,7 @@ def test_renewal_requires_session_and_offline_window_then_revocation_blocks_use(
                     "POST", "https://agent.example/pairing/v1/client-grants/renew"
                 ),
                 dpop="other.proof.signature",
-                browser_origin=SCOPE.origin.browser_origin,
+                browser_origin=SCOPE.browser_origin,
             )
         )
     assert mismatch.value.code is ClientTrustErrorCode.SCOPE_MISMATCH
