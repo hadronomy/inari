@@ -20,7 +20,6 @@ from inari.client_trust.models import (
     ClientGrant,
     ClientPairing,
     EndpointBinding,
-    PairingAssertion,
     PairingAssertionClaims,
     PairingCommand,
     PairingScope,
@@ -66,14 +65,44 @@ class Store:
     def save_pairing_request(self, request: PairingRequest) -> None:
         self.requests[request.request_id] = request
 
+    def transition_pairing_request(
+        self,
+        request_id: str,
+        *,
+        from_states: frozenset[str],
+        to_state: str,
+    ) -> PairingRequest | None:
+        request = self.requests.get(request_id)
+        if request is None or request.state.value not in from_states:
+            return None
+        changed = replace(request, state=PairingRequestState(to_state))
+        self.requests[request_id] = changed
+        return changed
+
     def get_pairing(self, pairing_id: str) -> ClientPairing | None:
         return self.pairings.get(pairing_id)
+
+    def get_pairing_by_request(self, request_id: str) -> ClientPairing | None:
+        return next(
+            (
+                pairing
+                for pairing in self.pairings.values()
+                if pairing.pairing_request_id == request_id
+            ),
+            None,
+        )
 
     def save_pairing(self, pairing: ClientPairing) -> None:
         self.pairings[pairing.pairing_id] = pairing
 
     def get_grant(self, grant_id: str) -> ClientGrant | None:
         return self.grants.get(grant_id)
+
+    def get_grant_for_pairing(self, pairing_id: str) -> ClientGrant | None:
+        return next(
+            (grant for grant in self.grants.values() if grant.pairing_id == pairing_id),
+            None,
+        )
 
     def save_grant(self, grant: ClientGrant) -> None:
         self.grants[grant.grant_id] = grant
@@ -88,6 +117,9 @@ class Store:
         self.save_pairing(pairing)
         self.save_grant(grant)
         return True
+
+    def pairing_assertion_was_consumed(self, assertion_jti: str) -> bool:
+        return assertion_jti in self.assertions
 
     def save_dpop_nonce(
         self, nonce: str, *, issued_at: datetime, expires_at: datetime
@@ -104,17 +136,21 @@ class Store:
     ) -> DPoPNonceConsumption:
         if jti in self.proofs:
             return DPoPNonceConsumption.REPLAY
+        self.proofs.add(jti)
         value = self.nonces.get(nonce)
         if value is None or value[0] <= at or value[1] is not None:
             return DPoPNonceConsumption.INVALID
-        self.proofs.add(jti)
         self.nonces[nonce] = (value[0], at)
         return DPoPNonceConsumption.ACCEPTED
 
 
 class AssertionVerifier:
+    claims: PairingAssertionClaims | None = None
+
     def verify(self, assertion, *, request, at):
-        return assertion.claims
+        assert assertion == "a.b.c"
+        assert self.claims is not None
+        return self.claims
 
 
 class TokenVerifier:
@@ -146,7 +182,7 @@ class DPoPVerifier:
             iat=at,
             ath="a" * 43,
             nonce=self.nonce,
-            jti="proof-1",
+            jti=f"proof-{self.nonce}",
             accepted_at=at,
         )
 
@@ -223,7 +259,7 @@ def test_admission_consumes_assertion_once_and_issues_scoped_records() -> None:
     )
     claims = PairingAssertionClaims(
         issuer="odoo",
-        subject="request-1",
+        subject=request.request_id,
         audience=SCOPE.audience,
         pairing_request_id=request.request_id,
         agent_id=SCOPE.agent_id,
@@ -237,19 +273,19 @@ def test_admission_consumes_assertion_once_and_issues_scoped_records() -> None:
         expires_at=NOW + timedelta(minutes=5),
         jti="assertion-1",
     )
-    command = PairingCommand(
-        request=request,
-        assertion=PairingAssertion(
-            claims=claims, compact_jws="a.b.c", signer_key_id="odoo-key"
-        ),
-    )
+    verifier = service.assertion_verifier
+    assert isinstance(verifier, AssertionVerifier)
+    verifier.claims = claims
+    service.approve_pairing_request(request.request_id)
+    command = PairingCommand(request_id=request.request_id, assertion="a.b.c")
     result = service.admit_pairing(command)
     assert result.pairing.pairing_id == "pairing-1"
     assert result.grant.permissions == frozenset({Permission.RECEIPT_IMAGE})
+    assert result.access_token == "signed-access-token"
     assert store.get_grant(result.grant.grant_id) == result.grant
-    with pytest.raises(ClientTrustError) as error:
-        service.admit_pairing(command)
-    assert error.value.code is ClientTrustErrorCode.REPLAY_DETECTED
+    replay = service.admit_pairing(command)
+    assert replay.pairing == result.pairing
+    assert replay.grant == result.grant
 
 
 @pytest.mark.parametrize("initial_nonce", [None, "client-placeholder"])
@@ -401,6 +437,7 @@ def test_renewal_requires_session_and_offline_window_then_revocation_blocks_use(
                     "POST", "https://agent.example/pairing/v1/client-grants/renew"
                 ),
                 dpop="other.proof.signature",
+                browser_origin=SCOPE.browser_origin,
             )
         )
     assert mismatch.value.code is ClientTrustErrorCode.SCOPE_MISMATCH
@@ -411,8 +448,10 @@ def test_renewal_requires_session_and_offline_window_then_revocation_blocks_use(
             pairing_id=pairing.pairing_id,
             grant_id=grant.grant_id,
             target=RequestTarget(
-                "POST", "https://agent.example/v1/client-grants/renew"
+                "POST",
+                "https://agent.example/pairing/v1/client-grants/renew",
             ),
+            browser_origin=SCOPE.browser_origin,
             dpop="a.b.c",
         )
     )
@@ -430,8 +469,10 @@ def test_renewal_requires_session_and_offline_window_then_revocation_blocks_use(
                 pairing_id=pairing.pairing_id,
                 grant_id=grant.grant_id,
                 target=RequestTarget(
-                    "POST", "https://agent.example/v1/client-grants/renew"
+                    "POST",
+                    "https://agent.example/pairing/v1/client-grants/renew",
                 ),
+                browser_origin=SCOPE.browser_origin,
                 dpop="d.e.f",
             )
         )

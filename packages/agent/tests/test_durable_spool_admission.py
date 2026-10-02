@@ -21,6 +21,7 @@ from inari.documents import (
     DocumentKind,
     DocumentWork,
     PosPrintOrigin,
+    PreparationPrintOrigin,
     ReceiptImage,
     SubmissionContext,
 )
@@ -91,7 +92,7 @@ class FakeRootSecretStore:
         self.values.pop(key, None)
 
 
-def _migrate(tmp_path: Path) -> Path:
+def _migrate(tmp_path: Path, *, purpose: str = "pos_receipt") -> Path:
     database_path = tmp_path / "agent.sqlite3"
     DatabaseMigrator(database_path).ensure_current()
     with sqlite3.connect(database_path) as connection:
@@ -113,7 +114,9 @@ def _migrate(tmp_path: Path) -> Path:
                 ),
             )
         for device_id in ("device-1", "device-2", "device-3"):
-            _seed_authority_graph(connection, _authority_proof_for(device_id))
+            _seed_authority_graph(
+                connection, _authority_proof_for(device_id, purpose=purpose)
+            )
     return database_path
 
 
@@ -125,6 +128,7 @@ def _authority_proof_for(
     device_id: str,
     *,
     proof_id: str = "proof-fixture",
+    purpose: str = "pos_receipt",
 ) -> AuthorityProof:
     suffix = device_id.rsplit("-", 1)[-1]
     scope = {
@@ -151,6 +155,7 @@ def _authority_proof_for(
         test_evidence_digest=_digest(f"{device_id}:test"),
         device_id=device_id,
         device_identity_digest=_digest(f"{device_id}:identity"),
+        purpose=purpose,
         issued_at=NOW - timedelta(days=1),
         valid_until=NOW + timedelta(days=30),
     )
@@ -375,6 +380,28 @@ def _jpeg_like_work(
     )
 
 
+def _preparation_work() -> DocumentWork:
+    work = _jpeg_like_work()
+    return replace(
+        work,
+        context=replace(
+            work.context,
+            origin=PreparationPrintOrigin(
+                database="odoo",
+                pos_configuration_id="pos-1",
+                pos_session_id="session-1",
+                offline_order_id="order-1",
+                server_order_id=None,
+                document_kind="preparation_ticket",
+                content_revision="sha256:ticket-image",
+                segment_kind="cancelled",
+                segment_index=1,
+                preparation_revision="sha256:order-change",
+            ),
+        ),
+    )
+
+
 def _admission(work: DocumentWork) -> DurableAdmission:
     deadline = AdmissionDeadline(
         expires_at=NOW + timedelta(minutes=5), monotonic_deadline=305.0
@@ -410,9 +437,16 @@ def _admission(work: DocumentWork) -> DurableAdmission:
         ),
         media_type="image/jpeg",
         normalized_options=b"{}",
-        authority_proof=_authority_proof_for(
-            work.context.device_id,
-            proof_id=f"proof:{work.context.print_intent_id}",
+        authority_proof=replace(
+            _authority_proof_for(
+                work.context.device_id,
+                proof_id=f"proof:{work.context.print_intent_id}",
+            ),
+            purpose=(
+                "pos_preparation"
+                if isinstance(work.context.origin, PreparationPrintOrigin)
+                else "pos_receipt"
+            ),
         ),
     )
 
@@ -568,6 +602,51 @@ async def test_accept_persists_artifact_job_and_event_as_one_barrier(
         database_path,
         "SELECT state, job_id FROM spool_reservations",
     ) == [("committed", "job-1")]
+
+
+@pytest.mark.anyio
+async def test_accept_persists_preparation_origin_and_segment_identity(
+    tmp_path: Path,
+) -> None:
+    database_path = _migrate(tmp_path, purpose="pos_preparation")
+    store = _store(
+        database_path,
+        tmp_path / "spool",
+        FakeRootSecretStore(),
+        DeterministicIds(
+            [
+                "admission-1",
+                "job-1",
+                "reservation-1",
+                "artifact-1",
+                "nonce-1",
+                "nonce-2",
+            ]
+        ),
+    )
+
+    await store.accept(_admission(_preparation_work()))
+
+    [(origin_kind, origin_json)] = _rows(
+        database_path,
+        "SELECT origin_kind, origin_json FROM public_print_jobs",
+    )
+    assert origin_kind == "preparation"
+    assert json.loads(origin_json) == {
+        "content_revision": "sha256:ticket-image",
+        "database": "odoo",
+        "document_kind": "preparation_ticket",
+        "offline_order_id": "order-1",
+        "organization_id": "org-1",
+        "paired_client_id": "client-1",
+        "pos_configuration_id": "pos-1",
+        "pos_session_id": "session-1",
+        "preparation_revision": "sha256:order-change",
+        "segment_index": 1,
+        "segment_kind": "cancelled",
+        "server_order_id": None,
+        "site_id": "site-1",
+    }
 
 
 @pytest.mark.anyio

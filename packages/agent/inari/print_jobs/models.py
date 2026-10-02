@@ -142,7 +142,9 @@ class ReportPrintOrigin:
         if type(self.record_ids) is not tuple:
             raise TypeError("Report record_ids must be an immutable tuple.")
         if len(self.record_ids) > 100:
-            raise ValueError("A Report Print Origin cannot contain more than 100 records.")
+            raise ValueError(
+                "A Report Print Origin cannot contain more than 100 records."
+            )
         for record_id in self.record_ids:
             _validate_identifier("record_id", record_id)
         if self.wizard_input_digest is not None and (
@@ -178,7 +180,7 @@ class PairedClientScope:
             return False
         origin = job.origin
         return (
-            _is_pos_origin(origin)
+            isinstance(origin, (PosPrintOrigin, PreparationPrintOrigin))
             and origin.organization_id == self.organization_id
             and origin.site_id == self.site_id
             and origin.pos_configuration_id == self.pos_configuration_id
@@ -220,7 +222,7 @@ class SiteManagerScope:
         if self.pos_configuration_id is None:
             return True
         return (
-            _is_pos_origin(origin)
+            isinstance(origin, (PosPrintOrigin, PreparationPrintOrigin))
             and origin.pos_configuration_id == self.pos_configuration_id
             and origin.paired_client_id == self.paired_client_id
         )
@@ -235,7 +237,9 @@ class PayloadFingerprint:
 
     def __post_init__(self) -> None:
         if not isinstance(self.value, bytes) or len(self.value) != 32:
-            raise ValueError("A SHA-256 Payload Fingerprint must contain exactly 32 bytes.")
+            raise ValueError(
+                "A SHA-256 Payload Fingerprint must contain exactly 32 bytes."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,7 +299,11 @@ class PrintJob:
             raise ValueError("Print Job started_at cannot precede accepted_at.")
         if terminal_at is not None and terminal_at < accepted_at:
             raise ValueError("Print Job terminal_at cannot precede accepted_at.")
-        if terminal_at is not None and started_at is not None and terminal_at < started_at:
+        if (
+            terminal_at is not None
+            and started_at is not None
+            and terminal_at < started_at
+        ):
             raise ValueError("Print Job terminal_at cannot precede started_at.")
         state = PrintJobState(self.state)
         evidence = (
@@ -406,9 +414,7 @@ def transition(
         error_code=error_code,
         message_key=message_key,
         confirmation_evidence=(
-            confirmation_evidence
-            if target is PrintJobState.OUTPUT_CONFIRMED
-            else None
+            confirmation_evidence if target is PrintJobState.OUTPUT_CONFIRMED else None
         ),
     )
 
@@ -487,7 +493,9 @@ class PrintJobQuery:
         if not job_ids:
             raise ValueError("A Print Job query requires at least one identifier.")
         if len(job_ids) > 100:
-            raise ValueError("A Print Job query cannot contain more than 100 identifiers.")
+            raise ValueError(
+                "A Print Job query cannot contain more than 100 identifiers."
+            )
         for job_id in job_ids:
             _validate_identifier("job_id", job_id)
         return cls(job_ids=tuple(dict.fromkeys(job_ids)), scope=scope)
@@ -500,7 +508,9 @@ class PrintJobQuery:
         if not self.job_ids:
             raise ValueError("A Print Job query requires at least one identifier.")
         if len(self.job_ids) > 100:
-            raise ValueError("A Print Job query cannot contain more than 100 identifiers.")
+            raise ValueError(
+                "A Print Job query cannot contain more than 100 identifiers."
+            )
         for job_id in self.job_ids:
             _validate_identifier("job_id", job_id)
 
@@ -517,7 +527,9 @@ class PrintJobPage:
         if type(self.high_water_mark) is not int or self.high_water_mark < 0:
             raise ValueError("Agent high_water_mark must be nonnegative.")
         if len(self.jobs) + len(self.missing_job_ids) > 100:
-            raise ValueError("A Print Job page cannot contain more than 100 identifiers.")
+            raise ValueError(
+                "A Print Job page cannot contain more than 100 identifiers."
+            )
         if not all(isinstance(job, PrintJob) for job in self.jobs):
             raise TypeError("A Print Job page can contain only Print Job snapshots.")
         present = [job.job_id for job in self.jobs]
@@ -530,6 +542,87 @@ class PrintJobPage:
         overlap = set(present).intersection(self.missing_job_ids)
         if overlap:
             raise ValueError("A Print Job cannot be both present and missing.")
+
+
+@dataclass(frozen=True, slots=True)
+class PrintIntentQuery:
+    """A bounded reconciliation query keyed by caller-owned Print Intent IDs."""
+
+    print_intent_ids: tuple[str, ...]
+    scope: PrintJobScope
+
+    @classmethod
+    def from_ids(
+        cls,
+        print_intent_ids: list[str] | tuple[str, ...],
+        *,
+        scope: PrintJobScope,
+    ) -> Self:
+        if not print_intent_ids:
+            raise ValueError("A Print Intent query requires at least one identifier.")
+        if len(print_intent_ids) > 100:
+            raise ValueError(
+                "A Print Intent query cannot contain more than 100 identifiers."
+            )
+        for print_intent_id in print_intent_ids:
+            _validate_identifier("print_intent_id", print_intent_id)
+        return cls(
+            print_intent_ids=tuple(dict.fromkeys(print_intent_ids)),
+            scope=scope,
+        )
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, (PairedClientScope, SiteManagerScope)):
+            raise TypeError(
+                "Print Intent query scope must be an authorized closed scope."
+            )
+        if type(self.print_intent_ids) is not tuple:
+            raise TypeError(
+                "A Print Intent query uses an immutable tuple of identifiers."
+            )
+        if not self.print_intent_ids:
+            raise ValueError("A Print Intent query requires at least one identifier.")
+        if len(self.print_intent_ids) > 100:
+            raise ValueError(
+                "A Print Intent query cannot contain more than 100 identifiers."
+            )
+        for print_intent_id in self.print_intent_ids:
+            _validate_identifier("print_intent_id", print_intent_id)
+
+
+@dataclass(frozen=True, slots=True)
+class PrintIntentPage:
+    """Scoped Print Job snapshots for one browser recovery reconciliation."""
+
+    jobs: tuple[PrintJob, ...]
+    missing_print_intent_ids: tuple[str, ...]
+    high_water_mark: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.jobs) is not tuple
+            or type(self.missing_print_intent_ids) is not tuple
+        ):
+            raise TypeError("A Print Intent page uses immutable tuples.")
+        if type(self.high_water_mark) is not int or self.high_water_mark < 0:
+            raise ValueError("Agent high_water_mark must be nonnegative.")
+        if len(self.jobs) + len(self.missing_print_intent_ids) > 100:
+            raise ValueError(
+                "A Print Intent page cannot contain more than 100 identifiers."
+            )
+        if not all(isinstance(job, PrintJob) for job in self.jobs):
+            raise TypeError("A Print Intent page can contain only Print Job snapshots.")
+        present = [job.intent_id for job in self.jobs]
+        if len(set(present)) != len(present):
+            raise ValueError("A Print Intent page cannot contain duplicate jobs.")
+        for print_intent_id in self.missing_print_intent_ids:
+            _validate_identifier("missing_print_intent_id", print_intent_id)
+        if len(set(self.missing_print_intent_ids)) != len(
+            self.missing_print_intent_ids
+        ):
+            raise ValueError("A Print Intent page cannot repeat a missing identifier.")
+        if set(present).intersection(self.missing_print_intent_ids):
+            raise ValueError("A Print Intent cannot be both present and missing.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -634,7 +727,10 @@ def _validate_lifecycle(
     has_error = error_code is not None or message_key is not None
     if state not in {PrintJobState.FAILED, PrintJobState.OUTCOME_UNKNOWN} and has_error:
         raise ValueError(f"A {state.value} Print Job cannot contain an error.")
-    if state is not PrintJobState.OUTPUT_CONFIRMED and confirmation_evidence is not None:
+    if (
+        state is not PrintJobState.OUTPUT_CONFIRMED
+        and confirmation_evidence is not None
+    ):
         raise ValueError(f"A {state.value} Print Job cannot contain Output Evidence.")
 
 

@@ -51,6 +51,23 @@ class PosPrintOrigin:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparationPrintOrigin:
+    database: str
+    pos_configuration_id: str
+    pos_session_id: str
+    offline_order_id: str
+    server_order_id: str | None
+    document_kind: str
+    content_revision: str
+    segment_kind: str
+    segment_index: int
+    preparation_revision: str
+
+
+LocalPrintOrigin: TypeAlias = PosPrintOrigin | PreparationPrintOrigin
+
+
+@dataclass(frozen=True, slots=True)
 class SubmissionContext:
     contract_major: int
     organization_id: str
@@ -58,7 +75,7 @@ class SubmissionContext:
     paired_client_id: str
     print_intent_id: str
     origin_submission_key: str
-    origin: PosPrintOrigin
+    origin: LocalPrintOrigin
     binding_revision_id: str
     device_id: str
     actor_id: str

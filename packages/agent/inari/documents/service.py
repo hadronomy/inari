@@ -35,6 +35,9 @@ from .models import (
     DocumentWork,
     DurableAdmission,
     LabelDocument,
+    LocalPrintOrigin,
+    PosPrintOrigin,
+    PreparationPrintOrigin,
     ReceiptImage,
     ReportPdf,
 )
@@ -114,7 +117,7 @@ class DocumentAdmissionService:
                         kind=ScopeKind.POS_CONFIGURATION,
                         pos_configuration_id=origin.pos_configuration_id,
                     ),
-                    purpose=_device_purpose(operation),
+                    purpose=_device_purpose(operation, origin),
                     device_id=context.device_id,
                     binding_revision_id=context.binding_revision_id,
                     operation=operation.value,
@@ -217,6 +220,10 @@ class DocumentAdmissionService:
             )
 
         origin = context.origin
+        if not isinstance(origin, PosPrintOrigin | PreparationPrintOrigin):
+            raise DocumentAdmissionError(
+                "payload_invalid", "The print origin has an invalid shape."
+            )
         for label, value in {
             "database": origin.database,
             "POS configuration": origin.pos_configuration_id,
@@ -228,6 +235,33 @@ class DocumentAdmissionService:
             _validate_string(label, value)
         if origin.server_order_id is not None:
             _validate_string("server order", origin.server_order_id)
+        if isinstance(origin, PreparationPrintOrigin):
+            if origin.document_kind != "preparation_ticket":
+                raise DocumentAdmissionError(
+                    "payload_invalid",
+                    "A preparation origin must identify a preparation ticket.",
+                )
+            _validate_string("preparation segment", origin.segment_kind)
+            _validate_string("preparation revision", origin.preparation_revision)
+            if origin.segment_kind not in {
+                "new",
+                "cancelled",
+                "note_update",
+                "notes",
+            }:
+                raise DocumentAdmissionError(
+                    "payload_invalid", "The preparation segment is invalid."
+                )
+            if (
+                not isinstance(origin.segment_index, int)
+                or isinstance(origin.segment_index, bool)
+                or origin.segment_index < 0
+                or origin.segment_index > 63
+            ):
+                raise DocumentAdmissionError(
+                    "payload_invalid",
+                    "Preparation segment index must be between 0 and 63.",
+                )
 
     @classmethod
     def _validate_document(cls, document: Document) -> None:
@@ -306,9 +340,13 @@ def _grant_scope(grant: AdmissionGrant, work: DocumentWork) -> AdmissionGrantSco
     return grant.scope()
 
 
-def _device_purpose(operation: DocumentKind) -> str:
+def _device_purpose(operation: DocumentKind, origin: LocalPrintOrigin) -> str:
     if operation is DocumentKind.RECEIPT_IMAGE:
-        return "pos_receipt"
+        return (
+            "pos_preparation"
+            if isinstance(origin, PreparationPrintOrigin)
+            else "pos_receipt"
+        )
     raise DocumentAdmissionError(
         "document_policy_rejected", "This document operation is not enabled."
     )

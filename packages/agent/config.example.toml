@@ -1,4 +1,4 @@
-#:schema schemas/inari-config.schema.json
+#:schema ./schemas/inari-config.schema.json
 
 # Generated configuration template for inari.
 # Uncomment only the settings you want to override.
@@ -144,6 +144,13 @@ config_version = 1
 # audience = "inari.local"
 # Issuer claim for locally issued tokens.
 # issuer = "inari.local"
+
+# Browser Client Pairing trust supplied by the current Controller policy.
+[auth.browser]
+# JSON Web Key Set with trusted Odoo Pairing Assertion public keys.
+# pairing_assertion_jwks_path = "./data/security/odoo-pairing-assertion.jwks.json"
+# Exact issuer accepted on Odoo Pairing Assertions.
+# pairing_assertion_issuer = "odoo"
 
 # ZITADEL service-account settings used when managed enrollment is authorized through ZITADEL.
 [auth.zitadel]

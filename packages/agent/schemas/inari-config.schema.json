@@ -112,9 +112,37 @@
       "title": "ApiTlsConfig",
       "type": "object"
     },
+    "AuthBrowserConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "pairing_assertion_issuer": {
+          "default": "odoo",
+          "title": "Pairing Assertion Issuer",
+          "type": "string"
+        },
+        "pairing_assertion_jwks_path": {
+          "anyOf": [
+            {
+              "format": "path",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pairing Assertion Jwks Path"
+        }
+      },
+      "title": "AuthBrowserConfig",
+      "type": "object"
+    },
     "AuthConfig": {
       "additionalProperties": false,
       "properties": {
+        "browser": {
+          "$ref": "#/definitions/AuthBrowserConfig"
+        },
         "local": {
           "$ref": "#/definitions/AuthLocalConfig"
         },

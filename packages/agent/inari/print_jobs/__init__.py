@@ -9,6 +9,8 @@ from .models import (
     OutputEvidence,
     PairedClientScope,
     PayloadFingerprint,
+    PrintIntentPage,
+    PrintIntentQuery,
     PosPrintOrigin,
     PreparationPrintOrigin,
     PrintJob,
@@ -26,7 +28,7 @@ from .models import (
     can_transition,
     transition,
 )
-from .ports import PrintJobModule, PrintJobStore, PrintJobSubmission
+from .ports import PrintJobModule, PrintJobReader, PrintJobStore, PrintJobSubmission
 
 __all__ = [
     "ACTIVE_RECONCILIATION_PERIOD",
@@ -39,10 +41,13 @@ __all__ = [
     "OutputEvidence",
     "PairedClientScope",
     "PayloadFingerprint",
+    "PrintIntentPage",
+    "PrintIntentQuery",
     "PosPrintOrigin",
     "PreparationPrintOrigin",
     "PrintJob",
     "PrintJobModule",
+    "PrintJobReader",
     "PrintJobPage",
     "PrintJobQuery",
     "PrintJobScope",

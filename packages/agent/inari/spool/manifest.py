@@ -10,7 +10,12 @@ from sqlalchemy.engine import RowMapping
 
 from ..core.failures import ProblemCode, ProblemDetails
 from ..device_authority import AuthorityProof
-from ..documents import DocumentKind, DurableAdmission, ReceiptImage
+from ..documents import (
+    DocumentKind,
+    DurableAdmission,
+    PreparationPrintOrigin,
+    ReceiptImage,
+)
 from ..documents.fingerprint import (
     DeviceWorkFingerprintInput,
     fingerprint_device_work,
@@ -38,6 +43,7 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
     origin = context.origin
     grant = admission.grant_scope
     proof = admission.authority_proof
+    preparation = isinstance(origin, PreparationPrintOrigin)
     if (
         grant.organization_id != context.organization_id
         or grant.site_id != context.site_id
@@ -57,7 +63,7 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
     if (
         proof.binding_revision_id != context.binding_revision_id
         or proof.device_id != context.device_id
-        or proof.purpose != "pos_receipt"
+        or proof.purpose != ("pos_preparation" if preparation else "pos_receipt")
         or proof.operation != work.operation.value
         or proof.media_type != admission.media_type
         or proof.contract_major != context.contract_major
@@ -80,20 +86,27 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
     )
     if expected_fingerprint != admission.payload_fingerprint:
         raise SpoolAdmissionError(ProblemCode.PAYLOAD_INVALID)
-    origin_json = canonical_json(
-        {
-            "content_revision": origin.content_revision,
-            "database": origin.database,
-            "document_kind": origin.document_kind,
-            "offline_order_id": origin.offline_order_id,
-            "organization_id": context.organization_id,
-            "paired_client_id": context.paired_client_id,
-            "pos_configuration_id": origin.pos_configuration_id,
-            "pos_session_id": origin.pos_session_id,
-            "server_order_id": origin.server_order_id,
-            "site_id": context.site_id,
-        }
-    )
+    origin_values = {
+        "content_revision": origin.content_revision,
+        "database": origin.database,
+        "document_kind": origin.document_kind,
+        "offline_order_id": origin.offline_order_id,
+        "organization_id": context.organization_id,
+        "paired_client_id": context.paired_client_id,
+        "pos_configuration_id": origin.pos_configuration_id,
+        "pos_session_id": origin.pos_session_id,
+        "server_order_id": origin.server_order_id,
+        "site_id": context.site_id,
+    }
+    if preparation:
+        origin_values.update(
+            {
+                "preparation_revision": origin.preparation_revision,
+                "segment_index": origin.segment_index,
+                "segment_kind": origin.segment_kind,
+            }
+        )
+    origin_json = canonical_json(origin_values)
     grant_values = {
         "actor_id": grant.actor_id,
         "authorization_digest": grant.authorization_digest,
@@ -127,7 +140,7 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
         normalized_options_digest=bytes.fromhex(normalized_options_digest),
         grant_scope_digest=hashlib.sha256(rfc8785.dumps(grant_values)).digest(),
         origin_submission_key=context.origin_submission_key,
-        origin_kind="pos",
+        origin_kind="preparation" if preparation else "pos",
         origin_json=origin_json,
         contract_major=context.contract_major,
         copy_ordinal=context.copy_ordinal,

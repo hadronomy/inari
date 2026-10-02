@@ -27,6 +27,7 @@ from .models import (
     GrantLifecycle,
     IssuedDPoPNonce,
     PairingCommand,
+    PairingAssertionClaims,
     PairingLifecycle,
     PairingRequest,
     PairingRequestState,
@@ -96,6 +97,10 @@ def _digest(
 
 def _invalid(message: str) -> ClientTrustError:
     return ClientTrustError(ClientTrustErrorCode.INVALID_VALUE, message)
+
+
+def _state_invalid(message: str) -> ClientTrustError:
+    return ClientTrustError(ClientTrustErrorCode.INVALID_STATE, message)
 
 
 class ClientTrustService:
@@ -174,37 +179,164 @@ class ClientTrustService:
         request = self.store.get_pairing_request(request_id)
         if request is None:
             return None
-        if (
-            request.expires_at <= self._now()
-            and request.state is PairingRequestState.PENDING
-        ):
-            return replace(request, state=PairingRequestState.EXPIRED)
+        if request.expires_at <= self._now() and request.state in {
+            PairingRequestState.PENDING,
+            PairingRequestState.APPROVED,
+        }:
+            return self.store.transition_pairing_request(
+                request.request_id,
+                from_states=frozenset(
+                    {
+                        PairingRequestState.PENDING.value,
+                        PairingRequestState.APPROVED.value,
+                    }
+                ),
+                to_state=PairingRequestState.EXPIRED.value,
+            ) or self._stored_request(request.request_id)
         return request
+
+    def require_pairing_request(self, request_id: str) -> PairingRequest:
+        """Return one current Pairing Request or a content-free not-found error."""
+
+        request = self.get_pairing_request(request_id)
+        if request is None:
+            raise ClientTrustError(
+                ClientTrustErrorCode.NOT_FOUND,
+                "The Pairing Request is not available.",
+            )
+        return request
+
+    def approve_pairing_request(self, request_id: str) -> PairingRequest:
+        """Record one Device Manager approval before Odoo assertion admission."""
+
+        request = self._active_pairing_request(request_id)
+        if request.state is PairingRequestState.APPROVED:
+            return request
+        if request.state is not PairingRequestState.PENDING:
+            raise _state_invalid("The Pairing Request cannot be approved.")
+        approved = self.store.transition_pairing_request(
+            request_id,
+            from_states=frozenset({PairingRequestState.PENDING.value}),
+            to_state=PairingRequestState.APPROVED.value,
+        )
+        if approved is None:
+            raise _state_invalid("The Pairing Request state changed.")
+        return approved
+
+    def deny_pairing_request(self, request_id: str) -> PairingRequest:
+        """Record one final Device Manager denial."""
+
+        request = self._active_pairing_request(request_id)
+        if request.state is PairingRequestState.DENIED:
+            return request
+        if request.state is not PairingRequestState.PENDING:
+            raise _state_invalid("The Pairing Request cannot be denied.")
+        denied = self.store.transition_pairing_request(
+            request_id,
+            from_states=frozenset({PairingRequestState.PENDING.value}),
+            to_state=PairingRequestState.DENIED.value,
+        )
+        if denied is None:
+            raise _state_invalid("The Pairing Request state changed.")
+        return denied
+
+    def cancel_pairing_request(self, request_id: str) -> PairingRequest:
+        """Cancel an uncompleted request after browser key proof succeeds."""
+
+        request = self._active_pairing_request(request_id)
+        if request.state is PairingRequestState.CANCELED:
+            return request
+        if request.state not in {
+            PairingRequestState.PENDING,
+            PairingRequestState.APPROVED,
+        }:
+            raise _state_invalid("The Pairing Request cannot be canceled.")
+        canceled = self.store.transition_pairing_request(
+            request_id,
+            from_states=frozenset(
+                {
+                    PairingRequestState.PENDING.value,
+                    PairingRequestState.APPROVED.value,
+                }
+            ),
+            to_state=PairingRequestState.CANCELED.value,
+        )
+        if canceled is None:
+            raise _state_invalid("The Pairing Request state changed.")
+        return canceled
+
+    def authorize_pairing_request(
+        self,
+        request: object,
+        *,
+        jwk_thumbprint: str,
+        expected_origin: BoundOrigin | None = None,
+    ) -> None:
+        """Authorize a pre-Grant browser request with its proposed Pairing key."""
+
+        target, origin, proof = self._key_bound_request_values(request)
+        now = self._now()
+        accepted = self.renewal_dpop_verifier.verify(
+            proof,
+            target=target,
+            jwk_thumbprint=jwk_thumbprint,
+            at=now,
+        )
+        if expected_origin is not None and not expected_origin.matches(origin):
+            raise ScopeMismatchError(
+                "The request origin does not match the Pairing Request."
+            )
+        self._consume_dpop_nonce(
+            accepted.nonce,
+            jti=accepted.jti,
+            at=now,
+            replay_expires_at=now + self.dpop_nonce_ttl,
+        )
 
     def admit_pairing(self, command: PairingCommand) -> PairingResult:
         """Verify one company assertion and issue one Client Pairing and Grant."""
 
         if not isinstance(command, PairingCommand):
             raise _invalid("The Pairing command is invalid.")
-        request = self._stored_request(command.request.request_id)
+        request = self.require_pairing_request(command.request_id)
         now = self._now()
-        if request.state is not PairingRequestState.PENDING:
-            if request.state is PairingRequestState.COMPLETED:
-                raise ReplayDetectedError("The Pairing Request was already completed.")
-            raise _invalid("The Pairing Request is not pending.")
-        if request.expires_at <= now:
+        if (
+            request.expires_at <= now
+            and request.state is not PairingRequestState.COMPLETED
+        ):
+            self.get_pairing_request(request.request_id)
             raise ClientTrustError(
                 ClientTrustErrorCode.PAIRING_EXPIRED,
                 "The Pairing Request is expired.",
             )
-
         verified = self.assertion_verifier.verify(
             command.assertion, request=request, at=now
         )
-        PairingCommand(
-            request=request,
-            assertion=replace(command.assertion, claims=verified),
-        )
+        self._assert_pairing_claims(request, verified)
+        if request.state is PairingRequestState.COMPLETED:
+            return self._resume_completed_pairing(
+                request=request,
+                assertion=command.assertion,
+                claims=verified,
+                at=now,
+            )
+        if request.state is PairingRequestState.DENIED:
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_DENIED,
+                "The Pairing Request was denied.",
+            )
+        if request.state is PairingRequestState.CANCELED:
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_CANCELED,
+                "The Pairing Request was canceled.",
+            )
+        if request.state is PairingRequestState.EXPIRED:
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_EXPIRED,
+                "The Pairing Request is expired.",
+            )
+        if request.state is not PairingRequestState.APPROVED:
+            raise _state_invalid("The Pairing Request is not approved.")
         if verified.expires_at > request.expires_at:
             raise ScopeMismatchError("The Pairing Assertion outlives the request.")
 
@@ -249,11 +381,54 @@ class ClientTrustService:
         admission = GrantAdmissionProof(
             pairing_request_id=request.request_id,
             assertion_jti=verified.jti,
-            assertion_digest=sha256(command.assertion.compact_jws.encode()).hexdigest(),
+            assertion_digest=sha256(command.assertion.encode()).hexdigest(),
             jwk_thumbprint=verified.jwk_thumbprint,
             admitted_at=now,
         )
-        return PairingResult(pairing=pairing, grant=grant, admission=admission)
+        access_token, claims = self.issue_access_token(grant)
+        return PairingResult(
+            pairing=pairing,
+            grant=grant,
+            admission=admission,
+            access_token=access_token,
+            claims=claims,
+        )
+
+    def _resume_completed_pairing(
+        self,
+        *,
+        request: PairingRequest,
+        assertion: str,
+        claims: PairingAssertionClaims,
+        at: datetime,
+    ) -> PairingResult:
+        if not self.store.pairing_assertion_was_consumed(claims.jti):
+            raise ReplayDetectedError(
+                "The completed Pairing Request does not match this assertion."
+            )
+        pairing = self.store.get_pairing_by_request(request.request_id)
+        if pairing is None:
+            raise _invalid("The Client Pairing is not available.")
+        grant = self.store.get_grant_for_pairing(pairing.pairing_id)
+        if grant is None:
+            raise _invalid("The Client Grant is not available.")
+        pairing.active_at(at)
+        grant.active_at(at)
+        admission = GrantAdmissionProof(
+            pairing_request_id=request.request_id,
+            assertion_jti=claims.jti,
+            assertion_digest=sha256(assertion.encode()).hexdigest(),
+            jwk_thumbprint=claims.jwk_thumbprint,
+            admitted_at=at,
+        )
+        access_token, token_claims = self.issue_access_token(grant)
+        return PairingResult(
+            pairing=pairing,
+            grant=grant,
+            admission=admission,
+            access_token=access_token,
+            claims=token_claims,
+        )
 
     def issue_access_token(
         self, grant: ClientGrant | str
@@ -383,6 +558,18 @@ class ClientTrustService:
         request = self.store.get_pairing_request(pairing.pairing_request_id)
         if request is None or request.state is not PairingRequestState.COMPLETED:
             raise _invalid("The Pairing Request is not available.")
+        if command.browser_origin != pairing.scope.browser_origin:
+            raise ScopeMismatchError(
+                "The renewal origin does not match the Client Pairing."
+            )
+        expected_target = RequestTarget(
+            "POST",
+            f"{pairing.scope.agent_endpoint.value}/pairing/v1/client-grants/renew",
+        )
+        if command.target != expected_target:
+            raise ScopeMismatchError(
+                "The renewal target does not match the Agent Endpoint."
+            )
         proof = self.renewal_dpop_verifier.verify(
             command.dpop,
             target=command.target,
@@ -419,11 +606,15 @@ class ClientTrustService:
             expires_at=expires_at,
             last_used_at=now,
         )
-        _, claims = self.access_token_issuer.issue(
+        access_token, claims = self.access_token_issuer.issue(
             renewed, issued_at=now, expires_at=expires_at
         )
         self.store.save_grant(renewed)
-        return RenewalResult(grant=renewed, claims=claims)
+        return RenewalResult(
+            grant=renewed,
+            access_token=access_token,
+            claims=claims,
+        )
 
     def revoke_pairing(self, pairing_id: str) -> ClientPairing:
         pairing = self.store.get_pairing(pairing_id)
@@ -474,8 +665,48 @@ class ClientTrustService:
     def _stored_request(self, request_id: str) -> PairingRequest:
         request = self.store.get_pairing_request(request_id)
         if request is None:
-            raise _invalid("The Pairing Request is not available.")
+            raise ClientTrustError(
+                ClientTrustErrorCode.NOT_FOUND,
+                "The Pairing Request is not available.",
+            )
         return request
+
+    def _active_pairing_request(self, request_id: str) -> PairingRequest:
+        request = self.require_pairing_request(request_id)
+        if request.state is PairingRequestState.DENIED:
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_DENIED,
+                "The Pairing Request was denied.",
+            )
+        if request.state is PairingRequestState.CANCELED:
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_CANCELED,
+                "The Pairing Request was canceled.",
+            )
+        if request.state is PairingRequestState.EXPIRED:
+            raise ClientTrustError(
+                ClientTrustErrorCode.PAIRING_EXPIRED,
+                "The Pairing Request is expired.",
+            )
+        return request
+
+    @staticmethod
+    def _assert_pairing_claims(
+        request: PairingRequest, claims: PairingAssertionClaims
+    ) -> None:
+        if (
+            claims.subject != request.request_id
+            or claims.pairing_request_id != request.request_id
+            or claims.jwk_thumbprint != request.browser_jwk_thumbprint
+            or claims.agent_id != request.scope.agent_id
+            or claims.audience != request.scope.audience
+            or claims.business != request.scope.business
+            or claims.scopes != request.requested_permissions
+            or claims.session_nonce != request.session_nonce
+        ):
+            raise ScopeMismatchError(
+                "The Pairing Assertion does not match the Pairing Request."
+            )
 
     def _grant(self, grant: ClientGrant | str) -> ClientGrant:
         current = (
@@ -524,6 +755,27 @@ class ClientTrustService:
         if not isinstance(authorization, str) or not isinstance(proof, str):
             raise _invalid("The browser request credentials are invalid.")
         return target, origin, authorization, proof
+
+    @staticmethod
+    def _key_bound_request_values(request: object) -> tuple[RequestTarget, str, str]:
+        target_value = getattr(request, "target", request)
+        if isinstance(target_value, RequestTarget):
+            target = target_value
+        else:
+            try:
+                target = RequestTarget(
+                    getattr(target_value, "method"), getattr(target_value, "htu")
+                )
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise _invalid("The request target is invalid.") from exc
+        try:
+            origin = BoundOrigin(getattr(request, "origin")).value
+            proof = getattr(request, "dpop")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise _invalid("The browser request is incomplete.") from exc
+        if not isinstance(proof, str):
+            raise _invalid("The browser request proof is invalid.")
+        return target, origin, proof
 
 
 __all__ = ["ClientTrustService"]

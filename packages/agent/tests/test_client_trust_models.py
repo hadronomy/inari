@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
@@ -19,12 +18,10 @@ from inari.client_trust import (
     GrantAdmissionProof,
     GrantLifecycle,
     InvalidOriginError,
-    PairingAssertion,
     PairingAssertionClaims,
     PairingCommand,
     PairingLifecycle,
     PairingRequest,
-    PairingRequestState,
     PairingScope,
     Permission,
     PermissionCatalog,
@@ -32,7 +29,6 @@ from inari.client_trust import (
     RenewalCommand,
     RenewalResult,
     RequestTarget,
-    ScopeMismatchError,
 )
 
 
@@ -234,24 +230,10 @@ def test_pairing_command_requires_request_and_assertion_identity() -> None:
         expires_at=NOW + timedelta(minutes=10),
     )
     command = PairingCommand(
-        request=request,
-        assertion=PairingAssertion(
-            claims=claims(),
-            compact_jws="header.payload.signature",
-            signer_key_id="key_1",
-        ),
+        request_id=request.request_id,
+        assertion="header.payload.signature",
     )
-    assert command.request.state is PairingRequestState.PENDING
-    mismatched_claims = replace(claims(), pairing_request_id="other_request")
-    with pytest.raises(ScopeMismatchError):
-        PairingCommand(
-            request=request,
-            assertion=PairingAssertion(
-                claims=mismatched_claims,
-                compact_jws="header.payload.signature",
-                signer_key_id="key_1",
-            ),
-        )
+    assert command.request_id == request.request_id
 
 
 def test_grant_admission_and_renewal_values_are_immutable() -> None:
@@ -265,11 +247,15 @@ def test_grant_admission_and_renewal_values_are_immutable() -> None:
     renewal = RenewalCommand(
         pairing_id="pairing_1",
         grant_id="grant_1",
-        target=RequestTarget("POST", "https://agent.example/v1/client-grants/renew"),
+        target=RequestTarget(
+            "POST", "https://agent.example/pairing/v1/client-grants/renew"
+        ),
+        browser_origin=SCOPE.browser_origin,
         dpop="header.payload.signature",
     )
     result = RenewalResult(
         grant=grant(),
+        access_token="signed-access-token",
         claims=AccessTokenClaims(
             issuer="agent_1",
             subject="user_1",

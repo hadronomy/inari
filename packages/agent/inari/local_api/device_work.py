@@ -23,12 +23,13 @@ from ..documents import (
     DocumentKind,
     DocumentWork,
     PosPrintOrigin,
+    PreparationPrintOrigin,
     ReceiptImage,
     SubmissionContext,
 )
 from .header_authorization import AUTHORIZATION_RESULT_STATE_KEY
 from .ingress import DeviceWorkIngress
-from .schemas.device_work import ReceiptImageEnvelope
+from .schemas.device_work import PreparationPrintOriginInput, ReceiptImageEnvelope
 
 
 _DOCUMENT_FAILURES = {
@@ -137,7 +138,7 @@ def _envelope(value: object) -> ReceiptImageEnvelope:
         ) from error
 
 
-def _field_violation(item: dict[str, object]) -> FieldViolation:
+def _field_violation(item: Mapping[str, object]) -> FieldViolation:
     raw_location = item.get("loc", ())
     location = raw_location if isinstance(raw_location, tuple | list) else ()
     pointer = "/" + "/".join(
@@ -175,14 +176,24 @@ def _admission_request(
 
     context_input = envelope.context
     origin_input = context_input.origin
-    origin = PosPrintOrigin(
-        database=business.database,
-        pos_configuration_id=pos_configuration_id,
-        pos_session_id=origin_input.pos_session_id,
-        offline_order_id=origin_input.offline_order_id,
-        server_order_id=origin_input.server_order_id,
-        document_kind=origin_input.document_kind,
-        content_revision=origin_input.content_revision,
+    origin_values = {
+        "database": business.database,
+        "pos_configuration_id": pos_configuration_id,
+        "pos_session_id": origin_input.pos_session_id,
+        "offline_order_id": origin_input.offline_order_id,
+        "server_order_id": origin_input.server_order_id,
+        "document_kind": origin_input.document_kind,
+        "content_revision": origin_input.content_revision,
+    }
+    origin = (
+        PreparationPrintOrigin(
+            **origin_values,
+            segment_kind=origin_input.segment_kind,
+            segment_index=origin_input.segment_index,
+            preparation_revision=origin_input.preparation_revision,
+        )
+        if isinstance(origin_input, PreparationPrintOriginInput)
+        else PosPrintOrigin(**origin_values)
     )
     context = SubmissionContext(
         contract_major=envelope.contract_major,

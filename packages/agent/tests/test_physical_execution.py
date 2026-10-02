@@ -153,6 +153,14 @@ def _seed_client_trust(
     )
     store = SqliteClientTrustStore(database_path)
     store.save_pairing_request(request)
+    assert (
+        store.transition_pairing_request(
+            request.request_id,
+            from_states=frozenset({PairingRequestState.PENDING.value}),
+            to_state=PairingRequestState.APPROVED.value,
+        )
+        is not None
+    )
     assert store.complete_pairing(
         request=replace(request, state=PairingRequestState.COMPLETED),
         pairing=pairing,

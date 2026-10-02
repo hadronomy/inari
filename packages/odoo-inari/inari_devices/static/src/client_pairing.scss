@@ -1,0 +1,71 @@
+.inari-pairing {
+    --inari-pairing-ink: #17211b;
+    --inari-pairing-surface: #edf3ee;
+    --inari-pairing-edge: rgba(44, 74, 55, 0.18);
+
+    position: relative;
+    max-width: 34rem;
+    padding: 0.75rem 0.25rem 0.25rem;
+    color: var(--inari-pairing-ink);
+}
+
+.inari-pairing h3 {
+    margin: 0 0 0.75rem;
+    font:
+        650 1.35rem/1.25 system-ui,
+        sans-serif;
+}
+
+.inari-pairing p {
+    max-width: 31rem;
+    margin: 0 0 1rem;
+    line-height: 1.5;
+}
+
+.inari-pairing__phrase {
+    position: relative;
+    margin: 1.25rem 0;
+    padding: 1.1rem 1.25rem;
+    overflow: hidden;
+    border: 1px solid var(--inari-pairing-edge);
+    background: var(--inari-pairing-surface);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.72);
+    clip-path: polygon(
+        0 0,
+        calc(100% - 0.8rem) 0,
+        100% 0.8rem,
+        100% 100%,
+        0.8rem 100%,
+        0 calc(100% - 0.8rem)
+    );
+    font:
+        700 1.45rem/1.3 system-ui,
+        sans-serif;
+    letter-spacing: 0.035em;
+    text-align: center;
+}
+
+.inari-pairing__steps {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0 0 1rem;
+    padding-left: 1.4rem;
+}
+
+.inari-pairing__expiry {
+    color: color-mix(in srgb, var(--inari-pairing-ink) 68%, transparent);
+    font-size: 0.9rem;
+}
+
+.inari-pairing__activity {
+    width: fit-content;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--inari-pairing-edge);
+    background: var(--inari-pairing-surface);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.64);
+}
+
+.inari-pairing__cancel {
+    margin-top: 1rem;
+    padding-inline: 0;
+}

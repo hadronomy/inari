@@ -7,6 +7,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ..client_trust.errors import (
+    ClientTrustError,
+    ClientTrustErrorCode,
+    DPoPNonceRequiredError,
+)
+from ..client_trust.request import RequestTargetError
 from ..core.exceptions import AgentError
 from ..core.failures import (
     DomainFailure,
@@ -119,6 +125,54 @@ async def _agent_failure_handler(request: Request, failure: Exception) -> JSONRe
     )
 
 
+async def _client_trust_failure_handler(
+    request: Request, failure: Exception
+) -> JSONResponse:
+    if not isinstance(failure, ClientTrustError):
+        return await _unexpected_failure_handler(request, failure)
+    code = {
+        ClientTrustErrorCode.NOT_FOUND: ProblemCode.RESOURCE_NOT_FOUND,
+        ClientTrustErrorCode.INVALID_ORIGIN: ProblemCode.REQUEST_MALFORMED,
+        ClientTrustErrorCode.INVALID_VALUE: ProblemCode.REQUEST_MALFORMED,
+        ClientTrustErrorCode.INVALID_STATE: ProblemCode.REQUEST_CONFLICT,
+        ClientTrustErrorCode.UNKNOWN_PERMISSION: ProblemCode.PAYLOAD_INVALID,
+        ClientTrustErrorCode.PERMISSION_DENIED: ProblemCode.PERMISSION_DENIED,
+        ClientTrustErrorCode.SCOPE_MISMATCH: ProblemCode.PERMISSION_DENIED,
+        ClientTrustErrorCode.PAIRING_EXPIRED: ProblemCode.EXPIRED,
+        ClientTrustErrorCode.PAIRING_DENIED: ProblemCode.EXPIRED,
+        ClientTrustErrorCode.PAIRING_CANCELED: ProblemCode.EXPIRED,
+        ClientTrustErrorCode.GRANT_EXPIRED: ProblemCode.EXPIRED,
+        ClientTrustErrorCode.GRANT_REVOKED: ProblemCode.PERMISSION_DENIED,
+        ClientTrustErrorCode.INVALID_ASSERTION: ProblemCode.TRUST_REQUIRED,
+        ClientTrustErrorCode.INVALID_DPOP_PROOF: ProblemCode.TRUST_REQUIRED,
+        ClientTrustErrorCode.REPLAY_DETECTED: ProblemCode.REQUEST_CONFLICT,
+    }[failure.code]
+    response = problem_response(
+        DomainFailure(code),
+        correlation_id=_request_correlation_id(request),
+    )
+    if isinstance(failure, DPoPNonceRequiredError):
+        response.headers.update(
+            {
+                "WWW-Authenticate": 'DPoP realm="inari", error="use_dpop_nonce"',
+                "DPoP-Nonce": failure.nonce.nonce,
+                "Cache-Control": "no-store",
+            }
+        )
+    return response
+
+
+async def _request_target_failure_handler(
+    request: Request, failure: Exception
+) -> JSONResponse:
+    if not isinstance(failure, RequestTargetError):
+        return await _unexpected_failure_handler(request, failure)
+    return problem_response(
+        DomainFailure(ProblemCode.REQUEST_MALFORMED),
+        correlation_id=_request_correlation_id(request),
+    )
+
+
 async def _ingress_failure_handler(
     request: Request, failure: Exception
 ) -> JSONResponse:
@@ -138,6 +192,8 @@ async def _ingress_failure_handler(
 
 def install_problem_handlers(app: FastAPI) -> None:
     app.add_exception_handler(DomainFailure, _domain_failure_handler)
+    app.add_exception_handler(ClientTrustError, _client_trust_failure_handler)
+    app.add_exception_handler(RequestTargetError, _request_target_failure_handler)
     app.add_exception_handler(IngressError, _ingress_failure_handler)
     app.add_exception_handler(AgentError, _agent_failure_handler)
     app.add_exception_handler(RequestValidationError, _validation_failure_handler)

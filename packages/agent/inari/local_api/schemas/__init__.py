@@ -60,8 +60,14 @@ from .jobs import (
 from .device_work import (
     DeviceWorkAcceptedResponse,
     PosPrintOriginInput,
+    PreparationPrintOriginInput,
     ReceiptImageEnvelope,
     SubmissionContextInput,
+)
+from .public_print_jobs import (
+    PrintJobQueryRequest,
+    PrintJobQueryResponse,
+    PublicPrintJobResponse,
 )
 from .onboarding import (
     ManagedOnboardingDeviceConfirmationRequest,
@@ -69,6 +75,15 @@ from .onboarding import (
     ManagedOnboardingPreviewResponse,
     ManagedOnboardingStartResponse,
     ManagedOnboardingStatusResponse,
+)
+from .pairing import (
+    ClientGrantRenewalInput,
+    ClientGrantRenewalResponse,
+    PairingAdmissionInput,
+    PairingAdmissionResponse,
+    PairingDecisionInput,
+    PairingRequestCreateInput,
+    PairingRequestResponse,
 )
 from .system import (
     LiveEventUpdateResponse,
@@ -126,15 +141,26 @@ __all__ = [
     "LocalPairingStartResponse",
     "LocalTrustStatusResponse",
     "ManagedCertificateStatusResponse",
+    "ClientGrantRenewalInput",
+    "ClientGrantRenewalResponse",
     "OpenCashDrawerCommandInput",
+    "PairingAdmissionInput",
+    "PairingAdmissionResponse",
+    "PairingDecisionInput",
+    "PairingRequestCreateInput",
+    "PairingRequestResponse",
     "DeviceWorkAcceptedResponse",
     "PrincipalResponse",
     "PrintTestPageCommandInput",
+    "PrintJobQueryRequest",
+    "PrintJobQueryResponse",
     "PrinterCapability",
     "PrinterDetailsResponse",
     "ProblemDetailsResponse",
+    "PublicPrintJobResponse",
     "QueueSummaryResponse",
     "PosPrintOriginInput",
+    "PreparationPrintOriginInput",
     "ReceiptImageEnvelope",
     "RuntimeEventResponse",
     "RuntimeEventKind",

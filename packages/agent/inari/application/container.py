@@ -6,6 +6,7 @@ from functools import lru_cache
 from dishka import make_container
 
 from ..config import AgentSettings, get_settings
+from ..client_trust import ClientTrustService
 from ..db import DatabaseMigrator
 from ..di import (
     AppProvider,
@@ -21,6 +22,7 @@ from ..gateway.onboarding import ManagedOnboardingService
 from ..gateway.supervisor import GatewaySupervisor
 from ..local_api.device_work import DeviceWorkSubmission
 from ..local_api.header_authorization import ClientTrustAuthorizer
+from ..local_api.print_job_queries import PrintJobQueries
 from ..printing.service import PrinterService
 from ..physical_execution import PhysicalExecution
 from ..runtime.events import EventHub
@@ -48,8 +50,10 @@ class AgentContainer:
     runtime_supervisor: RuntimeSupervisor
     document_admission: DocumentAdmission
     device_work_submission: DeviceWorkSubmission
+    print_job_queries: PrintJobQueries
     physical_execution: PhysicalExecution
     device_work_authorizer: ClientTrustAuthorizer | None = None
+    client_trust_service: ClientTrustService | None = None
     identity_service: AgentIdentityService | None = None
     authorization_service: AuthorizationService | None = None
     standalone_trust_service: StandaloneTrustService | None = None
@@ -82,8 +86,10 @@ def build_container(settings: AgentSettings) -> AgentContainer:
         runtime_supervisor=dependency_container.get(RuntimeSupervisor),
         document_admission=dependency_container.get(DocumentAdmission),
         device_work_submission=dependency_container.get(DeviceWorkSubmission),
+        print_job_queries=dependency_container.get(PrintJobQueries),
         physical_execution=dependency_container.get(PhysicalExecution),
         device_work_authorizer=dependency_container.get(ClientTrustAuthorizer),
+        client_trust_service=dependency_container.get(ClientTrustService),
         identity_service=dependency_container.get(AgentIdentityService),
         authorization_service=dependency_container.get(AuthorizationService),
         standalone_trust_service=dependency_container.get(StandaloneTrustService),

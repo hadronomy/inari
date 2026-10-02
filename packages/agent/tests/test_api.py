@@ -29,7 +29,12 @@ from inari.client_trust import (
     Permission,
     RequestTarget,
 )
-from inari.documents import AdmissionAccepted, AdmissionRequest, DocumentWork
+from inari.documents import (
+    AdmissionAccepted,
+    AdmissionRequest,
+    DocumentWork,
+    PreparationPrintOrigin,
+)
 from inari.drivers import (
     DeviceIdentity,
     DeviceKind,
@@ -41,6 +46,7 @@ from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.local_api.app import create_app
 from inari.local_api.device_work import DeviceWorkSubmission
+from inari.local_api.print_job_queries import PrintJobQueries
 from inari.local_api.header_authorization import (
     AuthorizationDecision,
     AuthorizationFailure,
@@ -52,6 +58,15 @@ from inari.printing.protocols import (
     PrinterCapabilities,
     PrinterDevice,
     PrinterTransport,
+)
+from inari.print_jobs import (
+    PairedClientScope,
+    PrintJobScope,
+    PosPrintOrigin,
+    PrintIntentPage,
+    PrintIntentQuery,
+    PrintJob,
+    PrintJobState,
 )
 from inari.runtime.events import EventHub
 from inari.runtime.models import (
@@ -202,11 +217,30 @@ class StubClientTrustAuthorizer:
         request: HeaderAuthorizationRequest,
         policy: EndpointAuthorizationPolicy,
     ) -> AuthorizationDecision:
-        del request
-        assert policy.permission is Permission.RECEIPT_IMAGE
+        expected_permission = (
+            Permission.JOBS_READ
+            if request.path.startswith("/v1/jobs/")
+            else Permission.RECEIPT_IMAGE
+        )
+        assert policy.permission is expected_permission
         if self.error is not None:
             raise self.error
         return AuthorizationDecision.authorized(self.authorization)
+
+
+@dataclass(slots=True)
+class StubPrintJobReader:
+    page: PrintIntentPage
+    query: PrintIntentQuery | None = None
+    lookup_scope: PrintJobScope | None = None
+
+    async def get(self, job_id: str, *, scope: PrintJobScope) -> PrintJob | None:
+        self.lookup_scope = scope
+        return next((job for job in self.page.jobs if job.job_id == job_id), None)
+
+    async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
+        self.query = query
+        return self.page
 
 
 @dataclass(slots=True)
@@ -445,19 +479,23 @@ def test_committed_event_fixture_matches_the_python_contract() -> None:
     assert events[0].resource_id == "dev_front_desk"
 
 
-@pytest.mark.anyio
-async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
-    container = make_test_container(mocker=mocker)
-    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
-    envelope = {
+def device_work_envelope(
+    device_id: str,
+    *,
+    print_intent_id: str = "pi_v1_test",
+    origin: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
         "contract_major": 1,
         "operation": "receipt_image",
         "media_type": "image/jpeg",
         "context": {
             "contract_major": 1,
-            "print_intent_id": "pi_v1_test",
-            "origin_submission_key": "osk_v1_test",
-            "origin": {
+            "print_intent_id": print_intent_id,
+            "origin_submission_key": f"osk:{print_intent_id}",
+            "origin": origin
+            or {
+                "kind": "pos",
                 "pos_session_id": "pos_session_42",
                 "offline_order_id": "order-1",
                 "server_order_id": None,
@@ -469,6 +507,13 @@ async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
             "copy_ordinal": 1,
         },
     }
+
+
+@pytest.mark.anyio
+async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
+    envelope = device_work_envelope(device_id)
 
     async with async_client_for(container) as client:
         headers = await auth_headers(client)
@@ -510,6 +555,158 @@ async def test_submit_device_work_returns_accepted_print_job(mocker) -> None:
         admission.submitted_request.grant.authorization_digest
         == "authorization_digest_1"
     )
+
+
+@pytest.mark.anyio
+async def test_submit_preparation_work_preserves_segment_identity(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
+    envelope = device_work_envelope(
+        device_id,
+        print_intent_id="pi_v1_preparation",
+        origin={
+            "kind": "preparation",
+            "pos_session_id": "pos_session_42",
+            "offline_order_id": "order-1",
+            "server_order_id": None,
+            "document_kind": "preparation_ticket",
+            "content_revision": "sha256:ticket-image",
+            "segment_kind": "new",
+            "segment_index": 0,
+            "preparation_revision": "sha256:order-change",
+        },
+    )
+
+    async with async_client_for(container) as client:
+        headers = await auth_headers(client)
+        headers["Idempotency-Key"] = "pi_v1_preparation"
+        response = await client.post(
+            "/v1/device-work",
+            files={
+                "envelope": (
+                    None,
+                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    "application/json",
+                ),
+                "document": ("ticket.jpg", b"\xff\xd8ticket\xff\xd9", "image/jpeg"),
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 202
+    admission = cast(StubDocumentAdmission, container.document_admission)
+    assert admission.submitted_work is not None
+    origin = admission.submitted_work.context.origin
+    assert isinstance(origin, PreparationPrintOrigin)
+    assert origin.segment_kind == "new"
+    assert origin.segment_index == 0
+    assert origin.preparation_revision == "sha256:order-change"
+
+
+@pytest.mark.anyio
+async def test_query_print_jobs_returns_scoped_public_projection(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    queries = container.print_job_queries
+    assert isinstance(queries.reader, StubPrintJobReader)
+    now = datetime(2026, 8, 31, 12, tzinfo=UTC)
+    queries.reader.page = PrintIntentPage(
+        jobs=(
+            PrintJob(
+                job_id="job_123",
+                intent_id="intent_123",
+                device_id="device_123",
+                origin=PosPrintOrigin(
+                    organization_id="org_1",
+                    site_id="site_1",
+                    database="odoo",
+                    paired_client_id="pairing_1",
+                    pos_configuration_id="pos_config_7",
+                    pos_session_id="session_1",
+                    offline_order_id="order_1",
+                    server_order_id=None,
+                    document_kind="customer_receipt",
+                    content_revision="sha256:receipt",
+                ),
+                state=PrintJobState.ACCEPTED,
+                state_version=1,
+                accepted_at=now,
+                expires_at=now + timedelta(minutes=5),
+                retryable=False,
+                contract_version="v1",
+            ),
+        ),
+        missing_print_intent_ids=("intent_missing",),
+        high_water_mark=17,
+    )
+
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/jobs/query",
+            json={"print_intent_ids": ["intent_123", "intent_missing"]},
+        )
+        lookup = await client.get("/v1/jobs/job_123")
+        missing = await client.get("/v1/jobs/job_missing")
+
+    assert lookup.status_code == 200
+    assert lookup.json()["print_job_id"] == "job_123"
+    assert missing.status_code == 404
+    assert queries.reader.lookup_scope == queries.reader.query.scope
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["jobs"][0]["print_job_id"] == "job_123"
+    assert payload["jobs"][0]["origin"]["kind"] == "pos"
+    assert payload["missing_print_intent_ids"] == ["intent_missing"]
+    assert payload["high_water_mark"] == 17
+    assert queries.reader.query is not None
+    assert queries.reader.query.scope == PairedClientScope(
+        organization_id="org_1",
+        site_id="site_1",
+        pos_configuration_id="pos_config_7",
+        paired_client_id="pairing_1",
+    )
+
+
+@pytest.mark.anyio
+async def test_query_print_jobs_rejects_unbounded_input_before_read(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    queries = container.print_job_queries
+    assert isinstance(queries.reader, StubPrintJobReader)
+
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/jobs/query",
+            json={"print_intent_ids": [f"intent_{index}" for index in range(101)]},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == "payload_invalid"
+    assert queries.reader.query is None
+
+
+@pytest.mark.anyio
+async def test_query_print_jobs_requires_jobs_read_permission(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    authorization = authorized_device_work()
+    limited = replace(
+        authorization,
+        grant=replace(
+            authorization.grant,
+            permissions=frozenset({Permission.RECEIPT_IMAGE}),
+        ),
+    )
+    container = replace(
+        container,
+        device_work_authorizer=StubClientTrustAuthorizer(limited),
+    )
+
+    async with async_client_for(container) as client:
+        response = await client.post(
+            "/v1/jobs/query",
+            json={"print_intent_ids": ["intent_123"]},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "permission_denied"
 
 
 @pytest.mark.anyio
@@ -717,26 +914,7 @@ async def test_agent_errors_use_unified_problem_details_shape(mocker) -> None:
         status_code=404,
     )
     device_id = next(iter(cast(StubDeviceCatalog, container.device_catalog).devices)).id
-    envelope = {
-        "contract_major": 1,
-        "operation": "receipt_image",
-        "media_type": "image/jpeg",
-        "context": {
-            "contract_major": 1,
-            "print_intent_id": "pi_v1_missing",
-            "origin_submission_key": "osk_v1_missing",
-            "origin": {
-                "pos_session_id": "pos_session_42",
-                "offline_order_id": "order-1",
-                "server_order_id": None,
-                "document_kind": "customer_receipt",
-                "content_revision": "revision-1",
-            },
-            "binding_revision_id": "binding_revision_9",
-            "device_id": device_id,
-            "copy_ordinal": 1,
-        },
-    }
+    envelope = device_work_envelope(device_id, print_intent_id="pi_v1_missing")
 
     async with async_client_for(container) as client:
         headers = await auth_headers(client)
@@ -877,7 +1055,7 @@ def authorized_device_work() -> AuthorizedRequest:
         scope=scope,
         actor_id="res.users:7",
         role="device_operator",
-        permissions=frozenset({Permission.RECEIPT_IMAGE}),
+        permissions=frozenset({Permission.RECEIPT_IMAGE, Permission.JOBS_READ}),
         authorization_digest="authorization_digest_1",
         generation=1,
         issued_at=now - timedelta(minutes=1),
@@ -996,6 +1174,9 @@ def make_test_container(
     )
     admission = StubDocumentAdmission(accepted_at=now)
     authorization = authorized_device_work()
+    print_job_reader = StubPrintJobReader(
+        PrintIntentPage(jobs=(), missing_print_intent_ids=(), high_water_mark=0)
+    )
     return AgentContainer(
         settings=settings,
         database_migrator=cast(Any, StubDatabaseMigrator()),
@@ -1007,6 +1188,7 @@ def make_test_container(
         runtime_supervisor=cast(Any, StubRuntimeSupervisor()),
         document_admission=cast(Any, admission),
         device_work_submission=DeviceWorkSubmission(admission=admission),
+        print_job_queries=PrintJobQueries(reader=print_job_reader),
         physical_execution=cast(Any, object()),
         device_work_authorizer=StubClientTrustAuthorizer(authorization),
         authorization_service=cast(Any, StubAuthorizationService()),

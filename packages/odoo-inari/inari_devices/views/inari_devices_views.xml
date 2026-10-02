@@ -1,0 +1,50 @@
+<odoo>
+    <record id="view_inari_device_tree" model="ir.ui.view">
+        <field name="name">inari.device.tree</field><field name="model">inari.device</field>
+        <field name="arch" type="xml"><list><field name="name"/><field name="device_id"/><field name="site_id"/><field name="agent_id"/><field name="health_state"/><field name="active"/></list></field>
+    </record>
+    <record id="view_inari_device_form" model="ir.ui.view">
+        <field name="name">inari.device.form</field><field name="model">inari.device</field>
+        <field name="arch" type="xml"><form><sheet><group><field name="name"/><field name="device_id"/><field name="company_id"/><field name="organization_id"/><field name="site_id"/><field name="agent_id"/><field name="health_state"/><field name="health_reason"/><field name="driver_profile_digest"/></group><notebook><page string="Capabilities"><field name="capability_ids" readonly="1"/></page></notebook></sheet></form></field>
+    </record>
+    <record id="action_inari_devices" model="ir.actions.act_window"><field name="name">Devices</field><field name="res_model">inari.device</field><field name="view_mode">list,form</field><field name="view_id" ref="view_inari_device_tree"/></record>
+
+    <record id="view_inari_binding_tree" model="ir.ui.view"><field name="name">inari.device.binding.tree</field><field name="model">inari.device.binding</field><field name="arch" type="xml"><list><field name="site_id"/><field name="scope_type"/><field name="purpose"/><field name="state"/><field name="active_revision_id"/></list></field></record>
+    <record id="view_inari_binding_form" model="ir.ui.view"><field name="name">inari.device.binding.form</field><field name="model">inari.device.binding</field><field name="arch" type="xml"><form><header><button name="action_deactivate" type="object" string="Deactivate" groups="inari_devices.group_inari_manager"/><field name="state" widget="statusbar"/></header><sheet><group><field name="company_id"/><field name="site_id"/><field name="scope_type"/><field name="purpose"/><field name="pos_config_id"/><field name="pos_printer_id"/><field name="active_revision_id"/></group><notebook><page string="Revisions"><field name="revision_ids" readonly="1"/></page></notebook></sheet></form></field></record>
+    <record id="action_inari_bindings" model="ir.actions.act_window"><field name="name">Bindings</field><field name="res_model">inari.device.binding</field><field name="view_mode">list,form</field><field name="view_id" ref="view_inari_binding_tree"/></record>
+
+    <record id="view_inari_agent_tree" model="ir.ui.view"><field name="name">inari.agent.tree</field><field name="model">inari.agent</field><field name="arch" type="xml"><list><field name="name"/><field name="agent_id"/><field name="site_id"/><field name="endpoint_url"/><field name="last_synced_at"/></list></field></record>
+    <record id="action_inari_agents" model="ir.actions.act_window"><field name="name">Agents</field><field name="res_model">inari.agent</field><field name="view_mode">list,form</field><field name="view_id" ref="view_inari_agent_tree"/></record>
+
+    <record id="view_inari_audit_tree" model="ir.ui.view"><field name="name">inari.print.audit.tree</field><field name="model">inari.print.audit</field><field name="arch" type="xml"><list><field name="observed_at"/><field name="action"/><field name="state"/><field name="device_id"/><field name="print_intent_id"/><field name="reason"/></list></field></record>
+    <record id="view_inari_audit_form" model="ir.ui.view"><field name="name">inari.print.audit.form</field><field name="model">inari.print.audit</field><field name="arch" type="xml"><form create="0" edit="0"><sheet><group><field name="observed_at"/><field name="actor_id"/><field name="action"/><field name="state"/><field name="reason"/><field name="note"/><field name="payload_fingerprint"/><field name="payload_size"/><field name="evidence"/></group></sheet></form></field></record>
+    <record id="action_inari_audit" model="ir.actions.act_window"><field name="name">Print Audit</field><field name="res_model">inari.print.audit</field><field name="view_mode">list,form</field><field name="view_id" ref="view_inari_audit_tree"/></record>
+
+    <record id="view_inari_alert_tree" model="ir.ui.view"><field name="name">inari.alert.tree</field><field name="model">inari.alert</field><field name="arch" type="xml"><list><field name="severity"/><field name="code"/><field name="message"/><field name="state"/><button name="action_acknowledge" type="object" string="Acknowledge"/></list></field></record>
+    <record id="action_inari_alerts" model="ir.actions.act_window"><field name="name">Alerts</field><field name="res_model">inari.alert</field><field name="view_mode">list,form</field><field name="view_id" ref="view_inari_alert_tree"/></record>
+
+    <record id="view_inari_work_tree" model="ir.ui.view"><field name="name">inari.managed.work.tree</field><field name="model">inari.managed.work</field><field name="arch" type="xml"><list><field name="managed_work_id"/><field name="operation"/><field name="state"/><field name="expires_at"/><field name="payload_fingerprint"/></list></field></record>
+    <record id="action_inari_managed_work" model="ir.actions.act_window"><field name="name">Managed Work</field><field name="res_model">inari.managed.work</field><field name="view_mode">list,form</field><field name="view_id" ref="view_inari_work_tree"/></record>
+
+    <record id="action_inari_decommission" model="ir.actions.act_window"><field name="name">Decommission</field><field name="res_model">inari.decommission.run</field><field name="view_mode">list,form</field></record>
+    <record id="action_inari_setup" model="ir.actions.act_window"><field name="name">Settings</field><field name="res_model">inari.setup.state</field><field name="view_mode">list,form</field></record>
+    <record id="action_inari_organizations" model="ir.actions.act_window"><field name="name">Organization Projections</field><field name="res_model">inari.organization</field><field name="view_mode">list,form</field></record>
+    <record id="action_inari_sites" model="ir.actions.act_window"><field name="name">Site Projections</field><field name="res_model">inari.site</field><field name="view_mode">list,form</field></record>
+    <record id="action_inari_identities" model="ir.actions.act_window"><field name="name">Workload identities</field><field name="res_model">inari.workload.identity</field><field name="view_mode">list,form</field></record>
+    <record id="action_inari_release_sets" model="ir.actions.act_window"><field name="name">Release Sets</field><field name="res_model">inari.release.set</field><field name="view_mode">list,form</field></record>
+
+    <menuitem id="menu_inari_root" name="Inari Devices" sequence="10" groups="inari_devices.group_inari_operator" action="action_inari_devices"/>
+    <menuitem id="menu_inari_devices" name="Devices" parent="menu_inari_root" action="action_inari_devices" sequence="10"/>
+    <menuitem id="menu_inari_bindings" name="Bindings" parent="menu_inari_root" action="action_inari_bindings" sequence="20" groups="inari_devices.group_inari_manager"/>
+    <menuitem id="menu_inari_agents" name="Agents" parent="menu_inari_root" action="action_inari_agents" sequence="30"/>
+    <menuitem id="menu_inari_audit" name="Print Audit" parent="menu_inari_root" action="action_inari_audit" sequence="40"/>
+    <menuitem id="menu_inari_alerts" name="Alerts" parent="menu_inari_root" action="action_inari_alerts" sequence="50"/>
+    <menuitem id="menu_inari_work" name="Managed Work" parent="menu_inari_root" action="action_inari_managed_work" sequence="60" groups="inari_devices.group_inari_manager"/>
+    <menuitem id="menu_inari_configuration" name="Configuration" parent="menu_inari_root" sequence="90" groups="inari_devices.group_inari_admin"/>
+    <menuitem id="menu_inari_setup" name="Settings" parent="menu_inari_configuration" action="action_inari_setup" sequence="10"/>
+    <menuitem id="menu_inari_decommission" name="Decommission" parent="menu_inari_configuration" action="action_inari_decommission" sequence="20"/>
+    <menuitem id="menu_inari_organizations" name="Organization Projections" parent="menu_inari_configuration" action="action_inari_organizations" sequence="30"/>
+    <menuitem id="menu_inari_sites" name="Site Projections" parent="menu_inari_configuration" action="action_inari_sites" sequence="40"/>
+    <menuitem id="menu_inari_identities" name="Workload identities" parent="menu_inari_configuration" action="action_inari_identities" sequence="50"/>
+    <menuitem id="menu_inari_release_sets" name="Release Sets" parent="menu_inari_configuration" action="action_inari_release_sets" sequence="60"/>
+</odoo>

@@ -19,6 +19,7 @@ from .dependencies import (
     get_event_hub,
     get_gateway_service,
     get_job_service,
+    get_print_job_queries,
     get_onboarding_service,
     get_standalone_trust_service,
 )
@@ -60,6 +61,9 @@ from .schemas import (
     LocalTrustStatusResponse,
     JobResourceResponse,
     JobResponse,
+    PrintJobQueryRequest,
+    PrintJobQueryResponse,
+    PublicPrintJobResponse,
     PrincipalResponse,
     DeviceWorkAcceptedResponse,
     QueueSummaryResponse,
@@ -75,7 +79,9 @@ from .schemas import (
     TrustedLocalClientResponse,
 )
 from .device_work import DeviceWorkSubmission, authorized_device_work_request
+from .print_job_queries import PrintJobQueries
 from .problem_handlers import problem_responses
+from .pairing_routes import pairing_router
 
 router = APIRouter()
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
@@ -149,6 +155,7 @@ JobServiceDependency = Annotated[JobService, Depends(get_job_service)]
 DeviceWorkSubmissionDependency = Annotated[
     DeviceWorkSubmission, Depends(get_device_work_submission)
 ]
+PrintJobQueriesDependency = Annotated[PrintJobQueries, Depends(get_print_job_queries)]
 EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
 AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
@@ -533,6 +540,39 @@ async def submit_device_work(
     )
 
 
+@jobs_router.get(
+    "/v1/jobs/{job_id}",
+    response_model=PublicPrintJobResponse,
+    responses=problem_responses(400, 401, 403, 404, 422, 500, 503),
+)
+async def get_public_print_job(
+    job_id: str,
+    connection: Request,
+    queries: PrintJobQueriesDependency,
+) -> PublicPrintJobResponse:
+    authorization = authorized_device_work_request(connection)
+    return PublicPrintJobResponse.from_domain(await queries.get(job_id, authorization))
+
+
+@jobs_router.post(
+    "/v1/jobs/query",
+    response_model=PrintJobQueryResponse,
+    responses=problem_responses(400, 401, 403, 422, 500, 503),
+)
+async def query_print_jobs(
+    request: PrintJobQueryRequest,
+    connection: Request,
+    queries: PrintJobQueriesDependency,
+) -> PrintJobQueryResponse:
+    authorization = authorized_device_work_request(connection)
+    page = await queries.reconcile(request.print_intent_ids, authorization)
+    return PrintJobQueryResponse(
+        jobs=[PublicPrintJobResponse.from_domain(job) for job in page.jobs],
+        missing_print_intent_ids=list(page.missing_print_intent_ids),
+        high_water_mark=page.high_water_mark,
+    )
+
+
 @jobs_router.post(
     "/device-commands", response_model=JobResourceResponse, status_code=202
 )
@@ -657,3 +697,4 @@ router.include_router(system_router)
 router.include_router(devices_router)
 router.include_router(jobs_router)
 router.include_router(events_router)
+router.include_router(pairing_router)

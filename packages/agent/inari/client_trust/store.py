@@ -54,6 +54,19 @@ class SqliteClientTrustStore:
             )
         return None if row is None else _pairing_from_row(cast(Mapping[str, Any], row))
 
+    def get_pairing_by_request(self, request_id: str) -> ClientPairing | None:
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(client_pairings_table).where(
+                        client_pairings_table.c.pairing_request_id == request_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return None if row is None else _pairing_from_row(cast(Mapping[str, Any], row))
+
     def save_pairing(self, pairing: ClientPairing) -> None:
         values = _pairing_values(pairing)
         statement = sqlite_insert(client_pairings_table).values(values)
@@ -74,6 +87,19 @@ class SqliteClientTrustStore:
                     select(client_grants_table).where(
                         client_grants_table.c.grant_id == grant_id
                     )
+                )
+                .mappings()
+                .first()
+            )
+        return None if row is None else _grant_from_row(cast(Mapping[str, Any], row))
+
+    def get_grant_for_pairing(self, pairing_id: str) -> ClientGrant | None:
+        with self.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    select(client_grants_table)
+                    .where(client_grants_table.c.pairing_id == pairing_id)
+                    .order_by(client_grants_table.c.generation.desc())
                 )
                 .mappings()
                 .first()
@@ -119,6 +145,37 @@ class SqliteClientTrustStore:
         with self.engine.begin() as connection:
             connection.execute(statement)
 
+    def transition_pairing_request(
+        self,
+        request_id: str,
+        *,
+        from_states: frozenset[str],
+        to_state: str,
+    ) -> PairingRequest | None:
+        if not from_states:
+            raise ValueError("from_states must not be empty")
+        with self.engine.begin() as connection:
+            changed = connection.execute(
+                update(pairing_requests_table)
+                .where(
+                    pairing_requests_table.c.request_id == request_id,
+                    pairing_requests_table.c.state.in_(tuple(from_states)),
+                )
+                .values(state=to_state)
+            )
+            if changed.rowcount != 1:
+                return None
+            row = (
+                connection.execute(
+                    select(pairing_requests_table).where(
+                        pairing_requests_table.c.request_id == request_id
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        return _request_from_row(cast(Mapping[str, Any], row))
+
     def complete_pairing(
         self,
         *,
@@ -145,12 +202,13 @@ class SqliteClientTrustStore:
                 update(pairing_requests_table)
                 .where(
                     pairing_requests_table.c.request_id == request.request_id,
-                    pairing_requests_table.c.state == PairingRequestState.PENDING.value,
+                    pairing_requests_table.c.state
+                    == PairingRequestState.APPROVED.value,
                 )
                 .values(state=request.state.value)
             )
             if completed.rowcount != 1:
-                raise ValueError("The Pairing Request is not pending")
+                raise ValueError("The Pairing Request is not approved")
             connection.execute(
                 sqlite_insert(client_pairings_table).values(_pairing_values(pairing))
             )
@@ -158,6 +216,18 @@ class SqliteClientTrustStore:
                 sqlite_insert(client_grants_table).values(_grant_values(grant))
             )
         return True
+
+    def pairing_assertion_was_consumed(self, assertion_jti: str) -> bool:
+        with self.engine.connect() as connection:
+            return (
+                connection.execute(
+                    select(client_trust_replays_table.c.jti).where(
+                        client_trust_replays_table.c.kind == "pairing_assertion",
+                        client_trust_replays_table.c.jti == assertion_jti,
+                    )
+                ).first()
+                is not None
+            )
 
     def save_dpop_nonce(
         self, nonce: str, *, issued_at: datetime, expires_at: datetime
@@ -217,7 +287,10 @@ class SqliteClientTrustStore:
                 .values(consumed_at=_timestamp(at))
             )
             if consumed.rowcount != 1:
-                transaction.rollback()
+                # A valid signed proof identity is spent even when its nonce is
+                # unknown. This prevents one captured proof from minting an
+                # unbounded sequence of fresh challenges.
+                transaction.commit()
                 return DPoPNonceConsumption.INVALID
             transaction.commit()
             return DPoPNonceConsumption.ACCEPTED

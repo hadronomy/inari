@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from io import BytesIO
 
@@ -18,6 +18,7 @@ from inari.documents import (
     DocumentWork,
     DurableAdmission,
     PosPrintOrigin,
+    PreparationPrintOrigin,
     ReceiptImage,
     SubmissionContext,
 )
@@ -108,6 +109,28 @@ def admission_request(work: DocumentWork) -> AdmissionRequest:
     )
 
 
+def preparation_work() -> DocumentWork:
+    work = receipt_work()
+    return replace(
+        work,
+        context=replace(
+            work.context,
+            origin=PreparationPrintOrigin(
+                database="odoo",
+                pos_configuration_id="pos_config_7",
+                pos_session_id="pos_session_42",
+                offline_order_id="01991a84-d0c2-7a49-89ad-2fd14bdbe501",
+                server_order_id=None,
+                document_kind="preparation_ticket",
+                content_revision="sha256:ticket-image",
+                segment_kind="new",
+                segment_index=0,
+                preparation_revision="sha256:order-change",
+            ),
+        ),
+    )
+
+
 @pytest.mark.anyio
 async def test_document_admission_returns_content_free_acceptance() -> None:
     store = RecordingAdmissionStore()
@@ -142,6 +165,22 @@ async def test_document_admission_returns_content_free_acceptance() -> None:
     assert target.operation == "receipt_image"
     assert target.options_digest == hashlib.sha256(b"{}").hexdigest()
     assert not hasattr(accepted, "content")
+
+
+@pytest.mark.anyio
+async def test_preparation_admission_requests_the_preparation_binding() -> None:
+    authority = StaticAdmissionAuthority()
+    admission = DocumentAdmissionService(
+        store=RecordingAdmissionStore(),
+        authority=authority,
+        clock=lambda: NOW,
+        monotonic_clock=lambda: 100.0,
+    )
+
+    await admission.admit(admission_request(preparation_work()))
+
+    assert authority.targets[0].purpose == "pos_preparation"
+    assert authority.proof.purpose == "pos_preparation"
 
 
 @pytest.mark.anyio

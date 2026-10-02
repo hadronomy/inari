@@ -15,6 +15,7 @@ from ..device_authority import (
 from ..documents import DocumentAdmission, DocumentAdmissionService
 from ..gateway.repositories import GatewayRepository
 from ..local_api.device_work import DeviceWorkSubmission
+from ..local_api.print_job_queries import PrintJobQueries
 from ..physical_execution import (
     EncryptedExecutionSpool,
     ExecutionOwner,
@@ -23,6 +24,7 @@ from ..physical_execution import (
     SqliteExecutionLedger,
 )
 from ..printing.renderers import EscPosImageReceiptRenderer
+from ..print_jobs.sqlite import SqlitePrintJobReader
 from ..runtime.devices.discovery import DiscoveryCoordinator
 from ..runtime.events import EventHub
 from ..runtime.jobs.execution import (
@@ -125,6 +127,14 @@ class RuntimeProvider(Provider):
         admission: DocumentAdmission,
     ) -> DeviceWorkSubmission:
         return DeviceWorkSubmission(admission=admission)
+
+    @provide
+    def print_job_reader(self, store: RuntimeStore) -> SqlitePrintJobReader:
+        return SqlitePrintJobReader(store)
+
+    @provide
+    def print_job_queries(self, reader: SqlitePrintJobReader) -> PrintJobQueries:
+        return PrintJobQueries(reader=reader)
 
     @provide
     def execution_owner(self) -> ExecutionOwner:

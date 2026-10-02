@@ -4,14 +4,17 @@ from fastapi import Depends
 from starlette.requests import HTTPConnection
 
 from ..config import AgentSettings
+from ..client_trust import ClientTrustService
 from ..application.container import AgentContainer, get_default_container
 from .device_work import DeviceWorkSubmission
+from .print_job_queries import PrintJobQueries
 from ..gateway.service import GatewayService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..runtime.events import EventHub
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
 from ..security.auth import AuthorizationService
+from ..security.identity import AgentIdentityService
 from ..security.local_trust import StandaloneTrustService
 from ..security.policies import SecurityPolicyService
 
@@ -44,6 +47,20 @@ def get_device_work_submission(
     return container.device_work_submission
 
 
+def get_print_job_queries(
+    container: AgentContainer = Depends(get_container),
+) -> PrintJobQueries:
+    return container.print_job_queries
+
+
+def get_client_trust_service(
+    container: AgentContainer = Depends(get_container),
+) -> ClientTrustService:
+    if container.client_trust_service is None:
+        raise RuntimeError("ClientTrustService is not configured.")
+    return container.client_trust_service
+
+
 def get_event_hub(container: AgentContainer = Depends(get_container)) -> EventHub:
     return container.event_hub
 
@@ -70,6 +87,14 @@ def get_security_policy_service(
     if container.security_policy_service is None:
         raise RuntimeError("SecurityPolicyService is not configured.")
     return container.security_policy_service
+
+
+def get_identity_service(
+    container: AgentContainer = Depends(get_container),
+) -> AgentIdentityService:
+    if container.identity_service is None:
+        raise RuntimeError("AgentIdentityService is not configured.")
+    return container.identity_service
 
 
 def get_gateway_service(

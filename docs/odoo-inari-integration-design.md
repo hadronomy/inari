@@ -50,8 +50,9 @@ starts the report in a browser.
 
 Before a POS Device Adapter renders or submits Device Work, it creates one
 immutable Submission Context. The context contains the Print Origin, Binding
-Revision, Device, actor, POS session, document kind, content revision, and copy
-ordinal.
+Revision, Device, POS session, document kind, content revision, and copy
+ordinal. It contains no actor or authority claim. The Agent derives those
+claims from the accepted Client Grant.
 
 The Device Adapter copies the Submission Context into the Print Intent and
 Print Audit Record. A Retry reuses the context. A Reprint creates a new context
@@ -141,6 +142,36 @@ printing.
 
 The global recovery panel continues Job Reconciliation after this observation
 window. An automatic sequence records the pending document and continues.
+
+### Local POS print recovery
+
+One POS recovery coordinator owns customer-receipt and preparation-ticket
+recovery. It serializes work for each Binding Revision and Device. The POS
+stores the content-free Submission Context and recovery state in IndexedDB
+before it calls the Agent. The IndexedDB database is scoped to the Odoo
+database, company, and POS configuration. It keeps the exact JPEG only in the
+current tab.
+
+If the Agent response is uncertain, the coordinator queries the protected
+`/v1/jobs/query` endpoint before it permits a retry. Each query contains no
+more than 100 Print Intent identities. It also polls admitted work while the
+state is `accepted` or `in_progress`, so a later failure becomes visible without
+an operator refresh. A missing Print Intent permits an exact same-tab retry.
+After a reload, missing work becomes `content_unavailable` because the JPEG no
+longer exists. The addon does not render replacement content from partial
+state.
+
+`outcome_unknown` never permits an automatic retry. The operator must check
+the printer, query the Agent again, or explicitly finish the task without a
+confirmed ticket. Customer receipts also permit an explicit browser print
+while the current tab still holds the exact JPEG. Preparation tickets do not
+use browser print.
+
+Odoo increments receipt copy state only after Agent admission. Odoo advances
+preparation change state only after Agent admission or an explicit operator
+dismissal. Native printers keep Odoo's native retry dialog. An authoritative
+Inari printer uses only the global Inari recovery dialog, including in a mixed
+native and Inari printer setup.
 
 Pending work expires at the deadline that the Controller assigned at Controller
 Admission. Agent acceptance links the Managed Work record to the authoritative
@@ -448,11 +479,41 @@ The assertion is compact JWS with `iss`, `sub`, `aud`, `iat`, `exp`, and `jti`
 claims. The company Pairing Assertion key signs through OpenBao Transit. Its
 private key never enters Odoo memory or the Controller.
 
+The browser requests the Pairing Assertion from
+`POST /inari_devices/pairing/v1/assertion`. This same-origin Odoo JSON-RPC route
+requires an authenticated Device Operator and an active POS session. Odoo
+validates the complete approved Pairing Request against the active receipt
+Binding Revision before it signs anything. It issues one assertion for each
+Pairing Request and safely replays the same result for an identical request.
+The route enables no CORS policy. Odoo's JSON-RPC dispatcher does not process
+CSRF tokens, and browsers cannot submit its JSON content type across origins
+without CORS approval.
+
+The Odoo pod authenticates to OpenBao with its Kubernetes workload identity.
+Odoo stores no OpenBao token or private signing key in its database. Each
+database and company uses the deterministic Transit key
+`inari-odoo-pairing-<database>-<company_id>`. Odoo reads the current Ed25519 key
+version first. It places that exact version in the protected `kid`, signs the
+compact JWS input through Transit, and rejects a different key type or a
+malformed signature.
+
+The Odoo deployment supplies `INARI_OPENBAO_ADDR` and
+`INARI_OPENBAO_KUBERNETES_ROLE`. It can also set the Kubernetes auth mount,
+Transit mount, OpenBao namespace, service-account token file, CA certificate,
+and client certificate files. OpenBao access uses HTTPS and a bounded request
+timeout.
+
 The Agent checks the assertion through the Odoo signing key in Controller
 policy. The Client Grant contains the same actor and business scope.
 
 The Agent stores the one-time assertion `jti` before it issues the Client
 Grant. A replay cannot create another grant after a restart.
+
+One browser pairing module owns the non-exportable Ed25519 key, IndexedDB
+record, DPoP proofs, Agent nonce retry, approval polling, Pairing Assertion
+request, Client Grant admission, renewal, and cancellation. POS printing sees
+only the resulting credential interface. If a ticket starts pairing, the same
+ticket resumes after the Agent issues the Client Grant.
 
 If Client Pairing is absent, the POS status control opens one guided flow. It
 covers Device Center, certificate trust, request review, manager approval, and
@@ -513,7 +574,7 @@ The access token contains `cnf.jkt`. Each DPoP proof contains exact `htm`,
 normalized `htu`, `iat`, `ath`, nonce, and `jti` values. The Agent rejects a
 missing or mismatched claim.
 
-The proof header contains `typ=dpop+jwt`, `alg=EdDSA`, and the public Ed25519
+The proof header contains `typ=dpop+jwt`, `alg=Ed25519`, and the public Ed25519
 JWK without private members. The normalized `htu` excludes query and fragment
 components. Requests present the access token with the `DPoP` authorization
 scheme.
@@ -2320,13 +2381,13 @@ The Device Adapter Interface exposes three operations:
 - `submit(device_work)` returns the authoritative work identity and state
 - `subscribe(selection, listener)` delivers state changes for selected work.
 
-An `InariPrinter` Device Adapter extends Odoo `BasePrinter`. It serves the
-primary receipt printer and preparation printers through their existing Odoo
-seams.
+The `InariReceiptPrinter` Device Adapter serves the primary receipt printer and
+preparation printers through their existing Odoo seams. It is independent from
+Odoo proxy printer state.
 
-Narrow patches carry Submission Context through `PrinterService.printHtml()`,
-`PosPrinterService.print()`, `PosPrinterService.printHtml()`, the receipt
-caller, and `PosStore.printOrderChanges()`.
+Narrow patches carry Submission Context through `PosPrinterService.print()`,
+`PosPrinterService.printHtml()`, the receipt caller, and
+`PosStore.printOrderChanges()`.
 
 The caller creates the immutable Submission Context before Odoo renders the
 JPEG. Each `InariPrinter` queue entry stores the rendered element and its exact
@@ -2340,27 +2401,26 @@ IndexedDB stores each pending content-free Submission Context by Print Origin,
 preparation segment, Binding Revision, and Copy Ordinal. A reload or Retry
 cannot create a different context for the same Print Intent.
 
-The addon installs `InariPrinter` after POS data load and after Odoo proxy
-connection ordering completes. Active Inari bindings work when Odoo proxy flags
-are disabled.
+The frontend service creates one Agent channel for each exact Agent and Client
+Grant scope. It creates one serialized printer queue for each Binding Revision
+and Device. Odoo proxy connection ordering cannot replace or drain these
+queues.
 
-The addon creates `InariPrinter` only for an active Binding Revision. This rule
-applies to primary receipts and preparation printers. It installs the receipt
-instance in `hardwareProxy.printer`.
+The server adds an authoritative Binding Revision projection to the exact
+`pos.printer` record. It does not add a `printer_type` value or replace Odoo's
+native printer object. A preparation printer without that projection keeps its
+Native Device Path unchanged.
 
-The addon guards `HardwareProxy.connectToPrinter()` and each printer-service
-reset. These paths cannot replace an active `InariPrinter`.
-
-The guard also covers the `EpsonPrinter` assignment in
-`PosStore.afterProcessServerData()` and the reconnect effect that calls
-`printer.printReceipt()`. A native reconnect cannot submit or drain Inari work.
-
-The preparation path creates the same Device Adapter for records whose
-`printer_type` is `inari` and whose Binding Revision is active.
+Odoo continues to own category filtering, order-change calculation, receipt
+segment order, and `OrderChangeReceipt` rendering. The addon patches
+`generateOrderChange()` and `generateReceiptsDataToPrint()` only to carry the
+immutable order-change and segment identity. It patches
+`printOrderChanges()` only when the selected `pos.printer` has an authoritative
+Inari Binding Revision.
 
 `PosStore.printOrderChanges()` creates one stable preparation segment identity
 for every `receiptsData` item. It passes the exact Submission Context to
-`InariPrinter.printReceipt()`.
+`InariReceiptPrinter.printReceipt()`.
 
 Preparation delivery state is stored per order, segment, Device, and Print
 Intent. `lastPrints` and `updateLastOrderChange()` advance only through work
@@ -2872,9 +2932,9 @@ work.
 printer, cash drawer, scale, and scanner. These fields contain no copied Device
 data.
 
-`pos.printer` adds `inari` to `printer_type` and exposes its computed active
-Binding Revision. Managers edit all assignments through the Device Binding
-view and revision workflow.
+`pos.printer` exposes its computed active Binding Revision without changing
+`printer_type`. Managers edit all assignments through the Device Binding view
+and revision workflow.
 
 Device Preflight compares the server addon build identifier with the bundled
 JavaScript identifier. A mismatch requests one hard reload and preserves
@@ -2893,8 +2953,34 @@ The Local Agent Interface contains these versioned endpoints:
 - `POST /v1/jobs/query`
 - `GET /v1/events`.
 
+`POST /v1/jobs/query` accepts 1 to 100 Print Intent IDs. The Agent derives the
+Organization, Site, POS Configuration, and Paired Client from the accepted
+Client Grant. It returns public Print Job snapshots in request order, missing
+Print Intent IDs, and a scope-specific high-water mark. An out-of-scope Print
+Intent is reported as missing. The request and response contain no Device Work,
+Receipt Payload, or raw Driver output.
+
+The POS browser pairing requests exactly `device_work:receipt_image` and
+`jobs:read`. Capability selection still uses the `receipt_image` operation.
+
 Client Pairing uses a separate privileged Interface under `/pairing/v1/`.
 Device Work credentials cannot call that Interface.
+
+The browser Client Pairing Interface contains these endpoints:
+
+- `POST /pairing/v1/requests`
+- `GET /pairing/v1/requests/{request_id}`
+- `POST /pairing/v1/requests/{request_id}/cancel`
+- `POST /pairing/v1/requests/{request_id}/admit`
+- `POST /pairing/v1/client-grants/renew`.
+
+Device Center uses its separate application identity for:
+
+- `GET /pairing/v1/requests/{request_id}/review`
+- `POST /pairing/v1/requests/{request_id}/decision`.
+
+Browser calls use exact-origin key proof and no authorization header. Device
+Center review and decision calls require its local administrative credential.
 
 Versioned Python protocol models are the contract source. The build publishes
 committed OpenAPI 3.1, JSON Schema, generated client, and contract-fixture

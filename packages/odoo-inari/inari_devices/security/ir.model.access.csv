@@ -1,0 +1,37 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_inari_organization,Inari Organization,model_inari_organization,inari_devices.group_inari_sync,1,1,1,0
+access_inari_organization_manager,Inari Organization manager read,model_inari_organization,inari_devices.group_inari_manager,1,0,0,0
+access_inari_site,Inari Site,model_inari_site,inari_devices.group_inari_sync,1,1,1,0
+access_inari_site_manager,Inari Site manager read,model_inari_site,inari_devices.group_inari_manager,1,0,0,0
+access_inari_agent,Inari Agent,model_inari_agent,inari_devices.group_inari_sync,1,1,1,0
+access_inari_agent_manager,Inari Agent manager read,model_inari_agent,inari_devices.group_inari_manager,1,0,0,0
+access_inari_device,Inari Device,model_inari_device,inari_devices.group_inari_sync,1,1,1,0
+access_inari_device_manager,Inari Device manager read,model_inari_device,inari_devices.group_inari_manager,1,0,0,0
+access_inari_capability,Inari Capability,model_inari_device_capability,inari_devices.group_inari_sync,1,1,1,0
+access_inari_capability_manager,Inari Capability manager read,model_inari_device_capability,inari_devices.group_inari_manager,1,0,0,0
+access_inari_work,Inari Managed Work,model_inari_managed_work,inari_devices.group_inari_sync,1,1,1,0
+access_inari_work_manager,Inari Managed Work manager read,model_inari_managed_work,inari_devices.group_inari_manager,1,0,0,0
+access_inari_binding_operator,Inari Binding read,model_inari_device_binding,inari_devices.group_inari_operator,1,0,0,0
+access_inari_binding_manager,Inari Binding manager,model_inari_device_binding,inari_devices.group_inari_manager,1,1,1,0
+access_inari_revision_operator,Inari Revision read,model_inari_device_binding_revision,inari_devices.group_inari_operator,1,0,0,0
+access_inari_revision_manager,Inari Revision manager,model_inari_device_binding_revision,inari_devices.group_inari_manager,1,1,1,0
+access_inari_test_operator,Inari Test read,model_inari_device_test_result,inari_devices.group_inari_operator,1,0,0,0
+access_inari_test_manager,Inari Test manager,model_inari_device_test_result,inari_devices.group_inari_manager,1,1,1,0
+access_inari_report_operator,Inari Report Binding read,model_inari_report_binding,inari_devices.group_inari_operator,1,0,0,0
+access_inari_report_manager,Inari Report Binding manager,model_inari_report_binding,inari_devices.group_inari_manager,1,1,1,0
+access_inari_report_sequence,Inari Report Sequence,model_inari_report_sequence,inari_devices.group_inari_manager,1,1,1,0
+access_inari_report_document,Inari Report Document,model_inari_report_sequence_document,inari_devices.group_inari_manager,1,1,1,0
+access_inari_intent_operator,Inari Print Intent,model_inari_print_intent,inari_devices.group_inari_operator,1,1,1,0
+access_inari_audit_operator,Inari Print Audit,model_inari_print_audit,inari_devices.group_inari_operator,1,0,1,0
+access_inari_recovery_operator,Inari Recovery Task,model_inari_recovery_task,inari_devices.group_inari_operator,1,1,1,0
+access_inari_assertion_manager,Inari Pairing Assertion,model_inari_pairing_assertion,inari_devices.group_inari_manager,1,0,0,0
+access_inari_endpoint_manager,Inari Agent Endpoint,model_inari_agent_endpoint,inari_devices.group_inari_manager,1,1,1,0
+access_inari_webhook_sync,Inari Webhook,model_inari_webhook_delivery,inari_devices.group_inari_sync,1,1,1,0
+access_inari_cursor_sync,Inari Cursor,model_inari_reconciliation_cursor,inari_devices.group_inari_sync,1,1,1,0
+access_inari_decommission_manager,Inari Decommission,model_inari_decommission_run,inari_devices.group_inari_manager,1,1,1,0
+access_inari_evidence_manager,Inari Evidence,model_inari_decommission_evidence,inari_devices.group_inari_manager,1,1,1,0
+access_inari_purge_manager,Inari Purge Authority,model_inari_decommission_purge_authority,inari_devices.group_inari_manager,1,1,1,0
+access_inari_identity_admin,Inari Workload Identity,model_inari_workload_identity,inari_devices.group_inari_admin,1,1,1,0
+access_inari_setup_admin,Inari Setup,model_inari_setup_state,inari_devices.group_inari_admin,1,1,1,0
+access_inari_release_admin,Inari Release Set,model_inari_release_set,inari_devices.group_inari_admin,1,1,1,0
+access_inari_alert_operator,Inari Alert,model_inari_alert,inari_devices.group_inari_operator,1,1,1,0
