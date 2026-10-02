@@ -14,7 +14,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     switch::Switch,
 };
-use inari_agent_client::{AgentClientOptions, ServiceState};
+use inari_agent_client::ServiceState;
 
 use crate::{
     app::{
@@ -38,6 +38,7 @@ pub struct SupportView {
     service_error: Option<String>,
     agent_error: Option<String>,
     identity_retry_available: bool,
+    agent_endpoint: Option<String>,
 }
 
 impl SupportView {
@@ -47,8 +48,16 @@ impl SupportView {
         service_error: Option<String>,
         agent_error: Option<String>,
         identity_retry_available: bool,
+        agent_endpoint: Option<String>,
     ) -> Self {
-        Self { agent, service, service_error, agent_error, identity_retry_available }
+        Self {
+            agent,
+            service,
+            service_error,
+            agent_error,
+            identity_retry_available,
+            agent_endpoint,
+        }
     }
 }
 
@@ -57,9 +66,9 @@ impl RenderOnce for SupportView {
         let theme = cx.inari();
         let recovery =
             Recovery::for_state(self.service, self.agent.tone, self.identity_retry_available);
-        let endpoint = AgentClientOptions::default()
-            .endpoint
-            .to_string();
+        let endpoint = self
+            .agent_endpoint
+            .unwrap_or_else(|| "Unavailable".into());
         let diagnostic = self
             .agent_error
             .or(self.service_error)

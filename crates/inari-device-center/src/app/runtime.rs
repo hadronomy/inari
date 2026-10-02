@@ -3,9 +3,7 @@ use std::sync::Arc;
 use gpui::{AnyWindowHandle, Context, Task, Window};
 #[cfg(windows)]
 use inari_agent_client::SetupSnapshot;
-use inari_agent_client::{
-    AgentClientOptions, AgentConnection, ServiceControlResult, ServiceState, SetupAccess,
-};
+use inari_agent_client::{AgentConnection, ServiceControlResult, ServiceState, SetupAccess};
 
 use super::{DeviceCenter, OpenApiReference, OpenLogs};
 use crate::infrastructure::{AgentRuntime, AgentRuntimeUpdate, TrayCommand, platform};
@@ -298,13 +296,7 @@ impl DeviceCenter {
         _: &mut Window,
         _: &mut Context<Self>,
     ) {
-        let endpoint = AgentClientOptions::default()
-            .endpoint
-            .join("docs")
-            .expect("the built-in API reference URL is valid");
-        if let Err(error) = open::that_detached(endpoint.as_str()) {
-            tracing::warn!(%error, "could not open the local API reference");
-        }
+        self.runtime.open_api_reference();
     }
 }
 

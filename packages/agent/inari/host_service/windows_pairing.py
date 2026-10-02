@@ -6,10 +6,13 @@ import sys
 import threading
 from typing import Any
 
+from ..config import AgentSettings
 from ..security.local_trust import StandaloneTrustService
 from ..security.local_trust.native_bootstrap import (
     WINDOWS_PAIRING_PIPE,
+    NativeEndpointResponse,
     NativePairingResponse,
+    native_agent_endpoint,
 )
 from ..windows_identity import current_package_family_name, package_family_for_process
 
@@ -27,9 +30,11 @@ class WindowsPairingBootstrapServer:
         trust_service: StandaloneTrustService,
         *,
         package_family: str,
+        agent_endpoint: str,
     ) -> None:
         self._trust_service = trust_service
         self._package_family = package_family
+        self._agent_endpoint = agent_endpoint
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         if sys.platform != "win32":
@@ -39,11 +44,17 @@ class WindowsPairingBootstrapServer:
     def for_current_package(
         cls,
         trust_service: StandaloneTrustService,
+        *,
+        settings: AgentSettings,
     ) -> WindowsPairingBootstrapServer | None:
         package_family = current_package_family_name()
         if package_family is None:
             return None
-        return cls(trust_service, package_family=package_family)
+        return cls(
+            trust_service,
+            package_family=package_family,
+            agent_endpoint=native_agent_endpoint(settings),
+        )
 
     def start(self) -> None:
         if self._thread is not None:
@@ -86,13 +97,17 @@ class WindowsPairingBootstrapServer:
             )
         win32file = importlib.import_module("win32file")
         _, request = win32file.ReadFile(pipe, 1)
-        if bytes(request) != b"\x01":
+        response: NativeEndpointResponse | NativePairingResponse
+        if bytes(request) == b"\x02":
+            response = NativeEndpointResponse(agent_endpoint=self._agent_endpoint)
+        elif bytes(request) == b"\x01":
+            pairing = self._trust_service.start_native_pairing()
+            response = NativePairingResponse(
+                pairing_secret=pairing.secret,
+                expires_at=pairing.expires_at,
+            )
+        else:
             raise ValueError("The native pairing request is invalid.")
-        pairing = self._trust_service.start_native_pairing()
-        response = NativePairingResponse(
-            pairing_secret=pairing.secret,
-            expires_at=pairing.expires_at,
-        )
         win32file.WriteFile(pipe, response.model_dump_json().encode("utf-8"))
         win32file.FlushFileBuffers(pipe)
 

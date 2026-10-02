@@ -98,7 +98,10 @@ def create_windows_service_class(
                     from .windows_pairing import WindowsPairingBootstrapServer
 
                     self._pairing_bootstrap = (
-                        WindowsPairingBootstrapServer.for_current_package(trust_service)
+                        WindowsPairingBootstrapServer.for_current_package(
+                            trust_service,
+                            settings=settings,
+                        )
                     )
                     if self._pairing_bootstrap is not None:
                         self._pairing_bootstrap.start()

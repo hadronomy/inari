@@ -117,6 +117,10 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
     ),
     ("api", "host"): ("Bind host for the local HTTP API.",),
     ("api", "port"): ("Bind port for the local HTTP API.",),
+    ("api", "endpoint"): (
+        "Agent Endpoint advertised to the packaged Device Center. Required when the listener uses TLS.",
+        "Use the certificate hostname and listener port, without a path or credentials.",
+    ),
     ("api", "allowed_hosts"): ("Allowed Host headers for incoming requests.",),
     ("api", "exposure"): ("Expose the API only on loopback or to the LAN.",),
     ("api", "https_redirect"): ("Redirect HTTP to HTTPS when LAN TLS is enabled.",),
@@ -310,6 +314,7 @@ _FIELD_COMMENTS: dict[tuple[str, ...], tuple[str, ...]] = {
 
 _FIELD_EXAMPLES: dict[tuple[str, ...], Any] = {
     ("logging", "directory"): "./logs",
+    ("api", "endpoint"): "https://agent.example.com:7310/",
     ("storage", "profile"): "production",
     ("storage", "data_dir"): "./data",
     ("storage", "temp_dir"): "./tmp",
@@ -460,6 +465,7 @@ class ApiConfig(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 7310
+    endpoint: str | None = None
     allowed_hosts: list[str] = Field(
         default_factory=lambda: ["127.0.0.1", "localhost", "testserver"]
     )
@@ -756,6 +762,7 @@ class AgentConfigFile(BaseModel):
         return {
             "host": self.api.host,
             "port": self.api.port,
+            "agent_endpoint": self.api.endpoint,
             "path_profile": path_defaults.profile,
             "trusted_hosts": list(self.api.allowed_hosts),
             "allowed_origins": list(self.api.cors.allowed_origins),
@@ -928,6 +935,7 @@ class AgentSettings(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 7310
+    agent_endpoint: str | None = None
     path_profile: PathProfile = "auto"
     gateway_mode: GatewayMode = GatewayMode.STANDALONE
     gateway_exposure: GatewayExposure = GatewayExposure.LOOPBACK
