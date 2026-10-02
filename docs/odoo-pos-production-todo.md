@@ -10,10 +10,12 @@ the workstation's 80-VII-UL USB printer.
 - POS configuration: `2`
 - Infrastructure: `mze-infra`, cluster `shadow`
 - Agent Host: Windows `workstation`
-- Merged implementation: `24948ff3d94967a6bbf06115ec5c4af1fdcb8469`
-- Windows observation branch: `t3code/inari-pos-windows-observation`
+- Deployed release commit: `53d0572853885ed19a066af177a4410f8b45f606`
+- Edge release: `edge@1.20.0-alpha.11`
+- Windows package: `1.20.0.1011`
 
-Status: **in progress**. Production does not yet have the required Inari setup.
+Status: **in progress**. Odoo and the Windows Agent are installed. The receipt
+Binding Revision is inactive. No physical receipt passed the full Inari path.
 
 ## Critical path
 
@@ -27,7 +29,7 @@ and test result before marking it complete.
 - [x] Run the current Agent wheel on Windows with production storage behavior.
 - [x] Verify HTTPS and CORS for the exact production Odoo origin in isolation.
 - [x] Stage matching Agent and shared-contract wheels with checksums.
-- [ ] Complete PR review and release checks.
+- [x] Complete PR review and release checks.
   - [x] Fix the first DPoP nonce challenge and bind renewal to one Client Pairing.
   - [x] Renew execution leases during preparation.
   - [x] Keep recovery on its original Agent channel after a Binding Revision changes.
@@ -35,7 +37,7 @@ and test result before marking it complete.
   - [x] Add a scoped lookup for the public Print Job ID.
   - [x] Add signer retirement and exact Driver Profile selection.
   - [x] Add the artifact compatibility manifest and pin its build backend.
-  - [ ] Run the Controller PostgreSQL regressions and merge the six PR layers.
+  - [x] Run the Controller PostgreSQL regressions and merge the six PR layers.
 - [ ] Install Controller-signed authority through a supported runtime path.
   - [x] Add and test the atomic `inari authority install` command.
   - [ ] Provision the production Controller trust and signed bundle.
@@ -43,25 +45,29 @@ and test result before marking it complete.
   - [x] Sign fresh discovery records with a separate protected Agent key.
   - [x] Read current Windows queue, driver, media width, and readiness facts.
   - [ ] Read the actual Device firmware identity through its supported protocol.
-- [ ] Prepare the Odoo runtime with the addon and shared-contract dependency.
+- [x] Prepare the Odoo runtime with the addon and shared-contract dependency.
   - [x] Stage the addon, shared contracts, and locked dependency in one Inari artifact.
-  - [ ] Publish a signed digest from the `main` release workflow.
-  - [ ] Pin, verify, and mount the artifact in the Odoo runtime.
+  - [x] Publish a signed digest from the `main` release workflow.
+  - [x] Pin, verify, and mount the artifact in the Odoo runtime.
 - [ ] Prepare the required Controller, Organization, Site, and policy setup.
 - [x] Configure OpenBao to sign scoped Odoo Pairing Assertions.
   - [x] Merge infrastructure PR 24 and verify Flux revision `e9ff0530`.
   - [x] Provision the non-exportable company key, narrow policy, and Kubernetes role.
   - [x] Install service account `odoo-inari` in namespace `odoo`.
-  - [ ] Verify service account login and mount its token and CA in Odoo.
-- [ ] Prepare the Windows Agent service and its trusted HTTPS certificate.
-- [ ] Publish the tested Release Set and pin its artifacts in `mze-infra`.
-- [ ] Complete the final Odoo backup before its planned restart.
+  - [x] Verify service account login and mount its token and CA in Odoo.
+- [x] Prepare the Windows Agent service and its trusted HTTPS certificate.
+- [x] Publish matching signed artifacts and pin the Odoo artifact in `mze-infra`.
+- [ ] Activate the complete Release Set after its Device Test and acceptance checks.
+- [x] Complete the final Odoo backup before its planned restart.
   - [x] Verify the database and filestore baseline backup.
   - [x] Finish active payments and synchronize paid orders in all POS windows.
-- [ ] Install the addon and verify the production POS asset bundle.
-- [ ] Start the Windows Agent service and verify service restart and HTTPS.
+- [x] Install the addon and verify the production POS asset bundle.
+- [x] Start the Windows Agent service and verify service restart and HTTPS.
 - [ ] Synchronize authoritative Agent and Device projections into Odoo.
 - [ ] Connect the USB printer and install its actual Windows driver.
+  - [x] Connect the USB printer and register queue `POS-80` on `USB002`.
+  - [x] Configure and observe an initialized 80 mm media width.
+  - [ ] Identify the manufacturer and its supported firmware observation protocol.
 - [ ] Complete the receipt Device Test and activate the exact Driver Profile.
 - [ ] Activate the receipt Binding Revision for POS configuration `2`.
 - [ ] Pair the production POS browser and approve its scoped Client Grant.
@@ -79,10 +85,22 @@ Repeat clicks must preserve the Print Intent. An uncertain physical outcome
 must require review before another copy. A printer failure must preserve the
 paid sale and its recovery record.
 
-## Current external dependency
+## Current dependencies
 
-The USB printer is disconnected. The operator will connect it after the software
-is ready. Complete the software tasks before requesting that connection.
+The printer is connected to WORKSTATION. The operator supplied its self-test
+ticket. It identifies model `80-VII-UL`, ESC/POS, a 576-dot print width, and a
+firmware revision date of February 26, 2025. The ticket does not identify the
+manufacturer. USB firmware queries returned no response. This ticket is hardware
+evidence, not a passed Inari Device Test.
+
+The Controller needs its production OIDC provider. The Windows desktop
+connection in Executor rejects its saved credential. SSH works for service
+operations, but it cannot operate the Device Center pairing controls.
+
+The software also needs a supported path that runs a real Device Test before
+binding activation. Existing signed Device Test models and the authority
+installer do not perform that Device I/O. Do not create a passed result to
+replace the missing execution path.
 
 ## Newly confirmed implementation blockers
 
@@ -102,30 +120,59 @@ the Odoo runtime. Keep the existing Odoo image and MZE addon ownership intact.
 ## Evidence
 
 See [the rollout checks](odoo-pos-rollout.md) for the completed Odoo and native
-Windows results. The staged artifacts are test candidates, not an installed
-production Release Set.
+Windows results. The October 2 deployment evidence follows. Full Release
+Readiness and physical acceptance remain incomplete.
 
-## Production preparation on October 2
+## Production deployment on October 2
 
 - All six implementation PRs, `61` through `66`, are merged.
 - The merged native Odoo suite passed 22 tests, including POS asset compilation.
 - The Agent suite passed 635 tests, with four skips. All four Desktop CI jobs
   passed for the production branch, including the frozen Windows Agent.
 - The Controller suite passed its PostgreSQL enrollment and state-replay tests.
-- The signed Inari Odoo artifact from `24948ff` is published. Its digest is
-  `sha256:82730ab0533febe2df5c2732ff0b5382ea7f8d8f18366aac033717fa509efad0`.
+- The deployed Inari Odoo artifact comes from release commit `53d05728`. Its
+  digest is `sha256:0a309a294b18deed5f2ce394166a5a80bd97c68497311b1b0c5b61909a7da519`.
+  Keyless signature verification passed for the repository's `release.yaml`
+  workflow on `refs/heads/main` and the GitHub Actions OIDC issuer.
+- Odoo installed `inari_devices` version `19.0.1.1.0` and shared contracts
+  `1.20.0a11`. The Odoo image and MZE addon artifact stay at their existing
+  production identities. Infrastructure PRs 27 and 28 own the cutover changes.
+- Both production POS JavaScript bundles returned HTTP 200. They contain the
+  submission context, receipt recovery, Client Pairing, Agent client, printer,
+  and device service modules. The POS asset watcher returns
+  `17888594851790967871`.
 - The OpenBao pairing role uses the non-exportable Ed25519 key
-  `inari-odoo-pairing-odoo-1`. Login and unrelated-key denial checks passed.
+  `inari-odoo-pairing-odoo-1`. The Odoo Pod authenticated with its projected
+  Kubernetes identity and signed a content-free verification claim. Its
+  Ed25519 signature passed verification against the production public key.
+  Unrelated-key denial checks also passed.
 - The dedicated certificate for `inari-workstation.eden.mizonaecologica.es` is
   ready. It expires on December 31 at `17:25:09 UTC`.
-- Windows now has protected production config, public Odoo signing trust, and
-  the dedicated TLS files. The Agent service is not installed yet.
+- WORKSTATION runs the signed MSIX `1.20.0.1011`. Its SHA-256 is
+  `53ca4a51b83480c1b96344d3af9e0616b4edf18ff76408cc42762c25518fd342`.
+  GitHub provenance and the Windows publisher signature passed verification.
+- `InariAgent` runs automatically as `LocalService`. It uses the protected
+  production config and TLS files. A service restart passed. Its runtime
+  database is at revision `20260906_0016`.
+- The production Odoo browser reached the Agent through trusted HTTPS on
+  port 7310. Unpaired access returned `401 trust_required`. The response
+  permits the exact Odoo origin and gives no CORS access to an unrelated origin.
+- Windows discovered `POS-80` on `USB002` with driver `Generic / Text Only`.
+  The driver accepted an initialized 80 mm media width. Firmware identity
+  remains unavailable. The Windows form label still reads `Letter`; it does
+  not identify the initialized width or certify the physical media.
+- The operator signed in to production Odoo. User 2 received the Inari System
+  Administrator role. The Organization, Site, Agent, Device, Binding, and
+  Release Set projections are empty. POS configuration 2 has no receipt binding.
 - The verified baseline backup is on `shadow`, at
   `/var/backups/inari-pos/20261002T173509Z`. The database and filestore archives
   passed their archive checks and have a checksum manifest.
-- The operator confirmed that active payments are complete and paid orders are
-  synchronized. The final backup and planned restart remain pending.
+- After the operator confirmed POS Drain, Odoo stopped writes for the final
+  consistent backup at `/var/backups/inari-pos/20261002T191214Z-cutover`.
+  The database and filestore archives passed their checks. Odoo then completed
+  the migration and restart. The backup precedes that schema change.
 
-The Controller image build and Version Packages release remain in progress.
-The receipt Device still needs its real Windows queue and firmware observation,
-Controller authority, Device Test, Binding Revision, and Client Pairing.
+The receipt Device still needs complete Device observations, Controller
+authority, a real Device Test, an active Binding Revision, and Client Pairing.
+Then run the sale and recovery acceptance checks. Moving the printer to the
+store's POS lane requires a separate Agent Host setup and Device Test.

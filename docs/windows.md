@@ -220,6 +220,26 @@ Validate the agent configuration from an elevated shell. Do not switch an
 installed tray to development spawn mode to hide a service failure; that creates
 a second process owner instead of repairing the installation.
 
+### Installation through SSH fails before package registration
+
+An SSH logon can fail to initialize Windows package lifecycle management even
+when the account has administrator access. On WORKSTATION, `Add-AppxPackage`
+returned `0x80070005`. Its deployment log contained event 718, followed by a
+failure at `PackagesInUseClosed`. Signature verification had passed.
+
+Run the verified installation command in the signed-in user's elevated
+PowerShell session. An administrator can also use a temporary scheduled task
+with that user's `Interactive` logon type. The same package installed in
+session 1 after it failed in the SSH session. Remove the temporary task after
+the installation completes.
+
+This diagnosis applies to the recorded lifecycle error. Other access errors
+need their own deployment log. Do not change WindowsApps permissions or disable
+signature verification.
+
+Microsoft documents the task's
+[logon type and run level](https://learn.microsoft.com/powershell/module/scheduledtasks/new-scheduledtaskprincipal).
+
 ## Upgrade and removal
 
 Install a newer MSIX with the same package identity to upgrade in place. Review
