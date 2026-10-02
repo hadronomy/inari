@@ -66,3 +66,10 @@ the latest Driver discovery record with its protected Device observation key.
 The Driver must report the platform backend, connection, media, firmware, and
 operating system. If a fact is absent or the Device is offline, admission stays
 closed.
+
+The Windows receipt Driver reads current spooler information on each discovery
+pass. It reports the queue port, Windows driver, initialized media width, and
+spooler readiness. Unknown status flags and failed reads cannot claim readiness.
+Pooled and unknown ports cannot claim a USB connection. Windows spooler data
+does not identify Device firmware. Firmware fields remain unavailable until a
+Device protocol reports them.

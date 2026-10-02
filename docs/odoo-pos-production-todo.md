@@ -10,8 +10,8 @@ the workstation's 80-VII-UL USB printer.
 - POS configuration: `2`
 - Infrastructure: `mze-infra`, cluster `shadow`
 - Agent Host: Windows `workstation`
-- Tested implementation: `9e2d3a3b`
-- Deployment branch: `t3code/inari-pos-production`
+- Merged implementation: `24948ff3d94967a6bbf06115ec5c4af1fdcb8469`
+- Windows observation branch: `t3code/inari-pos-windows-observation`
 
 Status: **in progress**. Production does not yet have the required Inari setup.
 
@@ -41,20 +41,23 @@ and test result before marking it complete.
   - [ ] Provision the production Controller trust and signed bundle.
 - [ ] Publish current signed Device observations from real Driver discovery.
   - [x] Sign fresh discovery records with a separate protected Agent key.
-  - [ ] Report the exact certification facts and readiness from the Windows receipt Driver.
+  - [x] Read current Windows queue, driver, media width, and readiness facts.
+  - [ ] Read the actual Device firmware identity through its supported protocol.
 - [ ] Prepare the Odoo runtime with the addon and shared-contract dependency.
   - [x] Stage the addon, shared contracts, and locked dependency in one Inari artifact.
   - [ ] Publish a signed digest from the `main` release workflow.
   - [ ] Pin, verify, and mount the artifact in the Odoo runtime.
 - [ ] Prepare the required Controller, Organization, Site, and policy setup.
-- [ ] Configure OpenBao to sign scoped Odoo Pairing Assertions.
+- [x] Configure OpenBao to sign scoped Odoo Pairing Assertions.
   - [x] Merge infrastructure PR 24 and verify Flux revision `e9ff0530`.
   - [x] Provision the non-exportable company key, narrow policy, and Kubernetes role.
   - [x] Install service account `odoo-inari` in namespace `odoo`.
   - [ ] Verify service account login and mount its token and CA in Odoo.
 - [ ] Prepare the Windows Agent service and its trusted HTTPS certificate.
 - [ ] Publish the tested Release Set and pin its artifacts in `mze-infra`.
-- [ ] Back up Odoo and drain active POS payments before its planned restart.
+- [ ] Complete the final Odoo backup before its planned restart.
+  - [x] Verify the database and filestore baseline backup.
+  - [x] Finish active payments and synchronize paid orders in all POS windows.
 - [ ] Install the addon and verify the production POS asset bundle.
 - [ ] Start the Windows Agent service and verify service restart and HTTPS.
 - [ ] Synchronize authoritative Agent and Device projections into Odoo.
@@ -101,3 +104,28 @@ the Odoo runtime. Keep the existing Odoo image and MZE addon ownership intact.
 See [the rollout checks](odoo-pos-rollout.md) for the completed Odoo and native
 Windows results. The staged artifacts are test candidates, not an installed
 production Release Set.
+
+## Production preparation on October 2
+
+- All six implementation PRs, `61` through `66`, are merged.
+- The merged native Odoo suite passed 22 tests, including POS asset compilation.
+- The Agent suite passed 635 tests, with four skips. All four Desktop CI jobs
+  passed for the production branch, including the frozen Windows Agent.
+- The Controller suite passed its PostgreSQL enrollment and state-replay tests.
+- The signed Inari Odoo artifact from `24948ff` is published. Its digest is
+  `sha256:82730ab0533febe2df5c2732ff0b5382ea7f8d8f18366aac033717fa509efad0`.
+- The OpenBao pairing role uses the non-exportable Ed25519 key
+  `inari-odoo-pairing-odoo-1`. Login and unrelated-key denial checks passed.
+- The dedicated certificate for `inari-workstation.eden.mizonaecologica.es` is
+  ready. It expires on December 31 at `17:25:09 UTC`.
+- Windows now has protected production config, public Odoo signing trust, and
+  the dedicated TLS files. The Agent service is not installed yet.
+- The verified baseline backup is on `shadow`, at
+  `/var/backups/inari-pos/20261002T173509Z`. The database and filestore archives
+  passed their archive checks and have a checksum manifest.
+- The operator confirmed that active payments are complete and paid orders are
+  synchronized. The final backup and planned restart remain pending.
+
+The Controller image build and Version Packages release remain in progress.
+The receipt Device still needs its real Windows queue and firmware observation,
+Controller authority, Device Test, Binding Revision, and Client Pairing.
