@@ -89,7 +89,8 @@ jobs:
           set -euo pipefail
           docker run --rm --read-only inari-controller:verification --version
           test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.js"
-          test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web_bg.wasm"
+          test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.wasm"
+          test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.css"
 
       - name: Install signing tool
         if: github.ref == 'refs/heads/main'
