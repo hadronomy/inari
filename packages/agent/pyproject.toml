@@ -1,35 +1,9 @@
 [project]
 name = "inari"
-version = "1.20.0-alpha.10"
+version = "1.20.0-alpha.11"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
-dependencies = [
-  "inari-print-contracts==1.20.0-alpha.10",
-  "pikepdf==10.12.0",
-  "alembic>=1.16.5,<2.0.0",
-  "fastapi>=0.115.0,<1.0.0",
-  "uvicorn[standard]>=0.30.0,<1.0.0",
-  "pydantic>=2.8.0,<3.0.0",
-  "python-multipart>=0.0.20,<1.0.0",
-  "dishka>=1.9.1,<2.0.0",
-  "sqlalchemy>=2.0.44,<3.0.0",
-  "typer>=0.19.2,<1.0.0",
-  "pillow>=12.2.0",
-  "puremagic>=2.0.0,<3.0.0",
-  "rfc8785>=0.1.4,<1.0.0",
-  "pywin32>=306; platform_system == 'Windows'",
-  "httpx>=0.28.1",
-  "cryptography>=46.0.5",
-  "joserfc>=1.6.3",
-  "keyring>=25.7.0",
-  "packaging>=25.0,<26.0",
-  "platformdirs>=4.4.0",
-  "tomli-w>=1.2.0,<2.0.0",
-  "scalar-fastapi>=1.8.2",
-  "eclipse-zenoh>=1.9.0,<2.0.0",
-  "pyhpke>=0.6.5,<1.0.0",
-  "fonttools>=4.61,<5",
-]
+dependencies = ["inari-print-contracts==1.20.0-alpha.11", "pikepdf==10.12.0", "alembic>=1.16.5,<2.0.0", "fastapi>=0.115.0,<1.0.0", "uvicorn[standard]>=0.30.0,<1.0.0", "pydantic>=2.8.0,<3.0.0", "python-multipart>=0.0.20,<1.0.0", "dishka>=1.9.1,<2.0.0", "sqlalchemy>=2.0.44,<3.0.0", "typer>=0.19.2,<1.0.0", "pillow>=12.2.0", "puremagic>=2.0.0,<3.0.0", "rfc8785>=0.1.4,<1.0.0", "pywin32>=306; platform_system == 'Windows'", "httpx>=0.28.1", "cryptography>=46.0.5", "joserfc>=1.6.3", "keyring>=25.7.0", "packaging>=25.0,<26.0", "platformdirs>=4.4.0", "tomli-w>=1.2.0,<2.0.0", "scalar-fastapi>=1.8.2", "eclipse-zenoh>=1.9.0,<2.0.0", "pyhpke>=0.6.5,<1.0.0", "fonttools>=4.61,<5"]
 
 [project.optional-dependencies]
 cups = ["pycups>=2.0.4; platform_system != 'Windows'"]
@@ -68,3 +42,4 @@ exclude = ["notebooks*", "tests*"]
 
 [tool.setuptools.package-data]
 inari = ["db/alembic/script.py.mako"]
+
