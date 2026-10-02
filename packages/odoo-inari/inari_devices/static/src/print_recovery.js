@@ -361,23 +361,6 @@ export class PrintRecoveryCoordinator {
         return matches[0]?.context || await this.store.receiptContext(plan);
     }
 
-    receiptContext(plan) {
-        const matches = [...this.entries.values()].filter(
-            ({ context }) =>
-                context.origin.kind === "pos" &&
-                context.origin.document_kind === "customer_receipt" &&
-                context.origin.offline_order_id === plan.offline_order_id &&
-                context.origin.pos_session_id === plan.pos_session_id &&
-                context.binding_revision_id === plan.binding_revision_id &&
-                context.device_id === plan.device_id &&
-                context.copy_ordinal === plan.copy_ordinal,
-        );
-        if (matches.length > 1) {
-            throw new TypeError("This receipt copy has conflicting recovery identities");
-        }
-        return matches[0]?.context || null;
-    }
-
     async enqueue({ context, jpeg, client, descriptor }) {
         if (!Object.isFrozen(context) || !(jpeg instanceof Blob) || jpeg.type !== "image/jpeg") {
             throw new TypeError("Recovery admission requires an immutable context and JPEG Blob");
