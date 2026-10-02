@@ -17,6 +17,7 @@ EXECUTABLE_ICON = (
 )
 PYTHON_PATHS = [
     str(WORKSPACE_ROOT / "packages" / "agent"),
+    str(WORKSPACE_ROOT / "packages" / "print-contracts"),
 ]
 WINDOWS_MODULES = [
     "pywintypes",

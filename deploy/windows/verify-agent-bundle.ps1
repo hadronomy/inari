@@ -64,15 +64,21 @@ try {
     $Executable = Join-Path $BundleTarget "dist\InariAgentService\InariAgentService.exe"
     $Report = Join-Path $BundleTarget "runtime-verification.txt"
     Remove-Item $Report -Force -ErrorAction SilentlyContinue
-    Invoke-BoundedProcess `
-        $Executable `
-        @("--verify-runtime", $Report) `
-        30 `
-        "Frozen Agent runtime verification"
+    try {
+        Invoke-BoundedProcess `
+            $Executable `
+            @("--verify-runtime", $Report) `
+            30 `
+            "Frozen Agent runtime verification"
+    }
+    finally {
+        if (Test-Path -LiteralPath $Report -PathType Leaf) {
+            Get-Content -LiteralPath $Report
+        }
+    }
     if (-not (Test-Path -LiteralPath $Report -PathType Leaf)) {
         throw "The frozen Agent did not produce a runtime verification report."
     }
-    Get-Content -LiteralPath $Report
 }
 finally {
     Pop-Location

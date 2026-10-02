@@ -43,15 +43,20 @@ jobs:
       - name: Install Rust components
         run: rustup component add clippy rustfmt
 
+      - name: Set up mbx
+        uses: jdx/mr-boxington-action@2bbb8f141e40e388b509cc68fe0bfbe7bc4b6818 # v1
+        with:
+          version: 0.4.0
+
       - name: Lint Controller
         run: >-
-          cargo clippy --locked
+          mbx clippy --locked
           --package inari-gateway --package inari-migration --package inari-server
           --all-targets -- -D warnings
 
       - name: Test Controller
         run: >-
-          cargo test --locked
+          mbx test --locked
           --package inari-gateway --package inari-migration --package inari-server
 
       - name: Prepare isolated PostgreSQL databases
@@ -65,7 +70,7 @@ jobs:
 
       - name: Test enrollment key history and retirement
         run: >-
-          cargo test --locked --package inari-server
+          mbx test --locked --package inari-server
           enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse
           -- --ignored --exact managed_gateway::enrollment_tests::enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse
         env:
@@ -73,7 +78,7 @@ jobs:
 
       - name: Test signed Agent State and retirement
         run: >-
-          cargo test --locked --package inari-server
+          mbx test --locked --package inari-server
           signed_state_recovers_acceptance_and_preserves_terminal_evidence
           -- --ignored
         env:
