@@ -101,12 +101,12 @@ describe("Odoo print recovery", () => {
         assert.deepEqual(recovery.snapshot()[0].actions, ["reconcile", "finish_without_ticket"]);
 
         await recovery.act(submissionContext.print_intent_id, "reconcile");
-        assert.equal(recovery.knownResult(submissionContext.print_intent_id).state, "failed");
+        assert.equal((await recovery.knownResult(submissionContext.print_intent_id)).state, "failed");
         assert.ok(recovery.snapshot()[0].actions.includes("retry"));
 
         await recovery.act(submissionContext.print_intent_id, "retry");
 
-        assert.equal(recovery.knownResult(submissionContext.print_intent_id).accepted, true);
+        assert.equal((await recovery.knownResult(submissionContext.print_intent_id)).accepted, true);
         assert.equal(attempts.length, 2);
         assert.equal(attempts[0].value, submissionContext);
         assert.equal(attempts[1].value, submissionContext);
@@ -177,9 +177,9 @@ describe("Odoo print recovery", () => {
         await recovery.reconcile();
 
         assert.deepEqual(recovery.snapshot(), []);
-        assert.equal(recovery.knownResult(submissionContext.print_intent_id).accepted, true);
+        assert.equal((await recovery.knownResult(submissionContext.print_intent_id)).accepted, true);
         assert.equal(
-            recovery.knownResult(submissionContext.print_intent_id).state,
+            (await recovery.knownResult(submissionContext.print_intent_id)).state,
             "output_confirmed",
         );
     });
@@ -229,7 +229,7 @@ describe("Odoo print recovery", () => {
         assert.equal(scheduled.length, 1);
         await scheduled.shift()();
         assert.equal(
-            recovery.knownResult(submissionContext.print_intent_id).state,
+            (await recovery.knownResult(submissionContext.print_intent_id)).state,
             "output_confirmed",
         );
         assert.equal(scheduled.length, 0);

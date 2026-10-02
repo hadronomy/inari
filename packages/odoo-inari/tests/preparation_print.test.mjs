@@ -121,7 +121,7 @@ describe("Odoo preparation printing", () => {
             client,
         });
         await recovery.act(plan.print_intent_id, "retry");
-        const accepted = recovery.knownResult(plan.print_intent_id);
+        const accepted = (await recovery.knownResult(plan.print_intent_id));
 
         assert.equal(failed.accepted, false);
         assert.equal(accepted.accepted, true);

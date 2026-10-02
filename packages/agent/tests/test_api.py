@@ -61,6 +61,7 @@ from inari.printing.protocols import (
 )
 from inari.print_jobs import (
     PairedClientScope,
+    PrintJobScope,
     PosPrintOrigin,
     PrintIntentPage,
     PrintIntentQuery,
@@ -218,7 +219,7 @@ class StubClientTrustAuthorizer:
     ) -> AuthorizationDecision:
         expected_permission = (
             Permission.JOBS_READ
-            if request.path == "/v1/jobs/query"
+            if request.path.startswith("/v1/jobs/")
             else Permission.RECEIPT_IMAGE
         )
         assert policy.permission is expected_permission
@@ -231,6 +232,11 @@ class StubClientTrustAuthorizer:
 class StubPrintJobReader:
     page: PrintIntentPage
     query: PrintIntentQuery | None = None
+    lookup_scope: PrintJobScope | None = None
+
+    async def get(self, job_id: str, *, scope: PrintJobScope) -> PrintJob | None:
+        self.lookup_scope = scope
+        return next((job for job in self.page.jobs if job.job_id == job_id), None)
 
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         self.query = query
@@ -638,7 +644,13 @@ async def test_query_print_jobs_returns_scoped_public_projection(mocker) -> None
             "/v1/jobs/query",
             json={"print_intent_ids": ["intent_123", "intent_missing"]},
         )
+        lookup = await client.get("/v1/jobs/job_123")
+        missing = await client.get("/v1/jobs/job_missing")
 
+    assert lookup.status_code == 200
+    assert lookup.json()["print_job_id"] == "job_123"
+    assert missing.status_code == 404
+    assert queries.reader.lookup_scope == queries.reader.query.scope
     assert response.status_code == 200
     payload = response.json()
     assert payload["jobs"][0]["print_job_id"] == "job_123"

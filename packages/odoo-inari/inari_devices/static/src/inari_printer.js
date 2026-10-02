@@ -40,7 +40,7 @@ export class InariReceiptPrinter {
 
     async printReceipt(element, plan, descriptor = {}) {
         try {
-            const existing = this.recovery.knownResult(plan?.print_intent_id);
+            const existing = await this.recovery.knownResult(plan?.print_intent_id);
             if (existing) {
                 return existing;
             }

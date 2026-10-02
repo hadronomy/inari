@@ -42,6 +42,49 @@ function posPrinter(inariDevice, nativePrinter) {
 }
 
 describe("Inari customer receipt printing", () => {
+    test("repeated receipt clicks keep the pending physical-copy identity", async () => {
+        let sequence = 0;
+        const service = new InariDeviceService({ randomUUID: () => String(++sequence) });
+        service.binding = { binding_revision_id: "binding-1", device_id: "printer-1" };
+        service.pos = { session: { id: 42 } };
+        const order = { uuid: "order-1", nb_print: 0 };
+
+        const first = (await service.prepareReceiptPrint(order));
+        const repeat = (await service.prepareReceiptPrint(order));
+
+        expect(repeat.print_intent_id).toBe(first.print_intent_id);
+        order.nb_print = 1;
+        expect((await service.prepareReceiptPrint(order)).print_intent_id).not.toBe(first.print_intent_id);
+    });
+
+    test("receipt clicks reuse the journaled identity after POS reload", async () => {
+        const original = context();
+        const recovery = new PrintRecoveryCoordinator({
+            store: new MemoryRecoveryStore([
+                {
+                    key: original.print_intent_id,
+                    context: original,
+                    state: "pending_agent",
+                },
+            ]),
+            clientForContext: async () => null,
+        });
+        await recovery.restore();
+        const service = new InariDeviceService({ randomUUID: () => "new-intent" });
+        service.recovery = recovery;
+        service.binding = { binding_revision_id: "binding-1", device_id: "printer-1" };
+        service.pos = { session: { id: "session-1" } };
+
+        const plan = (await service.prepareReceiptPrint({ uuid: "order-1", nb_print: 0 }));
+
+        expect(plan.print_intent_id).toBe(original.print_intent_id);
+    });
+
+    test("Inari service dependencies exist in the installed Odoo registry", () => {
+        for (const dependency of inariDeviceService.dependencies) {
+            expect(registry.category("services").contains(dependency)).toBe(true);
+        }
+    });
     test("printer service receives the deep Inari service at composition", () => {
         const inariDevice = { marker: "inari" };
         const service = posPrinterService.start(
@@ -210,7 +253,7 @@ describe("Inari customer receipt printing", () => {
         expect(calls).toHaveLength(2);
         expect(calls[0]).toBe(original);
         expect(calls[1]).toBe(original);
-        expect(recovery.knownResult(original.print_intent_id).state).toBe("accepted");
+        expect((await recovery.knownResult(original.print_intent_id)).state).toBe("accepted");
     });
 
     test("active Inari receipts bypass the native printer on success and failure", async () => {
@@ -385,7 +428,7 @@ describe("Inari customer receipt printing", () => {
             },
             session: { id: 42 },
         });
-        const plan = service.prepareReceiptPrint({ uuid: "order-1", nb_print: 0 });
+        const plan = (await service.prepareReceiptPrint({ uuid: "order-1", nb_print: 0 }));
 
         const result = await service.printReceipt(document.createElement("div"), plan);
 

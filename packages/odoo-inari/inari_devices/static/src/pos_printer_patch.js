@@ -42,7 +42,7 @@ patch(PosPrinterService.prototype, {
         if (component !== OrderReceipt) {
             return super.print(...arguments);
         }
-        const plan = this.inariDevice.prepareReceiptPrint(props?.order);
+        const plan = await this.inariDevice.prepareReceiptPrint(props?.order);
         if (!plan) {
             return super.print(...arguments);
         }

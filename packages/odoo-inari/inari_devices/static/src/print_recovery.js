@@ -47,6 +47,7 @@ function descriptorFor(context, descriptor = {}) {
             typeof descriptor.printer_name === "string" && descriptor.printer_name
                 ? descriptor.printer_name
                 : context.device_id,
+        agent_channel: descriptor.agent_channel ? Object.freeze({ ...descriptor.agent_channel }) : null,
     });
 }
 
@@ -318,28 +319,54 @@ export class PrintRecoveryCoordinator {
     async restoreRecords() {
         const records = await this.store.list();
         for (const record of records) {
+            let entry;
             try {
-                const entry = entryFromRecord(record);
-                if (entry.state !== "resolved") {
-                    this.entries.set(entry.key, entry);
-                }
+                entry = entryFromRecord(record);
             } catch {
                 // An invalid record cannot become Device Work or an operator action.
+                continue;
+            }
+            if (entry.state === "resolved" || entry.state === "output_confirmed") {
+                // oxlint-disable-next-line no-await-in-loop
+                await this.store.settle(record);
+            } else {
+                this.entries.set(entry.key, entry);
             }
         }
         this.notify();
         return this.snapshot();
     }
 
-    knownResult(key) {
+    async knownResult(key) {
         const entry = this.entries.get(key);
-        return entry ? this.result(entry) : null;
+        if (entry) return this.result(entry);
+        const record = await this.store.getSettled(key);
+        return record ? this.result(entryFromRecord(record)) : null;
+    }
+
+    async receiptContext(plan) {
+        const matches = [...this.entries.values()].filter(
+            ({ context }) =>
+                context.origin.kind === "pos" &&
+                context.origin.document_kind === "customer_receipt" &&
+                context.origin.offline_order_id === plan.offline_order_id &&
+                context.origin.pos_session_id === plan.pos_session_id &&
+                context.binding_revision_id === plan.binding_revision_id &&
+                context.device_id === plan.device_id &&
+                context.copy_ordinal === plan.copy_ordinal,
+        );
+        if (matches.length > 1) {
+            throw new TypeError("This receipt copy has conflicting recovery identities");
+        }
+        return matches[0]?.context || await this.store.receiptContext(plan);
     }
 
     async enqueue({ context, jpeg, client, descriptor }) {
         if (!Object.isFrozen(context) || !(jpeg instanceof Blob) || jpeg.type !== "image/jpeg") {
             throw new TypeError("Recovery admission requires an immutable context and JPEG Blob");
         }
+        const settled = await this.store.getSettled(context.print_intent_id);
+        if (settled) return this.result(entryFromRecord(settled));
         let entry = this.entries.get(context.print_intent_id);
         if (entry) {
             if (entry.context.origin.content_revision !== context.origin.content_revision) {
@@ -373,7 +400,6 @@ export class PrintRecoveryCoordinator {
             operation: null,
         };
         this.entries.set(entry.key, entry);
-        await this.save(entry);
         await this.submitInLane(entry);
         return this.result(entry);
     }
@@ -404,6 +430,7 @@ export class PrintRecoveryCoordinator {
             if (!entry.client) {
                 entry.client = await this.clientForContext(entry.context, {
                     interactive: true,
+                    channel: entry.descriptor.agent_channel,
                 });
             }
             if (!entry.client) {
@@ -446,7 +473,9 @@ export class PrintRecoveryCoordinator {
             if (!client) {
                 try {
                     // oxlint-disable-next-line no-await-in-loop
-                    client = await this.clientForContext(entry.context, { interactive });
+                    client = await this.clientForContext(entry.context, {
+                        interactive, channel: entry.descriptor.agent_channel,
+                    });
                 } catch (error) {
                     entry.error = error;
                 }
@@ -557,7 +586,9 @@ export class PrintRecoveryCoordinator {
             throw new Error("The exact print content is not available in this tab");
         }
         if (!entry.client) {
-            entry.client = await this.clientForContext(entry.context, { interactive: true });
+            entry.client = await this.clientForContext(entry.context, {
+                interactive: true, channel: entry.descriptor.agent_channel,
+            });
         }
         if (!entry.client) {
             throw new Error("Pair this browser before you retry the print");
@@ -666,7 +697,14 @@ export class PrintRecoveryCoordinator {
     }
 
     async save(entry) {
-        await this.store.put(persisted(entry));
+        if (entry.state === "resolved" || entry.state === "output_confirmed") {
+            await this.store.settle(persisted(entry));
+            this.entries.delete(entry.key);
+            entry.jpeg = null;
+            entry.client = null;
+        } else {
+            await this.store.put(persisted(entry));
+        }
         this.notify();
         this.scheduleWatch();
     }

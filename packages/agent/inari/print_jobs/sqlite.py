@@ -17,6 +17,7 @@ from .models import (
     PrintIntentPage,
     PrintIntentQuery,
     PrintJob,
+    PrintJobScope,
     PrintJobState,
     ReportPrintOrigin,
     SiteManagerScope,
@@ -28,6 +29,20 @@ class SqlitePrintJobReader:
 
     def __init__(self, store: RuntimeStore) -> None:
         self._store = store
+
+    async def get(self, job_id: str, *, scope: PrintJobScope) -> PrintJob | None:
+        with self._store.connection() as connection:
+            row = (
+                connection.execute(
+                    select(public_print_jobs_table).where(
+                        public_print_jobs_table.c.id == job_id,
+                        *_scope_predicates(scope),
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        return None if row is None else _job_from_row(row)
 
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         predicates = _scope_predicates(query.scope)

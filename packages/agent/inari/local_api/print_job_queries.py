@@ -9,6 +9,7 @@ from ..print_jobs import (
     PrintIntentPage,
     PrintIntentQuery,
     PrintJobReader,
+    PrintJob,
 )
 
 
@@ -23,6 +24,19 @@ class PrintJobQueries:
         print_intent_ids: list[str],
         authorization: AuthorizedRequest,
     ) -> PrintIntentPage:
+        scope = self._scope(authorization)
+        return await self.reader.reconcile(
+            PrintIntentQuery.from_ids(print_intent_ids, scope=scope)
+        )
+
+    async def get(self, job_id: str, authorization: AuthorizedRequest) -> PrintJob:
+        job = await self.reader.get(job_id, scope=self._scope(authorization))
+        if job is None:
+            raise DomainFailure(ProblemCode.RESOURCE_NOT_FOUND)
+        return job
+
+    @staticmethod
+    def _scope(authorization: AuthorizedRequest) -> PairedClientScope:
         try:
             authorization.require(Permission.JOBS_READ)
         except ClientTrustError as error:
@@ -30,14 +44,11 @@ class PrintJobQueries:
         business = authorization.grant.scope.business
         if business.pos_configuration_id is None:
             raise DomainFailure(ProblemCode.BINDING_REQUIRED)
-        scope = PairedClientScope(
+        return PairedClientScope(
             organization_id=business.organization_id,
             site_id=business.site_id,
             pos_configuration_id=business.pos_configuration_id,
             paired_client_id=authorization.grant.pairing_id,
-        )
-        return await self.reader.reconcile(
-            PrintIntentQuery.from_ids(print_intent_ids, scope=scope)
         )
 
 

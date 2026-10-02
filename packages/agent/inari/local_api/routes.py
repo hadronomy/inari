@@ -540,6 +540,20 @@ async def submit_device_work(
     )
 
 
+@jobs_router.get(
+    "/v1/jobs/{job_id}",
+    response_model=PublicPrintJobResponse,
+    responses=problem_responses(400, 401, 403, 404, 500, 503),
+)
+async def get_public_print_job(
+    job_id: str,
+    connection: Request,
+    queries: PrintJobQueriesDependency,
+) -> PublicPrintJobResponse:
+    authorization = authorized_device_work_request(connection)
+    return PublicPrintJobResponse.from_domain(await queries.get(job_id, authorization))
+
+
 @jobs_router.post(
     "/v1/jobs/query",
     response_model=PrintJobQueryResponse,

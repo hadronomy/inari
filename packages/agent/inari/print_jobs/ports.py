@@ -24,6 +24,9 @@ class PrintJobReader(Protocol):
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         """Return exact scoped snapshots and scoped reconciliation position."""
 
+    async def get(self, job_id: str, *, scope: PrintJobScope) -> PrintJob | None:
+        """Return one snapshot when it belongs to the requested scope."""
+
 
 class PrintJobSubmission(Protocol):
     """Content-free input needed to create one Print Job snapshot."""

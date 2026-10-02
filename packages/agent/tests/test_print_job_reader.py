@@ -116,6 +116,26 @@ def _scope() -> PairedClientScope:
 
 
 @pytest.mark.anyio
+async def test_lookup_by_public_id_requires_the_exact_client_scope(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    _seed_job(store.database_path, job_id="job_visible", intent_id="intent_visible")
+    _seed_job(
+        store.database_path,
+        job_id="job_hidden",
+        intent_id="intent_hidden",
+        pairing_id="pairing_2",
+    )
+    reader = SqlitePrintJobReader(store)
+    job = await reader.get("job_visible", scope=_scope())
+    assert job is not None
+    assert job.intent_id == "intent_visible"
+    assert await reader.get("job_hidden", scope=_scope()) is None
+    assert await reader.get("job_missing", scope=_scope()) is None
+
+
+@pytest.mark.anyio
 async def test_reconcile_returns_scoped_jobs_in_request_order(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _seed_job(

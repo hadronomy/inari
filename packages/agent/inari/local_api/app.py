@@ -83,6 +83,11 @@ def create_app(
                         permission=Permission.JOBS_READ,
                         name="Print Job reconciliation",
                     ),
+                    ("GET", "/v1/jobs/{job_id}"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.JOBS_READ,
+                        name="Print Job lookup",
+                    ),
                 }
             ),
             authorizer=app_container.device_work_authorizer,

@@ -49,6 +49,13 @@ function printerKey(binding) {
     return `${channelKey(binding)}|${binding.binding_revision_id}|${binding.device_id}`;
 }
 
+function recoveryChannel(binding) {
+    return Object.freeze(Object.fromEntries([
+        "browser_origin", "agent_endpoint", "database", "company_id", "organization_id",
+        "site_id", "pos_configuration_id", "agent_id", "audience", "requested_permissions",
+    ].map((key) => [key, binding[key]])));
+}
+
 function recoveryDatabaseName(bindings, posSessionId) {
     const scopes = new Set(
         bindings
@@ -95,6 +102,7 @@ export class InariDeviceService {
         this.recoveryFactory = recoveryFactory;
         this.printerFactory = printerFactory;
         this.randomUUID = randomUUID;
+        this.receiptPlans = new WeakMap();
         this.preparationPlans =
             preparationPlanBook || new PreparationPlanBook({ randomUUID: this.randomUUID });
         this.pos = null;
@@ -208,7 +216,19 @@ export class InariDeviceService {
     }
 
     async clientForContext(context, options = {}) {
-        const binding = this.bindings().find(
+        const { channel, ...clientOptions } = options;
+        const bindings = this.bindings();
+        if (channel) {
+            const scopeMatches = bindings.some((binding) => [
+                "browser_origin", "database", "company_id", "organization_id",
+                "site_id", "pos_configuration_id",
+            ].every((field) => String(binding[field]) === String(channel[field])));
+            if (!scopeMatches) {
+                throw new InariAgentError("recovery_scope_mismatch", "This recovery task belongs to another POS scope.");
+            }
+            return this.clientFor(channel, clientOptions);
+        }
+        const binding = bindings.find(
             (candidate) =>
                 candidate.binding_revision_id === context.binding_revision_id &&
                 candidate.device_id === context.device_id,
@@ -219,7 +239,7 @@ export class InariDeviceService {
                 "Configure the authenticated Agent Endpoint before printing.",
             );
         }
-        return this.clientFor(binding, options);
+        return this.clientFor(binding, clientOptions);
     }
 
     async printerFor(binding) {
@@ -241,17 +261,34 @@ export class InariDeviceService {
         return Boolean(this.binding);
     }
 
-    prepareReceiptPrint(order) {
+    async prepareReceiptPrint(order) {
         if (!this.isReceiptAuthoritative()) {
             return null;
         }
         try {
-            return createReceiptPlan({
+            const copyOrdinal = Number(order?.nb_print || 0) + 1;
+            const cached = this.receiptPlans.get(order);
+            const previous = cached?.candidate;
+            if (
+                previous?.copy_ordinal === copyOrdinal &&
+                previous.binding_revision_id === this.binding.binding_revision_id &&
+                previous.device_id === this.binding.device_id &&
+                previous.pos_session_id === String(this.pos.session.id)
+            ) {
+                return cached.promise;
+            }
+            const candidate = createReceiptPlan({
                 binding: this.binding,
                 order,
                 posSessionId: this.pos.session.id,
                 randomUUID: this.randomUUID,
             });
+            const promise = (async () => {
+                const saved = await this.recovery?.receiptContext(candidate);
+                return saved ? Object.freeze({ ...candidate, print_intent_id: saved.print_intent_id }) : candidate;
+            })();
+            this.receiptPlans.set(order, { candidate, promise });
+            return await promise;
         } catch (error) {
             return Object.freeze({ planningError: error });
         }
@@ -267,6 +304,7 @@ export class InariDeviceService {
                 this.pos?.models?.["pos.order"]?.getBy("uuid", plan.offline_order_id)?.name ||
                 plan.offline_order_id,
             printer_name: this.binding.device_name || this.binding.device_id,
+            agent_channel: recoveryChannel(this.binding),
         });
         this.lastResult = result;
         if (!result.accepted) {
@@ -300,6 +338,7 @@ export class InariDeviceService {
             result = await printer.printReceipt(element, plan, {
                 order_reference: source.order.name || source.order.uuid,
                 printer_name: printerName,
+                agent_channel: recoveryChannel(binding),
             });
         }
         if (!plan?.planningError) {
