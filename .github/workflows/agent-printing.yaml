@@ -56,6 +56,8 @@ jobs:
           packages/agent/tests/test_durable_spool_admission.py
           packages/agent/tests/test_physical_execution.py
           packages/agent/tests/test_windows_spool_submission.py
+          packages/agent/tests/test_windows_device_observations.py
+          packages/agent/tests/test_device_observations.py
           packages/agent/tests/test_windows_secrets.py
           packages/agent/tests/test_printer_drivers.py
           packages/agent/tests/test_document_admission.py

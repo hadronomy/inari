@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import logging
+import platform
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Iterator, NoReturn, Protocol, Sequence, cast
@@ -32,6 +34,8 @@ class Win32PrintAPI(Protocol):
     def OpenPrinter(self, printer_name: str) -> Any: ...
 
     def ClosePrinter(self, handle: Any) -> None: ...
+
+    def GetPrinter(self, handle: Any, level: int) -> dict[str, Any]: ...
 
     def StartDocPrinter(
         self, handle: Any, level: int, document: tuple[str, None, str]
@@ -84,6 +88,18 @@ class WindowsSpooler:
             if optional:
                 return None
             raise PrinterServiceError("DEFAULT_PRINTER_NOT_FOUND", str(exc)) from exc
+
+    def read_printer_information(self, printer_name: str) -> dict[str, Any]:
+        api = self._require_api()
+        try:
+            with self._open_printer(printer_name) as handle:
+                information = api.GetPrinter(handle, 2)
+            if not isinstance(information, dict):
+                raise ValueError("The Windows printer information is invalid.")
+            return information
+        except Exception:
+            logger.warning("Windows printer observation failed for %s", printer_name)
+            return {}
 
     def write_job(
         self,
@@ -298,6 +314,7 @@ class WindowsPrinterDriver(PrinterDriver):
     def _build_device(self, printer_name: str, *, is_default: bool) -> PrinterDevice:
         preferred_transport = self._guess_preferred_transport(printer_name)
         supports_raw = preferred_transport is PrinterTransport.RAW
+        information = self.spooler.read_printer_information(printer_name)
         return PrinterDevice(
             name=printer_name,
             driver_key=self.metadata.key,
@@ -316,6 +333,9 @@ class WindowsPrinterDriver(PrinterDriver):
             metadata={
                 "source": "windows_spooler",
                 "queue_name": printer_name,
+                "port_name": _information_text(information, "pPortName"),
+                "printer_driver": _information_text(information, "pDriverName"),
+                "authority_observation": _spooler_observation(information),
             },
         )
 
@@ -334,3 +354,35 @@ class WindowsPrinterDriver(PrinterDriver):
             "RAW_NOT_SUPPORTED",
             f"Printer {printer.name!r} does not support RAW receipt printing.",
         )
+
+
+def _information_text(information: dict[str, Any], name: str) -> str:
+    value = information.get(name)
+    return value if isinstance(value, str) and 0 < len(value) <= 256 else "unavailable"
+
+
+def _spooler_observation(information: dict[str, Any]) -> dict[str, object]:
+    port = _information_text(information, "pPortName")
+    devmode = information.get("pDevMode")
+    fields = getattr(devmode, "Fields", None)
+    width = getattr(devmode, "PaperWidth", None)
+    media_profile = "unavailable"
+    # DEVMODE declares initialized fields and measures paper width in 0.1 mm.
+    if (
+        type(fields) is int
+        and fields & 0x8
+        and type(width) is int
+        and 0 < width <= 32767
+    ):
+        whole, tenth = divmod(width, 10)
+        media_profile = f"{whole}.{tenth}mm" if tenth else f"{whole}mm"
+    status = information.get("Status")
+    # Active I/O, busy, printing, waiting, and processing do not block admission.
+    ready = type(status) is int and status >= 0 and status & ~0x6700 == 0
+    return {
+        "platform_backend_id": "windows-spooler",
+        "connection": "usb" if re.fullmatch(r"USB[0-9]+", port) else "unavailable",
+        "media_profile": media_profile,
+        "operating_system": f"windows:{platform.version()}",
+        "ready": ready,
+    }
