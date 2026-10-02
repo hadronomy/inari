@@ -29,5 +29,16 @@ class PrinterDriver(DeviceDriver, Protocol):
     ) -> PrintJobResult:
         """Send printer-native bytes."""
 
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+        dpi: int,
+    ) -> PrintJobResult:
+        """Send a document through the platform document pipeline."""
+
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         """Pulse the cash drawer for printers that support RAW control commands."""

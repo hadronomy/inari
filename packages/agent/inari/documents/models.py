@@ -68,6 +68,42 @@ LocalPrintOrigin: TypeAlias = PosPrintOrigin | PreparationPrintOrigin
 
 
 @dataclass(frozen=True, slots=True)
+class ReportBinding:
+    report_binding_id: str
+    binding_revision_id: str
+    report_action_id: str
+    report_contract_digest: str
+    template_digest: str
+    command_profile_id: str | None
+    layout_profile_id: str | None
+    hardware_matrix_digest: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RecordsReportSource:
+    model: str
+    ordered_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WizardReportSource:
+    model: str
+    input_digest: str
+
+
+ReportSource: TypeAlias = RecordsReportSource | WizardReportSource
+
+
+@dataclass(frozen=True, slots=True)
+class ReportPrintOrigin:
+    binding: ReportBinding
+    route: str
+    source: ReportSource
+    rendered_document_index: int
+    copy_ordinal: int
+
+
+@dataclass(frozen=True, slots=True)
 class SubmissionContext:
     contract_major: int
     organization_id: str
@@ -84,9 +120,30 @@ class SubmissionContext:
 
 
 @dataclass(frozen=True, slots=True)
+class ManagedSubmissionContext:
+    contract_major: int
+    database: str
+    company_id: str
+    organization_id: str
+    site_id: str
+    managed_work_id: str
+    print_intent_id: str
+    origin_submission_key: str
+    origin: ReportPrintOrigin
+    binding_revision_id: str
+    device_id: str
+    actor_id: str
+    authorization_digest: str
+    copy_ordinal: int
+
+
+DocumentSubmissionContext: TypeAlias = SubmissionContext | ManagedSubmissionContext
+
+
+@dataclass(frozen=True, slots=True)
 class DocumentWork:
     idempotency_key: str
-    context: SubmissionContext
+    context: DocumentSubmissionContext
     document: Document
 
     @property
@@ -160,6 +217,49 @@ class AdmissionGrant:
 
 
 @dataclass(frozen=True, slots=True)
+class ManagedAdmissionScope:
+    managed_work_id: str
+    organization_id: str
+    site_id: str
+    database: str
+    actor_id: str
+    device_id: str
+    binding_revision_id: str
+    operation: DocumentKind
+    authorization_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedAdmissionAuthorization:
+    managed_work_id: str
+    organization_id: str
+    site_id: str
+    database: str
+    actor_id: str
+    device_id: str
+    binding_revision_id: str
+    operation: DocumentKind
+    authorization_digest: str
+
+    def scope(self) -> ManagedAdmissionScope:
+        return ManagedAdmissionScope(
+            managed_work_id=self.managed_work_id,
+            organization_id=self.organization_id,
+            site_id=self.site_id,
+            database=self.database,
+            actor_id=self.actor_id,
+            device_id=self.device_id,
+            binding_revision_id=self.binding_revision_id,
+            operation=self.operation,
+            authorization_digest=self.authorization_digest,
+        )
+
+
+AdmissionAuthorization: TypeAlias = AdmissionGrant | ManagedAdmissionAuthorization
+AdmissionAuthorizationScope: TypeAlias = AdmissionGrantScope | ManagedAdmissionScope
+
+
+@dataclass(frozen=True, slots=True)
 class AdmissionDeadline:
     """The resolved UTC and process-local deadline for one admission."""
 
@@ -175,7 +275,7 @@ class AdmissionRequest:
     """The complete immutable input to the one Document Admission seam."""
 
     work: DocumentWork
-    grant: AdmissionGrant
+    authorization: AdmissionAuthorization
     media_type: str
     options: Mapping[str, Any]
     trusted_managed_expires_at: datetime | None = None
@@ -186,7 +286,7 @@ class DurableAdmission:
     """The validated content-bearing value accepted by the durable store."""
 
     work: DocumentWork
-    grant_scope: AdmissionGrantScope
+    authorization_scope: AdmissionAuthorizationScope
     deadline: AdmissionDeadline
     payload_fingerprint: bytes
     media_type: str

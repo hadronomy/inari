@@ -27,6 +27,7 @@ pub struct OidcConfig {
     pub issuer_url: Option<Url>,
     pub client_id: String,
     pub client_secret_file: Option<PathBuf>,
+    pub workload_audience: String,
     pub scopes: Vec<String>,
     pub role_claim: String,
     pub role_mapping: BTreeMap<String, AccessRole>,
@@ -39,6 +40,7 @@ impl Default for OidcConfig {
             issuer_url: None,
             client_id: String::new(),
             client_secret_file: None,
+            workload_audience: "urn:inari:managed-workload".into(),
             scopes: vec!["openid".into(), "profile".into(), "email".into()],
             role_claim: "roles".into(),
             role_mapping: BTreeMap::new(),
@@ -66,6 +68,9 @@ impl OidcConfig {
             return Err(ConfigError::invalid(
                 "identity.oidc.client_id is required when OIDC is enabled.",
             ));
+        }
+        if self.workload_audience.trim().is_empty() {
+            return Err(ConfigError::invalid("identity.oidc.workload_audience must not be empty."));
         }
         if self
             .scopes

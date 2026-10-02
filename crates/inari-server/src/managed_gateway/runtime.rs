@@ -1,4 +1,7 @@
-use inari_gateway::protocol::AgentPublication;
+use std::time::Duration;
+
+use inari_gateway::protocol::{AgentPublication, AgentStateReceipt, StructuredValue};
+use sha2::{Digest, Sha256};
 use zenoh::bytes::Encoding;
 use zenoh::sample::SampleKind;
 
@@ -10,6 +13,28 @@ use crate::zenoh::CurrentSession;
 
 impl ManagedGatewayController {
     pub async fn run_data_plane(self, shutdown: ShutdownCoordinator) -> AppResult<()> {
+        tokio::try_join!(self.run_transport(shutdown.clone()), self.run_payload_cleanup(shutdown),)?;
+        Ok(())
+    }
+
+    async fn run_payload_cleanup(&self, shutdown: ShutdownCoordinator) -> AppResult<()> {
+        if !self.inner.config.enabled || !self.inner.store.is_available() {
+            shutdown.wait_for_shutdown().await;
+            return Ok(());
+        }
+        let mut ticks = tokio::time::interval(Duration::from_secs(1));
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = shutdown.wait_for_shutdown() => return Ok(()),
+                _ = ticks.tick() => {
+                    self.inner.store.repository()?.expire_managed_payloads(chrono::Utc::now()).await?;
+                }
+            }
+        }
+    }
+
+    async fn run_transport(&self, shutdown: ShutdownCoordinator) -> AppResult<()> {
         if !self.inner.config.enabled || !self.inner.zenoh_config.enabled {
             shutdown.wait_for_shutdown().await;
             return Ok(());
@@ -58,6 +83,16 @@ impl ManagedGatewayController {
     async fn run_session_workers(&self, session: CurrentSession) -> AppResult<()> {
         let history_key = self.history_query_key()?;
         let publications_key = self.publications_key()?;
+        let state_commit_key = self.state_commit_key()?;
+        let state_queryable = session
+            .session()
+            .declare_queryable(state_commit_key.as_str())
+            .await
+            .map_err(|source| {
+                AppError::service_unavailable(format!(
+                    "Failed to declare managed state commit queryable: {source}"
+                ))
+            })?;
         let history_queryable = session
             .session()
             .declare_queryable(history_key.as_str())
@@ -79,6 +114,22 @@ impl ManagedGatewayController {
 
         loop {
             tokio::select! {
+                query = state_queryable.recv_async() => {
+                    let query = query.map_err(|source| AppError::service_unavailable(format!(
+                        "Managed state commit queryable stopped: {source}"
+                    )))?;
+                    let key = query.key_expr().as_str().to_owned();
+                    let payload = query.payload().map(|payload| payload.to_bytes());
+                    let result = self.commit_state_publication(&key, payload.as_deref().unwrap_or_default()).await;
+                    let reply = match result {
+                        Ok(receipt) => query.reply(key.as_str(), serde_json::to_vec(&receipt)?)
+                            .encoding(Encoding::APPLICATION_JSON).await,
+                        Err(error) => query.reply_err(error.to_string()).await,
+                    };
+                    if let Err(error) = reply {
+                        tracing::debug!(error = %error, "failed to reply to managed state commit");
+                    }
+                },
                 query = history_queryable.recv_async() => {
                     let query = query.map_err(|source| {
                         AppError::service_unavailable(format!(
@@ -149,11 +200,16 @@ impl ManagedGatewayController {
         let Some(agent_id) = self.agent_id_from_key(key) else {
             return Ok(None);
         };
-        self.inner
+        let (selected_protocol_version, stored_commands) = self
+            .inner
             .store
             .command_history(&agent_id, from_sequence)
-            .await
-            .map(Some)
+            .await?;
+        let mut commands = Vec::with_capacity(stored_commands.len());
+        for command in stored_commands {
+            commands.push(self.dispatch_message(&command).await?);
+        }
+        Ok(Some(CommandHistory { selected_protocol_version, commands }))
     }
 
     async fn record_publication_from_key(
@@ -168,5 +224,45 @@ impl ManagedGatewayController {
             .store
             .record_publication(agent_id, key.to_owned(), message)
             .await
+    }
+
+    pub(super) async fn commit_state_publication(
+        &self,
+        key: &str,
+        payload: &[u8],
+    ) -> AppResult<AgentStateReceipt> {
+        let prefix = self
+            .inner
+            .config
+            .data_plane
+            .namespace_prefix
+            .trim_end_matches('/');
+        let agent_id = self
+            .agent_id_from_key(key)
+            .filter(|id| key == format!("{prefix}/{id}/state/commit") && !id.contains('*'))
+            .ok_or_else(|| AppError::bad_request("Invalid Agent State commit key."))?;
+        if payload.len() > 131_072 {
+            return Err(AppError::bad_request("Agent State publication exceeds its size limit."));
+        }
+        let message: AgentPublication = serde_json::from_slice(payload)?;
+        let AgentPublication::RuntimeEvent { message_id, event, .. } = &message else {
+            return Err(AppError::bad_request("State commit requires a Print Job observation."));
+        };
+        let Some(StructuredValue::Text(envelope)) = event.payload.get("state_envelope") else {
+            return Err(AppError::bad_request("State commit requires a signed observation."));
+        };
+        if event.resource_kind != "print_job" {
+            return Err(AppError::bad_request("State commit requires a Print Job observation."));
+        }
+        let receipt = AgentStateReceipt {
+            contract_major: 1,
+            message_id: message_id.clone(),
+            state_envelope_sha256: hex::encode(Sha256::digest(envelope.as_bytes())),
+        };
+        self.inner
+            .store
+            .record_publication(agent_id, key.to_owned(), message)
+            .await?;
+        Ok(receipt)
     }
 }

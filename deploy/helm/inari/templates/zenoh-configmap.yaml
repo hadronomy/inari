@@ -61,24 +61,73 @@ data:
         "default_permission": {{ .Values.zenoh.config.accessControl.defaultPermission | quote }},
         "rules": [
           {
-            "id": "managed-keyspace",
-            "messages": [
-              "put",
-              "delete",
-              "declare_subscriber",
-              "query",
-              "reply",
-              "declare_queryable",
-              "liveliness_token",
-              "liveliness_query",
-              "declare_liveliness_subscriber"
-            ],
+            "id": "controller-authority",
+            "messages": ["put", "delete", "declare_subscriber", "query", "reply", "declare_queryable", "liveliness_token", "liveliness_query", "declare_liveliness_subscriber"],
             "flows": ["ingress", "egress"],
             "permission": "allow",
             "key_exprs": [{{ printf "%s/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
+          },
+          {
+            "id": "agent-publications",
+            "messages": ["put"],
+            "flows": ["ingress"],
+            "permission": "allow",
+            "key_exprs": [
+              {{ printf "%s/*/presence/agent" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
+              {{ printf "%s/*/status/latest" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
+              {{ printf "%s/*/results/*" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
+              {{ printf "%s/*/events/*" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
+              {{ printf "%s/*/errors/*" .Values.managedGateway.dataPlane.namespacePrefix | quote }}
+            ]
+          },
+          {
+            "id": "agent-presence",
+            "messages": ["liveliness_token"],
+            "flows": ["ingress"],
+            "permission": "allow",
+            "key_exprs": [{{ printf "%s/*/presence/agent" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
+          },
+          {
+            "id": "agent-command-subscription",
+            "messages": ["declare_subscriber"],
+            "flows": ["ingress"],
+            "permission": "allow",
+            "key_exprs": [{{ printf "%s/*/commands/live/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
+          },
+          {
+            "id": "controller-command-delivery",
+            "messages": ["put"],
+            "flows": ["egress"],
+            "permission": "allow",
+            "key_exprs": [{{ printf "%s/*/commands/live/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
+          },
+          {
+            "id": "agent-query",
+            "messages": ["query"],
+            "flows": ["ingress"],
+            "permission": "allow",
+            "key_exprs": [
+              {{ printf "%s/*/commands/history" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
+              {{ printf "%s/*/state/commit" .Values.managedGateway.dataPlane.namespacePrefix | quote }}
+            ]
+          },
+          {
+            "id": "controller-query-reply",
+            "messages": ["reply", "declare_queryable"],
+            "flows": ["egress"],
+            "permission": "allow",
+            "key_exprs": [
+              {{ printf "%s/*/commands/history" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
+              {{ printf "%s/*/state/commit" .Values.managedGateway.dataPlane.namespacePrefix | quote }}
+            ]
           }
         ],
         "subjects": [
+          {
+            "id": "controller-peers",
+            "link_protocols": ["tls"],
+            "cert_common_names": {{ .Values.zenoh.config.accessControl.trustedPeerCommonNames | toJson }}
+          },
           {
             "id": "mutually-authenticated-tls",
             "link_protocols": ["tls"]
@@ -86,8 +135,13 @@ data:
         ],
         "policies": [
           {
-            "id": "managed-keyspace-over-mtls",
-            "rules": ["managed-keyspace"],
+            "id": "controller-authority-over-mtls",
+            "rules": ["controller-authority"],
+            "subjects": ["controller-peers"]
+          },
+          {
+            "id": "agent-traffic-over-mtls",
+            "rules": ["agent-publications", "agent-presence", "agent-command-subscription", "controller-command-delivery", "agent-query", "controller-query-reply"],
             "subjects": ["mutually-authenticated-tls"]
           }
         ]

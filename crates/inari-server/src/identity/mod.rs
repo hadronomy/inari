@@ -1,8 +1,10 @@
 mod principal;
 mod service;
+mod workload;
 
 pub use self::principal::{Principal, SESSION_IDENTITY_KEY};
-pub use self::service::{IdentityService, LoginChallenge, PendingLogin};
+pub use self::service::{IdentityService, LoginChallenge, PendingLogin, WorkloadIdentity};
+pub use self::workload::WorkloadPrincipal;
 pub use inari_gateway::identity::{AccessRole, ActorId, Permission, SessionIdentity};
 
 #[derive(Clone, Debug)]

@@ -160,6 +160,7 @@ fn apply_access_control(config: &mut Config, settings: &ZenohConfig) -> AppResul
             {
                 "id": "managed-agent-publications",
                 "permission": "allow",
+                "flows": ["ingress"],
                 "messages": ["put"],
                 "key_exprs": [
                     format!("{namespace_prefix}/*/presence/agent"),
@@ -170,13 +171,67 @@ fn apply_access_control(config: &mut Config, settings: &ZenohConfig) -> AppResul
                 ],
             },
             {
+                "id": "managed-agent-presence",
+                "permission": "allow",
+                "flows": ["ingress"],
+                "messages": ["liveliness_token"],
+                "key_exprs": [format!("{namespace_prefix}/*/presence/agent")],
+            },
+            {
+                "id": "managed-controller-publication-subscription",
+                "permission": "allow",
+                "flows": ["egress"],
+                "messages": ["declare_subscriber"],
+                "key_exprs": [format!("{namespace_prefix}/*/**")],
+            },
+            {
+                "id": "managed-agent-state-commit",
+                "permission": "allow",
+                "flows": ["ingress"],
+                "messages": ["query"],
+                "key_exprs": [format!("{namespace_prefix}/*/state/commit")],
+            },
+            {
+                "id": "managed-agent-state-receipt",
+                "permission": "allow",
+                "flows": ["egress"],
+                "messages": ["reply", "declare_queryable"],
+                "key_exprs": [format!("{namespace_prefix}/*/state/commit")],
+            },
+            {
+                "id": "managed-agent-state-receipt-source",
+                "permission": "deny",
+                "flows": ["ingress"],
+                "messages": ["reply", "declare_queryable"],
+                "key_exprs": [format!("{namespace_prefix}/*/state/commit")],
+            },
+            {
                 "id": "managed-agent-command-read",
                 "permission": "allow",
-                "messages": ["declare_subscriber", "query", "reply"],
-                "key_exprs": [
-                    format!("{namespace_prefix}/*/commands/live/**"),
-                    format!("{namespace_prefix}/*/commands/history"),
-                ],
+                "flows": ["ingress"],
+                "messages": ["declare_subscriber"],
+                "key_exprs": [format!("{namespace_prefix}/*/commands/live/**")],
+            },
+            {
+                "id": "managed-controller-command-publish",
+                "permission": "allow",
+                "flows": ["egress"],
+                "messages": ["put"],
+                "key_exprs": [format!("{namespace_prefix}/*/commands/live/**")],
+            },
+            {
+                "id": "managed-agent-history-query",
+                "permission": "allow",
+                "flows": ["ingress"],
+                "messages": ["query"],
+                "key_exprs": [format!("{namespace_prefix}/*/commands/history")],
+            },
+            {
+                "id": "managed-controller-history-reply",
+                "permission": "allow",
+                "flows": ["egress"],
+                "messages": ["declare_queryable", "reply"],
+                "key_exprs": [format!("{namespace_prefix}/*/commands/history")],
             },
         ]);
         access_control["subjects"] = json!([subject]);
@@ -184,7 +239,15 @@ fn apply_access_control(config: &mut Config, settings: &ZenohConfig) -> AppResul
             {
                 "rules": [
                     "managed-agent-publications",
+                    "managed-agent-presence",
+                    "managed-controller-publication-subscription",
+                    "managed-agent-state-commit",
+                    "managed-agent-state-receipt",
+                    "managed-agent-state-receipt-source",
                     "managed-agent-command-read",
+                    "managed-controller-command-publish",
+                    "managed-agent-history-query",
+                    "managed-controller-history-reply",
                 ],
                 "subjects": ["managed-agents"],
             },
@@ -245,6 +308,198 @@ mod tests {
         ZenohAccessControlConfig, ZenohAclPermission, ZenohAdminSpaceConfig, ZenohConfig,
         ZenohMode, ZenohTlsConfig,
     };
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn managed_acl_allows_agent_traffic_and_blocks_remote_authority() {
+        use std::time::Duration;
+
+        let key = "iot/v1/agents/agt_test/state/commit";
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
+        drop(listener);
+        let mut router_config = Config::default();
+        configure_zenoh(
+            &mut router_config,
+            &ZenohConfig {
+                mode: ZenohMode::Router,
+                listen_endpoints: vec![endpoint.clone()],
+                access_control: ZenohAccessControlConfig {
+                    enabled: true,
+                    default_permission: ZenohAclPermission::Deny,
+                    managed_gateway_namespace_prefix: Some("iot/v1/agents".into()),
+                    managed_gateway_cert_common_names: vec![],
+                },
+                ..ZenohConfig::default()
+            },
+        )
+        .unwrap();
+        router_config
+            .insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        let router = zenoh::open(router_config)
+            .await
+            .unwrap();
+        let mut client_config = Config::default();
+        client_config
+            .insert_json5("mode", "\"client\"")
+            .unwrap();
+        client_config
+            .insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        client_config
+            .insert_json5("connect/endpoints", &serde_json::json!([endpoint]).to_string())
+            .unwrap();
+        let queryable = router
+            .declare_queryable(key)
+            .await
+            .unwrap();
+        let history_key = "iot/v1/agents/agt_test/commands/history";
+        let history = router
+            .declare_queryable("iot/v1/agents/*/commands/history")
+            .await
+            .unwrap();
+        let publications = router
+            .declare_subscriber("iot/v1/agents/*/**")
+            .allowed_origin(zenoh::sample::Locality::Remote)
+            .await
+            .unwrap();
+        let impostor = zenoh::open(client_config.clone())
+            .await
+            .unwrap();
+        let impostor_queryable = impostor
+            .declare_queryable(key)
+            .await
+            .unwrap();
+        let client = zenoh::open(client_config)
+            .await
+            .unwrap();
+        let replies = client
+            .get(key)
+            .payload("observation")
+            .target(zenoh::query::QueryTarget::All)
+            .timeout(Duration::from_secs(2))
+            .await
+            .unwrap();
+        let query = tokio::time::timeout(Duration::from_secs(2), queryable.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            query
+                .payload()
+                .unwrap()
+                .try_to_string()
+                .unwrap(),
+            "observation"
+        );
+        query
+            .reply(key, "stored")
+            .await
+            .unwrap();
+        drop(query);
+        let reply = tokio::time::timeout(Duration::from_secs(2), replies.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            reply
+                .result()
+                .as_ref()
+                .unwrap()
+                .payload()
+                .try_to_string()
+                .unwrap(),
+            "stored"
+        );
+        assert!(
+            impostor_queryable
+                .try_recv()
+                .unwrap()
+                .is_none()
+        );
+
+        let history_replies = client.get(history_key).await.unwrap();
+        let history_query = tokio::time::timeout(Duration::from_secs(2), history.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        history_query
+            .reply(history_key, "history")
+            .await
+            .unwrap();
+        drop(history_query);
+        let history_reply =
+            tokio::time::timeout(Duration::from_secs(2), history_replies.recv_async())
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            history_reply
+                .result()
+                .as_ref()
+                .unwrap()
+                .payload()
+                .to_bytes()
+                .as_ref(),
+            b"history"
+        );
+
+        let command_key = "iot/v1/agents/agt_test/commands/live/cmd_test";
+        let commands = client
+            .declare_subscriber("iot/v1/agents/agt_test/commands/live/**")
+            .await
+            .unwrap();
+        let publisher = router
+            .declare_publisher(command_key)
+            .allowed_destination(zenoh::sample::Locality::Remote)
+            .await
+            .unwrap();
+        let matching = publisher
+            .matching_listener()
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !publisher
+                .matching_status()
+                .await
+                .unwrap()
+                .matching()
+            {
+                matching.recv_async().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        publisher.put("dispatch").await.unwrap();
+        let command = tokio::time::timeout(Duration::from_secs(2), commands.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(command.payload().to_bytes().as_ref(), b"dispatch");
+
+        client
+            .put("iot/v1/agents/agt_test/status/latest", "status")
+            .await
+            .unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(2), publications.recv_async())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status.payload().to_bytes().as_ref(), b"status");
+
+        impostor
+            .put(command_key, "forged")
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), commands.recv_async())
+                .await
+                .is_err()
+        );
+        client.close().await.unwrap();
+        impostor.close().await.unwrap();
+        router.close().await.unwrap();
+    }
 
     #[test]
     fn configure_zenoh_applies_mode() {

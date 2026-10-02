@@ -72,6 +72,18 @@ class FakePrinterDriver(PrinterDriver):
             printer=printer, transport=PrinterTransport.RAW, bytes_written=5, job_id=2
         )
 
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+        dpi: int,
+    ) -> PrintJobResult:
+        del media_type
+        return self.submit_raw_job(printer, payload, document_name=document_name)
+
 
 def test_device_id_is_independent_from_the_display_name() -> None:
     identity = DeviceIdentity(

@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import uuid
+import json
+from dataclasses import asdict
 from typing import Any, Mapping
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import OperationalError
 
-from ..db.schema import gateway_inbound_commands_table, gateway_outbox_table
+from ..core.exceptions import AgentError
+from ..db.schema import (
+    gateway_inbound_commands_table,
+    gateway_managed_dispatch_state_table,
+    gateway_outbox_table,
+)
 from ..runtime.models import normalize_timestamp, timestamp_to_iso, utc_now
 from ..runtime.store import RuntimeStore, dump_json, load_json
 from .models import (
+    AgentManagedScope,
     GatewayInboundCommandRecord,
     GatewayInboundCommandState,
     GatewayOutboxRecord,
@@ -28,17 +36,16 @@ class GatewayRepository:
         command_id: str,
         message_id: str,
         sequence: int | None,
+        dispatch_epoch: int | None = None,
         message_type: str,
         payload: Mapping[str, Any],
     ) -> tuple[GatewayInboundCommandRecord, bool]:
-        existing = self.get_inbound_command(command_id)
-        if existing is not None:
-            return existing, False
         now = utc_now()
         stmt = insert(gateway_inbound_commands_table).values(
             command_id=command_id,
             message_id=message_id,
             sequence=sequence,
+            dispatch_epoch=dispatch_epoch,
             message_type=message_type,
             state=GatewayInboundCommandState.RECEIVED.value,
             payload_json=dump_json(payload),
@@ -49,7 +56,58 @@ class GatewayRepository:
             received_at=timestamp_to_iso(now),
             updated_at=timestamp_to_iso(now),
         )
-        with self.store.connection() as connection:
+        with self.store.immediate_transaction() as connection:
+            existing_row = (
+                connection.execute(
+                    select(gateway_inbound_commands_table).where(
+                        gateway_inbound_commands_table.c.command_id == command_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if existing_row is not None:
+                existing = _row_to_inbound(existing_row)
+                _assert_exact_inbound_replay(
+                    existing,
+                    message_id=message_id,
+                    sequence=sequence,
+                    dispatch_epoch=dispatch_epoch,
+                    message_type=message_type,
+                    payload=payload,
+                )
+                return existing, False
+            if sequence is not None:
+                last_sequence = connection.execute(
+                    select(func.max(gateway_inbound_commands_table.c.sequence)).where(
+                        gateway_inbound_commands_table.c.state.in_(
+                            (
+                                GatewayInboundCommandState.ACCEPTED.value,
+                                GatewayInboundCommandState.REJECTED.value,
+                            )
+                        ),
+                        gateway_inbound_commands_table.c.sequence.is_not(None),
+                    )
+                ).scalar_one_or_none()
+                expected = int(last_sequence or 0) + 1
+                if sequence != expected:
+                    raise AgentError(
+                        "UPSTREAM_SEQUENCE_GAP",
+                        f"Expected Controller command sequence {expected}, received {sequence}.",
+                        status_code=409,
+                    )
+            if dispatch_epoch is not None:
+                state = (
+                    connection.execute(select(gateway_managed_dispatch_state_table))
+                    .mappings()
+                    .first()
+                )
+                if state is not None and dispatch_epoch < int(state["dispatch_epoch"]):
+                    raise AgentError(
+                        "MANAGED_DISPATCH_EPOCH_STALE",
+                        "The managed dispatch epoch is older than the applied epoch.",
+                        status_code=409,
+                    )
             connection.execute(stmt)
         return self.get_inbound_command(command_id) or _missing_inbound(
             command_id
@@ -143,6 +201,123 @@ class GatewayRepository:
             connection.execute(stmt)
         return self.get_inbound_command(command_id) or _missing_inbound(command_id)
 
+    def mark_managed_dispatch_accepted(
+        self,
+        command_id: str,
+        *,
+        dispatch_epoch: int,
+        job_id: str,
+        response_payload: Mapping[str, Any],
+    ) -> GatewayInboundCommandRecord:
+        return self._finish_managed_dispatch(
+            command_id,
+            dispatch_epoch=dispatch_epoch,
+            state=GatewayInboundCommandState.ACCEPTED,
+            job_id=job_id,
+            response_payload=response_payload,
+            error_code=None,
+            error_detail=None,
+        )
+
+    def mark_managed_dispatch_rejected(
+        self,
+        command_id: str,
+        *,
+        dispatch_epoch: int,
+        error_code: str,
+        error_detail: str,
+        response_payload: Mapping[str, Any],
+    ) -> GatewayInboundCommandRecord:
+        return self._finish_managed_dispatch(
+            command_id,
+            dispatch_epoch=dispatch_epoch,
+            state=GatewayInboundCommandState.REJECTED,
+            job_id=None,
+            response_payload=response_payload,
+            error_code=error_code,
+            error_detail=error_detail,
+        )
+
+    def _finish_managed_dispatch(
+        self,
+        command_id: str,
+        *,
+        dispatch_epoch: int,
+        state: GatewayInboundCommandState,
+        job_id: str | None,
+        response_payload: Mapping[str, Any],
+        error_code: str | None,
+        error_detail: str | None,
+    ) -> GatewayInboundCommandRecord:
+        now = utc_now()
+        with self.store.immediate_transaction() as connection:
+            inbound = (
+                connection.execute(
+                    select(gateway_inbound_commands_table).where(
+                        gateway_inbound_commands_table.c.command_id == command_id
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            if inbound["dispatch_epoch"] != dispatch_epoch:
+                raise AgentError(
+                    "MANAGED_DISPATCH_EPOCH_INVALID",
+                    "The stored dispatch epoch does not match the accepted command.",
+                    status_code=409,
+                )
+            if inbound["state"] in {
+                GatewayInboundCommandState.ACCEPTED.value,
+                GatewayInboundCommandState.REJECTED.value,
+            }:
+                return _row_to_inbound(inbound)
+            sequence = int(inbound["sequence"])
+            dispatch_state = (
+                connection.execute(select(gateway_managed_dispatch_state_table))
+                .mappings()
+                .first()
+            )
+            if dispatch_state is None:
+                connection.execute(
+                    insert(gateway_managed_dispatch_state_table).values(
+                        id=1,
+                        dispatch_epoch=dispatch_epoch,
+                        last_sequence=sequence,
+                        updated_at=timestamp_to_iso(now),
+                    )
+                )
+            else:
+                stored_epoch = int(dispatch_state["dispatch_epoch"])
+                stored_sequence = int(dispatch_state["last_sequence"])
+                if dispatch_epoch < stored_epoch or sequence <= stored_sequence:
+                    raise AgentError(
+                        "MANAGED_DISPATCH_REPLAY_REJECTED",
+                        "The managed dispatch position was already applied.",
+                        status_code=409,
+                    )
+                connection.execute(
+                    update(gateway_managed_dispatch_state_table)
+                    .where(gateway_managed_dispatch_state_table.c.id == 1)
+                    .values(
+                        dispatch_epoch=dispatch_epoch,
+                        last_sequence=sequence,
+                        updated_at=timestamp_to_iso(now),
+                    )
+                )
+            connection.execute(
+                update(gateway_inbound_commands_table)
+                .where(gateway_inbound_commands_table.c.command_id == command_id)
+                .values(
+                    state=state.value,
+                    job_id=job_id,
+                    response_json=dump_json(response_payload),
+                    error_code=error_code,
+                    error_detail=error_detail,
+                    updated_at=timestamp_to_iso(now),
+                )
+            )
+        return self.get_inbound_command(command_id) or _missing_inbound(command_id)
+
     def enqueue_outbound(
         self,
         *,
@@ -150,6 +325,7 @@ class GatewayRepository:
         payload: Mapping[str, Any],
         correlation_id: str | None = None,
         dedupe_key: str | None = None,
+        recipient_scope: AgentManagedScope | None = None,
     ) -> GatewayOutboxRecord:
         if dedupe_key is not None:
             existing = self.find_outbox_by_dedupe_key(dedupe_key)
@@ -164,6 +340,7 @@ class GatewayRepository:
             payload_json=dump_json(payload),
             correlation_id=correlation_id,
             dedupe_key=dedupe_key,
+            recipient_scope=recipient_scope_key(recipient_scope),
             created_at=timestamp_to_iso(now),
             updated_at=timestamp_to_iso(now),
             sent_at=None,
@@ -174,12 +351,23 @@ class GatewayRepository:
         return self.get_outbox(message_id) or _missing_outbox(message_id)
 
     def list_pending_outbox(
-        self, *, limit: int = 128
+        self, *, limit: int = 128, recipient_scope: AgentManagedScope | None = None
     ) -> tuple[GatewayOutboxRecord, ...]:
         stmt = (
             select(gateway_outbox_table)
             .where(gateway_outbox_table.c.state == GatewayOutboxState.PENDING.value)
-            .order_by(gateway_outbox_table.c.created_at.asc())
+            .where(
+                or_(
+                    gateway_outbox_table.c.recipient_scope.is_(None),
+                    gateway_outbox_table.c.recipient_scope
+                    == recipient_scope_key(recipient_scope),
+                )
+            )
+            .order_by(
+                gateway_outbox_table.c.updated_at.asc(),
+                gateway_outbox_table.c.created_at.asc(),
+                gateway_outbox_table.c.message_id.asc(),
+            )
             .limit(limit)
         )
         with self.store.connection() as connection:
@@ -213,6 +401,22 @@ class GatewayRepository:
                 state=GatewayOutboxState.PENDING.value,
                 updated_at=timestamp_to_iso(now),
                 last_error=detail,
+            )
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
+        return self.get_outbox(message_id)
+
+    def requeue_outbound(self, message_id: str) -> GatewayOutboxRecord | None:
+        now = utc_now()
+        stmt = (
+            update(gateway_outbox_table)
+            .where(gateway_outbox_table.c.message_id == message_id)
+            .values(
+                state=GatewayOutboxState.PENDING.value,
+                updated_at=timestamp_to_iso(now),
+                sent_at=None,
+                last_error=None,
             )
         )
         with self.store.connection() as connection:
@@ -264,6 +468,9 @@ def _row_to_inbound(row: RowMapping | Mapping[str, Any]) -> GatewayInboundComman
         payload=load_json(str(row["payload_json"])),
         message_id=str(row["message_id"]),
         sequence=int(row["sequence"]) if row["sequence"] is not None else None,
+        dispatch_epoch=(
+            int(row["dispatch_epoch"]) if row["dispatch_epoch"] is not None else None
+        ),
         received_at=normalize_timestamp(str(row["received_at"])) or utc_now(),
         updated_at=normalize_timestamp(str(row["updated_at"])) or utc_now(),
         job_id=str(row["job_id"]) if row["job_id"] is not None else None,
@@ -300,5 +507,38 @@ def _missing_inbound(command_id: str) -> GatewayInboundCommandRecord:
     raise LookupError(f"Missing gateway inbound command {command_id!r}.")
 
 
+def _assert_exact_inbound_replay(
+    existing: GatewayInboundCommandRecord,
+    *,
+    message_id: str,
+    sequence: int | None,
+    dispatch_epoch: int | None,
+    message_type: str,
+    payload: Mapping[str, Any],
+) -> None:
+    if (
+        existing.message_id != message_id
+        or existing.sequence != sequence
+        or existing.dispatch_epoch != dispatch_epoch
+        or existing.message_type != message_type
+        or existing.payload != dict(payload)
+    ):
+        raise AgentError(
+            "UPSTREAM_COMMAND_REPLAY_CONFLICT",
+            "The Controller command ID was reused with different content.",
+            status_code=409,
+        )
+
+
 def _missing_outbox(message_id: str) -> GatewayOutboxRecord:
     raise LookupError(f"Missing gateway outbox message {message_id!r}.")
+
+
+def recipient_scope_key(scope: AgentManagedScope | None) -> str | None:
+    return (
+        None
+        if scope is None
+        else json.dumps(
+            asdict(scope), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    )

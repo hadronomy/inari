@@ -149,7 +149,8 @@ class SqliteExecutionLedger:
                 raise LeaseLost("The Print Job changed before Device I/O.")
             if parse_timestamp(job["expires_at"]) <= now:
                 raise ExecutionRejected("expired", "print.expired")
-            self._check_client_grant(connection, claim, now=now)
+            if claim.scope_kind == "paired_client":
+                self._check_client_grant(connection, claim, now=now)
             self._check_device_authority(connection, claim, now=now)
 
             next_version = int(job["state_version"]) + 1
@@ -538,14 +539,23 @@ class SqliteExecutionLedger:
             .one()
         )
         proof = read_authority_proof(connection, admission_id=str(job["admission_id"]))
+        scope_kind = str(admission["scope_kind"])
         grant_values = (
             admission["grant_id"],
             admission["grant_pairing_id"],
             admission["grant_generation"],
             admission["grant_authorization_digest"],
         )
-        if any(value is None for value in grant_values):
-            raise LeaseLost("The admitted Client Grant reference is incomplete.")
+        if scope_kind == "paired_client":
+            if any(value is None for value in grant_values):
+                raise LeaseLost("The admitted Client Grant reference is incomplete.")
+        elif scope_kind == "device_manager":
+            if admission["managed_work_id"] is None or any(
+                value is not None for value in grant_values
+            ):
+                raise LeaseLost("The admitted managed authorization is incomplete.")
+        else:
+            raise LeaseLost("The admitted authorization scope is invalid.")
 
         attempt_id = uuid4().hex
         lease_id = uuid4().hex
@@ -622,11 +632,34 @@ class SqliteExecutionLedger:
             operation=str(admission["operation"]),
             media_type=str(admission["media_type"]),
             normalized_options_digest=bytes(admission["normalized_options_digest"]),
+            normalized_options=bytes(admission["normalized_options"]),
             binding_revision_id=str(admission["binding_revision_id"]),
-            grant_id=str(admission["grant_id"]),
-            grant_pairing_id=str(admission["grant_pairing_id"]),
-            grant_generation=int(admission["grant_generation"]),
-            grant_authorization_digest=bytes(admission["grant_authorization_digest"]),
+            scope_kind=scope_kind,
+            managed_work_id=(
+                str(admission["managed_work_id"])
+                if admission["managed_work_id"] is not None
+                else None
+            ),
+            grant_id=(
+                str(admission["grant_id"])
+                if admission["grant_id"] is not None
+                else None
+            ),
+            grant_pairing_id=(
+                str(admission["grant_pairing_id"])
+                if admission["grant_pairing_id"] is not None
+                else None
+            ),
+            grant_generation=(
+                int(admission["grant_generation"])
+                if admission["grant_generation"] is not None
+                else None
+            ),
+            grant_authorization_digest=(
+                bytes(admission["grant_authorization_digest"])
+                if admission["grant_authorization_digest"] is not None
+                else None
+            ),
             expires_at=parse_timestamp(str(job["expires_at"])),
             original=ArtifactRef(
                 artifact_id=str(artifact["id"]),
@@ -649,6 +682,13 @@ class SqliteExecutionLedger:
     def _check_client_grant(
         self, connection: Connection, claim: ExecutionClaim, *, now: datetime
     ) -> None:
+        if (
+            claim.grant_id is None
+            or claim.grant_pairing_id is None
+            or claim.grant_generation is None
+            or claim.grant_authorization_digest is None
+        ):
+            raise ExecutionRejected("permission_denied", "print.permission_denied")
         grant = (
             connection.execute(
                 select(client_grants_table).where(

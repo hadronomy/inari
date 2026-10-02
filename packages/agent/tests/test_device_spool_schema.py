@@ -260,6 +260,7 @@ def _insert_admission(
     connection.execute(
         """
         INSERT INTO device_work_admissions (
+            normalized_options,
             id, planned_job_id, database, scope_kind, organization_id, site_id, pos_configuration_id,
             paired_client_id, idempotency_key, fingerprint, state, job_id,
             intent_id, device_id, deadline_at, original_size_bytes, created_at,
@@ -267,7 +268,7 @@ def _insert_admission(
             actor_id, binding_revision_id, authorization_digest, operation, media_type,
             normalized_options_digest, grant_scope_digest, origin_submission_key,
             origin_kind, origin_json, contract_major, copy_ordinal
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (X'7b7d', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             admission_id,
@@ -370,6 +371,7 @@ def test_admission_stages_before_job_and_enforces_scoped_idempotency(
             connection.execute(
                 """
                 INSERT INTO device_work_admissions (
+            normalized_options,
                 id, planned_job_id, database, scope_kind, organization_id, site_id, pos_configuration_id,
                 paired_client_id, idempotency_key, fingerprint, state, intent_id,
                 device_id, deadline_at, original_size_bytes, created_at,
@@ -377,7 +379,7 @@ def test_admission_stages_before_job_and_enforces_scoped_idempotency(
                 actor_id, binding_revision_id, authorization_digest, operation, media_type,
                 normalized_options_digest, grant_scope_digest, origin_submission_key,
                 origin_kind, origin_json, contract_major, copy_ordinal
-            ) VALUES ('admission_2', 'job_2', 'odoo', 'paired_client', 'org_1', 'site_1',
+            ) VALUES (X'7b7d', 'admission_2', 'job_2', 'odoo', 'paired_client', 'org_1', 'site_1',
                 'pos_1', 'client_1', 'idem_1', ?, 'staging', 'intent_2',
                 'device_1', ?, 100, ?, ?, ?, ?, 'actor_1', 'binding_1', ?,
                 'print', 'image/jpeg', ?, ?, 'submission_2', 'pos', '{}', 1, 0)
@@ -423,6 +425,7 @@ def test_manager_idempotency_is_unique_when_optional_scope_is_null(
     database_path = _migrate(tmp_path)
     statement = """
         INSERT INTO device_work_admissions (
+            normalized_options,
             id, planned_job_id, database, scope_kind, organization_id, site_id, pos_configuration_id,
             paired_client_id, idempotency_key, fingerprint, state, intent_id,
             device_id, deadline_at, original_size_bytes, created_at,
@@ -430,7 +433,7 @@ def test_manager_idempotency_is_unique_when_optional_scope_is_null(
             actor_id, binding_revision_id, authorization_digest, operation, media_type,
             normalized_options_digest, grant_scope_digest, origin_submission_key,
             origin_kind, origin_json, contract_major, copy_ordinal
-        ) VALUES (?, ?, 'odoo', 'device_manager', 'org_1', 'site_1', NULL, NULL,
+        ) VALUES (X'7b7d', ?, ?, 'odoo', 'device_manager', 'org_1', 'site_1', NULL, NULL,
             'idem_1', ?, 'staging', ?, 'device_1', ?, 100, ?, ?, ?, ?,
             'actor_1', 'binding_1', ?, 'print', 'image/jpeg', ?, ?, 'submission_1', 'pos', '{}', 1, 0)
     """

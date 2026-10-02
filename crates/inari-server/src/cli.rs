@@ -222,6 +222,17 @@ fn resolved_secret_files(loaded: &LoadedConfig) -> Vec<(&'static str, &std::path
     {
         files.push(("step_ca_provisioner_key", path.as_path()));
     }
+    if settings
+        .managed_gateway
+        .dispatch
+        .enabled
+        && let Some(path) = &settings
+            .managed_gateway
+            .dispatch
+            .signing_key_file
+    {
+        files.push(("managed_dispatch_key", path.as_path()));
+    }
     files
 }
 

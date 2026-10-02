@@ -66,11 +66,17 @@ resource_id!(OrganizationId, "org_", "organization IDs");
 resource_id!(SiteId, "site_", "site IDs");
 resource_id!(DeviceId, "dev_", "device IDs");
 resource_id!(JobId, "job_", "job IDs");
+resource_id!(ManagedPreflightId, "mpf_", "Managed Work preflight IDs");
+resource_id!(ManagedWorkId, "mw_", "Managed Work IDs");
 resource_id!(PolicyId, "policy_", "policy IDs");
+resource_id!(PrintIntentId, "pi_v1_", "Print Intent IDs");
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceId, JobId, OrganizationId, PolicyId, SiteId};
+    use super::{
+        DeviceId, JobId, ManagedPreflightId, ManagedWorkId, OrganizationId, PolicyId,
+        PrintIntentId, SiteId,
+    };
 
     #[test]
     fn resource_ids_enforce_domain_prefixes() {
@@ -91,8 +97,23 @@ mod tests {
         );
         assert!("job_01j3test".parse::<JobId>().is_ok());
         assert!(
+            "mpf_01j3test"
+                .parse::<ManagedPreflightId>()
+                .is_ok()
+        );
+        assert!(
+            "mw_01j3test"
+                .parse::<ManagedWorkId>()
+                .is_ok()
+        );
+        assert!(
             "policy_front_desk"
                 .parse::<PolicyId>()
+                .is_ok()
+        );
+        assert!(
+            "pi_v1_a1b2c3"
+                .parse::<PrintIntentId>()
                 .is_ok()
         );
         assert!(

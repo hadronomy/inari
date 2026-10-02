@@ -5,6 +5,14 @@ use crate::error::{AppError, AppResult};
 use crate::zenoh::KeyExpression;
 
 impl ManagedGatewayController {
+    pub(super) fn state_commit_key(&self) -> AppResult<KeyExpression> {
+        self.namespace_prefix_key()?
+            .join("*/state/commit")
+            .map_err(|source| {
+                AppError::bad_request(format!("Invalid managed state key expression: {source}"))
+            })
+    }
+
     pub(super) fn history_query_key(&self) -> AppResult<KeyExpression> {
         self.namespace_prefix_key()?
             .join("*")

@@ -1,0 +1,45 @@
+{
+  "work": {
+    "contract_major": 1,
+    "scope": {
+      "database": "production",
+      "company_id": "7",
+      "organization_id": "org_example",
+      "site_id": "site_example",
+      "agent_id": "agt_example"
+    },
+    "print_intent_id": "pi_v1_test",
+    "device_id": "dev_printer",
+    "origin": {
+      "binding": {
+        "report_binding_id": "binding-1",
+        "binding_revision_id": "revision-1",
+        "report_action_id": "sale.action_report_saleorder",
+        "report_contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "template_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "command_profile_id": null,
+        "layout_profile_id": null,
+        "hardware_matrix_digest": null
+      },
+      "route": "manual",
+      "source": {
+        "kind": "records",
+        "model": "sale.order",
+        "ordered_ids": [
+          42
+        ]
+      },
+      "rendered_document_index": 0,
+      "copy_ordinal": 1
+    },
+    "document": {
+      "operation": "report_pdf",
+      "content_base64": "JVBERi0xLjQ="
+    },
+    "normalized_device_options": {
+      "dpi": 300
+    }
+  },
+  "expires_at": "2026-09-06T12:05:00.123000Z",
+  "payload_fingerprint": "f0179a31c7694be1a166b51e32f58a155fc65292bca29078e8ddc35946b1008a"
+}

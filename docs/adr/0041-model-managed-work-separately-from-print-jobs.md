@@ -12,6 +12,16 @@ Controller derives the Managed Work deadline from operation policy at
 Controller Admission. Odoo does not supply it, and the Agent checks its exact
 value.
 
+Acceptance requires a verified Agent State Envelope. Its Managed Work, Print
+Intent, Device, Print Origin, Payload Fingerprint, and deadline must match the
+stored work before the Controller deletes protected content. Unsigned command
+acceptance and rejection receipts are informational. They cannot change Managed
+Work, stop its dispatch, or delete its Managed Payload.
+
+A rejection receipt cannot prove that an Agent did not accept the work. Without
+signed durable evidence, dispatched work remains unresolved and enters
+`recovery_uncertain` at its deadline.
+
 The Controller keeps a unique `(Organization, Idempotency Key)` pair for 90
 days. An exact Payload Fingerprint returns the existing record. A conflict
 returns `409`.

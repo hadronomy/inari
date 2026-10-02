@@ -39,6 +39,8 @@ class Win32PrintAPI(Protocol):
 
     def EndDocPrinter(self, handle: Any) -> None: ...
 
+    def AbortPrinter(self, handle: Any) -> None: ...
+
     def StartPagePrinter(self, handle: Any) -> None: ...
 
     def EndPagePrinter(self, handle: Any) -> None: ...
@@ -102,39 +104,38 @@ class WindowsSpooler:
 
         with self._open_printer(printer_name) as handle:
             started_doc = False
-            started_page = False
             try:
                 job_id = api.StartDocPrinter(
                     handle, 1, (document_name, None, data_type)
                 )
+                if type(job_id) is not int or job_id <= 0:
+                    raise RuntimeError(
+                        "The Windows spooler did not return a valid job ID."
+                    )
                 started_doc = True
 
                 if use_page_calls:
                     api.StartPagePrinter(handle)
-                    started_page = True
 
                 bytes_written = api.WritePrinter(handle, payload)
+                if type(bytes_written) is not int or bytes_written != len(payload):
+                    raise RuntimeError(
+                        "The Windows spooler did not accept the complete document."
+                    )
 
-                if started_page:
+                if use_page_calls:
                     api.EndPagePrinter(handle)
-                    started_page = False
 
                 api.EndDocPrinter(handle)
-                started_doc = False
             except Exception as exc:
-                if started_page:
-                    try:
-                        api.EndPagePrinter(handle)
-                    except Exception:  # pragma: no cover - best effort cleanup
-                        logger.debug(
-                            "Failed to end page for %s", printer_name, exc_info=True
-                        )
                 if started_doc:
                     try:
-                        api.EndDocPrinter(handle)
+                        api.AbortPrinter(handle)
                     except Exception:  # pragma: no cover - best effort cleanup
                         logger.debug(
-                            "Failed to end document for %s", printer_name, exc_info=True
+                            "Failed to abort document for %s",
+                            printer_name,
+                            exc_info=True,
                         )
                 raise PrinterServiceError("PRINT_FAILED", str(exc)) from exc
 
@@ -256,6 +257,26 @@ class WindowsPrinterDriver(PrinterDriver):
             transport=PrinterTransport.RAW,
             bytes_written=result.bytes_written,
             job_id=result.job_id,
+        )
+
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+        dpi: int,
+    ) -> PrintJobResult:
+        del payload, document_name
+        if not printer.supports_documents or media_type != "application/pdf":
+            raise PrinterServiceError(
+                "UNSUPPORTED_TRANSPORT",
+                f"Printer {printer.name!r} does not support {media_type!r} documents.",
+            )
+        raise PrinterServiceError(
+            "NO_DOCUMENT_BACKEND",
+            "The signed Inari PDF renderer is not installed.",
         )
 
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:

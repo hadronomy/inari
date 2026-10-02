@@ -52,6 +52,12 @@ Applied migrations are immutable. Never rename, reorder, edit, or remove one.
 Ship corrections as a new forward migration. SeaORM records migration names and
 application times but does not calculate SQLx-style content checksums.
 
+The Managed Payload storage change requires a coordinated Controller upgrade.
+Its migration blocks until older pending work finishes or expires. It then
+removes expired and terminal content. The
+[Managed Payload reference](managed_payloads.md) describes the schema change
+and its replay limits.
+
 ## Plan rolling changes
 
 Use expand-and-contract across releases:

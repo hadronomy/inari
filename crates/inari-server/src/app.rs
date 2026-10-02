@@ -22,7 +22,10 @@ use crate::database::ControllerDatabase;
 use crate::error::{AppError, AppResult};
 use crate::http;
 use crate::identity::{IdentityRuntime, IdentityService};
-use crate::managed_gateway::StepCaIssuer;
+use crate::managed_gateway::{
+    ManagedDispatchSigner, ManagedPayloadProtector, ManagedWorkSecurity, OpenBaoTransitKeyWrapper,
+    StepCaIssuer,
+};
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
@@ -100,6 +103,7 @@ impl ServerBuilder<WithConfig> {
         let onboarding = initialize_onboarding(&loaded, database.as_ref()).await?;
         let identity = initialize_identity(&loaded, database.as_ref()).await?;
         let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
+        let security = initialize_managed_work_security(&loaded).await?;
         let state = AppState::new_with_onboarding(
             loaded,
             zenoh_handle,
@@ -107,11 +111,28 @@ impl ServerBuilder<WithConfig> {
             onboarding,
             identity,
             certificate_issuer,
+            security,
         );
         let router = http::router(&state)?.with_state(state.clone());
 
         Ok(ServerApplication { state, router, shutdown, zenoh_supervisor })
     }
+}
+
+async fn initialize_managed_work_security(
+    loaded: &LoadedConfig,
+) -> AppResult<Option<Arc<ManagedWorkSecurity>>> {
+    let config = &loaded.settings.managed_gateway;
+    if !config.enabled || !config.dispatch.enabled {
+        return Ok(None);
+    }
+    let signer =
+        ManagedDispatchSigner::load(&config.dispatch, &config.controller_instance_id).await?;
+    let wrapper = OpenBaoTransitKeyWrapper::load(config.payload_protection.clone()).await?;
+    Ok(Some(Arc::new(ManagedWorkSecurity::new(
+        signer,
+        ManagedPayloadProtector::new(Arc::new(wrapper)),
+    ))))
 }
 
 async fn initialize_certificate_issuer(

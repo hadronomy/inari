@@ -7,15 +7,17 @@ from ..device_authority import AuthorityProof
 
 @dataclass(frozen=True, slots=True)
 class AdmissionManifest:
-    grant_id: str
-    grant_pairing_id: str
-    grant_generation: int
+    scope_kind: str
+    managed_work_id: str | None
+    grant_id: str | None
+    grant_pairing_id: str | None
+    grant_generation: int | None
     idempotency_key: str
     database: str
     organization_id: str
     site_id: str
-    pos_configuration_id: str
-    paired_client_id: str
+    pos_configuration_id: str | None
+    paired_client_id: str | None
     actor_id: str
     device_id: str
     binding_revision_id: str
@@ -23,6 +25,7 @@ class AdmissionManifest:
     operation: str
     media_type: str
     normalized_options_digest: bytes
+    normalized_options: bytes
     grant_scope_digest: bytes
     origin_submission_key: str
     origin_kind: str

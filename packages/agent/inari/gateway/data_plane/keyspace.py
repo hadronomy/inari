@@ -14,6 +14,9 @@ class GatewayZenohKeyspace:
     def command_history(self) -> str:
         return f"{self.namespace}/commands/history"
 
+    def state_commit(self) -> str:
+        return f"{self.namespace}/state/commit"
+
     def presence(self) -> str:
         return f"{self.namespace}/presence/agent"
 

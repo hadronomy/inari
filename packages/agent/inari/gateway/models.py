@@ -78,6 +78,7 @@ class ControllerAction(StrEnum):
     EVENTS_READ = "events:read"
     JOBS_CANCEL = "jobs:cancel"
     COMMANDS_EXECUTE = "commands:execute"
+    MANAGED_WORK_DISPATCH = "managed_work:dispatch"
 
 
 SUPPORTED_CONTROLLER_ACTIONS = (
@@ -86,6 +87,7 @@ SUPPORTED_CONTROLLER_ACTIONS = (
     ControllerAction.EVENTS_READ,
     ControllerAction.JOBS_CANCEL,
     ControllerAction.COMMANDS_EXECUTE,
+    ControllerAction.MANAGED_WORK_DISPATCH,
 )
 
 
@@ -224,6 +226,56 @@ class ZenohDataPlaneConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class AgentManagedScope:
+    organization_id: str
+    site_id: str
+    agent_id: str
+
+    def to_persisted_dict(self) -> dict[str, str]:
+        return {
+            "organization_id": self.organization_id,
+            "site_id": self.site_id,
+            "agent_id": self.agent_id,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class Ed25519VerificationJwk:
+    x: str
+    kid: str
+    kty: str = "OKP"
+    crv: str = "Ed25519"
+    alg: str = "EdDSA"
+    use: str = "sig"
+
+    def to_persisted_dict(self) -> dict[str, str]:
+        return {
+            "kty": self.kty,
+            "crv": self.crv,
+            "x": self.x,
+            "kid": self.kid,
+            "alg": self.alg,
+            "use": self.use,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class ManagedDispatchEnrollment:
+    scope: AgentManagedScope
+    issuer: str
+    epoch: int
+    verification_jwk: Ed25519VerificationJwk
+
+    def to_persisted_dict(self) -> dict[str, object]:
+        return {
+            "scope": self.scope.to_persisted_dict(),
+            "issuer": self.issuer,
+            "epoch": self.epoch,
+            "verification_jwk": self.verification_jwk.to_persisted_dict(),
+        }
+
+
+@dataclass(slots=True, frozen=True)
 class GatewayEnrollmentRecord:
     enrolled_at: datetime
     data_plane: ZenohDataPlaneConfig
@@ -236,6 +288,7 @@ class GatewayEnrollmentRecord:
     edge_provider: UpstreamEdgeProvider = UpstreamEdgeProvider.DIRECT
     mutual_tls_mode: MutualTlsMode = MutualTlsMode.OPTIONAL
     certificate_enrollment: CertificateEnrollmentSpec | None = None
+    managed_dispatch: ManagedDispatchEnrollment | None = None
 
     @property
     def bootstrap_pending(self) -> bool:
@@ -269,6 +322,8 @@ class GatewayEnrollmentRecord:
             payload["certificate_enrollment"] = (
                 self.certificate_enrollment.to_persisted_dict()
             )
+        if self.managed_dispatch is not None:
+            payload["managed_dispatch"] = self.managed_dispatch.to_persisted_dict()
         return payload
 
 
@@ -338,6 +393,7 @@ class GatewayInboundCommandRecord:
     payload: dict[str, object]
     message_id: str
     sequence: int | None
+    dispatch_epoch: int | None
     received_at: datetime
     updated_at: datetime
     job_id: str | None = None

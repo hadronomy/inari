@@ -10,6 +10,7 @@ publish.workspace     = true
 repository.workspace  = true
 
 [dependencies]
+aes-gcm.workspace               = true
 axum.workspace               = true
 axum-extra.workspace         = true
 base64.workspace             = true
@@ -19,10 +20,12 @@ chrono.workspace             = true
 # package rename leaves usage's derive unable to resolve its own runtime crates.
 usage                        = { package = "usage-rs", version = "6" }
 config.workspace             = true
+ed25519-dalek.workspace      = true
 futures-util.workspace       = true
 getrandom.workspace          = true
 hex.workspace                = true
 html-escape.workspace        = true
+hpke.workspace               = true
 http.workspace               = true
 http-body.workspace          = true
 human-panic.workspace        = true
@@ -36,10 +39,12 @@ leptos_axum.workspace        = true
 mime.workspace               = true
 openidconnect.workspace      = true
 qrcode.workspace             = true
+reqwest.workspace            = true
 secrecy.workspace            = true
 sea-orm.workspace            = true
 serde.workspace              = true
 serde_json.workspace         = true
+serde_json_canonicalizer.workspace = true
 sha2.workspace               = true
 sqlx.workspace               = true
 subtle.workspace             = true
@@ -56,9 +61,9 @@ tracing.workspace            = true
 tracing-subscriber.workspace = true
 url.workspace                = true
 x509-parser.workspace        = true
+zeroize.workspace            = true
 zenoh.workspace              = true
 
 [dev-dependencies]
-ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 tempfile = "3"

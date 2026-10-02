@@ -268,6 +268,7 @@ def _insert_admission(
     connection.execute(
         """
         INSERT INTO device_work_admissions (
+            normalized_options,
             id, planned_job_id, database, scope_kind, organization_id, site_id,
             pos_configuration_id, paired_client_id, idempotency_key, fingerprint,
             state, job_id, intent_id, device_id, deadline_at, original_size_bytes,
@@ -276,7 +277,7 @@ def _insert_admission(
             binding_revision_id, authorization_digest, operation, media_type,
             normalized_options_digest, grant_scope_digest, origin_submission_key,
             origin_kind, origin_json, contract_major, copy_ordinal
-        ) VALUES (?, ?, 'db', 'device_manager', 'org', 'site', NULL, NULL,
+        ) VALUES (X'7b7d', ?, ?, 'db', 'device_manager', 'org', 'site', NULL, NULL,
             ?, ?, ?, NULL, ?, 'device_1', ?, 10, ?, ?, NULL, NULL, NULL,
             ?, ?, 'actor', 'binding_revision_1', ?, 'print', 'text/plain',
             ?, ?, 'origin', 'pos', '{}', 1, 0)

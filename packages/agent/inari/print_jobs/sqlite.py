@@ -42,7 +42,7 @@ class SqlitePrintJobReader:
                 .mappings()
                 .one_or_none()
             )
-        return None if row is None else _job_from_row(row)
+        return None if row is None else print_job_from_row(row)
 
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         predicates = _scope_predicates(query.scope)
@@ -71,7 +71,9 @@ class SqlitePrintJobReader:
                 .where(*predicates)
             ).scalar_one()
 
-        jobs_by_intent = {str(row["intent_id"]): _job_from_row(row) for row in rows}
+        jobs_by_intent = {
+            str(row["intent_id"]): print_job_from_row(row) for row in rows
+        }
         jobs = tuple(
             jobs_by_intent[print_intent_id]
             for print_intent_id in query.print_intent_ids
@@ -116,7 +118,7 @@ def _scope_predicates(
     return tuple(predicates)
 
 
-def _job_from_row(row: RowMapping) -> PrintJob:
+def print_job_from_row(row: Mapping[str, Any] | RowMapping) -> PrintJob:
     origin_values = _origin_values(row["origin_json"])
     origin_kind = str(row["origin_kind"])
     if origin_kind == "pos":
@@ -124,10 +126,7 @@ def _job_from_row(row: RowMapping) -> PrintJob:
     elif origin_kind == "preparation":
         origin = PreparationPrintOrigin(**origin_values)
     elif origin_kind == "report":
-        record_ids = origin_values.get("record_ids")
-        if isinstance(record_ids, list):
-            origin_values["record_ids"] = tuple(record_ids)
-        origin = ReportPrintOrigin(**origin_values)
+        origin = _report_origin(row, origin_values)
     else:
         raise RuntimeError("The stored Print Job has an unsupported origin kind.")
     return PrintJob(
@@ -147,6 +146,48 @@ def _job_from_row(row: RowMapping) -> PrintJob:
         message_key=_optional_text(row["message_key"]),
         confirmation_evidence=_optional_text(row["confirmation_evidence"]),
         contract_version=str(row["contract_version"]),
+    )
+
+
+def _report_origin(
+    row: Mapping[str, Any] | RowMapping, values: Mapping[str, Any]
+) -> ReportPrintOrigin:
+    if any(
+        values.get(name) != row[name]
+        for name in ("organization_id", "site_id", "managed_work_id")
+    ):
+        raise RuntimeError("The stored Report Origin does not match its Print Job.")
+    binding = values.get("binding")
+    source = values.get("source")
+    if not isinstance(binding, dict) or not isinstance(source, dict):
+        raise RuntimeError("The stored Report Origin has no Binding or source.")
+    if source.get("kind") == "records":
+        identifiers = source.get("ordered_ids")
+        if (
+            not isinstance(identifiers, list)
+            or not identifiers
+            or any(type(value) is not int or value <= 0 for value in identifiers)
+        ):
+            raise RuntimeError("The stored Report Origin has invalid record IDs.")
+        record_ids = tuple(str(value) for value in identifiers)
+        wizard_input_digest = None
+    elif source.get("kind") == "wizard":
+        record_ids = ()
+        wizard_input_digest = source.get("input_digest")
+    else:
+        raise RuntimeError("The stored Report Origin has an unsupported source.")
+    return ReportPrintOrigin(
+        organization_id=values["organization_id"],
+        site_id=values["site_id"],
+        database=values["database"],
+        company_id=values["company_id"],
+        report_binding_id=binding["report_binding_id"],
+        report_route=values["route"],
+        report_action=binding["report_action_id"],
+        source_model=source["model"],
+        record_ids=record_ids,
+        wizard_input_digest=wizard_input_digest,
+        rendered_document_index=values["rendered_document_index"],
     )
 
 

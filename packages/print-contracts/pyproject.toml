@@ -1,0 +1,14 @@
+[project]
+name = "inari-print-contracts"
+version = "1.20.0-alpha.10"
+description = "Shared Inari document contracts for the Agent and Odoo"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["inari_print_contracts*"]

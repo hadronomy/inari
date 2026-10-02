@@ -76,6 +76,7 @@ async fn test_app() -> (axum::Router, OnboardingService) {
         Some(onboarding.clone()),
         None,
         None,
+        None,
     );
     let app = http::router(&state)
         .expect("router should build")

@@ -1,6 +1,6 @@
 use axum::extract::{FromRequest, FromRequestParts, Json, Path, Query, Request};
 use axum::http::request::Parts;
-use inari_gateway::protocol::{AgentId, JobId};
+use inari_gateway::protocol::{AgentId, JobId, ManagedWorkId, OrganizationId};
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 
@@ -60,12 +60,29 @@ where
 pub(super) struct IdempotencyKey(String);
 
 impl IdempotencyKey {
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub(super) fn job_id(&self, agent_id: &AgentId) -> Result<JobId, AppError> {
         let mut digest = Sha256::new();
         digest.update(agent_id.as_str());
         digest.update([0]);
         digest.update(self.0.as_bytes());
         format!("job_{}", &hex::encode(digest.finalize())[..32])
+            .parse()
+            .map_err(Into::into)
+    }
+
+    pub(super) fn managed_work_id(
+        &self,
+        organization_id: &OrganizationId,
+    ) -> Result<ManagedWorkId, AppError> {
+        let mut digest = Sha256::new();
+        digest.update(organization_id.as_str());
+        digest.update([0]);
+        digest.update(self.0.as_bytes());
+        format!("mw_{}", &hex::encode(digest.finalize())[..32])
             .parse()
             .map_err(Into::into)
     }

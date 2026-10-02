@@ -18,6 +18,7 @@ export const release = tegami<"edge" | "controller-chart">({
   packages: {
     "pip:inari": { group: "edge" },
     "pip:inari-brand": { group: "edge" },
+    "pip:inari-print-contracts": { group: "edge" },
     "cargo:inari-agent-client": { group: "edge" },
     "cargo:inari-device-center": { group: "edge" },
     "msix:inari-device-center": { group: "edge" },

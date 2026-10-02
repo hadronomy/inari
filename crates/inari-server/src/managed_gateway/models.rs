@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use inari_gateway::protocol::{
-    AgentId, ControllerCommand, OrganizationId, ProtocolVersion, SiteId,
+    AgentId, DispatchEncryptionKey, OrganizationId, ProtocolVersion, SiteId,
 };
 use jsonwebtoken::jwk::Jwk;
 
@@ -16,6 +16,8 @@ pub(super) struct StoredAgentEnrollment {
     pub(super) key_id: String,
     pub(super) public_jwk_fingerprint: String,
     pub(super) public_jwk: Jwk,
+    pub(super) dispatch_key: DispatchEncryptionKey,
+    pub(super) state_signing_jwk: Jwk,
     pub(super) certificate_pem: Option<String>,
     pub(super) namespace: String,
     pub(super) protocol_version: ProtocolVersion,
@@ -28,5 +30,5 @@ pub(super) struct StoredControllerCommand {
     pub(super) agent_id: inari_gateway::protocol::AgentId,
     pub(super) namespace: String,
     pub(super) command_id: inari_gateway::protocol::JobId,
-    pub(super) command: ControllerCommand,
+    pub(super) command: inari_gateway::CommandContent,
 }

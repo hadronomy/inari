@@ -23,6 +23,7 @@ from inari.gateway.models import (
 )
 from inari.gateway.protocol import AgentStatusSnapshotMessage, GatewaySnapshotPayload
 from inari.gateway.repositories import GatewayRepository
+from inari.gateway.state_events import GatewayStateEventProjector
 from inari.gateway.bridges.runtime import (
     GatewayCommandDispatcher,
     GatewayRuntimeEventForwarder,
@@ -35,6 +36,8 @@ from inari.runtime.models import (
 )
 from inari.runtime.store import RuntimeStore
 from inari.security.models import GatewayMode
+from inari.security.secrets import MemorySecretStore
+from inari.security.state_keys import AgentStateSigningKeyService
 from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
 
 
@@ -54,6 +57,11 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
         certificate_lifecycle_manager=None,
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
+        state_event_projector=GatewayStateEventProjector(
+            store=store,
+            signing_keys=AgentStateSigningKeyService(MemorySecretStore()),
+            agent_boot_id="boot_test",
+        ),
         command_dispatcher=cast(
             GatewayCommandDispatcher,
             FakeCommandDispatcher(),
@@ -92,6 +100,11 @@ async def test_connector_marks_online_after_successful_status_sync(
         certificate_lifecycle_manager=None,
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
+        state_event_projector=GatewayStateEventProjector(
+            store=store,
+            signing_keys=AgentStateSigningKeyService(MemorySecretStore()),
+            agent_boot_id="boot_test",
+        ),
         command_dispatcher=cast(
             GatewayCommandDispatcher,
             FakeCommandDispatcher(),

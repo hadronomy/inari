@@ -18,6 +18,7 @@ use crate::coordination::{
 use crate::error::AppError;
 use crate::identity::IdentityRuntime;
 use crate::managed_gateway::ManagedGatewayController;
+use crate::managed_gateway::ManagedWorkSecurity;
 use crate::zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus};
 
 pub type ReadinessSummary = Arc<str>;
@@ -69,6 +70,7 @@ impl AppState {
             None,
             None,
             None,
+            None,
         )
     }
 
@@ -79,6 +81,7 @@ impl AppState {
         onboarding: Option<OnboardingService>,
         identity: Option<IdentityRuntime>,
         certificate_issuer: Option<CertificateIssuerHandle>,
+        security: Option<Arc<ManagedWorkSecurity>>,
     ) -> Self {
         let database_readiness = if onboarding.is_some() || identity.is_some() {
             DatabaseReadiness::ready("PostgreSQL connection pool is available.")
@@ -123,6 +126,7 @@ impl AppState {
             zenoh.clone(),
             gateway_repository,
             certificate_issuer,
+            security,
         );
 
         Self {

@@ -10,8 +10,8 @@ use super::entity::value::{
 };
 use super::entity::{agent, command, invitation, publication};
 use super::{
-    GatewayRepository, PersistedAgentStatus, PersistedPublication, require_agent, stored_time,
-    utc_time,
+    CommandContent, GatewayRepository, PersistedAgentStatus, PersistedPublication, require_agent,
+    stored_time, utc_time,
 };
 use crate::protocol::AgentPublication;
 use crate::{GatewayError, GatewayResult};
@@ -29,7 +29,7 @@ impl GatewayRepository {
             .await?
             .is_none()
         {
-            return Ok(());
+            return Err(GatewayError::NotFound(format!("Agent {agent_id} is not enrolled")));
         }
         let transaction = self.database.begin().await?;
         publication::Entity::insert(publication::ActiveModel {
@@ -42,13 +42,27 @@ impl GatewayRepository {
         })
         .on_conflict(
             OnConflict::column(publication::COLUMN.message_id)
-                .update_column(publication::COLUMN.key_expr)
-                .update_column(publication::COLUMN.message_type)
-                .update_column(publication::COLUMN.payload)
-                .update_column(publication::COLUMN.received_at)
+                .do_nothing()
                 .to_owned(),
         )
+        .try_insert()
         .exec(&transaction)
+        .await?;
+        let stored = publication::Entity::find_by_id(message.message_id())
+            .one(&transaction)
+            .await?
+            .ok_or_else(|| GatewayError::CorruptState("publication was not stored".into()))?;
+        if stored.agent_id != agent_id || stored.payload.0 != *message {
+            return Err(GatewayError::Conflict(
+                "publication message ID was reused for different content".into(),
+            ));
+        }
+        super::state_observations::reconcile_state_observation(
+            &transaction,
+            agent_id,
+            message,
+            now,
+        )
         .await?;
         if let Some(snapshot) = message.snapshot()
             && let Some(model) = invitation::Entity::find()
@@ -79,7 +93,14 @@ impl GatewayRepository {
                 AgentPublication::CommandRejected { .. } => Some(CommandState::Rejected),
                 _ => None,
             };
-            if let Some(state) = state {
+            // Managed Work needs signed Agent State before a receipt can stop dispatch.
+            if let Some(state) = state
+                && let Some(dispatch) = command::Entity::find_by_id(command_id)
+                    .filter(command::COLUMN.agent_id.eq(agent_id))
+                    .one(&transaction)
+                    .await?
+                && matches!(dispatch.command.0, CommandContent::Inline(_))
+            {
                 command::Entity::update_many()
                     .col_expr(command::COLUMN.state, Expr::value(state))
                     .col_expr(command::COLUMN.updated_at, Expr::value(stored_time(now)))

@@ -4,6 +4,8 @@ version = "1.20.0-alpha.10"
 description = "Extensible local hardware bridge for POS and local devices"
 requires-python = ">=3.12"
 dependencies = [
+  "inari-print-contracts==1.20.0-alpha.10",
+  "pikepdf==10.12.0",
   "alembic>=1.16.5,<2.0.0",
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
@@ -25,10 +27,15 @@ dependencies = [
   "tomli-w>=1.2.0,<2.0.0",
   "scalar-fastapi>=1.8.2",
   "eclipse-zenoh>=1.9.0,<2.0.0",
+  "pyhpke>=0.6.5,<1.0.0",
+  "fonttools>=4.61,<5",
 ]
 
 [project.optional-dependencies]
 cups = ["pycups>=2.0.4; platform_system != 'Windows'"]
+
+[tool.uv.sources]
+inari-print-contracts = { workspace = true }
 
 [dependency-groups]
 dev = [

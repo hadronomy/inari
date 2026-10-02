@@ -39,6 +39,24 @@ def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
                 "PRAGMA table_info(device_stream_generations)"
             )
         }
+        admission_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(device_work_admissions)"
+            )
+        }
+        inbound_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(gateway_inbound_commands)"
+            )
+        }
+        dispatch_state_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(gateway_managed_dispatch_state)"
+            )
+        }
     assert revision == (expected_revision,)
     assert {
         "intent_id",
@@ -52,6 +70,14 @@ def test_migrator_upgrades_empty_database_to_head(tmp_path: Path) -> None:
     assert "uq_drawer_intents_action" in drawer_indexes
     assert stream_state == (1, 0)
     assert stream_generation_columns == {"scope_digest", "generation"}
+    assert "managed_work_id" in admission_columns
+    assert "dispatch_epoch" in inbound_columns
+    assert dispatch_state_columns == {
+        "id",
+        "dispatch_epoch",
+        "last_sequence",
+        "updated_at",
+    }
 
 
 def test_migrator_stamps_legacy_unversioned_database_and_creates_backup(

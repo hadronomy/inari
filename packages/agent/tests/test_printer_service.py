@@ -80,6 +80,18 @@ class FakePrinterDriver(PrinterDriver):
             job_id=2,
         )
 
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+        dpi: int,
+    ) -> PrintJobResult:
+        del media_type
+        return self.submit_raw_job(printer, payload, document_name=document_name)
+
 
 def printer(*, raw: bool = True) -> PrinterDevice:
     return PrinterDevice(

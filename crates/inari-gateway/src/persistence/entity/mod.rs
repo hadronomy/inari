@@ -1,9 +1,14 @@
 pub mod agent;
+pub mod agent_state_observation;
+pub mod agent_verification_key;
 pub mod audit_event;
 pub mod command;
 pub mod device;
 pub mod invitation;
 pub mod invitation_attempt;
+pub mod managed_payload;
+pub mod managed_work;
+pub mod managed_work_preflight;
 pub mod organization;
 pub mod publication;
 pub mod site;

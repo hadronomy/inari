@@ -1,12 +1,16 @@
 use chrono::Utc;
-use inari_gateway::protocol::{AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord};
+use inari_gateway::protocol::{
+    AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord, ManagedWorkId,
+};
 use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
-use inari_gateway::{AgentEnrollmentRecord, GatewayRepository};
+use inari_gateway::{
+    AgentEnrollmentRecord, GatewayRepository, ManagedWorkAdmission, ManagedWorkTargetRecord,
+    NewManagedWorkPreflight, PersistedManagedWork, PersistedManagedWorkDispatch,
+};
 use sha2::{Digest, Sha256};
 
 use super::models::{
-    AgentPublicationList, CommandHistory, JobList, JobRequest, StoredAgentEnrollment,
-    StoredControllerCommand,
+    AgentPublicationList, JobList, JobRequest, StoredAgentEnrollment, StoredControllerCommand,
 };
 use crate::error::{AppError, AppResult};
 
@@ -72,6 +76,8 @@ impl ManagedGatewayStore {
                     key_id: enrollment.key_id,
                     jwk_thumbprint: enrollment.public_jwk_fingerprint,
                     public_jwk: enrollment.public_jwk,
+                    dispatch_key: enrollment.dispatch_key,
+                    state_signing_jwk: enrollment.state_signing_jwk,
                     certificate_pem: enrollment.certificate_pem,
                     namespace: enrollment.namespace,
                     protocol_version: enrollment.protocol_version,
@@ -142,12 +148,23 @@ impl ManagedGatewayStore {
         &self,
         agent_id: &str,
         from_sequence: u64,
-    ) -> AppResult<CommandHistory> {
+    ) -> AppResult<(inari_gateway::protocol::ProtocolVersion, Vec<StoredControllerCommand>)> {
         let (selected_protocol_version, commands) = self
             .repository()?
             .command_history(agent_id, from_sequence)
             .await?;
-        Ok(CommandHistory { selected_protocol_version, commands })
+        Ok((
+            selected_protocol_version,
+            commands
+                .into_iter()
+                .map(|command| StoredControllerCommand {
+                    agent_id: command.agent_id,
+                    namespace: command.namespace,
+                    command_id: command.command_id,
+                    command: command.command,
+                })
+                .collect(),
+        ))
     }
 
     pub(super) async fn job(&self, job_id: &JobId) -> AppResult<JobRecord> {
@@ -212,6 +229,96 @@ impl ManagedGatewayStore {
                 })
             })
             .map_err(AppError::from)
+    }
+
+    pub(super) async fn admit_managed_work<F>(
+        &self,
+        admission: ManagedWorkAdmission<'_>,
+        build_command: F,
+    ) -> AppResult<(PersistedManagedWork, Option<StoredControllerCommand>)>
+    where
+        F: FnOnce(
+            inari_gateway::ManagedDispatchAllocation<'_>,
+        ) -> inari_gateway::GatewayResult<inari_gateway::NewManagedPayload>,
+    {
+        let PersistedManagedWorkDispatch { managed_work, command } = self
+            .repository()?
+            .admit_managed_work(admission, build_command)
+            .await?;
+        let command = command.map(|command| StoredControllerCommand {
+            agent_id: command.agent_id,
+            namespace: command.namespace,
+            command_id: command.command_id,
+            command: command.command,
+        });
+        Ok((managed_work, command))
+    }
+
+    pub(super) async fn replay_managed_work(
+        &self,
+        managed_work_id: &ManagedWorkId,
+        organization_id: &OrganizationId,
+        idempotency_key: &str,
+        print_intent_id: &str,
+        request_fingerprint: &[u8; 32],
+    ) -> AppResult<Option<(PersistedManagedWork, Option<StoredControllerCommand>)>> {
+        Ok(self
+            .repository()?
+            .replay_managed_work(
+                managed_work_id,
+                organization_id.as_str(),
+                idempotency_key,
+                print_intent_id,
+                request_fingerprint,
+            )
+            .await?
+            .map(|PersistedManagedWorkDispatch { managed_work, command }| {
+                let command = command.map(|command| StoredControllerCommand {
+                    agent_id: command.agent_id,
+                    namespace: command.namespace,
+                    command_id: command.command_id,
+                    command: command.command,
+                });
+                (managed_work, command)
+            }))
+    }
+
+    pub(super) async fn managed_work_target(
+        &self,
+        organization_id: &OrganizationId,
+        site_id: &SiteId,
+        agent_id: &AgentId,
+        device_id: &inari_gateway::protocol::DeviceId,
+    ) -> AppResult<ManagedWorkTargetRecord> {
+        self.repository()?
+            .managed_work_target(
+                organization_id.as_str(),
+                site_id.as_str(),
+                agent_id.as_str(),
+                device_id.as_str(),
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn create_managed_work_preflight(
+        &self,
+        preflight: NewManagedWorkPreflight,
+    ) -> AppResult<()> {
+        self.repository()?
+            .create_managed_work_preflight(preflight)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(super) async fn managed_work(
+        &self,
+        managed_work_id: &ManagedWorkId,
+    ) -> AppResult<PersistedManagedWork> {
+        self.repository()?
+            .managed_work(managed_work_id)
+            .await
+            .map_err(Into::into)
     }
 }
 

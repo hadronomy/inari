@@ -32,6 +32,7 @@ enabled = true
 issuer_url = "https://identity.example.com"
 client_id = "inari-controller"
 client_secret_file = "/var/run/secrets/inari/oidc-client-secret"
+workload_audience = "urn:inari:managed-workload"
 scopes = ["openid", "profile", "email", "urn:zitadel:iam:org:project:roles"]
 role_claim = "urn:zitadel:iam:org:project:roles"
 
@@ -52,13 +53,14 @@ allow_admin_space = false
 enabled = false
 controller_name = "Inari Controller"
 controller_instance_id = "controller-prod-1"
-supported_protocol_versions = ["2026-07-12"]
+supported_protocol_versions = ["2026-09-06"]
 controller_actions = [
   "system:read",
   "devices:read",
   "events:read",
   "jobs:cancel",
   "commands:execute",
+  "managed_work:dispatch",
 ]
 [managed_gateway.onboarding]
 # The operator interface remains available while onboarding is disabled, but
@@ -88,6 +90,29 @@ step_ca_signing_key_file = "/var/run/secrets/inari/step-ca-provisioner-key.pem"
 step_ca_signing_algorithm = "ed_dsa"
 step_ca_token_ttl = "5m"
 requires_mutual_tls_after_issuance = true
+
+[managed_gateway.dispatch]
+# Managed Work dispatch uses a Controller key that is separate from the
+# step-ca provisioner key. Increase the epoch when this key changes.
+enabled = true
+epoch = 1
+signing_key_id = "controller-dispatch-2026-01"
+signing_key_file = "/var/run/secrets/inari/managed-dispatch-key.pem"
+envelope_ttl = "2m"
+
+[managed_gateway.payload_protection]
+# OpenBao Transit wraps one random AES-256-GCM data key for each Managed Payload.
+# The Controller exchanges its mounted Kubernetes identity for a short-lived token.
+enabled = true
+address = "https://openbao.example.com"
+kubernetes_role = "inari-controller"
+kubernetes_auth_mount = "kubernetes"
+transit_mount = "transit"
+transit_key_name = "inari-managed-payload"
+service_account_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+namespace = "inari"
+ca_certificate_file = "/etc/inari/openbao/ca.pem"
+request_timeout = "5s"
 
 [zenoh]
 enabled = true

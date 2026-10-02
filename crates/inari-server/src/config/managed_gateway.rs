@@ -19,6 +19,8 @@ pub struct ManagedGatewayConfig {
     pub onboarding: ManagedGatewayOnboardingConfig,
     pub data_plane: ManagedGatewayDataPlaneConfig,
     pub certificate: ManagedGatewayCertificateConfig,
+    pub dispatch: ManagedGatewayDispatchConfig,
+    pub payload_protection: ManagedGatewayPayloadProtectionConfig,
 }
 
 impl Default for ManagedGatewayConfig {
@@ -34,12 +36,15 @@ impl Default for ManagedGatewayConfig {
                 "events:read",
                 "jobs:cancel",
                 "commands:execute",
+                "managed_work:dispatch",
             ]
             .map(String::from)
             .to_vec(),
             onboarding: ManagedGatewayOnboardingConfig::default(),
             data_plane: ManagedGatewayDataPlaneConfig::default(),
             certificate: ManagedGatewayCertificateConfig::default(),
+            dispatch: ManagedGatewayDispatchConfig::default(),
+            payload_protection: ManagedGatewayPayloadProtectionConfig::default(),
         }
     }
 }
@@ -142,7 +147,238 @@ impl ManagedGatewayConfig {
                 ));
             }
         }
+        if self.dispatch.enabled {
+            if self
+                .dispatch
+                .signing_key_id
+                .as_deref()
+                .is_none_or(str::is_empty)
+                || self.dispatch.signing_key_file.is_none()
+                || self.dispatch.epoch == 0
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch requires a signing_key_id, signing_key_file, and non-zero epoch.",
+                ));
+            }
+            if !self
+                .controller_actions
+                .iter()
+                .any(|action| action == "managed_work:dispatch")
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch requires the managed_work:dispatch Controller action.",
+                ));
+            }
+            if !(Duration::from_secs(10)..=Duration::from_secs(5 * 60))
+                .contains(&self.dispatch.envelope_ttl)
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch.envelope_ttl must be between 10 seconds and 5 minutes.",
+                ));
+            }
+            if !self.payload_protection.enabled {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.dispatch requires managed_gateway.payload_protection.",
+                ));
+            }
+        }
+        if self.payload_protection.enabled {
+            let address = self
+                .payload_protection
+                .address
+                .as_ref()
+                .ok_or_else(|| {
+                    ConfigError::invalid(
+                        "managed_gateway.payload_protection.address is required when payload protection is enabled.",
+                    )
+                })?;
+            if address.scheme() != "https"
+                || address.host_str().is_none()
+                || address.path() != "/"
+                || address.query().is_some()
+                || address.fragment().is_some()
+                || !address.username().is_empty()
+                || address.password().is_some()
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.payload_protection.address must be an HTTPS origin.",
+                ));
+            }
+            for (name, value) in [
+                (
+                    "kubernetes_role",
+                    self.payload_protection
+                        .kubernetes_role
+                        .as_deref(),
+                ),
+                (
+                    "kubernetes_auth_mount",
+                    Some(
+                        self.payload_protection
+                            .kubernetes_auth_mount
+                            .as_str(),
+                    ),
+                ),
+                (
+                    "transit_mount",
+                    Some(
+                        self.payload_protection
+                            .transit_mount
+                            .as_str(),
+                    ),
+                ),
+                (
+                    "transit_key_name",
+                    Some(
+                        self.payload_protection
+                            .transit_key_name
+                            .as_str(),
+                    ),
+                ),
+            ] {
+                if value.is_none_or(|value| !valid_openbao_name(value)) {
+                    return Err(ConfigError::invalid(format!(
+                        "managed_gateway.payload_protection.{name} must contain 1 to 128 ASCII letters, digits, hyphens, or underscores."
+                    )));
+                }
+            }
+            if self
+                .payload_protection
+                .request_timeout
+                .is_zero()
+            {
+                return Err(ConfigError::invalid(
+                    "managed_gateway.payload_protection.request_timeout must be non-zero.",
+                ));
+            }
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::{ManagedGatewayConfig, ManagedGatewayPayloadProtectionConfig};
+
+    fn config() -> ManagedGatewayConfig {
+        let mut config = ManagedGatewayConfig {
+            enabled: true,
+            payload_protection: ManagedGatewayPayloadProtectionConfig {
+                enabled: true,
+                address: Some(
+                    "https://openbao.example/"
+                        .parse()
+                        .unwrap(),
+                ),
+                kubernetes_role: Some("controller".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        config.data_plane.connect_endpoints = vec!["tls/router.example:7447".into()];
+        config
+    }
+
+    #[test]
+    fn payload_protection_requires_an_https_origin() {
+        assert!(config().validate().is_ok());
+        for address in [
+            "http://openbao.example/",
+            "https://user:password@openbao.example/",
+            "https://openbao.example/v1/",
+            "https://openbao.example/?token=value",
+            "https://openbao.example/#fragment",
+        ] {
+            let mut config = config();
+            config.payload_protection.address = Some(address.parse().unwrap());
+            assert!(config.validate().is_err(), "{address} must be rejected");
+        }
+    }
+
+    #[test]
+    fn payload_protection_rejects_path_components_in_mount_names() {
+        for name in ["", "../transit", "transit/key", "%2f", "transit\n"] {
+            let mut config = config();
+            config.payload_protection.transit_mount = name.into();
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn managed_dispatch_requires_payload_protection() {
+        let mut config = config();
+        config.dispatch.enabled = true;
+        config.dispatch.signing_key_id = Some("signing-key".into());
+        config.dispatch.signing_key_file = Some("signing-key.pem".into());
+        assert!(config.validate().is_ok());
+        config.payload_protection.enabled = false;
+        assert!(config.validate().is_err());
+    }
+}
+
+fn valid_openbao_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ManagedGatewayPayloadProtectionConfig {
+    pub enabled: bool,
+    pub address: Option<Url>,
+    pub kubernetes_role: Option<String>,
+    pub kubernetes_auth_mount: String,
+    pub transit_mount: String,
+    pub transit_key_name: String,
+    pub service_account_token_file: PathBuf,
+    pub namespace: Option<String>,
+    pub ca_certificate_file: Option<PathBuf>,
+    #[serde(with = "humantime_serde")]
+    pub request_timeout: Duration,
+}
+
+impl Default for ManagedGatewayPayloadProtectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            address: None,
+            kubernetes_role: None,
+            kubernetes_auth_mount: "kubernetes".into(),
+            transit_mount: "transit".into(),
+            transit_key_name: "inari-managed-payload".into(),
+            service_account_token_file: PathBuf::from(
+                "/var/run/secrets/kubernetes.io/serviceaccount/token",
+            ),
+            namespace: None,
+            ca_certificate_file: None,
+            request_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ManagedGatewayDispatchConfig {
+    pub enabled: bool,
+    pub epoch: u64,
+    pub signing_key_id: Option<String>,
+    pub signing_key_file: Option<PathBuf>,
+    #[serde(with = "humantime_serde")]
+    pub envelope_ttl: Duration,
+}
+
+impl Default for ManagedGatewayDispatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            epoch: 1,
+            signing_key_id: None,
+            signing_key_file: None,
+            envelope_ttl: Duration::from_secs(2 * 60),
+        }
     }
 }
 

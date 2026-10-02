@@ -82,6 +82,7 @@ fn parse_action(value: &str) -> GatewayResult<AuditAction> {
     match value {
         "job.created" => Ok(AuditAction::JobCreated),
         "job.cancellation_requested" => Ok(AuditAction::JobCancellationRequested),
+        "managed_work.submitted" => Ok(AuditAction::ManagedWorkSubmitted),
         "invitation.created" => Ok(AuditAction::InvitationCreated),
         "invitation.revoked" => Ok(AuditAction::InvitationRevoked),
         "agent.enrolled" => Ok(AuditAction::AgentEnrolled),

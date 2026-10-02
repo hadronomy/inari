@@ -143,6 +143,7 @@ gateway_inbound_commands_table = Table(
     Column("command_id", String, primary_key=True),
     Column("message_id", String, nullable=False),
     Column("sequence", Integer),
+    Column("dispatch_epoch", Integer),
     Column("message_type", String, nullable=False),
     Column("state", String, nullable=False),
     Column("payload_json", Text, nullable=False),
@@ -164,6 +165,35 @@ Index(
     unique=True,
     sqlite_where=gateway_inbound_commands_table.c.sequence.is_not(None),
 )
+Index(
+    "uq_gateway_inbound_dispatch_epoch_sequence",
+    gateway_inbound_commands_table.c.dispatch_epoch,
+    gateway_inbound_commands_table.c.sequence,
+    unique=True,
+    sqlite_where=gateway_inbound_commands_table.c.dispatch_epoch.is_not(None),
+)
+Index(
+    "idx_gateway_inbound_managed_work",
+    func.json_extract(
+        gateway_inbound_commands_table.c.payload_json, "$.payload.managed_work_id"
+    ),
+    sqlite_where=gateway_inbound_commands_table.c.message_type
+    == "controller.command.dispatch_device_work",
+)
+
+gateway_managed_dispatch_state_table = Table(
+    "gateway_managed_dispatch_state",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("dispatch_epoch", Integer, nullable=False),
+    Column("last_sequence", Integer, nullable=False),
+    Column("updated_at", String, nullable=False),
+    CheckConstraint("id = 1", name="ck_gateway_managed_dispatch_state_singleton"),
+    CheckConstraint(
+        "dispatch_epoch > 0 AND last_sequence >= 0",
+        name="ck_gateway_managed_dispatch_state_position",
+    ),
+)
 
 gateway_outbox_table = Table(
     "gateway_outbox",
@@ -174,6 +204,7 @@ gateway_outbox_table = Table(
     Column("payload_json", Text, nullable=False),
     Column("correlation_id", String),
     Column("dedupe_key", String),
+    Column("recipient_scope", Text),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
     Column("sent_at", String),
@@ -189,6 +220,17 @@ Index(
     "idx_gateway_outbox_state_created_at",
     gateway_outbox_table.c.state,
     gateway_outbox_table.c.created_at,
+)
+
+gateway_print_job_cursors_table = Table(
+    "gateway_print_job_cursors",
+    metadata,
+    Column("recipient_scope", Text, primary_key=True),
+    Column("last_sequence", Integer, nullable=False),
+    CheckConstraint(
+        "last_sequence BETWEEN 0 AND 9007199254740991",
+        name="ck_gateway_print_job_cursor_sequence",
+    ),
 )
 
 public_print_jobs_table = Table(
@@ -325,6 +367,7 @@ device_work_admissions_table = Table(
     Column("planned_job_id", String, nullable=False, unique=True),
     Column("database", String, nullable=False),
     Column("scope_kind", String, nullable=False),
+    Column("managed_work_id", String),
     Column("organization_id", String, nullable=False),
     Column("site_id", String, nullable=False),
     Column("pos_configuration_id", String),
@@ -357,6 +400,7 @@ device_work_admissions_table = Table(
     Column("operation", String, nullable=False),
     Column("media_type", String, nullable=False),
     Column("normalized_options_digest", LargeBinary, nullable=False),
+    Column("normalized_options", LargeBinary),
     Column("grant_scope_digest", LargeBinary, nullable=False),
     # The exact Client Grant used for admission. These fields let execution
     # recheck the same grant after queueing without storing bearer material.
@@ -444,6 +488,12 @@ Index(
     unique=True,
     sqlite_where=(device_work_admissions_table.c.scope_kind == "device_manager")
     & device_work_admissions_table.c.pos_configuration_id.is_(None),
+)
+Index(
+    "uq_device_work_admissions_managed_work_id",
+    device_work_admissions_table.c.managed_work_id,
+    unique=True,
+    sqlite_where=device_work_admissions_table.c.managed_work_id.is_not(None),
 )
 Index(
     "uq_device_work_admissions_manager_pos_idempotency",

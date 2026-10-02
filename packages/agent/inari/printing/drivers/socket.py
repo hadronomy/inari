@@ -64,6 +64,21 @@ class RawSocketPrinterDriver(PrinterDriver):
             printer=printer, transport=PrinterTransport.RAW, bytes_written=bytes_written
         )
 
+    def submit_document_job(
+        self,
+        printer: PrinterDevice,
+        payload: bytes,
+        *,
+        media_type: str,
+        document_name: str,
+        dpi: int,
+    ) -> PrintJobResult:
+        del payload, media_type, document_name
+        raise PrinterServiceError(
+            "UNSUPPORTED_TRANSPORT",
+            f"Printer {printer.name!r} has no document spooler.",
+        )
+
     def open_cash_drawer(self, printer: PrinterDevice) -> PrintJobResult:
         self._ensure_transport_supported(printer, PrinterTransport.RAW)
         bytes_written = self._send(printer.name, EscPosCommands.DRAWER_PULSE)

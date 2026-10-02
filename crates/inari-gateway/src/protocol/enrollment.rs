@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use jsonwebtoken::jwk::Jwk;
 use serde::{Deserialize, Serialize};
 
-use super::{AgentId, GatewaySnapshot, ProtocolDescriptor, ProtocolVersion};
+use super::{
+    AgentId, DispatchEncryptionKey, GatewaySnapshot, ManagedDispatchEnrollment, ProtocolDescriptor,
+    ProtocolVersion,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -12,6 +15,8 @@ pub struct EnrollmentRequest {
     pub agent_id: AgentId,
     pub key_id: String,
     pub public_jwk: Jwk,
+    pub dispatch_key: DispatchEncryptionKey,
+    pub state_signing_jwk: Jwk,
     #[serde(default)]
     pub certificate_pem: Option<String>,
     pub csr_pem: String,
@@ -26,6 +31,8 @@ pub struct EnrollmentResponse {
     pub data_plane: DataPlane,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub certificate: Option<CertificateProvisioning>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_dispatch: Option<ManagedDispatchEnrollment>,
     pub enrolled_at: DateTime<Utc>,
 }
 

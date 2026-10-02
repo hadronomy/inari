@@ -19,7 +19,8 @@ mod platform;
 pub use self::identity::{IdentityConfig, OidcConfig};
 pub use self::managed_gateway::{
     ManagedGatewayCertificateConfig, ManagedGatewayCertificateMode, ManagedGatewayConfig,
-    ManagedGatewayDataPlaneConfig, ManagedGatewayOnboardingConfig, StepCaSigningAlgorithm,
+    ManagedGatewayDataPlaneConfig, ManagedGatewayDispatchConfig, ManagedGatewayOnboardingConfig,
+    ManagedGatewayPayloadProtectionConfig, StepCaSigningAlgorithm,
 };
 pub use self::platform::{DatabaseConfig, OrganizationConfig};
 

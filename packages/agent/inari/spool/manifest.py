@@ -11,10 +11,18 @@ from sqlalchemy.engine import RowMapping
 from ..core.failures import ProblemCode, ProblemDetails
 from ..device_authority import AuthorityProof
 from ..documents import (
+    AdmissionGrantScope,
     DocumentKind,
     DurableAdmission,
+    LabelDocument,
+    ManagedAdmissionScope,
+    ManagedSubmissionContext,
     PreparationPrintOrigin,
     ReceiptImage,
+    RecordsReportSource,
+    ReportPdf,
+    SubmissionContext,
+    WizardReportSource,
 )
 from ..documents.fingerprint import (
     DeviceWorkFingerprintInput,
@@ -31,31 +39,103 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
     if not isinstance(admission, DurableAdmission):
         raise SpoolAdmissionError(ProblemCode.PAYLOAD_INVALID)
     work = admission.work
+    expected_document = {
+        DocumentKind.RECEIPT_IMAGE: (ReceiptImage, "image/jpeg"),
+        DocumentKind.REPORT_PDF: (ReportPdf, "application/pdf"),
+        DocumentKind.LABEL_DOCUMENT: (
+            LabelDocument,
+            "application/vnd.zebra-zpl",
+        ),
+    }[work.operation]
     if (
-        work.operation is not DocumentKind.RECEIPT_IMAGE
-        or not isinstance(work.document, ReceiptImage)
-        or admission.media_type != "image/jpeg"
+        not isinstance(work.document, expected_document[0])
+        or admission.media_type != expected_document[1]
     ):
         raise SpoolAdmissionError(ProblemCode.DOCUMENT_POLICY_REJECTED)
     if len(admission.payload_fingerprint) != 32 or not work.document.content:
         raise SpoolAdmissionError(ProblemCode.PAYLOAD_INVALID)
     context = work.context
-    origin = context.origin
-    grant = admission.grant_scope
+    authorization = admission.authorization_scope
     proof = admission.authority_proof
-    preparation = isinstance(origin, PreparationPrintOrigin)
-    if (
-        grant.organization_id != context.organization_id
-        or grant.site_id != context.site_id
-        or grant.database != origin.database
-        or grant.pos_configuration_id != origin.pos_configuration_id
-        or grant.paired_client_id != context.paired_client_id
-        or grant.actor_id != context.actor_id
-        or grant.device_id != context.device_id
-        or grant.binding_revision_id != context.binding_revision_id
-        or grant.operation is not work.operation
-        or grant.authorization_digest != context.authorization_digest
+    if isinstance(context, SubmissionContext) and isinstance(
+        authorization, AdmissionGrantScope
     ):
+        origin = context.origin
+        preparation = isinstance(origin, PreparationPrintOrigin)
+        if (
+            authorization.organization_id != context.organization_id
+            or authorization.site_id != context.site_id
+            or authorization.database != origin.database
+            or authorization.pos_configuration_id != origin.pos_configuration_id
+            or authorization.paired_client_id != context.paired_client_id
+            or authorization.actor_id != context.actor_id
+            or authorization.device_id != context.device_id
+            or authorization.binding_revision_id != context.binding_revision_id
+            or authorization.operation is not work.operation
+            or authorization.authorization_digest != context.authorization_digest
+        ):
+            raise SpoolAdmissionError(ProblemCode.PERMISSION_DENIED)
+        scope_kind = "paired_client"
+        managed_work_id = None
+        database = origin.database
+        pos_configuration_id = origin.pos_configuration_id
+        paired_client_id = context.paired_client_id
+        expected_purpose = "pos_preparation" if preparation else "pos_receipt"
+        origin_kind = "preparation" if preparation else "pos"
+        origin_values = _local_origin_values(context)
+        grant_id = authorization.grant_id
+        grant_pairing_id = authorization.pairing_id
+        grant_generation = authorization.generation
+        authorization_values = {
+            "actor_id": authorization.actor_id,
+            "authorization_digest": authorization.authorization_digest,
+            "binding_revision_id": authorization.binding_revision_id,
+            "database": authorization.database,
+            "device_id": authorization.device_id,
+            "operation": authorization.operation.value,
+            "organization_id": authorization.organization_id,
+            "paired_client_id": authorization.paired_client_id,
+            "pos_configuration_id": authorization.pos_configuration_id,
+            "site_id": authorization.site_id,
+        }
+    elif isinstance(context, ManagedSubmissionContext) and isinstance(
+        authorization, ManagedAdmissionScope
+    ):
+        if (
+            authorization.managed_work_id != context.managed_work_id
+            or authorization.organization_id != context.organization_id
+            or authorization.site_id != context.site_id
+            or authorization.database != context.database
+            or authorization.actor_id != context.actor_id
+            or authorization.device_id != context.device_id
+            or authorization.binding_revision_id != context.binding_revision_id
+            or authorization.operation is not work.operation
+            or authorization.authorization_digest != context.authorization_digest
+        ):
+            raise SpoolAdmissionError(ProblemCode.PERMISSION_DENIED)
+        scope_kind = "device_manager"
+        managed_work_id = context.managed_work_id
+        database = context.database
+        pos_configuration_id = None
+        paired_client_id = None
+        expected_purpose = work.operation.value
+        origin_kind = "report"
+        origin_values = _managed_origin_values(context)
+        grant_id = None
+        grant_pairing_id = None
+        grant_generation = None
+        authorization_values = {
+            "actor_id": authorization.actor_id,
+            "authorization_digest": authorization.authorization_digest,
+            "binding_revision_id": authorization.binding_revision_id,
+            "database": authorization.database,
+            "device_id": authorization.device_id,
+            "managed_work_id": authorization.managed_work_id,
+            "operation": authorization.operation.value,
+            "organization_id": authorization.organization_id,
+            "site_id": authorization.site_id,
+        }
+    else:
         raise SpoolAdmissionError(ProblemCode.PERMISSION_DENIED)
     if not isinstance(proof, AuthorityProof):
         raise SpoolAdmissionError(ProblemCode.PERMISSION_DENIED)
@@ -63,7 +143,7 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
     if (
         proof.binding_revision_id != context.binding_revision_id
         or proof.device_id != context.device_id
-        or proof.purpose != ("pos_preparation" if preparation else "pos_receipt")
+        or proof.purpose != expected_purpose
         or proof.operation != work.operation.value
         or proof.media_type != admission.media_type
         or proof.contract_major != context.contract_major
@@ -86,49 +166,19 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
     )
     if expected_fingerprint != admission.payload_fingerprint:
         raise SpoolAdmissionError(ProblemCode.PAYLOAD_INVALID)
-    origin_values = {
-        "content_revision": origin.content_revision,
-        "database": origin.database,
-        "document_kind": origin.document_kind,
-        "offline_order_id": origin.offline_order_id,
-        "organization_id": context.organization_id,
-        "paired_client_id": context.paired_client_id,
-        "pos_configuration_id": origin.pos_configuration_id,
-        "pos_session_id": origin.pos_session_id,
-        "server_order_id": origin.server_order_id,
-        "site_id": context.site_id,
-    }
-    if preparation:
-        origin_values.update(
-            {
-                "preparation_revision": origin.preparation_revision,
-                "segment_index": origin.segment_index,
-                "segment_kind": origin.segment_kind,
-            }
-        )
     origin_json = canonical_json(origin_values)
-    grant_values = {
-        "actor_id": grant.actor_id,
-        "authorization_digest": grant.authorization_digest,
-        "binding_revision_id": grant.binding_revision_id,
-        "database": grant.database,
-        "device_id": grant.device_id,
-        "operation": grant.operation.value,
-        "organization_id": grant.organization_id,
-        "paired_client_id": grant.paired_client_id,
-        "pos_configuration_id": grant.pos_configuration_id,
-        "site_id": grant.site_id,
-    }
     return AdmissionManifest(
-        grant_id=grant.grant_id,
-        grant_pairing_id=grant.pairing_id,
-        grant_generation=grant.generation,
+        scope_kind=scope_kind,
+        managed_work_id=managed_work_id,
+        grant_id=grant_id,
+        grant_pairing_id=grant_pairing_id,
+        grant_generation=grant_generation,
         idempotency_key=work.idempotency_key,
-        database=origin.database,
+        database=database,
         organization_id=context.organization_id,
         site_id=context.site_id,
-        pos_configuration_id=origin.pos_configuration_id,
-        paired_client_id=context.paired_client_id,
+        pos_configuration_id=pos_configuration_id,
+        paired_client_id=paired_client_id,
         actor_id=context.actor_id,
         device_id=context.device_id,
         binding_revision_id=context.binding_revision_id,
@@ -138,9 +188,10 @@ def manifest_from_admission(admission: DurableAdmission) -> AdmissionManifest:
         operation=work.operation.value,
         media_type=admission.media_type,
         normalized_options_digest=bytes.fromhex(normalized_options_digest),
-        grant_scope_digest=hashlib.sha256(rfc8785.dumps(grant_values)).digest(),
+        normalized_options=admission.normalized_options,
+        grant_scope_digest=hashlib.sha256(rfc8785.dumps(authorization_values)).digest(),
         origin_submission_key=context.origin_submission_key,
-        origin_kind="preparation" if preparation else "pos",
+        origin_kind=origin_kind,
         origin_json=origin_json,
         contract_major=context.contract_major,
         copy_ordinal=context.copy_ordinal,
@@ -156,6 +207,8 @@ def manifest_from_row(
     row: DatabaseRow, authority_proof: AuthorityProof
 ) -> AdmissionManifest:
     return AdmissionManifest(
+        scope_kind=row["scope_kind"],
+        managed_work_id=row["managed_work_id"],
         grant_id=row["grant_id"],
         grant_pairing_id=row["grant_pairing_id"],
         grant_generation=row["grant_generation"],
@@ -172,6 +225,7 @@ def manifest_from_row(
         operation=row["operation"],
         media_type=row["media_type"],
         normalized_options_digest=row["normalized_options_digest"],
+        normalized_options=bytes(row["normalized_options"]),
         grant_scope_digest=row["grant_scope_digest"],
         origin_submission_key=row["origin_submission_key"],
         origin_kind=row["origin_kind"],
@@ -210,6 +264,8 @@ def same_origin_submission(row: DatabaseRow, manifest: AdmissionManifest) -> boo
 
 def manifest_comparison(manifest: AdmissionManifest) -> dict[str, object]:
     return {
+        "scope_kind": manifest.scope_kind,
+        "managed_work_id": manifest.managed_work_id,
         "grant_id": manifest.grant_id,
         "grant_pairing_id": manifest.grant_pairing_id,
         "grant_generation": manifest.grant_generation,
@@ -235,6 +291,72 @@ def manifest_comparison(manifest: AdmissionManifest) -> dict[str, object]:
         "paired_client_id": manifest.paired_client_id,
         "pos_configuration_id": manifest.pos_configuration_id,
         "site_id": manifest.site_id,
+    }
+
+
+def _local_origin_values(context: SubmissionContext) -> dict[str, object]:
+    origin = context.origin
+    values: dict[str, object] = {
+        "content_revision": origin.content_revision,
+        "database": origin.database,
+        "document_kind": origin.document_kind,
+        "offline_order_id": origin.offline_order_id,
+        "organization_id": context.organization_id,
+        "paired_client_id": context.paired_client_id,
+        "pos_configuration_id": origin.pos_configuration_id,
+        "pos_session_id": origin.pos_session_id,
+        "server_order_id": origin.server_order_id,
+        "site_id": context.site_id,
+    }
+    if isinstance(origin, PreparationPrintOrigin):
+        values.update(
+            {
+                "preparation_revision": origin.preparation_revision,
+                "segment_index": origin.segment_index,
+                "segment_kind": origin.segment_kind,
+            }
+        )
+    return values
+
+
+def _managed_origin_values(context: ManagedSubmissionContext) -> dict[str, object]:
+    origin = context.origin
+    binding = origin.binding
+    source = origin.source
+    if not isinstance(source, RecordsReportSource | WizardReportSource):
+        raise SpoolAdmissionError(ProblemCode.PAYLOAD_INVALID)
+    source_values = (
+        {
+            "kind": "records",
+            "model": source.model,
+            "ordered_ids": list(source.ordered_ids),
+        }
+        if isinstance(source, RecordsReportSource)
+        else {
+            "kind": "wizard",
+            "model": source.model,
+            "input_digest": source.input_digest,
+        }
+    )
+    return {
+        "binding": {
+            "binding_revision_id": binding.binding_revision_id,
+            "command_profile_id": binding.command_profile_id,
+            "hardware_matrix_digest": binding.hardware_matrix_digest,
+            "layout_profile_id": binding.layout_profile_id,
+            "report_action_id": binding.report_action_id,
+            "report_binding_id": binding.report_binding_id,
+            "report_contract_digest": binding.report_contract_digest,
+            "template_digest": binding.template_digest,
+        },
+        "company_id": context.company_id,
+        "database": context.database,
+        "managed_work_id": context.managed_work_id,
+        "organization_id": context.organization_id,
+        "rendered_document_index": origin.rendered_document_index,
+        "route": origin.route,
+        "site_id": context.site_id,
+        "source": source_values,
     }
 
 

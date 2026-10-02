@@ -8,19 +8,40 @@ use crate::error::{AppError, AppResult};
 use crate::zenoh::ZenohHandle;
 
 mod certificate;
+mod dispatch;
 mod enrollment;
+#[cfg(test)]
+mod enrollment_tests;
 mod fleet;
 mod jobs;
 mod keyspace;
+mod managed_work;
 mod models;
+mod payload;
 mod runtime;
 mod store;
 
 pub use self::certificate::StepCaIssuer;
+pub use self::dispatch::ManagedDispatchSigner;
+pub use self::payload::{ManagedPayloadProtector, OpenBaoTransitKeyWrapper};
 
 pub use self::models::{AgentPublicationList, CommandHistory, JobList, JobReceipt, JobRequest};
 use self::models::{StoredAgentEnrollment, StoredControllerCommand};
 use self::store::ManagedGatewayStore;
+
+pub struct ManagedWorkSecurity {
+    dispatch_signer: ManagedDispatchSigner,
+    payload_protector: ManagedPayloadProtector,
+}
+
+impl ManagedWorkSecurity {
+    pub fn new(
+        dispatch_signer: ManagedDispatchSigner,
+        payload_protector: ManagedPayloadProtector,
+    ) -> Self {
+        Self { dispatch_signer, payload_protector }
+    }
+}
 
 #[derive(Clone)]
 pub struct ManagedGatewayController {
@@ -34,6 +55,7 @@ struct ManagedGatewayControllerInner {
     store: ManagedGatewayStore,
     organization: OrganizationConfig,
     certificate_issuer: Option<CertificateIssuerHandle>,
+    security: Option<Arc<ManagedWorkSecurity>>,
 }
 
 impl ManagedGatewayController {
@@ -45,6 +67,7 @@ impl ManagedGatewayController {
         zenoh: ZenohHandle,
         repository: Option<GatewayRepository>,
         certificate_issuer: Option<CertificateIssuerHandle>,
+        security: Option<Arc<ManagedWorkSecurity>>,
     ) -> Self {
         let store = ManagedGatewayStore::new(repository);
         Self {
@@ -55,6 +78,7 @@ impl ManagedGatewayController {
                 store,
                 organization,
                 certificate_issuer,
+                security,
             }),
         }
     }
@@ -70,5 +94,23 @@ impl ManagedGatewayController {
         } else {
             Err(AppError::service_unavailable("Managed gateway controller is not enabled."))
         }
+    }
+
+    fn dispatch_signer(&self) -> AppResult<&ManagedDispatchSigner> {
+        self.inner
+            .security
+            .as_deref()
+            .map(|security| &security.dispatch_signer)
+            .ok_or_else(|| AppError::service_unavailable("Managed Work dispatch is not enabled."))
+    }
+
+    fn payload_protector(&self) -> AppResult<&ManagedPayloadProtector> {
+        self.inner
+            .security
+            .as_deref()
+            .map(|security| &security.payload_protector)
+            .ok_or_else(|| {
+                AppError::service_unavailable("Managed Payload protection is not enabled.")
+            })
     }
 }

@@ -19,7 +19,7 @@ used as defined by [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 
 ## Version and compatibility
 
-The current draft version is `2026-07-12`.
+The current draft version is `2026-09-06`.
 
 An enrollment request contains the agent’s preferred version and the versions
 it supports. The controller MUST return one of those versions as
@@ -36,6 +36,8 @@ Each agent keeps a persistent logical and cryptographic identity:
 - `agent_id` — stable managed agent identifier;
 - `key_id` — identifier for the signing key;
 - `public_jwk` — Ed25519 public key in OKP JWK form;
+- `dispatch_key` — X25519 public key used to seal Managed Device Work for this
+  Agent;
 - `csr_pem` — PKCS#10 request signed by that key;
 - `certificate_pem` — current managed certificate, when one exists.
 
@@ -94,8 +96,8 @@ Content-Type: application/json
 ```json
 {
   "protocol": {
-    "version": "2026-07-12",
-    "supported_versions": ["2026-07-12"]
+    "version": "2026-09-06",
+    "supported_versions": ["2026-09-06"]
   },
   "agent_id": "agt_123",
   "key_id": "kid_123",
@@ -105,6 +107,19 @@ Content-Type: application/json
     "alg": "EdDSA",
     "use": "sig",
     "kid": "kid_123",
+    "x": "..."
+  },
+  "dispatch_key": {
+    "key_id": "dispatch_0123456789abcdef",
+    "kem": "dhkem_x25519_hkdf_sha256",
+    "public_key_base64url": "..."
+  },
+  "state_signing_jwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "alg": "EdDSA",
+    "use": "sig",
+    "kid": "agent_state_<sha256-of-raw-public-key>",
     "x": "..."
   },
   "certificate_pem": null,
@@ -121,9 +136,28 @@ Content-Type: application/json
 }
 ```
 
-`agent_id`, `key_id`, `public_jwk`, `csr_pem`, and `snapshot` are required. The
-snapshot describes the agent’s observed state and capabilities; it never grants
-permissions to the controller.
+`agent_id`, `key_id`, `public_jwk`, `dispatch_key`, `state_signing_jwk`, `csr_pem`,
+and `snapshot` are required. The snapshot describes the Agent’s observed state and capabilities.
+It never grants permissions to the Controller. The Agent keeps the dispatch
+private key in its protected secret store. The Controller stores only the public
+key.
+
+`state_signing_jwk` registers the separate Ed25519 Agent State signing key.
+Its `kid` is `agent_state_` followed by the lowercase SHA-256 digest of the
+32-byte public key. The Agent stores its private key in protected storage.
+A storage failure or corrupt key stops enrollment. The Agent never replaces
+a corrupt key or sends a private JWK field.
+
+The Controller retains each registered Agent verification key with its owner,
+purpose, public-key thumbprint, and first registration time. Enrollment cannot
+assign a registered key to another Agent or another purpose. Registration of a
+new state key preserves the previous public key. The state key must differ from
+the Agent transport identity.
+
+Protocol `2026-09-06` requires this field. Upgrade the Agent and Controller
+together, apply the Controller migrations, and enroll each Agent with a new
+invitation. Cached enrollment without the current state-key identity is invalid.
+The migration registers existing Agent transport keys before new enrollments.
 
 All API errors use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
 details with `Content-Type: application/problem+json`.
@@ -132,7 +166,7 @@ details with `Content-Type: application/problem+json`.
 
 ```json
 {
-  "selected_protocol_version": "2026-07-12",
+  "selected_protocol_version": "2026-09-06",
   "controller": {
     "name": "Acme Inari Controller",
     "instance_id": "controller-01"
@@ -218,6 +252,7 @@ The controller assigns one namespace per agent. With
 | Command replay query | `iot/v1/agents/agt_123/commands/history` |
 | Command result | `iot/v1/agents/agt_123/results/{command_id}` |
 | Runtime event | `iot/v1/agents/agt_123/events/{message_id}` |
+| Signed Print Job commit query | `iot/v1/agents/agt_123/state/commit` |
 | Agent error | `iot/v1/agents/agt_123/errors/{message_id}` |
 
 The agent holds a liveliness token at `{namespace}/presence/agent`. Presence is
@@ -233,6 +268,41 @@ It does not replace native Zenoh traffic. The typed Inari API exposes controller
 resources such as `GET /api/inari/v1/agents/{agent_id}` separately; an agent
 detail includes the latest durable status observed by the controller.
 
+## Managed Work admission
+
+The Odoo backend uses a separate HTTPS workload API for report and label
+admission:
+
+| Operation | Route |
+| --- | --- |
+| Check the target and get its dispatch key | `POST /api/inari/v1/managed-work/preflight` |
+| Submit sealed work | `POST /api/inari/v1/managed-work` |
+| Read durable state | `GET /api/inari/v1/managed-work/{managed_work_id}` |
+
+These routes accept an OIDC workload access token. The token must use the
+configured workload audience. It must contain `inari_database`,
+`inari_company_id`, `inari_organization_id`, and a `scope` claim. Write routes
+require `managed_work:write`. The read route requires `managed_work:read`. Each
+request must match the database, company, and Organization in the token.
+
+Preflight checks the durable Agent and Device scope, online state, print
+capability, and current dispatch key. A ready result fixes the work deadline,
+idempotency deadline, payload media type, and dispatch key before Odoo renders
+the document.
+
+Submission requires `Idempotency-Key` and sends one PDF or Label Document over
+HTTPS. The Payload Fingerprint covers the Contract Major, operation, Device ID,
+media type, exact document bytes, canonical options, and resolved work deadline.
+The Controller checks this full fingerprint against the preflight deadline.
+Changing the fingerprint during replay is a conflict.
+
+The Controller signs and seals the Agent dispatch with HPKE. It encrypts the
+pending dispatch at rest with a per-payload key protected by OpenBao Transit.
+Protected payload, fingerprints, Binding claim, scope, deadlines, and state commit
+in one transaction. Plaintext document bytes remain in memory during admission.
+The PDF plaintext limit is 10 MiB. The Label Document plaintext limit is 2 MiB.
+Queue admission returns HTTP 429 when the Agent or Organization limit is full.
+
 ## Commands
 
 Every controller command has:
@@ -243,10 +313,24 @@ Every controller command has:
 - an optional `issued_at` time;
 - a discriminating `type`.
 
-Managed document delivery does not use a broad print command. The gateway
-command union does not accept raw, text, HTML, structured receipt, base64,
-printer-name, or transport-selection fields. Encrypted Managed Device Work is
-outside this protocol version until its dispatch contract is implemented.
+Managed document delivery uses `controller.command.dispatch_device_work`.
+The dispatch contains signed Managed Device Work inside an HPKE envelope addressed
+to the Agent dispatch key. It names a stable Device ID and a Report Binding.
+
+Authenticated data binds the Agent, Organization, Site, Managed Work, sequence,
+Dispatch Epoch, Payload Fingerprint, and deadlines. `expires_at` limits the
+dispatch credential. `work_expires_at` fixes the Device Work deadline and uses UTC
+with six fractional digits. The dispatch credential cannot outlive Device Work.
+The Agent fingerprints and admits work with `work_expires_at`; a shorter dispatch
+credential lifetime does not shorten the admitted Print Job deadline.
+
+Upgrade the Controller, Agent, and submitting clients together for this contract.
+Stop new admissions before the upgrade. The Controller migration refuses active
+pending or dispatching work until it finishes or expires. It then deletes retained
+payloads, marks expired pending work `Expired`, and marks expired dispatching work
+`RecoveryUncertain`. Historical fingerprints remain unchanged. Records with the
+old document-only fingerprint cannot reconcile against full Device Work evidence;
+the upgrade does not infer a Print Job outcome or authorize another print.
 
 ### Execute a device command
 
@@ -296,10 +380,100 @@ The agent publishes a discriminated message for each outcome:
 - `agent.runtime.event` — local job or device event;
 - `agent.error` — managed transport or execution failure.
 
-Each publication has a stable `message_id`. The agent persists publications
-before sending them and removes them from its outbox after Zenoh accepts the
-publish. A future protocol version may add controller receipts; this version
-does not claim end-to-end acknowledgement beyond that point.
+Each publication has a stable `message_id`. The Agent persists publications
+before sending them. Signed Print Job observations require a Controller storage
+receipt before the Agent marks them sent. Other publications become sent after
+Zenoh accepts the publish; these do not have end-to-end storage receipts.
+
+For Managed Work, unsigned `agent.command.accepted` and `agent.command.rejected`
+publications are informational. The Controller MUST NOT use them to change
+Managed Work or its dispatch state, or to delete a Managed Payload. Acceptance
+requires a verified Agent State Envelope. A rejection receipt does not prove
+that durable Agent acceptance did not occur.
+
+### Signed Print Job observations
+
+For a managed Print Job, `agent.runtime.event` uses `resource_kind: "print_job"`.
+Its `resource_id` and top-level `job_id` identify the public Print Job.
+The event payload contains `state_envelope`, an attached compact JWS signed with
+the registered Agent State key. Its protected header uses `alg: "EdDSA"`, the
+registered `kid`, and `typ: "application/inari-agent-state+jws"`.
+The signed payload uses RFC 8785 canonical JSON.
+
+Each envelope contains the Agent ID, Agent Boot ID, Dispatch Epoch,
+reconciliation session ID, envelope ID, and observation and issue times.
+The envelope sequence and durable state sequence use the local Print Job journal
+position. The nested `job` contains the public Print Job and Print Intent IDs,
+Managed Work ID, Device ID, Print Origin, state, state version, lifecycle times,
+contract version, and optional error or Output Evidence.
+The Payload Fingerprint uses the `sha256:<lowercase-hex>` form.
+`output_confirmed` requires Device Output Evidence.
+
+The Agent commits each signed publication and its journal cursor in one SQLite
+transaction. A restart preserves the exact pending envelope. Historical events
+retain their original state and state version. The projection can recover an
+admitted Print Job even when its command acceptance reply was not recorded.
+
+Managed replies, signed observations, and projection cursors are bound to the
+original Agent, Organization, and Site. An enrollment change does not send pending
+managed publications to the new recipient. Migration `20260906_0015` adds this
+scope to existing managed replies from their stored dispatch command.
+
+The Agent sends each signed publication as the JSON payload of a Zenoh query to
+`{namespace}/state/commit`. The request is limited to 128 KiB. The Controller
+returns a JSON receipt only after it commits the verified observation:
+
+```json
+{
+  "contract_major": 1,
+  "message_id": "ase_example",
+  "state_envelope_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+```
+
+The digest covers the exact UTF-8 compact JWS. The Agent requires the same query
+key, message ID, digest, and contract version. An absent or invalid receipt leaves
+the publication pending. Retries keep the original message and envelope. A lost
+reply after commit therefore causes an idempotent retry, not another print.
+Migration `20260906_0016` requeues previously sent signed observations once, so
+transport-only delivery does not become an assumed storage receipt.
+
+The managed router permits incoming state commit queries and outgoing receipts.
+It rejects Agent declarations and replies on this key. Deploy this policy with
+the Controller and Agent update. Receipt trust depends on the authenticated
+router connection and these direction-specific permissions.
+
+The Controller verifies the envelope with the registered State key for the
+authenticated Agent. It checks the signed scope, Print Intent, Device, Report
+Binding, Payload Fingerprint, and deadline against Managed Work before recording
+the observation. Transport identity keys cannot sign Agent State.
+
+The Managed Work response includes `print_job_observation` when verified evidence
+exists. This field contains the parsed `observation` and original `state_envelope`
+for independent signature verification. Managed Work remains `accepted` while
+the nested Print Job state describes physical execution.
+
+A valid observation proves Agent acceptance even if the command acceptance reply
+was lost. The Controller records the observation, stops dispatch, and deletes the
+protected payload in one transaction. Lower state versions cannot replace the
+current projection. A changed snapshot at the same state version is a conflict.
+Terminal states remain immutable, including `outcome_unknown`.
+
+Migration `m20260906_223031_store_agent_state_observations` adds the current
+projection and signed observation history. It also requires each Agent Print Job
+ID to identify one Managed Work record. Existing Managed Work has no observation
+until the Controller receives verified Agent evidence.
+
+Enrollment retires the previous verification key for each purpose in the same
+transaction that registers its replacement. Retirement is permanent. A retired
+Agent State key can verify an exact observation already stored before retirement.
+It cannot introduce another observation, including one with a backdated timestamp.
+
+Migration `m20261002_223032_retire_agent_verification_keys` adds the retirement
+timestamp and permits one active key per Agent and purpose. It retires earlier
+keys. If existing Agent State keys share the latest registration time, it retires
+all ambiguous keys. The Agent must enroll with a new key before fresh evidence
+can enter the Controller.
 
 ## Replay and reconnect
 

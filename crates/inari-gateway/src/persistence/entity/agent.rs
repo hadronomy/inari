@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::*;
 
-use super::value::{StoredActions, StoredJwk};
+use super::value::{StoredActions, StoredDispatchEncryptionKey, StoredJwk};
 
 #[sea_orm::model]
 #[derive(Clone, Debug, DeriveEntityModel)]
@@ -15,6 +15,8 @@ pub struct Model {
     pub jwk_thumbprint: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub public_jwk: StoredJwk,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub dispatch_key: Option<StoredDispatchEncryptionKey>,
     #[sea_orm(column_type = "Text", nullable)]
     pub certificate_pem: Option<String>,
     #[sea_orm(unique)]

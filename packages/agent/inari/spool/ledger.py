@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, insert, select, update
 from sqlalchemy.engine import Connection, RowMapping
+from sqlalchemy.sql.elements import ColumnElement
 
 from ..core.failures import ProblemCode
 from ..db.schema import (
@@ -113,7 +114,8 @@ class SpoolAdmissionLedger:
                     id=plan.admission_id,
                     planned_job_id=plan.job_id,
                     database=manifest.database,
-                    scope_kind="paired_client",
+                    scope_kind=manifest.scope_kind,
+                    managed_work_id=manifest.managed_work_id,
                     organization_id=manifest.organization_id,
                     site_id=manifest.site_id,
                     pos_configuration_id=manifest.pos_configuration_id,
@@ -139,11 +141,16 @@ class SpoolAdmissionLedger:
                     operation=manifest.operation,
                     media_type=manifest.media_type,
                     normalized_options_digest=manifest.normalized_options_digest,
+                    normalized_options=manifest.normalized_options,
                     grant_scope_digest=manifest.grant_scope_digest,
                     grant_id=manifest.grant_id,
                     grant_pairing_id=manifest.grant_pairing_id,
                     grant_generation=manifest.grant_generation,
-                    grant_authorization_digest=manifest.authorization_digest,
+                    grant_authorization_digest=(
+                        manifest.authorization_digest
+                        if manifest.grant_id is not None
+                        else None
+                    ),
                     origin_submission_key=manifest.origin_submission_key,
                     origin_kind=manifest.origin_kind,
                     origin_json=manifest.origin_json,
@@ -158,7 +165,11 @@ class SpoolAdmissionLedger:
                 grant_id=manifest.grant_id,
                 grant_pairing_id=manifest.grant_pairing_id,
                 grant_generation=manifest.grant_generation,
-                grant_authorization_digest=manifest.authorization_digest,
+                grant_authorization_digest=(
+                    manifest.authorization_digest
+                    if manifest.grant_id is not None
+                    else None
+                ),
             )
             self.hold_reservation(
                 connection,
@@ -470,17 +481,11 @@ class SpoolAdmissionLedger:
     def find_idempotency(
         self, connection: Connection, manifest: AdmissionManifest
     ) -> RowMapping | None:
+        predicates = _scope_predicates(manifest)
         return (
             connection.execute(
                 select(device_work_admissions_table).where(
-                    device_work_admissions_table.c.scope_kind == "paired_client",
-                    device_work_admissions_table.c.organization_id
-                    == manifest.organization_id,
-                    device_work_admissions_table.c.site_id == manifest.site_id,
-                    device_work_admissions_table.c.pos_configuration_id
-                    == manifest.pos_configuration_id,
-                    device_work_admissions_table.c.paired_client_id
-                    == manifest.paired_client_id,
+                    *predicates,
                     device_work_admissions_table.c.idempotency_key
                     == manifest.idempotency_key,
                 )
@@ -492,17 +497,11 @@ class SpoolAdmissionLedger:
     def find_origin(
         self, connection: Connection, manifest: AdmissionManifest
     ) -> RowMapping | None:
+        predicates = _scope_predicates(manifest)
         return (
             connection.execute(
                 select(device_work_admissions_table).where(
-                    device_work_admissions_table.c.scope_kind == "paired_client",
-                    device_work_admissions_table.c.organization_id
-                    == manifest.organization_id,
-                    device_work_admissions_table.c.site_id == manifest.site_id,
-                    device_work_admissions_table.c.pos_configuration_id
-                    == manifest.pos_configuration_id,
-                    device_work_admissions_table.c.paired_client_id
-                    == manifest.paired_client_id,
+                    *predicates,
                     device_work_admissions_table.c.origin_submission_key
                     == manifest.origin_submission_key,
                 )
@@ -527,6 +526,33 @@ def _accepted_from_row(row: RowMapping, *, replayed: bool) -> AdmissionAccepted:
         state_version=1,
         replayed=replayed,
     )
+
+
+def _scope_predicates(
+    manifest: AdmissionManifest,
+) -> tuple[ColumnElement[bool], ...]:
+    predicates: list[ColumnElement[bool]] = [
+        device_work_admissions_table.c.scope_kind == manifest.scope_kind,
+        device_work_admissions_table.c.organization_id == manifest.organization_id,
+        device_work_admissions_table.c.site_id == manifest.site_id,
+    ]
+    if manifest.scope_kind == "paired_client":
+        predicates.extend(
+            (
+                device_work_admissions_table.c.pos_configuration_id
+                == manifest.pos_configuration_id,
+                device_work_admissions_table.c.paired_client_id
+                == manifest.paired_client_id,
+            )
+        )
+    else:
+        predicates.extend(
+            (
+                device_work_admissions_table.c.pos_configuration_id.is_(None),
+                device_work_admissions_table.c.paired_client_id.is_(None),
+            )
+        )
+    return tuple(predicates)
 
 
 __all__ = ["SpoolAdmissionLedger"]

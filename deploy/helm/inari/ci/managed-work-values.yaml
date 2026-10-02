@@ -1,0 +1,7 @@
+managedGateway:
+  dispatch:
+    enabled: true
+  payloadProtection:
+    caCertificateSecret:
+      name: inari-openbao-ca
+      key: ca.crt
