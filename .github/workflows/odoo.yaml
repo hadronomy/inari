@@ -1,0 +1,73 @@
+name: Odoo addon
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/odoo.yaml
+      - deploy/odoo/**
+      - packages/odoo-inari/**
+      - packages/print-contracts/**
+      - pyproject.toml
+      - uv.lock
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/odoo.yaml
+      - deploy/odoo/**
+      - packages/odoo-inari/**
+      - packages/print-contracts/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odoo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  addon:
+    name: Odoo 19 registry and asset tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.3-alpine@sha256:54451ecb8ab38c24c3ec123f2fd501303a3a1856a5c66e98cecf2460d5e1e9d7
+        env:
+          POSTGRES_USER: inari_test
+          POSTGRES_PASSWORD: inari_test
+          POSTGRES_DB: inari_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U inari_test -d inari_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install artifact tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python uv node
+          cache: true
+
+      - name: Stage addon and locked Python dependencies
+        run: python deploy/odoo/build_artifact.py "${RUNNER_TEMP}/inari-odoo-addons"
+
+      - name: Run native Odoo tests with the production image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            --volume "${RUNNER_TEMP}/inari-odoo-addons/addons:/mnt/extra-addons:ro" \
+            --volume "${RUNNER_TEMP}/inari-odoo-addons/python:/mnt/inari-python:ro" \
+            --volume "$(command -v node):/usr/local/bin/node:ro" \
+            --env PYTHONPATH=/mnt/inari-python \
+            odoo:19.0@sha256:e415f9924395e7521245813135112f264b9222bcde3b1d3c2ee9ff073081540a \
+            odoo --db_host=127.0.0.1 --db_user=inari_test --db_password=inari_test \
+              --database=inari_test --init=inari_devices --without-demo=all \
+              --test-enable --test-tags=/inari_devices --stop-after-init \
+              --http-interface=127.0.0.1 --http-port=8075 --workers=0
