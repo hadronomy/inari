@@ -362,6 +362,51 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
             .unwrap(),
         2
     );
+    let retired_at = now + TimeDelta::seconds(1);
+    sqlx::query("UPDATE agent_verification_keys SET retired_at = $1 WHERE key_id = $2")
+        .bind(retired_at)
+        .bind(key["kid"].as_str().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    repository
+        .record_publication("agt_example", "test", &terminal, retired_at)
+        .await
+        .unwrap();
+    let mut fresh = accepted.clone();
+    fresh.envelope_id = "ase_retired_fresh".into();
+    fresh.observed_at = retired_at + TimeDelta::seconds(1);
+    fresh.issued_at = fresh.observed_at;
+    let error = repository
+        .record_publication(
+            "agt_example",
+            "test",
+            &state_publication(&fresh, &command_id),
+            fresh.observed_at,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("retired Agent State key")
+    );
+    fresh.observed_at = now;
+    fresh.issued_at = now;
+    let error = repository
+        .record_publication(
+            "agt_example",
+            "test",
+            &state_publication(&fresh, &command_id),
+            retired_at,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("retired Agent State key")
+    );
 }
 
 impl ManagedPayloadKeyWrapper for TestKeyWrapper {

@@ -47,6 +47,25 @@ pub(super) async fn reconcile_state_observation(
         .await?
         .ok_or_else(|| invalid("Agent State key is not registered for this Agent"))?;
     let observation = envelope.verify(&key.public_jwk.0)?;
+    if observation.observed_at < utc_time(key.registered_at) {
+        return Err(invalid("Agent State predates registration of its signing key"));
+    }
+    if let Some(retired_at) = key.retired_at {
+        let stored = agent_state_observation::Entity::find_by_id(&observation.envelope_id)
+            .one(transaction)
+            .await?;
+        // Historical keys verify recorded evidence, but cannot add new authority.
+        if observation.observed_at < utc_time(retired_at)
+            && stored.is_some_and(|stored| {
+                stored.agent_id == agent_id
+                    && stored.observation.0.state_envelope == *compact
+                    && stored.observation.0.observation == observation
+            })
+        {
+            return Ok(());
+        }
+        return Err(invalid("retired Agent State key cannot introduce new observations"));
+    }
     let job = &observation.job;
     let expected_type = format!("print_job.{}", job.state.as_str());
     if observation.agent_id.as_str() != agent_id

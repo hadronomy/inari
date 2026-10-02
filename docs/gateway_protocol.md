@@ -464,6 +464,17 @@ projection and signed observation history. It also requires each Agent Print Job
 ID to identify one Managed Work record. Existing Managed Work has no observation
 until the Controller receives verified Agent evidence.
 
+Enrollment retires the previous verification key for each purpose in the same
+transaction that registers its replacement. Retirement is permanent. A retired
+Agent State key can verify an exact observation already stored before retirement.
+It cannot introduce another observation, including one with a backdated timestamp.
+
+Migration `m20261002_223032_retire_agent_verification_keys` adds the retirement
+timestamp and permits one active key per Agent and purpose. It retires earlier
+keys. If existing Agent State keys share the latest registration time, it retires
+all ambiguous keys. The Agent must enroll with a new key before fresh evidence
+can enter the Controller.
+
 ## Replay and reconnect
 
 Live delivery is not sufficient. The agent persists the last applied controller

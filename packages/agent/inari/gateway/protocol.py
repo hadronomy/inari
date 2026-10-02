@@ -11,6 +11,7 @@ from pydantic import (
     Field,
     JsonValue,
     TypeAdapter,
+    StringConstraints,
     field_serializer,
 )
 
@@ -337,7 +338,9 @@ class ManagedDispatchAuthenticatedDataPayload(GatewayProtocolModel):
     site_id: str = Field(min_length=1, max_length=256)
     agent_id: str = Field(min_length=1, max_length=256)
     managed_work_id: str = Field(min_length=1, max_length=256)
-    idempotency_key: str = Field(min_length=1, max_length=128)
+    idempotency_key: Annotated[
+        str, StringConstraints(strip_whitespace=False, min_length=1, max_length=128)
+    ]
     payload_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     dispatch_epoch: int = Field(ge=1)
     sequence: int = Field(ge=1)

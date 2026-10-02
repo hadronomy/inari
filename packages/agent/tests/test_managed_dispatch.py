@@ -119,6 +119,21 @@ def test_dispatch_preserves_microseconds_with_trailing_zeros() -> None:
     assert verified.expires_at == deadline
 
 
+def test_signed_idempotency_key_preserves_opaque_whitespace() -> None:
+    key = " report:manual:17:1 "
+    fixture = _dispatch_fixture(idempotency_key=key)
+    message = ControllerDispatchDeviceWorkMessage.model_validate_json(
+        fixture.message.model_dump_json()
+    )
+    verified = fixture.verifier.verify(
+        message,
+        enrollment=fixture.enrollment,
+        now=datetime(2026, 9, 4, 12, 0, 30, tzinfo=UTC),
+    )
+    assert message.payload.authenticated_data.idempotency_key == key
+    assert verified.idempotency_key == key
+
+
 class _DispatchFixture:
     def __init__(
         self,
@@ -136,6 +151,7 @@ def _dispatch_fixture(
     *,
     work_expires_at: datetime = datetime(2026, 9, 4, 12, 5, tzinfo=UTC),
     document_digest_only: bool = False,
+    idempotency_key: str = "report:manual:17:1",
 ) -> _DispatchFixture:
     dispatch_keys = DispatchEncryptionKeyService(MemorySecretStore())
     recipient = dispatch_keys.get_or_create()
@@ -150,7 +166,7 @@ def _dispatch_fixture(
         "site_id": "site_test",
         "agent_id": "agt_test",
         "managed_work_id": "mw_test",
-        "idempotency_key": "report:manual:17:1",
+        "idempotency_key": idempotency_key,
         "payload_fingerprint": fingerprint_device_work(
             DeviceWorkFingerprintInput(
                 contract_major=1,

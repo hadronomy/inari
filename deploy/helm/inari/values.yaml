@@ -155,7 +155,6 @@ managedGateway:
     - events:read
     - jobs:cancel
     - commands:execute
-    - managed_work:dispatch
   dispatch:
     # Enable after provisioning the signing key and OpenBao Transit policy.
     enabled: false

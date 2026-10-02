@@ -117,6 +117,7 @@ async fn enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse() {
 
     let mut rotated = first.clone();
     rotated.state_signing_jwk = jwk(3, true);
+    rotated.enrolled_at = Utc::now();
     invitation(&pool, "inv_rotation", &rotated).await;
     repository
         .enroll_agent(rotated, "inv_rotation", &snapshot())
@@ -127,6 +128,32 @@ async fn enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse() {
         .await
         .unwrap();
     assert_eq!(count, 3);
+
+    let retired: bool = sqlx::query_scalar(
+        "SELECT retired_at IS NOT NULL FROM agent_verification_keys WHERE key_id = $1",
+    )
+    .bind(
+        first
+            .state_signing_jwk
+            .common
+            .key_id
+            .as_ref()
+            .unwrap(),
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(retired);
+    let active: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_verification_keys WHERE agent_id = 'agt_first' AND purpose = 'agent_state' AND retired_at IS NULL")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(active, 1);
+    invitation(&pool, "inv_reactivate", &first).await;
+    assert!(
+        repository
+            .enroll_agent(first.clone(), "inv_reactivate", &snapshot())
+            .await
+            .is_err()
+    );
 
     for (name, rejected) in [
         ("owner", enrollment("agt_other", jwk(4, false), first.state_signing_jwk.clone())),

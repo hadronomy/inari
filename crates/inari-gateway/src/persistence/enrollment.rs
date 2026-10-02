@@ -1,8 +1,8 @@
 use jsonwebtoken::jwk::{Jwk, ThumbprintHash};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, DatabaseTransaction, EntityTrait, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait, QueryFilter,
+    QuerySelect, TransactionTrait,
 };
 
 use super::entity::value::{
@@ -131,6 +131,31 @@ async fn register_verification_key(
         .clone()
         .ok_or_else(|| GatewayError::InvalidInput("verification keys require a kid".into()))?;
     let thumbprint = public_jwk.thumbprint(ThumbprintHash::SHA256);
+    if let Some(existing) = agent_verification_key::Entity::find_by_id(&key_id)
+        .one(transaction)
+        .await?
+    {
+        if existing.agent_id != agent_id
+            || existing.purpose != purpose
+            || existing.jwk_thumbprint != thumbprint
+            || existing.retired_at.is_some()
+        {
+            return Err(GatewayError::Conflict(
+                "verification key identity is immutable and retirement is permanent".into(),
+            ));
+        }
+    }
+    agent_verification_key::Entity::update_many()
+        .col_expr(
+            agent_verification_key::Column::RetiredAt,
+            sea_orm::sea_query::Expr::value(registered_at),
+        )
+        .filter(agent_verification_key::Column::AgentId.eq(agent_id))
+        .filter(agent_verification_key::Column::Purpose.eq(purpose.clone()))
+        .filter(agent_verification_key::Column::KeyId.ne(&key_id))
+        .filter(agent_verification_key::Column::RetiredAt.is_null())
+        .exec(transaction)
+        .await?;
     agent_verification_key::Entity::insert(agent_verification_key::ActiveModel {
         key_id: Set(key_id.clone()),
         agent_id: Set(agent_id.to_owned()),
@@ -138,6 +163,7 @@ async fn register_verification_key(
         jwk_thumbprint: Set(thumbprint.clone()),
         public_jwk: Set(StoredJwk(public_jwk)),
         registered_at: Set(registered_at),
+        retired_at: Set(None),
     })
     .on_conflict(
         OnConflict::new()

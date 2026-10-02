@@ -15,6 +15,7 @@ pub struct Model {
     #[sea_orm(column_type = "JsonBinary")]
     pub public_jwk: StoredJwk,
     pub registered_at: DateTimeWithTimeZone,
+    pub retired_at: Option<DateTimeWithTimeZone>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

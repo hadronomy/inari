@@ -1,4 +1,8 @@
 {{- include "inari.validateValues" . }}
+{{- $controllerActions := without .Values.managedGateway.controllerActions "managed_work:dispatch" }}
+{{- if .Values.managedGateway.dispatch.enabled }}
+{{- $controllerActions = append $controllerActions "managed_work:dispatch" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -67,7 +71,7 @@ data:
     controller_name = {{ .Values.managedGateway.controllerName | quote }}
     controller_instance_id = {{ .Values.managedGateway.controllerInstanceId | quote }}
     supported_protocol_versions = {{ .Values.managedGateway.supportedProtocolVersions | toJson }}
-    controller_actions = {{ .Values.managedGateway.controllerActions | toJson }}
+    controller_actions = {{ $controllerActions | toJson }}
 
     [managed_gateway.dispatch]
     enabled = {{ .Values.managedGateway.dispatch.enabled }}

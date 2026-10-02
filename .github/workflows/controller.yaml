@@ -1,0 +1,80 @@
+name: Controller
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/controller.yaml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/inari-gateway/**
+      - crates/inari-migration/**
+      - crates/inari-server/**
+      - crates/inari-web/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/controller.yaml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/inari-gateway/**
+      - crates/inari-migration/**
+      - crates/inari-server/**
+      - crates/inari-web/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: controller-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  controller:
+    name: Controller tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust components
+        run: rustup component add clippy rustfmt
+
+      - name: Lint Controller
+        run: >-
+          cargo clippy --locked
+          --package inari-gateway --package inari-migration --package inari-server
+          --all-targets -- -D warnings
+
+      - name: Test Controller
+        run: >-
+          cargo test --locked
+          --package inari-gateway --package inari-migration --package inari-server
+
+      - name: Prepare isolated PostgreSQL databases
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql
+          sudo systemctl start postgresql
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE inari_test LOGIN PASSWORD 'inari_test'"
+          sudo -u postgres createdb --owner=inari_test inari_enrollment_test
+          sudo -u postgres createdb --owner=inari_test inari_state_test
+
+      - name: Test enrollment key history and retirement
+        run: >-
+          cargo test --locked --package inari-server
+          enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse
+          -- --ignored --exact managed_gateway::enrollment_tests::enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse
+        env:
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_enrollment_test
+
+      - name: Test signed Agent State and retirement
+        run: >-
+          cargo test --locked --package inari-server
+          signed_state_recovers_acceptance_and_preserves_terminal_evidence
+          -- --ignored
+        env:
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_state_test
