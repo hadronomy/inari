@@ -107,6 +107,74 @@ jobs:
       - name: Validate Kubernetes distribution
         run: just check-kubernetes
 
+  odoo_addons:
+    name: Publish Inari Odoo addon artifact
+    if: github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install artifact tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: python uv flux2 cosign aqua:anchore/syft
+          cache: true
+
+      - name: Stage addon and shared contracts
+        run: python deploy/odoo/build_artifact.py "${RUNNER_TEMP}/inari-odoo-addons"
+
+      - name: Authenticate to GHCR
+        shell: bash
+        env:
+          REGISTRY_PASSWORD: ${{ github.token }}
+        run: |
+          printf '%s' "${REGISTRY_PASSWORD}" | cosign login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Publish immutable artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="ghcr.io/hadronomy/inari-odoo-addons"
+          flux push artifact "oci://${artifact}:sha-${GITHUB_SHA}" \
+            --path="${RUNNER_TEMP}/inari-odoo-addons" \
+            --ignore-paths='.git/' \
+            --source="https://github.com/${GITHUB_REPOSITORY}" \
+            --revision="main@sha1:${GITHUB_SHA}" \
+            --reproducible \
+            --output=json > "${RUNNER_TEMP}/inari-odoo-artifact.json"
+          digest="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["digest"])' "${RUNNER_TEMP}/inari-odoo-artifact.json")"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          cosign sign --yes "${artifact}@${digest}"
+
+      - name: Build software bill of materials
+        run: syft "dir:${RUNNER_TEMP}/inari-odoo-addons" -o "spdx-json=${RUNNER_TEMP}/inari-odoo-addons.spdx.json"
+
+      - name: Attest artifact provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-name: ghcr.io/hadronomy/inari-odoo-addons
+          subject-digest: ${{ steps.artifact.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest software bill of materials
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-name: ghcr.io/hadronomy/inari-odoo-addons
+          subject-digest: ${{ steps.artifact.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/inari-odoo-addons.spdx.json
+          push-to-registry: true
+
   version:
     name: Open or update Version Packages PR
     if: needs.plan.outputs.publish == 'false'

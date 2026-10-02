@@ -63,6 +63,57 @@ The native Odoo test `TestInariPosAssets` passes each declared POS module throug
 Odoo's asset compiler and checks the result as a browser script. It requires
 Node on the test host.
 
+## Inari addon artifact
+
+`deploy/odoo/build_artifact.py` stages one artifact with
+`addons/inari_devices`, `python/inari_print_contracts`, and the locked
+`rfc8785` dependency. The `requirements.txt` in the artifact records the
+dependency hash. Odoo must list the `addons` directory in `addons_path` and
+the `python` directory in `PYTHONPATH`.
+
+The artifact also includes `compatibility.json`. It declares the addon version,
+Odoo version range, exact Agent and Controller versions, shared-contract version,
+Contract Majors, Device authority contract, and gateway protocol version.
+Verify these fields against the Release Set before deployment. The shared-contract
+wheel uses the pinned `setuptools==83.0.0` build backend.
+
+The `release.yaml` workflow publishes the artifact to
+`ghcr.io/hadronomy/inari-odoo-addons:sha-<commit>` from `main`. It signs the
+digest with keyless Cosign and attaches provenance and an SPDX SBOM. The
+deployment must pin the digest and verify the signer identity
+`https://github.com/hadronomy/inari/.github/workflows/release.yaml@refs/heads/main`
+with issuer `https://token.actions.githubusercontent.com` before unpacking.
+Keep the Inari artifact separate from the MZE artifact.
+
+## Controller image
+
+The `controller-image.yaml` workflow builds the Controller and its matching
+browser assets. Pull requests verify the container runtime and asset files.
+Main publishes `ghcr.io/hadronomy/inari-server:sha-<commit>` with provenance,
+an SBOM, and a keyless Cosign signature.
+
+Pin the image digest in the Controller chart. Verify the signer identity
+`https://github.com/hadronomy/inari/.github/workflows/controller-image.yaml@refs/heads/main`
+with issuer `https://token.actions.githubusercontent.com`. The image contains
+no deployment credentials. PostgreSQL, OIDC, certificates, and Device authority
+still require the production configuration.
+
+## Recovery retention
+
+A recovery task retains its original Agent channel independently of its Binding
+Revision. The channel must remain in the same Odoo company, Organization, Site,
+and POS configuration before the browser restores its Client Grant.
+
+After Output Confirmed or an explicit resolution, the browser deletes the active
+task and releases its Receipt Payload and client reference. A content-free journal
+retains the receipt copy identity for 90 days. A POS reload reads that identity
+before it allocates another Print Intent. Expired journal entries are deleted.
+
+Peripheral stream requests remain unavailable until a production Driver supplies
+Scale Readings or Barcode Events. Receipt submission and recovery use separate
+Interfaces and remain available.
+
+
 ## Physical acceptance
 
 A captured JPEG or simulated admission proves software behavior only. Before
