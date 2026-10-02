@@ -71,6 +71,12 @@ Node on the test host.
 dependency hash. Odoo must list the `addons` directory in `addons_path` and
 the `python` directory in `PYTHONPATH`.
 
+The artifact also includes `compatibility.json`. It declares the addon version,
+Odoo version range, exact Agent and Controller versions, shared-contract version,
+Contract Majors, Device authority contract, and gateway protocol version.
+Verify these fields against the Release Set before deployment. The shared-contract
+wheel uses the pinned `setuptools==83.0.0` build backend.
+
 The `release.yaml` workflow publishes the artifact to
 `ghcr.io/hadronomy/inari-odoo-addons:sha-<commit>` from `main`. It signs the
 digest with keyless Cosign and attaches provenance and an SPDX SBOM. The
@@ -78,6 +84,22 @@ deployment must pin the digest and verify the signer identity
 `https://github.com/hadronomy/inari/.github/workflows/release.yaml@refs/heads/main`
 with issuer `https://token.actions.githubusercontent.com` before unpacking.
 Keep the Inari artifact separate from the MZE artifact.
+
+## Recovery retention
+
+A recovery task retains its original Agent channel independently of its Binding
+Revision. The channel must remain in the same Odoo company, Organization, Site,
+and POS configuration before the browser restores its Client Grant.
+
+After Output Confirmed or an explicit resolution, the browser deletes the active
+task and releases its Receipt Payload and client reference. A content-free journal
+retains the receipt copy identity for 90 days. A POS reload reads that identity
+before it allocates another Print Intent. Expired journal entries are deleted.
+
+Peripheral stream requests remain unavailable until a production Driver supplies
+Scale Readings or Barcode Events. Receipt submission and recovery use separate
+Interfaces and remain available.
+
 
 ## Physical acceptance
 

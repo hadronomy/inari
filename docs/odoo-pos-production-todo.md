@@ -27,6 +27,15 @@ and test result before marking it complete.
 - [x] Run the current Agent wheel on Windows with production storage behavior.
 - [x] Verify HTTPS and CORS for the exact production Odoo origin in isolation.
 - [x] Stage matching Agent and shared-contract wheels with checksums.
+- [ ] Complete PR review and release checks.
+  - [x] Fix the first DPoP nonce challenge and bind renewal to one Client Pairing.
+  - [x] Renew execution leases during preparation.
+  - [x] Keep recovery on its original Agent channel after a Binding Revision changes.
+  - [x] Retire completed recovery tasks and retain receipt identity for 90 days.
+  - [x] Add a scoped lookup for the public Print Job ID.
+  - [x] Add signer retirement and exact Driver Profile selection.
+  - [x] Add the artifact compatibility manifest and pin its build backend.
+  - [ ] Run the Controller PostgreSQL regressions and merge the six PR layers.
 - [ ] Install Controller-signed authority through a supported runtime path.
   - [x] Add and test the atomic `inari authority install` command.
   - [ ] Provision the production Controller trust and signed bundle.
@@ -39,6 +48,10 @@ and test result before marking it complete.
   - [ ] Pin, verify, and mount the artifact in the Odoo runtime.
 - [ ] Prepare the required Controller, Organization, Site, and policy setup.
 - [ ] Configure OpenBao to sign scoped Odoo Pairing Assertions.
+  - [x] Merge infrastructure PR 24 and verify Flux revision `e9ff0530`.
+  - [x] Provision the non-exportable company key, narrow policy, and Kubernetes role.
+  - [x] Install service account `odoo-inari` in namespace `odoo`.
+  - [ ] Verify service account login and mount its token and CA in Odoo.
 - [ ] Prepare the Windows Agent service and its trusted HTTPS certificate.
 - [ ] Publish the tested Release Set and pin its artifacts in `mze-infra`.
 - [ ] Back up Odoo and drain active POS payments before its planned restart.

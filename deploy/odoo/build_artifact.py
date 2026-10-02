@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
+import json
+from importlib.metadata import Distribution
+import runpy
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 
@@ -91,6 +96,31 @@ def stage(output: Path) -> None:
     with record.open("w", newline="") as destination:
         writer = csv.writer(destination)
         writer.writerows(row for row in rows if Path(row[0]).name not in generated)
+
+    addon = ast.literal_eval((addons / "inari_devices/__manifest__.py").read_text())
+    agent = tomllib.loads((ROOT / "packages/agent/pyproject.toml").read_text())[
+        "project"
+    ]
+    controller = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"][
+        "package"
+    ]
+    compatibility = {
+        "schema_version": 1,
+        "addon_version": addon["version"],
+        "odoo_version_range": ">=19.0,<20.0",
+        "agent_version_range": f"={agent['version']}",
+        "controller_version_range": f"={controller['version']}",
+        "print_contracts_version": Distribution.at(dist_info).version,
+        "local_agent_contract_major": 1,
+        "managed_workload_contract_major": 1,
+        "device_authority_contract": "inari.device-authority.v1",
+        "gateway_protocol_version": runpy.run_path(
+            str(ROOT / "packages/agent/inari/core/version.py")
+        )["GATEWAY_PROTOCOL_VERSION"],
+    }
+    (output / "compatibility.json").write_text(
+        json.dumps(compatibility, indent=2, sort_keys=True) + "\n"
+    )
 
 
 def main() -> None:
