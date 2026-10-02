@@ -543,7 +543,7 @@ async def submit_device_work(
 @jobs_router.get(
     "/v1/jobs/{job_id}",
     response_model=PublicPrintJobResponse,
-    responses=problem_responses(400, 401, 403, 404, 500, 503),
+    responses=problem_responses(400, 401, 403, 404, 422, 500, 503),
 )
 async def get_public_print_job(
     job_id: str,
