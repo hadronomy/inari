@@ -88,6 +88,65 @@ def create_app(
                         permission=Permission.JOBS_READ,
                         name="Print Job lookup",
                     ),
+                    ("POST", "/v1/drawer-intents"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.DRAWER,
+                        name="cash drawer intent submission",
+                    ),
+                    ("POST", "/v1/drawer-intents/query"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.JOBS_READ,
+                        name="cash drawer intent reconciliation",
+                    ),
+                    ("POST", "/v1/events/lease"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Transport Leader Lease acquisition",
+                    ),
+                    (
+                        "POST",
+                        "/v1/events/lease/renew",
+                    ): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Transport Leader Lease renewal",
+                    ),
+                    ("DELETE", "/v1/events/lease"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Transport Leader Lease release",
+                    ),
+                    ("POST", "/v1/events/scale-lease"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Scale Lease acquisition",
+                    ),
+                    (
+                        "POST",
+                        "/v1/events/scale-lease/renew",
+                    ): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Scale Lease renewal",
+                    ),
+                    (
+                        "DELETE",
+                        "/v1/events/scale-lease",
+                    ): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Scale Lease release",
+                    ),
+                    ("POST", "/v1/events/ack"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="Barcode Event acknowledgement",
+                    ),
+                    ("GET", "/v1/events"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.EVENTS_READ,
+                        name="signed Device Stream",
+                    ),
                 }
             ),
             authorizer=app_container.device_work_authorizer,
@@ -103,7 +162,15 @@ def create_app(
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["DPoP-Nonce", "Date", "X-Correlation-ID"],
+        expose_headers=[
+            "DPoP-Nonce",
+            "Date",
+            "X-Correlation-ID",
+            "X-Inari-Event-Lease",
+            "X-Inari-Event-Subscription",
+            "X-Inari-Event-Generation",
+            "X-Inari-Scale-Lease",
+        ],
     )
     app.include_router(router)
     install_problem_handlers(app)

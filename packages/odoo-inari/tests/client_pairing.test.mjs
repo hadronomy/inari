@@ -54,6 +54,36 @@ async function verifyProof(proof) {
 }
 
 describe("Odoo browser Client Pairing", () => {
+    test("uses the canonical active Device permissions as part of its scope", () => {
+        const drawerBinding = {
+            ...binding(),
+            requested_permissions: ["device_work:drawer", "jobs:read"],
+        };
+        const options = {
+            posSessionId: 9,
+            store: new MemoryPairingStore(),
+            fetchApi: async () => assert.fail("construction must not contact the Agent"),
+            browserOrigin: "https://odoo.example",
+            rpc: async () => assert.fail("construction must not contact Odoo"),
+        };
+
+        const receipt = new ClientPairingManager({ ...options, binding: binding() });
+        const drawer = new ClientPairingManager({ ...options, binding: drawerBinding });
+
+        assert.notEqual(receipt.scopeKey, drawer.scopeKey);
+        assert.throws(
+            () =>
+                new ClientPairingManager({
+                    ...options,
+                    binding: {
+                        ...drawerBinding,
+                        requested_permissions: ["jobs:read", "device_work:drawer"],
+                    },
+                }),
+            /invalid pairing permissions/,
+        );
+    });
+
     test("pairs with a non-exportable key and restores the Client Grant", async () => {
         const attempts = new Map();
         const observed = [];

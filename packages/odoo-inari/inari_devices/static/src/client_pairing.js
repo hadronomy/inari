@@ -3,7 +3,14 @@
 const DATABASE_NAME = "inari-client-trust";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "pairings";
-const PAIRING_PERMISSIONS = Object.freeze(["device_work:receipt_image", "jobs:read"]);
+const PAIRING_PERMISSION_ORDER = Object.freeze([
+    "device_work:receipt_image",
+    "device_work:drawer",
+    "device_read:scale",
+    "device_read:scanner",
+    "events:read",
+    "jobs:read",
+]);
 const TOKEN_RENEWAL_MARGIN_MS = 60_000;
 const INITIAL_NONCE_BYTES = 24;
 
@@ -97,39 +104,44 @@ function requiredBinding(binding, browserOrigin) {
         "audience",
     ];
     if (!binding || names.some((name) => typeof binding[name] !== "string" || !binding[name])) {
-        throw new TypeError("Client Pairing requires one complete POS receipt binding");
+        throw new TypeError("Client Pairing requires one complete POS Device binding");
     }
     const normalizedOrigin = exactHttpsOrigin(browserOrigin, "Browser origin");
     const bindingOrigin = exactHttpsOrigin(binding.browser_origin, "Binding browser origin");
     if (normalizedOrigin !== bindingOrigin) {
-        throw new TypeError("The browser origin does not match the POS receipt binding");
+        throw new TypeError("The browser origin does not match the POS Device binding");
     }
+    const requestedPermissions = binding.requested_permissions;
+    const canonicalPermissions = PAIRING_PERMISSION_ORDER.filter((permission) =>
+        requestedPermissions?.includes(permission),
+    );
     if (
-        !Array.isArray(binding.requested_permissions) ||
-        binding.requested_permissions.length !== PAIRING_PERMISSIONS.length ||
-        binding.requested_permissions.some(
-            (permission, index) => permission !== PAIRING_PERMISSIONS[index],
-        )
+        !Array.isArray(requestedPermissions) ||
+        requestedPermissions.length < 1 ||
+        new Set(requestedPermissions).size !== requestedPermissions.length ||
+        requestedPermissions.some((permission) => !PAIRING_PERMISSION_ORDER.includes(permission)) ||
+        requestedPermissions.some((permission, index) => permission !== canonicalPermissions[index])
     ) {
-        throw new TypeError("The POS receipt binding has invalid pairing permissions");
+        throw new TypeError("The POS Device binding has invalid pairing permissions");
     }
     return Object.freeze({
         ...binding,
         browser_origin: bindingOrigin,
         agent_endpoint: exactHttpsOrigin(binding.agent_endpoint, "Agent Endpoint"),
-        requested_permissions: Object.freeze([...binding.requested_permissions]),
+        requested_permissions: Object.freeze([...requestedPermissions]),
     });
 }
 
 function pairingScopeKey(binding) {
     return [
-        "v1",
+        "v2",
         binding.browser_origin,
         binding.agent_endpoint,
         binding.database,
         binding.company_id,
         binding.pos_configuration_id,
         binding.agent_id,
+        ...binding.requested_permissions,
     ].join("|");
 }
 

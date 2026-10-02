@@ -173,6 +173,12 @@ dismissal. Native printers keep Odoo's native retry dialog. An authoritative
 Inari printer uses only the global Inari recovery dialog, including in a mixed
 native and Inari printer setup.
 
+The cash-drawer adapter writes one content-free Drawer Intent to IndexedDB
+before it contacts the Agent. The record includes only stable scope and action
+identities. A storage failure blocks the pulse. A safe pre-I/O failure keeps
+the same identity for an explicit Retry. An uncertain result blocks a new
+pulse and tells the operator to request manager review.
+
 Pending work expires at the deadline that the Controller assigned at Controller
 Admission. Agent acceptance links the Managed Work record to the authoritative
 Print Job.
@@ -1001,7 +1007,10 @@ The `range_state` value is `valid`, `underload`, or `overload`. The resolution
 uses the same decimal exponent as the value.
 
 For example, `12345` with exponent `-3` and unit `kg` means `12.345 kg`.
-The contract contains no binary floating-point weight.
+The signed wire contract represents `value_mantissa` and
+`resolution_mantissa` as canonical decimal strings. The values stay within the
+signed 64-bit range. The contract contains no binary floating-point weight and
+does not lose precision in a JavaScript browser.
 
 The Agent supplies gross Scale Readings. The Odoo POS keeps its current tare
 behavior and stores the selected gross reading as tare.
@@ -1311,6 +1320,11 @@ The Transport Leader opens one fetch-based SSE stream with DPoP. Each stream
 message carries the fencing generation. The Agent rejects a stale holder and
 sends a final signed `lease_lost` reason before teardown when transport permits.
 
+The Odoo browser transport treats IndexedDB and BroadcastChannel as advisory.
+It still asks the Agent for the authoritative Transport Leader Lease when
+either browser mechanism is unavailable. A BroadcastChannel hint contains only
+the contract version, hint kind, and a random nonce.
+
 The stream sends heartbeats and carries no access token in its URL.
 
 The Agent sends a heartbeat every 15 seconds. The Transport Leader reconnects
@@ -1321,6 +1335,48 @@ After access-token renewal, the Transport Leader reconnects with the new token.
 
 The first event is `ready`. It contains the stream identity, current sequence,
 and an immutable reconciliation high-water mark.
+
+The browser verifies the lease key against the paired Agent identity. It then
+verifies every compact JWS before it sends data to a Device Adapter. It
+completes the `ready` reconciliation barrier before it reads later events. It
+acknowledges a Barcode Event only after the scanner handler accepts it.
+
+Scale activity changes rebuild the selected Event Lease. This keeps a scanner
+stream active while the scale screen is closed and adds the Scale Lease only
+while the scale screen is open.
+
+The Local Agent Interface uses these fixed DPoP-protected endpoints:
+
+- `POST /v1/events/lease` acquires the Transport Leader Lease.
+- `POST /v1/events/lease/renew` renews the Transport Leader Lease.
+- `DELETE /v1/events/lease` releases the Transport Leader Lease.
+- `POST /v1/events/scale-lease` acquires the separate three-second Scale Lease.
+- `POST /v1/events/scale-lease/renew` renews the Scale Lease.
+- `DELETE /v1/events/scale-lease` releases the Scale Lease.
+- `GET /v1/events` opens the fetch-based SSE stream.
+- `POST /v1/events/ack` acknowledges accepted Barcode Events.
+
+The SSE request puts the lease, Subscription Identity, and fencing generation
+in bounded request headers. It does not put credentials, scope, or Device
+identities in the URL. The Agent derives business scope from the Client Grant.
+
+Each signed message uses an Ed25519 compact JWS with the protected type
+`inari-agent-event+jws`. The signature covers the canonical message, Agent Boot
+Identity, Subscription Identity, Client Grant, Binding Revision, scope digest,
+and fencing generation. The first `ready` message also returns the Agent public
+JWK. The browser verifies that key against the paired Agent identity before it
+accepts the message.
+
+The stream uses one sequence for each Subscription Identity and one durable
+Agent sequence for its reconciliation barrier. Scale Readings are ephemeral.
+The Agent keeps at most 128 unacknowledged Barcode Events in memory for the
+active lease. It never writes barcode values to SQLite, logs, metrics, runtime
+events, or the gateway. Buffer exhaustion sends signed
+`replay_unavailable` evidence and closes the stream. It never drops an older
+Barcode Event to admit a newer value.
+
+The older unscoped `/events` WebSocket is not part of the Local Agent
+Interface. The Agent does not expose it.
 
 A successor reconciles through that high-water mark before it subscribes to
 later events. A sequence gap starts the same barrier flow. This contract
@@ -2465,20 +2521,32 @@ Print Intent constraint serializes updates from multiple tabs.
 All Inari POS Print Origins, including the bill action, use this accepted
 counter rule. Native Device Paths keep Odoo's existing counter behavior.
 
-A narrow `InariHardwareAdapter` serves only bound Inari drawer, scale, and
-scanner functions. Both Device Adapters call the deep frontend Module.
+A narrow `InariHardwareAdapter` serves only the bound cash drawer. A separate
+`InariDeviceInputAdapter` owns Certified Scale acceptance and Barcode Event
+de-duplication. Both Device Adapters call the deep frontend Module.
 
 The scale seam wraps the Odoo scale service and screen. It preserves Odoo tare
 behavior and accepts only signed decimal Scale Readings with a current
 Certification Record.
 
+The input Adapter keeps scale mantissas as `BigInt` values. It requires two
+fresh stable readings within one resolution, rejects invalid range and unit
+states, and converts the accepted decimal only at the Odoo scale-service seam.
+Closing the scale screen releases the Scale Lease. Transport or lease loss
+invalidates the accepted reading at once.
+
 The scanner seam owns one Agent subscription and sends checked Barcode Events
 through the native Odoo barcode-reader seam. Keyboard scanning remains a
 Native Device Path.
 
-The drawer seam replaces only the bound `open_cashbox` call. Its caller awaits
-one separate Drawer Intent. A Retry reconciles the prior Drawer Intent before
-it submits again.
+Scale and scanner Bindings share one browser stream only when their complete
+paired Agent scope matches. Bindings for separate Agents use separate streams.
+
+The drawer seam replaces only bound `HardwareProxy.openCashbox()` calls. It
+also makes `PosStore.openCashbox()` return the hardware promise. Unbound calls
+use the native Odoo path. A bound call awaits one separate Drawer Intent and
+never falls back to a native pulse. Odoo records a manual employee action only
+after the Agent reports `succeeded`.
 
 Manual Weight has a separate permission and a content-free audit record. The
 Device Adapter delegates all unbound behavior to the existing Odoo
@@ -2915,14 +2983,21 @@ Floyd-Steinberg dithering.
 Every Device Test includes barcode and QR-code readability for the selected
 dither mode.
 
-Cash-drawer actions are separate idempotent Device Work on the printer FIFO
-queue. Receipt printing never adds an implicit drawer pulse.
+Cash-drawer actions use a separate idempotent Drawer Intent. Receipt printing
+never adds an implicit drawer pulse. The active Binding Revision authorizes
+the `open_cash_drawer` operation.
 
-A Drawer Intent identity contains a format version, Odoo database, POS
-session, business context, action sequence, and `device_id`.
+A Drawer Intent request contains `contract_major`, `drawer_intent_id`,
+`binding_revision_id`, `device_id`, `pos_session_id`, `action_sequence`, and
+`reason`. The reason is `payment` or `manual_open`. The Agent derives the Odoo
+database, Organization, Site, POS configuration, Paired Client, and actor from
+the accepted Client Grant.
 
-A Retry keeps the Drawer Intent. A deliberate repeated opening creates a new
-Drawer Intent.
+The Agent stores each Drawer Intent for 90 days before Device I/O. It commits
+an I/O marker before the pulse. An exact replay never creates a second pulse.
+A pre-I/O failure can Retry the same Drawer Intent. A timeout or exception
+after the marker becomes `outcome_unknown` and cannot Retry automatically. A
+deliberate repeated opening creates a new Drawer Intent.
 
 The implementation removes the existing `PrintJob.open_drawer` composite
 option. It does not keep a compatibility path for combined receipt and drawer
@@ -2951,6 +3026,8 @@ The Local Agent Interface contains these versioned endpoints:
 - `POST /v1/device-work`
 - `GET /v1/jobs/{job_id}`
 - `POST /v1/jobs/query`
+- `POST /v1/drawer-intents`
+- `POST /v1/drawer-intents/query`
 - `GET /v1/events`.
 
 `POST /v1/jobs/query` accepts 1 to 100 Print Intent IDs. The Agent derives the
@@ -2960,8 +3037,18 @@ Print Intent IDs, and a scope-specific high-water mark. An out-of-scope Print
 Intent is reported as missing. The request and response contain no Device Work,
 Receipt Payload, or raw Driver output.
 
-The POS browser pairing requests exactly `device_work:receipt_image` and
-`jobs:read`. Capability selection still uses the `receipt_image` operation.
+`POST /v1/drawer-intents` requires `device_work:drawer`. The
+`Idempotency-Key` header must equal `drawer_intent_id`.
+`POST /v1/drawer-intents/query` requires `jobs:read` and accepts 1 to 100
+Drawer Intent IDs. Both endpoints derive their scope from the Client Grant.
+The query returns records in request order and reports out-of-scope identities
+as missing. Public responses contain no tenant or actor data.
+
+The POS browser requests the exact canonical union of permissions for its
+active bindings on one Agent. Receipt and preparation bindings add
+`device_work:receipt_image` and `jobs:read`. A drawer binding adds
+`device_work:drawer` and `jobs:read`. Scale and scanner bindings add their
+device-read permission and `events:read`.
 
 Client Pairing uses a separate privileged Interface under `/pairing/v1/`.
 Device Work credentials cannot call that Interface.

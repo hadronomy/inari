@@ -13,6 +13,14 @@ from ..device_authority import (
     SqliteDeviceAuthorityReader,
 )
 from ..documents import DocumentAdmission, DocumentAdmissionService
+from ..drawer_intents import DrawerIntentService
+from ..device_streams import (
+    AgentEventSigner,
+    DeviceStreamService,
+    SqliteDeviceStreamLedger,
+)
+from ..drawer_intents.adapter import PrinterCashDrawerPort
+from ..drawer_intents.sqlite import SqliteDrawerIntentLedger
 from ..gateway.repositories import GatewayRepository
 from ..local_api.device_work import DeviceWorkSubmission
 from ..local_api.print_job_queries import PrintJobQueries
@@ -24,6 +32,7 @@ from ..physical_execution import (
     SqliteExecutionLedger,
 )
 from ..printing.renderers import EscPosImageReceiptRenderer
+from ..printing.service import PrinterService
 from ..print_jobs.sqlite import SqlitePrintJobReader
 from ..runtime.devices.discovery import DiscoveryCoordinator
 from ..runtime.events import EventHub
@@ -40,6 +49,7 @@ from ..runtime.jobs.service import JobService
 from ..runtime.store import RuntimeStore
 from ..runtime.supervisor import RuntimeSupervisor
 from ..security.secrets import ProtectedSecretStore
+from ..security.identity import AgentIdentityService
 from ..spool import (
     ArtifactFileStore,
     DurableSpoolAdmissionStore,
@@ -65,14 +75,20 @@ class RuntimeProvider(Provider):
         return SqliteDeviceAuthorityReader(store)
 
     @provide
-    def admission_authorizer(
+    def device_capability_authority(
         self, reader: SqliteDeviceAuthorityReader
-    ) -> AdmissionAuthorizer:
+    ) -> DeviceCapabilityAuthority:
         return DeviceCapabilityAuthority(
             projections=reader,
             observations=reader,
             current_agent_version=version("inari"),
         )
+
+    @provide
+    def admission_authorizer(
+        self, authority: DeviceCapabilityAuthority
+    ) -> AdmissionAuthorizer:
+        return authority
 
     @provide
     def spool_files(self, settings: AgentSettings) -> ArtifactFileStore:
@@ -135,6 +151,55 @@ class RuntimeProvider(Provider):
     @provide
     def print_job_queries(self, reader: SqlitePrintJobReader) -> PrintJobQueries:
         return PrintJobQueries(reader=reader)
+
+    @provide
+    def drawer_intent_ledger(self, store: RuntimeStore) -> SqliteDrawerIntentLedger:
+        return SqliteDrawerIntentLedger(store)
+
+    @provide
+    def cash_drawer_port(
+        self,
+        device_catalog: DeviceCatalog,
+        printer_service: PrinterService,
+    ) -> PrinterCashDrawerPort:
+        return PrinterCashDrawerPort(
+            catalog=device_catalog,
+            printer_service=printer_service,
+        )
+
+    @provide
+    def drawer_intent_service(
+        self,
+        ledger: SqliteDrawerIntentLedger,
+        authority: DeviceCapabilityAuthority,
+        drawer: PrinterCashDrawerPort,
+    ) -> DrawerIntentService:
+        return DrawerIntentService(ledger=ledger, authority=authority, drawer=drawer)
+
+    @provide
+    def device_stream_ledger(self, store: RuntimeStore) -> SqliteDeviceStreamLedger:
+        return SqliteDeviceStreamLedger(store)
+
+    @provide
+    def agent_event_signer(
+        self, identity_service: AgentIdentityService
+    ) -> AgentEventSigner:
+        return AgentEventSigner(identity_service)
+
+    @provide
+    def device_stream_service(
+        self,
+        ledger: SqliteDeviceStreamLedger,
+        authority: DeviceCapabilityAuthority,
+        signer: AgentEventSigner,
+    ) -> DeviceStreamService:
+        return DeviceStreamService(
+            ledger=ledger,
+            authority=authority,
+            signer=signer,
+            # No production Driver currently produces Scale Readings or Barcode Events.
+            input_kinds=frozenset(),
+        )
 
     @provide
     def execution_owner(self) -> ExecutionOwner:

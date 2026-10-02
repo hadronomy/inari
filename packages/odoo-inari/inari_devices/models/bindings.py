@@ -18,7 +18,7 @@ PURPOSES = {
 PURPOSE_OPERATIONS = {
     "pos_receipt": "receipt_image",
     "pos_preparation": "receipt_image",
-    "pos_cash_drawer": "open_cashbox",
+    "pos_cash_drawer": "open_cash_drawer",
     "pos_scale": "scale_reading",
     "pos_scanner": "barcode_event",
     "report_pdf": "report_pdf",
@@ -237,6 +237,8 @@ class InariDeviceBinding(models.Model):
         self.write(
             {"active_revision_id": revision.id, "active": True, "state": "active"}
         )
+        if self.purpose == "pos_scale":
+            self.pos_config_id.sudo().write({"iface_electronic_scale": True})
         return revision
 
     def action_deactivate(self):

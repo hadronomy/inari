@@ -57,6 +57,13 @@ class AgentIdentityService:
         csr = builder.sign(private_key, algorithm=None)
         return csr.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
+    def sign(self, message: bytes) -> bytes:
+        """Sign one protocol message with the protected Agent Identity."""
+
+        if not isinstance(message, bytes):
+            raise TypeError("message must be bytes")
+        return self._load_or_create_private_key().sign(message)
+
     @staticmethod
     def default_uri_san(agent_id: str) -> str:
         return f"urn:inari:{quote(agent_id, safe='')}"
