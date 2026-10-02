@@ -4,7 +4,9 @@ import { describe, test } from "node:test";
 import { InariAgentClient, canonicalJson } from "../inari_devices/static/src/agent_client.js";
 import {
     createSubmissionContext,
+    createReceiptPlan,
     envelopeFor,
+    materializeSubmissionContext,
 } from "../inari_devices/static/src/submission_context.js";
 
 function submissionContext() {
@@ -27,6 +29,29 @@ function submissionContext() {
 }
 
 describe("Odoo Inari receipt core", () => {
+    test("render changes cannot allocate another origin for the same receipt copy", async () => {
+        const request = {
+            binding: { binding_revision_id: "binding-1", device_id: "printer-1" },
+            order: { uuid: "order-1", nb_print: 0 },
+            posSessionId: "session-1",
+        };
+        const first = await materializeSubmissionContext(
+            createReceiptPlan({ ...request, randomUUID: () => "first" }),
+            new Blob(["first render"], { type: "image/jpeg" }),
+        );
+        const second = await materializeSubmissionContext(
+            createReceiptPlan({ ...request, randomUUID: () => "second" }),
+            new Blob(["changed render"], { type: "image/jpeg" }),
+        );
+        assert.equal(first.origin_submission_key, second.origin_submission_key);
+        assert.notEqual(first.origin.content_revision, second.origin.content_revision);
+        const anotherCopy = await materializeSubmissionContext(
+            createReceiptPlan({ ...request, order: { ...request.order, nb_print: 1 } }),
+            new Blob(["changed render"], { type: "image/jpeg" }),
+        );
+        assert.notEqual(first.origin_submission_key, anotherCopy.origin_submission_key);
+    });
+
     test("uses the exact Agent envelope", () => {
         const context = submissionContext();
         assert.deepEqual(Object.keys(context).toSorted(), [

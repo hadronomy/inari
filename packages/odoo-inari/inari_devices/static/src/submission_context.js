@@ -149,10 +149,13 @@ export async function materializeSubmissionContext(plan, jpeg, { subtle = crypto
         contract_major: 1,
         print_intent_id: plan.print_intent_id,
         origin_submission_key: [
+            plan.pos_session_id,
             plan.offline_order_id,
             plan.document_kind,
             plan.binding_revision_id,
-            contentRevision,
+            ...(plan.origin_kind === "preparation"
+                ? [plan.preparation_revision, plan.segment_index, plan.segment_kind]
+                : []),
             plan.copy_ordinal,
         ].join(":"),
         origin: {

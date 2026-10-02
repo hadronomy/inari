@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pyhpke import AEADId, KDFId, KEMId, CipherSuite
 
 from inari.core.exceptions import AgentError
-from inari.documents.fingerprint import (
+from inari_print_contracts.fingerprint import (
     DeviceWorkFingerprintInput,
     fingerprint_device_work,
 )

@@ -23,7 +23,7 @@ from inari.documents import (
     ReportPrintOrigin,
     LabelDocument,
 )
-from inari.documents.fingerprint import (
+from inari_print_contracts.fingerprint import (
     DeviceWorkFingerprintInput,
     fingerprint_device_work,
 )

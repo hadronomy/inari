@@ -2,7 +2,7 @@
 members = ["packages/agent", "packages/brand", "packages/print-contracts"]
 
 [tool.ty.environment]
-root = [".", "./packages/agent", "./packages/brand", "./packages/print-contracts"]
+root = [".", "./packages/agent", "./packages/brand", "./packages/print-contracts", "./packages/odoo-inari"]
 
 [tool.pytest.ini_options]
 minversion = "8.3"
@@ -15,6 +15,11 @@ filterwarnings = [
 [dependency-groups]
 dev = [
     "ruff>=0.15.11",
+]
+odoo-tests = [
+    "pytest>=9.1.1",
+    "pytest-timeout>=2.4.0",
+    "requests>=2.34.2",
 ]
 windows-build = [
     "pyinstaller==6.21.0",

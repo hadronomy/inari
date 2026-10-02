@@ -41,6 +41,24 @@ from ..security.tls import TlsContextFactory
 from ..runtime.store import RuntimeStore
 from ..security.tokens import TokenService
 from ..security.windows_secrets import WindowsMachineSecretStore
+from ..device_authority.observations import DeviceObservationSigningKey
+
+
+def build_secret_store(settings: AgentSettings) -> ProtectedSecretStore:
+    security_state_dir = settings.resolved_security_state_dir
+    if sys.platform == "win32" and settings.path_profile == "production":
+        primary = WindowsMachineSecretStore(
+            security_state_dir / "service-secrets.dpapi"
+        )
+    else:
+        primary = KeyringSecretStore(service_name=settings.secret_store_service_name)
+    fallback = (
+        FileSecretStore(security_state_dir / "secrets.json")
+        if settings.gateway_mode is GatewayMode.STANDALONE
+        and settings.path_profile != "production"
+        else None
+    )
+    return ProtectedSecretStore(primary=primary, fallback=fallback)
 
 
 def _pairing_assertion_keys(path: Path | None) -> dict[str, dict[str, Any]]:
@@ -96,25 +114,13 @@ class SecurityProvider(Provider):
 
     @provide
     def secret_store(self, settings: AgentSettings) -> ProtectedSecretStore:
-        security_state_dir = settings.resolved_security_state_dir
-        if sys.platform == "win32" and settings.path_profile == "production":
-            primary = WindowsMachineSecretStore(
-                security_state_dir / "service-secrets.dpapi"
-            )
-        else:
-            primary = KeyringSecretStore(
-                service_name=settings.secret_store_service_name,
-            )
-        fallback = (
-            FileSecretStore(security_state_dir / "secrets.json")
-            if settings.gateway_mode is GatewayMode.STANDALONE
-            and settings.path_profile != "production"
-            else None
-        )
-        return ProtectedSecretStore(
-            primary=primary,
-            fallback=fallback,
-        )
+        return build_secret_store(settings)
+
+    @provide
+    def device_observation_signing_key(
+        self, secret_store: ProtectedSecretStore
+    ) -> DeviceObservationSigningKey:
+        return DeviceObservationSigningKey(secret_store)
 
     @provide
     def local_trust_store(self, secret_store: ProtectedSecretStore) -> LocalTrustStore:

@@ -2,6 +2,7 @@
 
 import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
+import { rpc as odooRpc } from "@web/core/network/rpc";
 
 import { InariAgentClient, InariAgentError } from "./agent_client";
 import { InariDeviceInputAdapter } from "./device_input_adapter";
@@ -748,9 +749,9 @@ export class InariDeviceService {
 }
 
 export const inariDeviceService = {
-    dependencies: ["dialog", "notification", "rpc"],
-    start(_env, { dialog, notification, rpc }) {
-        return new InariDeviceService({ dialog, notification, rpc });
+    dependencies: ["dialog", "notification"],
+    start(_env, { dialog, notification }) {
+        return new InariDeviceService({ dialog, notification, rpc: odooRpc });
     },
 };
 

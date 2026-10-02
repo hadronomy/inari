@@ -1,6 +1,8 @@
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
+from ..services.managed_work import build_managed_work_client
+
 
 class InariWorkloadIdentity(models.Model):
     _name = "inari.workload.identity"
@@ -39,6 +41,28 @@ class InariWorkloadIdentity(models.Model):
             raise AccessError(_("A System Administrator is required to revoke workload identity."))
         self.write({"state": "revoked"})
         return True
+
+
+    def _managed_work_client(self):
+        self.ensure_one()
+        self._check_scope()
+        if self.state != "active":
+            raise UserError(_("The Organization Workload Identity is not active."))
+        setup = self.env["inari.setup.state"].search(
+            [("company_id", "=", self.company_id.id)], limit=1
+        )
+        if not setup.controller_url or setup.state == "decommissioned":
+            raise UserError(
+                _("Managed Device Work is not configured for this company.")
+            )
+        return build_managed_work_client(
+            database=self.env.cr.dbname,
+            company_id=self.company_id.id,
+            organization_id=self.organization_id.controller_uuid,
+            client_id=self.client_id,
+            issuer=self.issuer_url,
+            controller=setup.controller_url,
+        )
 
 
 class InariSetupState(models.Model):

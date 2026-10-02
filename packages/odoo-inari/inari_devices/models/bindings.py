@@ -521,7 +521,7 @@ class InariReportSequence(models.Model):
     message = fields.Char()
     document_ids = fields.One2many("inari.report.sequence.document", "sequence_id")
 
-    def action_reconcile(self):
+    def _reconcile(self):
         for record in self:
             documents = record.document_ids
             record.write(

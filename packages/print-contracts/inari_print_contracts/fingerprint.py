@@ -9,9 +9,6 @@ from typing import Any
 
 import rfc8785
 
-from .models import DocumentKind
-
-
 OptionsCanonicalizer = Callable[[Mapping[str, Any]], bytes]
 
 _FINGERPRINT_FORMAT = b"inari-device-work-fingerprint\x00\x01"
@@ -28,7 +25,7 @@ class DeviceWorkFingerprintInput:
     """
 
     contract_major: int
-    operation: DocumentKind | str
+    operation: str
     device_id: str
     media_type: str
     document: bytes
@@ -65,7 +62,7 @@ def fingerprint_device_work(
 
     fields = (
         work.contract_major.to_bytes(4, byteorder="big", signed=False),
-        DocumentKind(work.operation).value.encode("utf-8"),
+        work.operation.encode("utf-8"),
         work.device_id.encode("utf-8"),
         work.media_type.strip().lower().encode("ascii"),
         work.document,
@@ -86,14 +83,10 @@ def _validate_work(work: DeviceWorkFingerprintInput) -> None:
     if not 0 <= work.contract_major <= (1 << 32) - 1:
         raise ValueError("contract_major must fit in an unsigned 32-bit integer.")
 
-    if not isinstance(work.operation, (DocumentKind, str)):
+    if not isinstance(work.operation, str):
         raise TypeError("operation must be a supported DocumentKind.")
-    try:
-        operation = DocumentKind(work.operation).value
-    except ValueError as exc:
-        raise ValueError("operation must be a supported DocumentKind.") from exc
-    if not operation:
-        raise ValueError("operation must not be empty.")
+    if work.operation not in {"receipt_image", "report_pdf", "label_document"}:
+        raise ValueError("operation must be a supported DocumentKind.")
 
     if not isinstance(work.device_id, str):
         raise TypeError("device_id must be a string.")

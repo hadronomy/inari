@@ -15,7 +15,7 @@ from pyhpke import AEADId, KDFId, KEMId, CipherSuite
 from pydantic import ValidationError
 
 from ..core.exceptions import AgentError
-from ..documents.fingerprint import DeviceWorkFingerprintInput, fingerprint_device_work
+from inari_print_contracts.fingerprint import DeviceWorkFingerprintInput, fingerprint_device_work
 from ..security.dispatch_keys import DispatchEncryptionKeyService
 from .models import ControllerAction, GatewayEnrollmentRecord
 from .protocol import (
