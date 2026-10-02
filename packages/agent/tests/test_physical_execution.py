@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+import asyncio
 import sqlite3
 
 from PIL import Image
@@ -396,6 +397,44 @@ async def test_facade_commits_permission_before_the_worker_can_send(
     assert receipt.state is PrintJobState.OUTCOME_UNKNOWN
     assert prepared.executed
     assert spool.released
+
+
+@pytest.mark.anyio
+async def test_preparation_renews_the_lease_before_device_io(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fixture = await _fixture(tmp_path)
+    renewed = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    clock = [NOW]
+    original_renew = fixture.ledger.renew
+
+    def renew(claim, *, now):
+        result = original_renew(claim, now=now)
+        if now >= NOW + timedelta(seconds=20):
+            loop.call_soon_threadsafe(renewed.set)
+        return result
+
+    monkeypatch.setattr(fixture.ledger, "renew", renew)
+    prepared = RecordingPreparedWorker(fixture.database_path)
+
+    class SlowWorker:
+        async def prepare(self, work):
+            clock[0] = NOW + timedelta(seconds=20)
+            await asyncio.wait_for(renewed.wait(), timeout=1)
+            clock[0] = NOW + timedelta(seconds=35)
+            return prepared
+
+    execution = PhysicalExecution(
+        ledger=fixture.ledger,
+        spool=RecordingSpool(),
+        worker=SlowWorker(),
+        clock=lambda: clock[0],
+        heartbeat_seconds=0.001,
+    )
+    receipt = await execution.run_one(OWNER)
+    assert receipt.state is PrintJobState.OUTCOME_UNKNOWN
+    assert prepared.executed
 
 
 @pytest.mark.anyio

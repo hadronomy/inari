@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -129,9 +130,10 @@ class DPoPVerifier:
     def __init__(self, store: Store) -> None:
         self.store = store
         self.nonce: str | None = None
+        self.omit_nonce = False
 
     def verify(self, proof, *, target, claims, access_token, at):
-        if self.nonce is None:
+        if self.nonce is None and not self.omit_nonce:
             self.nonce = next(
                 value
                 for value, (_, consumed_at) in self.store.nonces.items()
@@ -250,7 +252,10 @@ def test_admission_consumes_assertion_once_and_issues_scoped_records() -> None:
     assert error.value.code is ClientTrustErrorCode.REPLAY_DETECTED
 
 
-def test_authorization_requires_exact_origin_and_replays_are_rejected() -> None:
+@pytest.mark.parametrize("initial_nonce", [None, "client-placeholder"])
+def test_authorization_requires_exact_origin_and_replays_are_rejected(
+    initial_nonce: str | None,
+) -> None:
     service, store, _, token_verifier = make_service()
     pairing = ClientPairing(
         pairing_id="pairing-1",
@@ -309,13 +314,15 @@ def test_authorization_requires_exact_origin_and_replays_are_rejected() -> None:
     )
     verifier = service.dpop_verifier
     assert isinstance(verifier, DPoPVerifier)
-    verifier.nonce = "client-placeholder"
+    verifier.nonce = initial_nonce
+    verifier.omit_nonce = initial_nonce is None
     with pytest.raises(DPoPNonceRequiredError) as challenge:
         service.authorize_request(
             request, binding=binding, permission=Permission.RECEIPT_IMAGE
         )
     assert store.nonces[challenge.value.nonce.nonce][1] is None
     verifier.nonce = challenge.value.nonce.nonce
+    verifier.omit_nonce = False
     authorized = service.authorize_request(
         request, binding=binding, permission=Permission.RECEIPT_IMAGE
     )
@@ -382,6 +389,23 @@ def test_renewal_requires_session_and_offline_window_then_revocation_blocks_use(
     store.save_pairing(pairing)
     store.save_grant(grant)
     service.issue_dpop_nonce()
+    other = replace(pairing, pairing_id="other-pairing", jwk_thumbprint="other-key")
+    store.save_pairing(other)
+    nonce_count = len(store.nonces)
+    with pytest.raises(ClientTrustError) as mismatch:
+        service.renew_grant(
+            RenewalCommand(
+                pairing_id=other.pairing_id,
+                grant_id=grant.grant_id,
+                target=RequestTarget(
+                    "POST", "https://agent.example/pairing/v1/client-grants/renew"
+                ),
+                dpop="other.proof.signature",
+            )
+        )
+    assert mismatch.value.code is ClientTrustErrorCode.SCOPE_MISMATCH
+    assert store.get_grant(grant.grant_id) == grant
+    assert len(store.nonces) == nonce_count
     renewed = service.renew_grant(
         RenewalCommand(
             pairing_id=pairing.pairing_id,

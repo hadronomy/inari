@@ -376,6 +376,10 @@ class ClientTrustService:
         pairing = self.store.get_pairing(command.pairing_id)
         if pairing is None:
             raise _invalid("The Client Pairing is not available.")
+        if grant.pairing_id != pairing.pairing_id:
+            raise ScopeMismatchError(
+                "The Client Grant does not belong to this Client Pairing."
+            )
         request = self.store.get_pairing_request(pairing.pairing_request_id)
         if request is None or request.state is not PairingRequestState.COMPLETED:
             raise _invalid("The Pairing Request is not available.")
@@ -445,12 +449,14 @@ class ClientTrustService:
 
     def _consume_dpop_nonce(
         self,
-        nonce: str,
+        nonce: str | None,
         *,
         jti: str,
         at: datetime,
         replay_expires_at: datetime,
     ) -> None:
+        if nonce is None:
+            raise DPoPNonceRequiredError(self.issue_dpop_nonce())
         outcome = self.store.consume_dpop_nonce(
             nonce,
             jti=jti,

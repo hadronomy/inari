@@ -53,6 +53,7 @@ class PhysicalExecution:
         if claim is None:
             return None
 
+        heartbeat = asyncio.create_task(self._heartbeat(claim))
         prepared_worker: PreparedWorker | None = None
         marker_committed = False
         try:
@@ -99,7 +100,6 @@ class PhysicalExecution:
                 permit,
                 now=self._now(),
             )
-            heartbeat = asyncio.create_task(self._heartbeat(claim))
             cancellation: asyncio.CancelledError | None = None
             try:
                 result = await prepared_worker.execute(permit)
@@ -116,9 +116,6 @@ class PhysicalExecution:
                     error_code="worker_exited",
                     message_key="print.outcome_unknown",
                 )
-            finally:
-                heartbeat.cancel()
-                await asyncio.gather(heartbeat, return_exceptions=True)
             receipt = await asyncio.to_thread(
                 self._ledger.finish, claim, result, now=self._now()
             )
@@ -139,6 +136,8 @@ class PhysicalExecution:
                 )
             raise
         finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
             if prepared_worker is not None:
                 await prepared_worker.close()
 

@@ -600,7 +600,7 @@ class AcceptedDPoPProof:
     htu: str
     iat: datetime
     ath: str
-    nonce: str
+    nonce: str | None
     jti: str
     accepted_at: datetime
 
@@ -611,7 +611,8 @@ class AcceptedDPoPProof:
         object.__setattr__(self, "htu", target.htu)
         if not _BASE64URL.fullmatch(self.ath):
             raise ValueError("ath must be a base64url access-token hash")
-        _token_value("nonce", self.nonce)
+        if self.nonce is not None:
+            _token_value("nonce", self.nonce)
         _token_value("jti", self.jti)
         object.__setattr__(self, "iat", _utc("iat", self.iat))
         object.__setattr__(self, "accepted_at", _utc("accepted_at", self.accepted_at))

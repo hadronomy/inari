@@ -289,6 +289,17 @@ async def test_unprotected_requests_bypass_authorization_and_body_read(
     assert sent[0]["status"] == 204
 
 
+def test_catalog_matches_one_job_segment_and_exact_method() -> None:
+    policy = EndpointAuthorizationPolicy(
+        AuthorizationMode.CLIENT_GRANT, permission=Permission.JOBS_READ
+    )
+    catalog = ExplicitEndpointPolicyCatalog({("GET", "/v1/jobs/{job_id}"): policy})
+    assert catalog.policy_for("get", "/v1/jobs/public-job-1") is policy
+    assert catalog.policy_for("POST", "/v1/jobs/public-job-1") is None
+    assert catalog.policy_for("GET", "/v1/jobs/") is None
+    assert catalog.policy_for("GET", "/v1/jobs/one/two") is None
+
+
 def test_catalog_normalizes_method_and_rejects_duplicate_entries() -> None:
     policy = EndpointAuthorizationPolicy(AuthorizationMode.PUBLIC)
     catalog = ExplicitEndpointPolicyCatalog({(" post ", " /health"): policy})

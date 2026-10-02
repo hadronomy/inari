@@ -6,8 +6,11 @@ import json
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from re import Pattern
 from types import MappingProxyType
 from typing import Any, Protocol, cast
+
+from starlette.routing import compile_path
 
 from ..client_trust import Permission
 from ..client_trust.errors import (
@@ -60,6 +63,9 @@ class EndpointPolicyCatalog(Protocol):
 @dataclass(frozen=True, slots=True)
 class ExplicitEndpointPolicyCatalog:
     policies: Mapping[tuple[str, str], EndpointAuthorizationPolicy]
+    _templates: tuple[tuple[str, Pattern[str], EndpointAuthorizationPolicy], ...] = (
+        field(init=False, repr=False)
+    )
 
     def __post_init__(self) -> None:
         normalized: dict[tuple[str, str], EndpointAuthorizationPolicy] = {}
@@ -73,9 +79,29 @@ class ExplicitEndpointPolicyCatalog:
                 raise ValueError(f"duplicate endpoint policy: {method} {path}")
             normalized[key] = policy
         object.__setattr__(self, "policies", MappingProxyType(normalized))
+        object.__setattr__(
+            self,
+            "_templates",
+            tuple(
+                (method, compile_path(path)[0], policy)
+                for (method, path), policy in normalized.items()
+                if "{" in path
+            ),
+        )
 
     def policy_for(self, method: str, path: str) -> EndpointAuthorizationPolicy | None:
-        return self.policies.get((method.upper(), path))
+        method = method.upper()
+        exact = self.policies.get((method, path))
+        if exact is not None:
+            return exact
+        return next(
+            (
+                policy
+                for verb, pattern, policy in self._templates
+                if verb == method and pattern.fullmatch(path)
+            ),
+            None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,9 +237,7 @@ class ProblemAuthorizationErrorMapper:
         if isinstance(error, DPoPNonceRequiredError):
             headers.update(
                 {
-                    "WWW-Authenticate": (
-                        'DPoP realm="inari", error="use_dpop_nonce"'
-                    ),
+                    "WWW-Authenticate": ('DPoP realm="inari", error="use_dpop_nonce"'),
                     "DPoP-Nonce": error.nonce.nonce,
                     "Cache-Control": "no-store",
                 }

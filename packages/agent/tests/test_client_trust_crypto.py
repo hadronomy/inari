@@ -136,7 +136,10 @@ def test_access_token_round_trip_requires_generation_and_digest(key: OKPKey) -> 
     assert verified.client_grant_id == grant.grant_id
 
 
-def test_dpop_proof_binds_key_method_uri_token_and_nonce(key: OKPKey) -> None:
+@pytest.mark.parametrize("nonce", ["nonce-1234", None])
+def test_dpop_proof_binds_key_method_uri_token_and_nonce(
+    key: OKPKey, nonce: str | None
+) -> None:
     public = public_ed25519_jwk(key)
     claims = AccessTokenClaims(
         issuer="agent-1",
@@ -157,7 +160,6 @@ def test_dpop_proof_binds_key_method_uri_token_and_nonce(key: OKPKey) -> None:
     target = RequestTarget(
         "POST", "https://agent.example/device-work?ignored=yes#fragment"
     )
-    nonce = "nonce-1234"
     ath = (
         base64.urlsafe_b64encode(hashlib.sha256(access_token.encode()).digest())
         .rstrip(b"=")
@@ -170,7 +172,7 @@ def test_dpop_proof_binds_key_method_uri_token_and_nonce(key: OKPKey) -> None:
             "htu": target.htu,
             "iat": int(NOW.timestamp()),
             "ath": ath,
-            "nonce": nonce,
+            **({"nonce": nonce} if nonce is not None else {}),
             "jti": "proof-1",
         },
         key,
@@ -185,6 +187,7 @@ def test_dpop_proof_binds_key_method_uri_token_and_nonce(key: OKPKey) -> None:
     )
     assert accepted.jwk_thumbprint == claims.cnf_jkt
     assert accepted.htu == "https://agent.example/device-work"
+    assert accepted.nonce == nonce
 
 
 def test_dpop_rejects_wrong_token_hash_and_clock(key: OKPKey) -> None:

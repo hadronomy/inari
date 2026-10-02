@@ -318,7 +318,8 @@ class DPoPProofVerifier:
         payload = parsed.claims
         if not isinstance(payload, Mapping):
             raise _invalid(code, "The DPoP payload is invalid.")
-        if set(payload) != {"htm", "htu", "iat", "ath", "nonce", "jti"}:
+        required = {"htm", "htu", "iat", "ath", "jti"}
+        if not required.issubset(payload) or set(payload) - required - {"nonce"}:
             raise _invalid(code, "The DPoP payload has unsupported claims.")
         htm = payload.get("htm")
         htu = payload.get("htu")
@@ -335,7 +336,7 @@ class DPoPProofVerifier:
         if abs(moment - issued_at) > _DPOP_WINDOW:
             raise _invalid(code, "The DPoP proof is outside the clock window.")
         nonce = payload.get("nonce")
-        if not isinstance(nonce, str) or not nonce:
+        if "nonce" in payload and (not isinstance(nonce, str) or not nonce):
             raise _invalid(code, "The DPoP nonce is invalid.")
         access_hash = _b64url(sha256(access_token.encode("utf-8")).digest())
         if not isinstance(payload.get("ath"), str) or not compare_digest(
