@@ -5,6 +5,7 @@
 //! details and generated names out of application state.
 
 mod client;
+mod client_pairing;
 mod error;
 mod events;
 mod identity;
@@ -15,12 +16,16 @@ mod service;
 mod transport;
 
 pub use client::{AgentClient, AgentClientOptions};
+pub use client_pairing::{
+    InariLink, InariLinkError, PairingDecision, PairingLinkError, PairingRequest,
+    PairingRequestState, PairingScope,
+};
 pub use error::{AgentClientError, AgentClientResult};
 pub use events::{AgentEvent, AgentEventKind, AgentEventStream, EventResource};
 pub use identity::{ClientIdentity, IdentityStore, LocalIdentityStore};
 pub use model::{
     AgentConnection, Device, DeviceId, DeviceKind, DeviceState, EnrollmentPreview, InvitationLink,
-    Job, JobId, JobState, ServiceState, SetupAccess, SetupSnapshot, SetupStage,
+    Job, JobId, JobState, PairingRequestId, ServiceState, SetupAccess, SetupSnapshot, SetupStage,
 };
 pub use pairing::PairingMode;
 pub use service::{LocalAgentService, ServiceControlError, ServiceControlResult, ServiceOperation};

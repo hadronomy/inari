@@ -12,8 +12,8 @@ mod onboarding;
 mod ui;
 
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Application, Bounds, TitlebarOptions, WindowBounds,
-    WindowOptions, point, px, size,
+    AnyWindowHandle, App, AppContext as _, Application, Bounds, TitlebarOptions, WeakEntity,
+    WindowBounds, WindowOptions, point, px, size,
 };
 use gpui_component::Root;
 
@@ -24,8 +24,7 @@ use crate::{
     ui::{effect, material, motion, theme::Theme},
 };
 
-/// The operations window, built at startup and shown only once enrollment is
-/// out of the way.
+/// The operations window, also used to review browser access before enrollment.
 ///
 /// It is created rather than deferred because it owns the `inari://` activation
 /// listener, the agent update stream, and the tray. Deferring the window would
@@ -33,6 +32,7 @@ use crate::{
 /// listener starts a second copy of it.
 struct Operations {
     window: RefCell<Option<AnyWindowHandle>>,
+    center: RefCell<Option<WeakEntity<DeviceCenter>>>,
 }
 
 impl Operations {
@@ -80,6 +80,7 @@ impl Operations {
                     let center = cx.new(|cx| {
                         DeviceCenter::new(runtime, tray_commands, open_onboarding, window, cx)
                     });
+                    *self.center.borrow_mut() = Some(center.downgrade());
                     center.update(cx, |center, _| center.install_tray(tray));
                     cx.new(|cx| Root::new(center, window, cx))
                 },
@@ -96,6 +97,25 @@ impl Operations {
             .ok();
         cx.activate(true);
         Some(handle)
+    }
+
+    fn open_link(&self, value: &str, cx: &mut App) {
+        let Some(handle) = *self.window.borrow() else {
+            return;
+        };
+        let Some(center) = self
+            .center
+            .borrow()
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+        else {
+            return;
+        };
+        if let Err(error) = handle.update(cx, |_, window, cx| {
+            center.update(cx, |center, cx| center.open_link(value, window, cx));
+        }) {
+            tracing::warn!(%error, "Could not open the Inari link");
+        }
     }
 }
 
@@ -131,7 +151,8 @@ fn main() {
             let (tray_sender, tray_commands) = async_channel::bounded(32);
             let tray =
                 TrayController::new(tray_sender).expect("failed to create the Device Center tray");
-            let operations = Rc::new(Operations { window: RefCell::new(None) });
+            let operations =
+                Rc::new(Operations { window: RefCell::new(None), center: RefCell::new(None) });
 
             let launcher = operations.clone();
             let open_operations: onboarding::OpenOperations =
@@ -150,9 +171,11 @@ fn main() {
                 });
 
             operations.create(runtime.clone(), tray_commands, tray, open_onboarding.clone(), cx);
-            // Both windows start unshown. Enrollment reveals itself only if the
-            // agent says this computer still needs it, and otherwise hands
-            // straight to the operations window without either one flashing.
-            open_onboarding(invitation, cx);
+            // Links choose their own window. A normal launch lets enrollment
+            // read the Agent's state before either window becomes visible.
+            match invitation {
+                Some(link) => operations.open_link(&link, cx),
+                None => open_onboarding(None, cx),
+            }
         });
 }

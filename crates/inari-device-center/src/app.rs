@@ -14,8 +14,8 @@ use inari_agent_client::{
 
 use crate::{
     features::{
-        activity::ActivityView, devices::DeviceDirectory, overview::OverviewView,
-        support::SupportView,
+        activity::ActivityView, client_pairing::ClientPairingView, devices::DeviceDirectory,
+        overview::OverviewView, support::SupportView,
     },
     infrastructure::{AgentRuntime, TrayCommand, TrayController},
     ui::{
@@ -40,6 +40,7 @@ actions!(
         ShowDevices,
         ShowActivity,
         ShowSupport,
+        ShowClientPairing,
         RetryConnection,
         PreviewInvitation,
         BeginSetup,
@@ -64,10 +65,12 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-2", ShowDevices, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-3", ShowActivity, Some(KEY_CONTEXT)),
         KeyBinding::new("cmd-4", ShowSupport, Some(KEY_CONTEXT)),
+        KeyBinding::new("cmd-5", ShowClientPairing, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-1", ShowOverview, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-2", ShowDevices, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-3", ShowActivity, Some(KEY_CONTEXT)),
         KeyBinding::new("ctrl-4", ShowSupport, Some(KEY_CONTEXT)),
+        KeyBinding::new("ctrl-5", ShowClientPairing, Some(KEY_CONTEXT)),
     ]);
 }
 
@@ -77,10 +80,12 @@ enum Destination {
     Devices,
     Activity,
     Support,
+    ClientPairing,
 }
 
 impl Destination {
-    const ALL: [Self; 4] = [Self::Overview, Self::Devices, Self::Activity, Self::Support];
+    const ALL: [Self; 5] =
+        [Self::Overview, Self::Devices, Self::Activity, Self::Support, Self::ClientPairing];
 
     fn index(self) -> usize {
         Self::ALL
@@ -102,6 +107,12 @@ impl Destination {
                 RailItem::new("nav-activity", "Activity", Glyph::Activity, ShowActivity)
             },
             Self::Support => RailItem::new("nav-support", "Support", Glyph::Support, ShowSupport),
+            Self::ClientPairing => RailItem::new(
+                "nav-client-pairing",
+                "Client Pairing",
+                Glyph::Link,
+                ShowClientPairing,
+            ),
         }
     }
 }
@@ -114,6 +125,7 @@ pub struct DeviceCenter {
     setup: SetupSnapshot,
     devices: Arc<[Device]>,
     device_directory: Entity<DeviceDirectory>,
+    client_pairing: Entity<ClientPairingView>,
     jobs: Arc<[Job]>,
     events: Vec<AgentEvent>,
     connection: AgentConnection,
@@ -123,10 +135,7 @@ pub struct DeviceCenter {
     agent_endpoint: Option<String>,
     identity_retry_available: bool,
     runtime: Arc<AgentRuntime>,
-    /// Reopens enrollment for a forwarded `inari://` link. Only Windows
-    /// forwards activations, so on other platforms this is held and never
-    /// called rather than making the constructor differ per platform.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Enrollment owns its input and focus in a separate window.
     open_onboarding: crate::onboarding::OpenOnboarding,
     tray: Option<TrayController>,
     focus_handle: FocusHandle,
@@ -150,6 +159,7 @@ impl DeviceCenter {
         let service_task = Self::load_service_state(runtime.clone(), cx);
         let updates_task = Self::listen_for_updates(runtime.clone(), window.window_handle(), cx);
         let device_directory = cx.new(|cx| DeviceDirectory::new(window, cx));
+        let client_pairing = cx.new(|cx| ClientPairingView::new(runtime.clone(), window, cx));
         let appearance_subscription = window.observe_window_appearance(Theme::sync);
         let tray_task = Self::listen_for_tray(tray_commands, window.window_handle(), cx);
         let focus_handle = cx.focus_handle();
@@ -165,6 +175,7 @@ impl DeviceCenter {
             setup: SetupSnapshot::unavailable(),
             devices: Arc::default(),
             device_directory,
+            client_pairing,
             jobs: Arc::default(),
             events: Vec::new(),
             connection: AgentConnection::Checking,
@@ -232,6 +243,37 @@ impl DeviceCenter {
         self.navigate(Destination::Support, cx);
     }
 
+    fn show_client_pairing(
+        &mut self,
+        _: &ShowClientPairing,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.navigate(Destination::ClientPairing, cx);
+        self.client_pairing
+            .update(cx, |view, cx| view.focus(window, cx));
+    }
+
+    pub(crate) fn open_link(&mut self, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match inari_agent_client::InariLink::parse(value) {
+            Ok(inari_agent_client::InariLink::Enrollment(_)) => {
+                (self.open_onboarding)(Some(value.to_owned()), cx);
+            },
+            Ok(inari_agent_client::InariLink::ClientPairing(id)) => {
+                crate::infrastructure::platform::show_window(window, cx);
+                self.client_pairing
+                    .update(cx, |view, cx| view.open_request(id, window, cx));
+                self.navigate(Destination::ClientPairing, cx);
+            },
+            Err(error) => {
+                crate::infrastructure::platform::show_window(window, cx);
+                self.client_pairing
+                    .update(cx, |view, cx| view.show_error(error.to_string(), cx));
+                self.navigate(Destination::ClientPairing, cx);
+            },
+        }
+    }
+
     fn toggle_translucency(
         &mut self,
         _: &ToggleTranslucency,
@@ -286,6 +328,10 @@ impl DeviceCenter {
                 self.agent_endpoint.clone(),
             )
             .into_any_element(),
+            Destination::ClientPairing => self
+                .client_pairing
+                .clone()
+                .into_any_element(),
         }
     }
 
@@ -404,6 +450,7 @@ impl Render for DeviceCenter {
             .on_action(cx.listener(Self::show_devices))
             .on_action(cx.listener(Self::show_activity))
             .on_action(cx.listener(Self::show_support))
+            .on_action(cx.listener(Self::show_client_pairing))
             .on_action(cx.listener(Self::refresh_agent_service))
             .on_action(cx.listener(Self::start_agent_service))
             .on_action(cx.listener(Self::restart_agent_service))

@@ -6,7 +6,8 @@ use std::{
 use inari_agent_client::{
     AgentClient, AgentClientError, AgentClientOptions, AgentClientResult, AgentConnection,
     AgentEvent, Device, DeviceId, EnrollmentPreview, InvitationLink, Job, LocalAgentService,
-    LocalIdentityStore, ServiceControlResult, ServiceState, SetupSnapshot,
+    LocalIdentityStore, PairingDecision, PairingRequest, PairingRequestId, ServiceControlResult,
+    ServiceState, SetupSnapshot,
 };
 #[cfg(windows)]
 use tokio::io::AsyncReadExt as _;
@@ -86,6 +87,25 @@ impl AgentRuntime {
 
     pub fn jobs(&self) -> oneshot::Receiver<AgentClientResult<Vec<Job>>> {
         self.spawn(|client| async move { client.jobs().await })
+    }
+
+    pub fn review_client_pairing(
+        &self,
+        id: PairingRequestId,
+    ) -> oneshot::Receiver<AgentClientResult<PairingRequest>> {
+        self.spawn(move |client| async move { client.review_client_pairing(&id).await })
+    }
+
+    pub fn decide_client_pairing(
+        &self,
+        id: PairingRequestId,
+        decision: PairingDecision,
+    ) -> oneshot::Receiver<AgentClientResult<PairingRequest>> {
+        self.spawn(move |client| async move {
+            client
+                .decide_client_pairing(&id, decision)
+                .await
+        })
     }
 
     pub fn open_api_reference(&self) {

@@ -77,13 +77,9 @@ impl DeviceCenter {
                                         },
                                         #[cfg(windows)]
                                         AgentRuntimeUpdate::Activation(invitation) => {
-                                            // A bare activation means "show me
-                                            // the app". One carrying a link
-                                            // means "read this", which is the
-                                            // enrollment window's job.
                                             match invitation {
                                                 Some(invitation) => {
-                                                    (center.open_onboarding)(Some(invitation), cx);
+                                                    center.open_link(&invitation, window, cx);
                                                 },
                                                 None => platform::show_window(window, cx),
                                             }
