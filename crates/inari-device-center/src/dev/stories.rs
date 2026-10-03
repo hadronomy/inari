@@ -333,6 +333,7 @@ story! {
                 None,
                 None,
                 false,
+                Some("https://agent.example.com:7310/".into()),
             )))
             .child(Section::new("Running, not answering").child(SupportView::new(
                 Status::service(ServiceState::Running, AgentConnection::Unavailable),
@@ -340,6 +341,7 @@ story! {
                 None,
                 Some("connection reset by peer (os error 104)".into()),
                 false,
+                Some("https://agent.example.com:7310/".into()),
             )))
             .child(Section::new("Healthy").child(SupportView::new(
                 Status::service(ServiceState::Running, AgentConnection::Connected),
@@ -347,6 +349,7 @@ story! {
                 None,
                 None,
                 false,
+                Some("https://agent.example.com:7310/".into()),
             )))
             .into_any_element()
     },
