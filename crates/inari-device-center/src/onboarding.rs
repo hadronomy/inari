@@ -15,7 +15,8 @@ use std::{cell::RefCell, collections::HashSet, rc::Rc, sync::Arc};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, WindowHandle, div, px,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, WeakEntity, Window, WindowHandle,
+    div, px,
 };
 use gpui_component::{
     Root, StyledExt as _,
@@ -23,16 +24,20 @@ use gpui_component::{
     scroll::ScrollableElement as _,
 };
 use inari_agent_client::{
-    DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
+    DeviceId, EnrollmentPreview, InvitationLink, ServiceState, SetupAccess, SetupSnapshot,
+    SetupStage,
 };
 
 use crate::{
     app::{
-        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RetryConnection,
-        StartOver,
+        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RestartAgentService,
+        RetryConnection, StartOver,
     },
     features::setup::SetupView,
-    infrastructure::{AgentRuntime, SetupResult, agent_failure_message, platform},
+    infrastructure::{
+        AgentRuntime, SetupProgressError, SetupProgressMode, SetupResult, agent_failure_message,
+        platform, setup_progress_pending,
+    },
     ui::{
         field, motion,
         theme::{ActiveTheme as _, Theme},
@@ -51,7 +56,7 @@ const COLUMN: f32 = 372.0;
 /// Held by the onboarding window so the two windows never both believe they
 /// own the app. It is a callback rather than a direct call because the shell it
 /// opens lives in `main`, which already owns the runtime and the tray.
-pub type OpenOperations = Rc<dyn Fn(&mut App) -> Option<AnyWindowHandle>>;
+pub type OpenOperations = Rc<dyn Fn(SetupSnapshot, &mut App) -> Option<AnyWindowHandle>>;
 
 /// Reopens enrollment for an `inari://` link that arrived while the operations
 /// shell was up. The link is a credential the operator wants reviewed, so it
@@ -195,7 +200,7 @@ impl Onboarding {
             }
             return;
         }
-        (self.open_operations)(cx);
+        (self.open_operations)(self.snapshot.clone(), cx);
         if let Some(handle) = self.handle.take() {
             handle
                 .update(cx, |_, window, _| window.remove_window())
@@ -239,6 +244,7 @@ impl Render for Onboarding {
             .on_action(cx.listener(Self::confirm_devices))
             .on_action(cx.listener(Self::continue_without_devices))
             .on_action(cx.listener(Self::start_over))
+            .on_action(cx.listener(Self::restart_agent_service))
             .size_full()
             .v_flex()
             .font_family(font)
@@ -294,6 +300,27 @@ impl Render for Onboarding {
     }
 }
 
+/// Handle for the hidden enrollment window and its persistent onboarding entity.
+pub struct OnboardingWindow {
+    handle: WindowHandle<Root>,
+    onboarding: WeakEntity<Onboarding>,
+}
+
+impl OnboardingWindow {
+    pub fn show(&self, invitation: Option<String>, cx: &mut App) -> gpui::Result<()> {
+        self.handle.update(cx, |_, window, cx| {
+            if let Some(invitation) = invitation {
+                self.onboarding
+                    .update(cx, |onboarding, cx| {
+                        onboarding.receive_invitation(invitation, window, cx);
+                    })
+                    .ok();
+            }
+            platform::show_window(window, cx);
+        })
+    }
+}
+
 /// Open the enrollment window, unshown.
 ///
 /// It reveals itself only once the agent has confirmed that enrollment is
@@ -304,10 +331,12 @@ pub fn open(
     open_operations: OpenOperations,
     invitation: Option<String>,
     cx: &mut App,
-) -> gpui::Result<WindowHandle<Root>> {
+) -> gpui::Result<OnboardingWindow> {
     let revealed = Rc::new(RefCell::new(false));
+    let source = Rc::new(RefCell::new(None));
+    let created_source = source.clone();
     let bounds = gpui::Bounds::centered(None, gpui::size(px(468.0), px(660.0)), cx);
-    cx.open_window(
+    let handle = cx.open_window(
         gpui::WindowOptions {
             window_bounds: Some(gpui::WindowBounds::Windowed(bounds)),
             window_min_size: Some(gpui::size(px(420.0), px(560.0))),
@@ -326,15 +355,50 @@ pub fn open(
         },
         |window, cx| {
             Theme::sync(window, cx);
+            window.on_window_should_close(cx, |window, cx| {
+                platform::hide_window(window, cx);
+                false
+            });
             let onboarding = cx.new(|cx| {
                 Onboarding::new(runtime, open_operations, revealed, invitation, window, cx)
             });
+            *created_source.borrow_mut() = Some(onboarding.downgrade());
             cx.new(|cx| Root::new(onboarding, window, cx))
         },
-    )
+    )?;
+    Ok(OnboardingWindow {
+        handle,
+        onboarding: source
+            .borrow_mut()
+            .take()
+            .expect("the setup window owns its view"),
+    })
 }
 
 impl Onboarding {
+    fn receive_invitation(&mut self, value: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.working {
+            return;
+        }
+        self.invitation_input
+            .update(cx, |input, cx| {
+                input.set_value(value.clone(), window, cx);
+                input.focus(window, cx);
+            });
+        self.forced = true;
+        self.snapshot = SetupSnapshot::invitation();
+        self.preview = None;
+        self.error = None;
+        match InvitationLink::parse(&value) {
+            Ok(invitation) => {
+                self.working = true;
+                self._setup_task =
+                    Self::load_invitation_preview(self.runtime.clone(), invitation, cx);
+            },
+            Err(error) => self.error = Some(error.to_string()),
+        }
+        cx.notify();
+    }
     fn load_invitation_preview(
         runtime: Arc<AgentRuntime>,
         invitation: InvitationLink,
@@ -389,6 +453,7 @@ impl Onboarding {
                         onboarding.snapshot =
                             if onboarding.forced { SetupSnapshot::invitation() } else { snapshot };
                         onboarding.select_all_devices();
+                        onboarding.track_progress(cx);
                         onboarding.settle(cx);
                         cx.notify();
                     })
@@ -398,9 +463,129 @@ impl Onboarding {
     }
 
     fn retry_connection(&mut self, _: &RetryConnection, _: &mut Window, cx: &mut Context<Self>) {
+        if self.working {
+            return;
+        }
         self.error = None;
-        self._setup_task = Self::retry_setup(self.runtime.clone(), cx);
+        if self.snapshot.access == SetupAccess::Required {
+            self.working = true;
+            self._setup_task =
+                Self::follow_setup(self.runtime.clone(), SetupProgressMode::Retry, cx);
+        } else {
+            self._setup_task = Self::retry_setup(self.runtime.clone(), cx);
+        }
         cx.notify();
+    }
+
+    fn restart_agent_service(
+        &mut self,
+        _: &RestartAgentService,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.working
+            || !self.snapshot.restart_required
+            || self.snapshot.access != SetupAccess::Required
+        {
+            return;
+        }
+        self.working = true;
+        self.error = None;
+        let response = self.runtime.restart_service();
+        self._setup_task = cx.spawn(async move |onboarding, cx| {
+            let result = response.await;
+            if let Some(onboarding) = onboarding.upgrade() {
+                onboarding
+                    .update(cx, |onboarding, cx| {
+                        match result {
+                            Ok(Ok(ServiceState::Running)) => {
+                                onboarding._setup_task = Self::follow_setup(
+                                    onboarding.runtime.clone(),
+                                    SetupProgressMode::AfterRestart,
+                                    cx,
+                                );
+                            },
+                            result => {
+                                onboarding.working = false;
+                                onboarding.error = Some(match result {
+                                    Ok(Err(error)) => error.to_string(),
+                                    _ => "The Agent service did not restart. Try again.".into(),
+                                });
+                            },
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+            }
+        });
+        cx.notify();
+    }
+
+    fn track_progress(&mut self, cx: &mut Context<Self>) {
+        if setup_progress_pending(&self.snapshot, false) {
+            self.working = true;
+            self._setup_task =
+                Self::follow_setup(self.runtime.clone(), SetupProgressMode::Observe, cx);
+        }
+    }
+
+    fn follow_setup(
+        runtime: Arc<AgentRuntime>,
+        mode: SetupProgressMode,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
+        let mut updates = runtime.follow_setup(mode);
+        cx.spawn(async move |onboarding, cx| {
+            while let Some(result) = updates.recv().await {
+                let Some(onboarding) = onboarding.upgrade() else {
+                    return;
+                };
+                if onboarding
+                    .update(cx, |onboarding, cx| {
+                        match result {
+                            Ok(snapshot) => {
+                                onboarding.working = setup_progress_pending(
+                                    &snapshot,
+                                    mode == SetupProgressMode::AfterRestart,
+                                );
+                                onboarding.snapshot = snapshot;
+                                onboarding.select_all_devices();
+                                onboarding.error = None;
+                            },
+                            Err(error) => {
+                                onboarding.working = false;
+                                onboarding.error = Some(match error {
+                                    SetupProgressError::Agent(error) => {
+                                        agent_failure_message(&error).into()
+                                    },
+                                    SetupProgressError::TimedOut if onboarding.snapshot.restart_required => {
+                                        "The Agent still requires a restart. Select Restart Agent to try again.".into()
+                                    },
+                                    error => error.to_string(),
+                                });
+                            },
+                        }
+                        onboarding.settle(cx);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            if let Some(onboarding) = onboarding.upgrade() {
+                onboarding
+                    .update(cx, |onboarding, cx| {
+                        if onboarding.working {
+                            onboarding.working = false;
+                            onboarding.error =
+                                Some("The connection check stopped. Try again.".into());
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            }
+        })
     }
 
     fn preview_invitation(
@@ -409,6 +594,9 @@ impl Onboarding {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.working {
+            return;
+        }
         let value = self.invitation_input.read(cx).value();
         let invitation = match InvitationLink::parse(value.as_str()) {
             Ok(invitation) => invitation,
@@ -427,6 +615,9 @@ impl Onboarding {
     }
 
     fn begin_setup(&mut self, _: &BeginSetup, window: &mut Window, cx: &mut Context<Self>) {
+        if self.working {
+            return;
+        }
         let value = self.invitation_input.read(cx).value();
         let invitation = match InvitationLink::parse(value.as_str()) {
             Ok(invitation) => invitation,
@@ -447,6 +638,9 @@ impl Onboarding {
     }
 
     fn confirm_devices(&mut self, _: &ConfirmDevices, _: &mut Window, cx: &mut Context<Self>) {
+        if self.working {
+            return;
+        }
         let device_ids = self
             .selected_devices
             .iter()
@@ -465,6 +659,9 @@ impl Onboarding {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.working {
+            return;
+        }
         self.working = true;
         self.error = None;
         let response = self.runtime.confirm_devices(Vec::new());
@@ -473,6 +670,9 @@ impl Onboarding {
     }
 
     fn start_over(&mut self, _: &StartOver, _: &mut Window, cx: &mut Context<Self>) {
+        if self.working {
+            return;
+        }
         self.working = true;
         self.error = None;
         self.preview = None;
@@ -498,6 +698,7 @@ impl Onboarding {
                                 onboarding.snapshot = snapshot;
                                 onboarding.select_all_devices();
                                 onboarding.preview = None;
+                                onboarding.track_progress(cx);
                             },
                             Ok(Err(error)) => {
                                 onboarding.error = Some(agent_failure_message(&error).into());
@@ -534,8 +735,55 @@ fn default_device_selection(setup: &SetupSnapshot) -> HashSet<DeviceId> {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+    use chrono::Utc;
+    use gpui::TestAppContext;
+    use inari_agent_client::{
+        AgentClientError, AgentClientResult, ClientIdentity, Device, DeviceKind, DeviceState,
+        IdentityStore,
+    };
+
     use super::*;
-    use inari_agent_client::{Device, DeviceKind, DeviceState};
+    use crate::app::RestartAgentService;
+
+    #[derive(Clone, Copy)]
+    struct TestIdentityStore;
+
+    impl IdentityStore for TestIdentityStore {
+        fn load(&self) -> AgentClientResult<Option<ClientIdentity>> {
+            Err(AgentClientError::IdentityLocked("test identity is locked".into()))
+        }
+
+        fn store(&self, _: &ClientIdentity) -> AgentClientResult<()> {
+            Ok(())
+        }
+    }
+
+    fn runtime() -> Arc<AgentRuntime> {
+        AgentRuntime::with_identity_store(TestIdentityStore).expect("test Agent runtime starts")
+    }
+
+    fn init_test_app(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        #[cfg(debug_assertions)]
+        cx.update(crate::dev::init);
+    }
+
+    fn invitation(fragment: &str) -> String {
+        format!("inari://controller.example/setup#{fragment}")
+    }
+
+    fn complete_snapshot() -> SetupSnapshot {
+        SetupSnapshot {
+            access: SetupAccess::Complete,
+            stage: SetupStage::Complete,
+            restart_required: false,
+            completed_at: Some(Utc::now()),
+            guidance: None,
+            devices: Vec::new(),
+        }
+    }
 
     #[test]
     fn device_selection_starts_with_every_found_device() {
@@ -543,6 +791,7 @@ mod tests {
         let setup = SetupSnapshot {
             access: SetupAccess::Required,
             stage: SetupStage::Devices,
+            restart_required: false,
             completed_at: None,
             guidance: None,
             devices: vec![Device {
@@ -555,5 +804,132 @@ mod tests {
 
         assert_eq!(default_device_selection(&setup), [device_id].into());
         assert!(default_device_selection(&SetupSnapshot::invitation()).is_empty());
+    }
+
+    #[gpui::test]
+    fn completion_hands_the_authoritative_snapshot_to_operations(cx: &mut TestAppContext) {
+        init_test_app(cx);
+        let captured = Rc::new(RefCell::new(Vec::new()));
+        let captured_by_open = captured.clone();
+        let open_operations: OpenOperations = Rc::new(move |snapshot, _| {
+            captured_by_open
+                .borrow_mut()
+                .push(snapshot);
+            None
+        });
+        let window = cx.update(|app| {
+            open(runtime(), open_operations, Some("not an invitation".into()), app)
+                .expect("setup window opens")
+        });
+        let onboarding = window
+            .onboarding
+            .upgrade()
+            .expect("setup view exists");
+        let expected = complete_snapshot();
+
+        cx.update(|app| {
+            onboarding.update(app, |onboarding, cx| {
+                onboarding.forced = false;
+                onboarding.working = true;
+                let (sender, receiver) = tokio::sync::oneshot::channel();
+                onboarding._setup_task = Onboarding::apply_setup_response(receiver, cx);
+                sender
+                    .send(Ok(expected.clone()))
+                    .expect("completion response is pending");
+            });
+        });
+        cx.run_until_parked();
+
+        assert_eq!(captured.borrow().as_slice(), &[expected]);
+    }
+
+    #[gpui::test]
+    fn reopening_setup_reuses_the_window_and_input_and_rejects_duplicate_invitation(
+        cx: &mut TestAppContext,
+    ) {
+        init_test_app(cx);
+        let open_operations: OpenOperations = Rc::new(|_, _| None);
+        let window = cx.update(|app| {
+            open(runtime(), open_operations, Some("not an invitation".into()), app)
+                .expect("setup window opens")
+        });
+        let onboarding_before = window
+            .onboarding
+            .upgrade()
+            .expect("setup view exists");
+        let input_before =
+            onboarding_before.read_with(cx, |onboarding, _| onboarding.invitation_input.clone());
+        let first = invitation("first");
+        let duplicate = invitation("duplicate");
+
+        cx.update(|app| {
+            window
+                .show(Some(first.clone()), app)
+                .expect("setup window reopens")
+        });
+        cx.update(|app| {
+            onboarding_before.update(app, |onboarding, _| {
+                assert!(onboarding.working);
+            });
+            window
+                .show(Some(duplicate), app)
+                .expect("setup window remains available");
+        });
+
+        let onboarding_after = window
+            .onboarding
+            .upgrade()
+            .expect("setup view remains");
+        let input_after =
+            onboarding_after.read_with(cx, |onboarding, _| onboarding.invitation_input.clone());
+        let value = input_after.read_with(cx, |input, _| input.value());
+        assert_eq!(onboarding_before, onboarding_after);
+        assert_eq!(input_before, input_after);
+        assert_eq!(value, first);
+    }
+
+    #[gpui::test]
+    fn in_flight_setup_rejects_duplicate_mutations(cx: &mut TestAppContext) {
+        init_test_app(cx);
+        let open_operations: OpenOperations = Rc::new(|_, _| None);
+        let window = cx.update(|app| {
+            open(runtime(), open_operations, Some("not an invitation".into()), app)
+                .expect("setup window opens")
+        });
+        let onboarding = window
+            .onboarding
+            .upgrade()
+            .expect("setup view exists");
+
+        cx.update(|app| {
+            window
+                .handle
+                .update(app, |_, window, app| {
+                    onboarding.update(app, |onboarding, cx| {
+                        onboarding.snapshot = SetupSnapshot {
+                            access: SetupAccess::Required,
+                            stage: SetupStage::Securing,
+                            restart_required: true,
+                            completed_at: None,
+                            guidance: None,
+                            devices: Vec::new(),
+                        };
+                        onboarding.working = true;
+                        onboarding.error = Some("keep this error".into());
+                        onboarding.restart_agent_service(&RestartAgentService, window, cx);
+                        onboarding.preview_invitation(&PreviewInvitation, window, cx);
+                        onboarding.begin_setup(&BeginSetup, window, cx);
+                        onboarding.confirm_devices(&ConfirmDevices, window, cx);
+                        onboarding.continue_without_devices(&ContinueWithoutDevices, window, cx);
+                        onboarding.start_over(&StartOver, window, cx);
+                    });
+                })
+                .expect("setup window remains open");
+        });
+
+        let (working, error) = onboarding
+            .read_with(cx, |onboarding, _| (onboarding.working, onboarding.error.clone()));
+        assert!(working);
+        assert_eq!(error.as_deref(), Some("keep this error"));
     }
 }

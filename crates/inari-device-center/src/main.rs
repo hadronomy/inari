@@ -90,7 +90,19 @@ impl Operations {
     }
 
     /// Show the operations window. Enrollment calls this when it is finished.
-    fn reveal(self: &Rc<Self>, cx: &mut App) -> Option<AnyWindowHandle> {
+    fn reveal(
+        self: &Rc<Self>,
+        snapshot: inari_agent_client::SetupSnapshot,
+        cx: &mut App,
+    ) -> Option<AnyWindowHandle> {
+        if let Some(center) = self
+            .center
+            .borrow()
+            .as_ref()
+            .and_then(WeakEntity::upgrade)
+        {
+            center.update(cx, |center, cx| center.accept_setup(snapshot, cx));
+        }
         let handle = (*self.window.borrow())?;
         handle
             .update(cx, |_, window, cx| platform::show_window(window, cx))
@@ -156,12 +168,20 @@ fn main() {
 
             let launcher = operations.clone();
             let open_operations: onboarding::OpenOperations =
-                Rc::new(move |cx: &mut App| launcher.reveal(cx));
+                Rc::new(move |snapshot, cx: &mut App| launcher.reveal(snapshot, cx));
             let onboarding_runtime = runtime.clone();
             let onboarding_operations = open_operations.clone();
+            let setup_window = RefCell::new(None::<onboarding::OnboardingWindow>);
             let open_onboarding: onboarding::OpenOnboarding =
                 Rc::new(move |invitation: Option<String>, cx: &mut App| {
-                    onboarding::open(
+                    if let Some(existing) = setup_window.borrow().as_ref()
+                        && existing
+                            .show(invitation.clone(), cx)
+                            .is_ok()
+                    {
+                        return;
+                    }
+                    *setup_window.borrow_mut() = onboarding::open(
                         onboarding_runtime.clone(),
                         onboarding_operations.clone(),
                         invitation,
