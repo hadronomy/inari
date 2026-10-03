@@ -220,8 +220,11 @@ async fn enrollment_migrations_retire_claims_and_retain_key_history() {
     .execute(&pool)
     .await
     .unwrap();
-    // Stop before the atomic enrollment migration, which is the latest one.
-    let before_atomic_enrollment = u32::try_from(Migrator::migrations().len() - 7).unwrap();
+    let atomic_migration = Migrator::migrations()
+        .iter()
+        .position(|migration| migration.name() == "m20261003_223034_atomic_enrollment")
+        .unwrap();
+    let before_atomic_enrollment = u32::try_from(atomic_migration - 6).unwrap();
     Migrator::up(&database, Some(before_atomic_enrollment))
         .await
         .unwrap();
@@ -682,4 +685,42 @@ async fn enrollment_consumes_invitations_atomically() {
     assert!(matches!(blocked.await.unwrap(), Err(GatewayError::Forbidden(_))));
     assert!(!issued.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(count(&pool, "SELECT count(*) FROM agents WHERE agent_id = 'agt_blocked'").await, 0);
+
+    let code = live_invitation(&repository).await;
+    let record = enrollment("agt_replay_expiry", jwk(97, false), jwk(98, true));
+    enroll(&repository, &code, record.clone(), &prepared)
+        .await
+        .unwrap();
+    let expires_at = Utc::now() + chrono::Duration::seconds(2);
+    set_expiry(&pool, &code, expires_at).await;
+    let mut holder = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM agents WHERE agent_id = 'agt_replay_expiry' FOR UPDATE")
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    let issued = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let replay = tokio::spawn({
+        let repository = repository.clone();
+        let issued = issued.clone();
+        async move {
+            repository
+                .enroll_agent(&code, record, &snapshot(), LIMIT, move || {
+                    issued.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                })
+                .await
+        }
+    });
+    assert!(lock_wait(&pool, &replay).await);
+    tokio::time::sleep(
+        (expires_at - Utc::now())
+            .to_std()
+            .unwrap_or_default()
+            + Duration::from_millis(50),
+    )
+    .await;
+    holder.commit().await.unwrap();
+    assert!(matches!(replay.await.unwrap(), Err(GatewayError::Forbidden(_))));
+    assert!(!issued.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(enrolled_audits(&pool, "agt_replay_expiry").await, 1);
 }

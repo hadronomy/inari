@@ -39,7 +39,7 @@ impl GatewayRepository {
     /// The invitation row stays locked from secret verification to commit, and
     /// the enrollment time is read after that lock is held. `prepare` runs
     /// after the secret, attempt limit, expiry, Organization, Site, and
-    /// invitation state pass, and before any write. It holds the lock, so it
+    /// invitation state pass, and before enrollment writes. It holds the lock, so it
     /// must not wait on the network. An error from `prepare` or from a write
     /// rolls back the whole enrollment and the invitation stays `created`. A
     /// wrong secret is the one rejection that commits: the attempt counts
@@ -127,6 +127,9 @@ impl GatewayRepository {
                 let enrolled_at =
                     replayed_enrollment(&transaction, &invitation, &enrollment, &fingerprint)
                         .await?;
+                if Utc::now() >= utc_time(invitation.expires_at) {
+                    return Err(unavailable());
+                }
                 let value = prepare()?;
                 transaction.commit().await?;
                 Ok(PreparedEnrollment { value, enrolled_at })
