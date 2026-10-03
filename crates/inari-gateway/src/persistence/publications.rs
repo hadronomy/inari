@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
+    QuerySelect, TransactionTrait,
 };
 
 use super::entity::value::{
@@ -24,14 +24,12 @@ impl GatewayRepository {
         message: &AgentPublication,
         now: DateTime<Utc>,
     ) -> GatewayResult<()> {
-        if agent::Entity::find_by_id(agent_id)
-            .one(&self.database)
-            .await?
-            .is_none()
-        {
-            return Err(GatewayError::NotFound(format!("Agent {agent_id} is not enrolled")));
-        }
         let transaction = self.database.begin().await?;
+        let current_agent = agent::Entity::find_by_id(agent_id)
+            .lock_shared()
+            .one(&transaction)
+            .await?
+            .ok_or_else(|| GatewayError::NotFound(format!("Agent {agent_id} is not enrolled")))?;
         publication::Entity::insert(publication::ActiveModel {
             message_id: Set(message.message_id().to_owned()),
             agent_id: Set(agent_id.to_owned()),
@@ -70,6 +68,11 @@ impl GatewayRepository {
                     invitation::COLUMN
                         .bound_agent_id
                         .eq(agent_id),
+                )
+                .filter(
+                    invitation::COLUMN
+                        .enrolled_at
+                        .eq(current_agent.last_enrolled_at),
                 )
                 .filter(
                     invitation::COLUMN
