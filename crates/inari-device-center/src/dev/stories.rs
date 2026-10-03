@@ -362,6 +362,7 @@ story! {
         let input = invitation(window, cx);
 
         let snapshot_for = |stage, devices| SetupSnapshot {
+            restart_required: false,
             access: SetupAccess::Required,
             stage,
             completed_at: None,
@@ -377,6 +378,11 @@ story! {
                 .collect(),
         );
         let connecting = snapshot_for(SetupStage::Connecting, Vec::new());
+        let restart = SetupSnapshot {
+            restart_required: true,
+            guidance: Some("Restart Inari to apply the secure connection.".into()),
+            ..snapshot_for(SetupStage::Securing, Vec::new())
+        };
         let failed = snapshot_for(SetupStage::Failed, Vec::new());
 
         let selected = selecting
@@ -408,6 +414,15 @@ story! {
                 invitation_snapshot,
                 input.clone(),
                 Some(preview),
+                None,
+                false,
+                Default::default(),
+                onboarding.clone(),
+            )))
+            .child(Section::new("Restart required").child(SetupView::new(
+                restart,
+                input.clone(),
+                None,
                 None,
                 false,
                 Default::default(),

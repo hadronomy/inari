@@ -23,8 +23,8 @@ use inari_agent_client::{
 
 use crate::{
     app::{
-        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RetryConnection,
-        StartOver,
+        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RestartAgentService,
+        RetryConnection, StartOver,
     },
     onboarding::Onboarding,
     ui::{
@@ -76,6 +76,8 @@ impl RenderOnce for SetupView {
         let stage = self.snapshot.stage;
         let access = self.snapshot.access;
         let working = self.working;
+        let restart_required = self.snapshot.restart_required;
+        let has_error = self.error.is_some();
         let has_preview = self.preview.is_some();
         let selected_count = self.selected_devices.len();
         // Parse the field as it stands, right here: the parse check, the
@@ -136,11 +138,16 @@ impl RenderOnce for SetupView {
                     .when_some(self.snapshot.guidance, |view, guidance| {
                         let (title, tone) = if access == SetupAccess::Unknown {
                             ("Device Center cannot reach the agent", Tone::Caution)
+                        } else if restart_required {
+                            ("Restart required", Tone::Caution)
+                        } else if matches!(stage, SetupStage::Securing | SetupStage::Connecting) {
+                            (
+                                "Connection progress",
+                                if working { Tone::Busy } else { Tone::Neutral },
+                            )
+                        } else if stage == SetupStage::Failed {
+                            ("Connection failed", Tone::Critical)
                         } else {
-                            // Neutral, not busy: nothing is under way here. The
-                            // computer is waiting for a person to paste a link,
-                            // and a busy tone would promise progress that is not
-                            // happening.
                             ("Connection required", Tone::Neutral)
                         };
                         view.child(Banner::new("setup-status", tone, title, guidance))
@@ -207,7 +214,33 @@ impl RenderOnce for SetupView {
                             )
                         },
                     )
-                    .when(stage == SetupStage::Devices, |view| {
+                    .when(access == SetupAccess::Required && restart_required, |view| {
+                        view.child(action_button(
+                            "restart-agent-for-setup",
+                            if working { "Restarting Agent" } else { "Restart Agent" },
+                            IconName::Redo2,
+                            working,
+                            RestartAgentService,
+                            true,
+                        ))
+                    })
+                    .when(
+                        access == SetupAccess::Required
+                            && !restart_required
+                            && matches!(stage, SetupStage::Securing | SetupStage::Connecting)
+                            && has_error,
+                        |view| {
+                            view.child(action_button(
+                                "check-setup-progress",
+                                "Check again",
+                                IconName::Redo2,
+                                working,
+                                RetryConnection,
+                                true,
+                            ))
+                        },
+                    )
+                    .when(stage == SetupStage::Devices && !restart_required, |view| {
                         let center = self.center.clone();
                         let selected_devices = self.selected_devices.clone();
                         let device_count = self.snapshot.devices.len();
@@ -306,7 +339,7 @@ impl RenderOnce for SetupView {
                     .when(access == SetupAccess::Unknown, |view| {
                         view.child(div().child(action_button(
                             "retry-agent",
-                            if working { "Checking" } else { "Try again" },
+                            if working { "Checking" } else { "Check again" },
                             IconName::Redo2,
                             working,
                             RetryConnection,
@@ -449,6 +482,11 @@ fn copy_for(snapshot: &SetupSnapshot) -> (&'static str, &'static str, &'static s
             "Device Center is checking the agent service on this computer.",
         ),
         SetupAccess::Required => match snapshot.stage {
+            _ if snapshot.restart_required => (
+                "Apply the secure connection",
+                "Restart Inari to continue",
+                "Your invitation is saved. Restart the Agent service to apply the connection. Device Center stays open.",
+            ),
             SetupStage::Invitation => (
                 "Set up Inari",
                 "Connect this computer",

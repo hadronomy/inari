@@ -257,7 +257,7 @@ class ManagedOnboardingService:
         ):
             return OnboardingStatus(
                 phase=OnboardingPhase.RESTART_REQUIRED,
-                detail="Restarting Inari to apply the secure connection.",
+                detail="Restart Inari to apply the secure connection.",
                 restart_required=True,
                 **common,
             )

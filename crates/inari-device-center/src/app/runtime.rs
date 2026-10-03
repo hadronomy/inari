@@ -81,6 +81,11 @@ impl DeviceCenter {
                                                 Some(invitation) => {
                                                     center.open_link(&invitation, window, cx);
                                                 },
+                                                None if center.setup.access
+                                                    == SetupAccess::Required =>
+                                                {
+                                                    (center.open_onboarding)(None, cx);
+                                                },
                                                 None => platform::show_window(window, cx),
                                             }
                                         },
@@ -119,7 +124,19 @@ impl DeviceCenter {
                 match command {
                     TrayCommand::Open | TrayCommand::ReviewSetup => {
                         window_handle
-                            .update(cx, |_, window, cx| platform::show_window(window, cx))
+                            .update(cx, |_, window, cx| {
+                                if let Some(center) = center.upgrade() {
+                                    center.update(cx, |center, cx| {
+                                        if command == TrayCommand::ReviewSetup
+                                            || center.setup.access == SetupAccess::Required
+                                        {
+                                            (center.open_onboarding)(None, cx);
+                                        } else {
+                                            platform::show_window(window, cx);
+                                        }
+                                    });
+                                }
+                            })
                             .ok();
                     },
                     TrayCommand::OpenLogs => open_logs(),

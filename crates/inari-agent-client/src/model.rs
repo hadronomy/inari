@@ -107,6 +107,7 @@ pub enum SetupStage {
 pub struct SetupSnapshot {
     pub access: SetupAccess,
     pub stage: SetupStage,
+    pub restart_required: bool,
     pub completed_at: Option<DateTime<Utc>>,
     pub guidance: Option<String>,
     pub devices: Vec<Device>,
@@ -126,6 +127,7 @@ impl SetupSnapshot {
         Self {
             access: SetupAccess::Required,
             stage: SetupStage::Invitation,
+            restart_required: false,
             completed_at: None,
             guidance: None,
             devices: Vec::new(),
@@ -142,6 +144,7 @@ impl SetupSnapshot {
         Self {
             access: SetupAccess::Unknown,
             stage: SetupStage::Invitation,
+            restart_required: false,
             completed_at: None,
             guidance: Some(guidance.into()),
             devices: Vec::new(),
@@ -218,7 +221,10 @@ impl TryFrom<transport::types::ManagedOnboardingStatusResponse> for SetupSnapsho
     ) -> Result<Self, Self::Error> {
         use transport::types::Phase;
 
-        let access = if response.completed_at.is_some() {
+        let restart_required = response
+            .restart_required
+            .unwrap_or_default();
+        let access = if response.completed_at.is_some() && !restart_required {
             SetupAccess::Complete
         } else {
             SetupAccess::Required
@@ -240,7 +246,14 @@ impl TryFrom<transport::types::ManagedOnboardingStatusResponse> for SetupSnapsho
             .into_iter()
             .map(map_device)
             .collect::<AgentClientResult<Vec<_>>>()?;
-        Ok(Self { access, stage, completed_at: response.completed_at, guidance, devices })
+        Ok(Self {
+            access,
+            stage,
+            restart_required,
+            completed_at: response.completed_at,
+            guidance,
+            devices,
+        })
     }
 }
 
@@ -375,5 +388,37 @@ mod tests {
                 .access,
             SetupAccess::Complete
         );
+    }
+
+    #[test]
+    fn restart_requirement_is_preserved_without_reading_guidance() {
+        for required in [false, true] {
+            let response: transport::types::ManagedOnboardingStatusResponse =
+                serde_json::from_value(serde_json::json!({
+                    "phase": "securing_connection", "detail": "Localized operator text",
+                    "restart_required": required,
+                }))
+                .unwrap();
+            let snapshot = SetupSnapshot::try_from(response).unwrap();
+            assert_eq!(snapshot.restart_required, required);
+            assert_eq!(snapshot.stage, SetupStage::Securing);
+            assert_eq!(snapshot.access, SetupAccess::Required);
+        }
+    }
+
+    #[test]
+    fn a_pending_restart_keeps_a_previous_completion_blocked() {
+        let response: transport::types::ManagedOnboardingStatusResponse =
+            serde_json::from_value(serde_json::json!({
+                "phase": "restart_required", "detail": "Restart Inari.",
+                "restart_required": true,
+                "completed_at": "2026-07-17T10:00:00Z",
+            }))
+            .unwrap();
+        let snapshot = SetupSnapshot::try_from(response).unwrap();
+        assert!(snapshot.completed_at.is_some());
+        assert!(snapshot.restart_required);
+        assert_eq!(snapshot.access, SetupAccess::Required);
+        assert_eq!(snapshot.stage, SetupStage::Securing);
     }
 }
