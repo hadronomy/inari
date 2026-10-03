@@ -285,3 +285,7 @@ package depends on them.
 Microsoft’s [App Installer troubleshooting guide](https://learn.microsoft.com/windows/msix/app-installer/troubleshoot-appinstaller-issues)
 and [MSIX signing overview](https://learn.microsoft.com/windows/msix/package/signing-package-overview)
 describe the Windows trust behavior used here.
+
+Device Center connects to the local Agent through loopback. The Agent Endpoint
+hostname stays in the HTTPS request and TLS certificate check. Local requests
+do not use proxy settings or the hostname’s LAN or overlay address.

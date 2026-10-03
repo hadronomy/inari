@@ -64,6 +64,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn certificate_hostname_uses_loopback_without_changing_the_host_header() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let endpoint: Url = format!("http://agent.fixture.invalid:{port}/")
+            .parse()
+            .unwrap();
+        let client = AgentClient::new(
+            AgentClientOptions {
+                endpoint: Some(endpoint.clone()),
+                ..AgentClientOptions::default()
+            },
+            crate::LocalIdentityStore,
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, peer) = listener.accept().await.unwrap();
+            assert!(peer.ip().is_loopback());
+            let mut bytes = [0; 4096];
+            let count = stream.read(&mut bytes).await.unwrap();
+            let request = std::str::from_utf8(&bytes[..count])
+                .unwrap()
+                .to_owned();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .await
+                .unwrap();
+            request
+        });
+        client
+            .http
+            .post(
+                endpoint
+                    .join("auth/local-challenge")
+                    .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        let request = server.await.unwrap();
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains(&format!("host: agent.fixture.invalid:{port}\r\n"))
+        );
+    }
+
+    #[tokio::test]
     async fn communication_errors_report_an_unavailable_agent() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -107,6 +159,8 @@ impl AgentClient {
         identity: impl IdentityStore + 'static,
     ) -> AgentClientResult<Self> {
         let http = reqwest::Client::builder()
+            .no_proxy()
+            .dns_resolver(Arc::new(crate::local_transport::LoopbackResolver))
             .redirect(reqwest::redirect::Policy::none())
             .timeout(options.request_timeout)
             .build()
@@ -126,6 +180,7 @@ impl AgentClient {
     pub async fn endpoint(&self) -> AgentClientResult<Url> {
         let mut endpoint = self.endpoint.lock().await;
         if let Some(endpoint) = endpoint.as_ref() {
+            crate::local_transport::socket_address(endpoint)?;
             return Ok(endpoint.clone());
         }
         let resolved = match self.pairing_mode {
@@ -143,6 +198,7 @@ impl AgentClient {
                 }
             },
         };
+        crate::local_transport::socket_address(&resolved)?;
         *endpoint = Some(resolved.clone());
         Ok(resolved)
     }
@@ -308,6 +364,8 @@ impl AgentClient {
         authorization.set_sensitive(true);
         headers.insert(AUTHORIZATION, authorization);
         let http = reqwest::Client::builder()
+            .no_proxy()
+            .dns_resolver(Arc::new(crate::local_transport::LoopbackResolver))
             .redirect(reqwest::redirect::Policy::none())
             .default_headers(headers)
             .timeout(self.request_timeout)
