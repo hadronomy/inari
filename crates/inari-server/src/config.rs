@@ -37,6 +37,7 @@ const ENV_LIST_KEYS: &[&str] = &[
     "http.cors.allow_headers",
     "http.cors.expose_headers",
     "identity.oidc.scopes",
+    "identity.oidc.additional_id_token_audiences",
     "managed_gateway.controller_actions",
     "managed_gateway.supported_protocol_versions",
     "managed_gateway.data_plane.connect_endpoints",

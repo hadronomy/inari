@@ -115,6 +115,8 @@ identity:
   oidc:
     issuerUrl: https://identity.example.com
     clientId: inari-controller
+    # Trust only named additional ID token audiences, such as the ZITADEL project ID.
+    additionalIdTokenAudiences: []
     clientSecret:
       name: inari-oidc
       key: client-secret

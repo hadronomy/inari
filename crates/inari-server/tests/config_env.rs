@@ -43,6 +43,10 @@ fn environment_overrides_cover_every_nested_field() {
         ("INARI_SERVER_IDENTITY__OIDC__ENABLED".into(), "true".into()),
         ("INARI_SERVER_IDENTITY__OIDC__ISSUER_URL".into(), "http://identity.test".into()),
         ("INARI_SERVER_IDENTITY__OIDC__CLIENT_ID".into(), "test-controller".into()),
+        (
+            "INARI_SERVER_IDENTITY__OIDC__ADDITIONAL_ID_TOKEN_AUDIENCES".into(),
+            "trusted-project,trusted-api".into(),
+        ),
         ("INARI_SERVER_IDENTITY__OIDC__ROLE_CLAIM".into(), "roles".into()),
         ("INARI_SERVER_IDENTITY__OIDC__ROLE_MAPPING__ADMIN".into(), "administrator".into()),
         ("INARI_SERVER_MANAGED_GATEWAY__ENABLED".into(), "true".into()),
@@ -77,6 +81,14 @@ fn environment_overrides_cover_every_nested_field() {
     .expect("environment overrides should deserialize");
 
     assert!(loaded.origin.includes_environment);
+    assert_eq!(
+        loaded
+            .settings
+            .identity
+            .oidc
+            .additional_id_token_audiences,
+        ["trusted-project", "trusted-api"]
+    );
     assert_eq!(loaded.settings.server.bind, "127.0.0.1:9000".parse().unwrap());
     assert_eq!(loaded.settings.server.environment, DeploymentEnvironment::Development);
     assert_eq!(loaded.settings.server.request_timeout, Duration::from_secs(45));
