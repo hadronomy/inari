@@ -13,14 +13,14 @@
 use std::time::Duration;
 
 use gpui::{
-    AnimationExt as _, Bounds, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    Styled, canvas, div, fill, point, prelude::FluentBuilder as _, px, size, svg,
+    AnimationExt as _, AnyElement, Bounds, Hsla, IntoElement, ParentElement as _, RenderOnce,
+    SharedString, Styled, canvas, div, fill, point, prelude::FluentBuilder as _, px, size, svg,
 };
 use gpui_component::{Icon, StyledExt as _};
 
 use super::{
     content::Typography as _,
-    effect::Weathered,
+    effect::{self, Weathered},
     icon::{Glyph, Symbol},
     motion,
     motion::CASCADE,
@@ -314,7 +314,10 @@ fn node(
 /// The silhouette is still the one the brand ships — the effect is applied over
 /// the real mark rather than replacing it — so the operator sees the same gate,
 /// left standing too long.
-fn weathered(mark: gpui::Svg, theme: &Theme) -> impl IntoElement {
+fn weathered(mark: gpui::Svg, theme: &Theme) -> AnyElement {
+    if !effect::layers_supported() {
+        return mark.into_any_element();
+    }
     gpui::effect_layer(
         &Weathered { tint: Hsla { a: 0.55, ..theme.text_tertiary }, ..Weathered::default() },
         mark,
@@ -322,6 +325,7 @@ fn weathered(mark: gpui::Svg, theme: &Theme) -> impl IntoElement {
     // The cracks eat inwards from the silhouette, so nothing spreads past it
     // and the layer needs no room around the mark.
     .outset(px(0.0))
+    .into_any_element()
 }
 
 /// The mark as a bulb that is going.
