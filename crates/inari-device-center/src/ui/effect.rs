@@ -268,11 +268,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
         // than that and the tail is cut off at the element's edge, which is
         // the exact artefact the outset exists to remove.
         for radius in [0.5, 2.0, 8.0, 40.0] {
-            assert_eq!(
-                Blur::reach(px(radius)),
-                px(3.0 * (radius / 2.0)),
-                "at radius {radius}"
-            );
+            assert_eq!(Blur::reach(px(radius)), px(3.0 * (radius / 2.0)), "at radius {radius}");
         }
     }
 
@@ -285,10 +281,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
     /// strictest target we have.
     const UNUSED_VARIANTS: EffectDef = EffectDef {
         name: "inari.unused-variants",
-        parameters: &[ParameterDef {
-            name: "mode",
-            kind: ParameterKind::Enum(Pointer::VARIANTS),
-        }],
+        parameters: &[ParameterDef { name: "mode", kind: ParameterKind::Enum(Pointer::VARIANTS) }],
         wgsl: r#"
 fn effect(input: EffectInput) -> vec4<f32> {
     if mode_is_inside(input) {
@@ -306,7 +299,10 @@ fn effect(input: EffectInput) -> vec4<f32> {
                 .unwrap_or_else(|error| panic!("{target:?}: {error:#}"));
             if target == ShaderTarget::Hlsl {
                 println!("--- HLSL for an enum with unused variants ---");
-                for line in source.lines().filter(|line| line.contains("MODE_")) {
+                for line in source
+                    .lines()
+                    .filter(|line| line.contains("MODE_"))
+                {
                     println!("{line}");
                 }
                 println!("--- end ---");

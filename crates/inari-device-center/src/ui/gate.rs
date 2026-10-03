@@ -316,10 +316,7 @@ fn node(
 /// left standing too long.
 fn weathered(mark: gpui::Svg, theme: &Theme) -> impl IntoElement {
     gpui::effect_layer(
-        &Weathered {
-            tint: Hsla { a: 0.55, ..theme.text_tertiary },
-            ..Weathered::default()
-        },
+        &Weathered { tint: Hsla { a: 0.55, ..theme.text_tertiary }, ..Weathered::default() },
         mark,
     )
     // The cracks eat inwards from the silhouette, so nothing spreads past it
@@ -335,11 +332,9 @@ fn weathered(mark: gpui::Svg, theme: &Theme) -> impl IntoElement {
 /// re-renders.
 fn flickering(mark: gpui::Svg) -> impl IntoElement {
     mark.opacity(flicker(WIRE_CLOCK.elapsed().as_secs_f32()))
-        .with_animation(
-            SharedString::from("gate-flicker"),
-            motion::cascade(),
-            move |mark, _| mark.opacity(flicker(WIRE_CLOCK.elapsed().as_secs_f32())),
-        )
+        .with_animation(SharedString::from("gate-flicker"), motion::cascade(), move |mark, _| {
+            mark.opacity(flicker(WIRE_CLOCK.elapsed().as_secs_f32()))
+        })
 }
 
 /// How lit the failing mark is at `t` seconds.
@@ -348,7 +343,9 @@ fn flickering(mark: gpui::Svg) -> impl IntoElement {
 /// contact snaps between levels, and a smooth fade reads as breathing, which is
 /// the animation a healthy gate already has.
 fn flicker(t: f32) -> f32 {
-    let tick = (t * FLICKER_TICKS_PER_SECOND).floor().max(0.0) as u32;
+    let tick = (t * FLICKER_TICKS_PER_SECOND)
+        .floor()
+        .max(0.0) as u32;
     let roll = noise(0x00B0_1BED, tick);
     let level = if roll < FLICKER_OUT_CHANCE {
         FLICKER_OUT

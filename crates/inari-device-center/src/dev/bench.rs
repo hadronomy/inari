@@ -11,10 +11,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, Window, actions, div,
     prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Icon, IconName, StyledExt as _,
-    input::InputState,
-};
+use gpui_component::{Icon, IconName, StyledExt as _, input::InputState};
 
 use crate::{
     dev::{
@@ -62,8 +59,7 @@ impl Bench {
             if matches!(event, gpui_component::input::InputEvent::Focus)
                 || matches!(event, gpui_component::input::InputEvent::Blur)
             {
-                let focused =
-                    matches!(event, gpui_component::input::InputEvent::Focus);
+                let focused = matches!(event, gpui_component::input::InputEvent::Focus);
                 if motion::hover_set(FILTER_FOCUS, focused) {
                     cx.refresh_windows();
                 }
@@ -81,14 +77,25 @@ impl Bench {
     }
 
     fn matching(&self, cx: &App) -> Vec<&'static Story> {
-        let needle = self.filter.read(cx).value().to_lowercase();
+        let needle = self
+            .filter
+            .read(cx)
+            .value()
+            .to_lowercase();
         story::catalog()
             .into_iter()
             .filter(|story| {
                 needle.is_empty()
-                    || story.name.to_lowercase().contains(&needle)
+                    || story
+                        .name
+                        .to_lowercase()
+                        .contains(&needle)
                     || story.id.contains(&needle)
-                    || story.scope.title().to_lowercase().contains(&needle)
+                    || story
+                        .scope
+                        .title()
+                        .to_lowercase()
+                        .contains(&needle)
             })
             .collect()
     }
@@ -162,7 +169,9 @@ impl Render for Bench {
             .on_action(cx.listener(|this, _: &NextStory, _, cx| this.step(1, cx)))
             .on_action(cx.listener(|this, _: &PreviousStory, _, cx| this.step(-1, cx)))
             .on_action(cx.listener(|this, _: &FocusFilter, window, cx| {
-                this.filter.focus_handle(cx).focus(window);
+                this.filter
+                    .focus_handle(cx)
+                    .focus(window);
             }))
             .size_full()
             .v_flex()
@@ -230,7 +239,8 @@ impl Bench {
                         .rounded(px(Theme::RADIUS_CONTROL))
                         .text_size(px(13.0))
                         .when(chosen, |row| {
-                            row.bg(theme.surface_raised).text_color(theme.text)
+                            row.bg(theme.surface_raised)
+                                .text_color(theme.text)
                         })
                         .when(!chosen, |row| {
                             row.text_color(theme.text_secondary)
@@ -251,18 +261,16 @@ impl Bench {
             .border_r_1()
             .border_color(theme.hairline)
             .child(
-                div()
-                    .p(px(Theme::SPACE_SM))
-                    .child(
-                        control::field(&theme, FILTER_KEY.into(), &self.filter)
-                            .child(
-                                Icon::from(IconName::Search)
-                                    .size(px(13.0))
-                                    .flex_none()
-                                    .text_color(theme.text_tertiary),
-                            )
-                            .child(control::editor(&theme, &self.filter)),
-                    ),
+                div().p(px(Theme::SPACE_SM)).child(
+                    control::field(&theme, FILTER_KEY.into(), &self.filter)
+                        .child(
+                            Icon::from(IconName::Search)
+                                .size(px(13.0))
+                                .flex_none()
+                                .text_color(theme.text_tertiary),
+                        )
+                        .child(control::editor(&theme, &self.filter)),
+                ),
             )
             .child(list)
             .into_any_element()

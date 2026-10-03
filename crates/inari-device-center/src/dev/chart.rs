@@ -33,11 +33,7 @@ impl Sample {
     /// band below it: to read as a stack the series have to be totals, and to
     /// be visible the largest has to be drawn first.
     pub fn bands(&self) -> (f64, f64, f64) {
-        (
-            millis(self.total),
-            millis(self.build + self.paint),
-            millis(self.build),
-        )
+        (millis(self.total), millis(self.build + self.paint), millis(self.build))
     }
 }
 
@@ -98,15 +94,6 @@ mod tests {
         assert_eq!(sample(9, 9, 10).rest(), Duration::ZERO);
     }
 
-
-
-
-
-
-
-
-
-
     #[test]
     fn the_bands_are_cumulative_so_a_stacked_area_reads_as_a_stack() {
         let (total, upper, lower) = sample(4, 3, 10).bands();
@@ -116,7 +103,9 @@ mod tests {
 
     #[test]
     fn the_median_and_the_ninety_fifth_tell_slow_apart_from_stuttering() {
-        let mut stuttering: Vec<Sample> = (0..19).map(|_| sample(1, 1, 2)).collect();
+        let mut stuttering: Vec<Sample> = (0..19)
+            .map(|_| sample(1, 1, 2))
+            .collect();
         stuttering.push(sample(40, 20, 64));
         assert_eq!(percentile(&stuttering, 0.5), ms(2));
         assert_eq!(percentile(&stuttering, 1.0), ms(64));
@@ -132,6 +121,4 @@ mod tests {
         let run = [sample(1, 1, 2), sample(10, 8, 20), sample(9, 8, 17)];
         assert_eq!(over_budget(&run), 2);
     }
-
-
 }

@@ -155,7 +155,9 @@ unsafe fn restore_under_pointer(handle: windows::Win32::Foundation::HWND) {
         GetCursorPos(&mut cursor).is_ok() && GetWindowRect(handle, &mut maximised).is_ok()
     };
     if !measured {
-        unsafe { let _ = ShowWindow(handle, SW_RESTORE); }
+        unsafe {
+            let _ = ShowWindow(handle, SW_RESTORE);
+        }
         return;
     }
 
@@ -163,7 +165,9 @@ unsafe fn restore_under_pointer(handle: windows::Win32::Foundation::HWND) {
     let grip = (cursor.x - maximised.left) as f32 / width as f32;
     let depth = cursor.y - maximised.top;
 
-    unsafe { let _ = ShowWindow(handle, SW_RESTORE); }
+    unsafe {
+        let _ = ShowWindow(handle, SW_RESTORE);
+    }
 
     let mut restored = RECT::default();
     if unsafe { GetWindowRect(handle, &mut restored) }.is_err() {

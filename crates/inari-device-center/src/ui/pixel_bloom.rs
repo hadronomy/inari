@@ -6,9 +6,9 @@
 use std::{cell::RefCell, collections::HashMap, time::Instant};
 
 use gpui::{
-    App, InteractiveElement as _, IntoElement, MouseMoveEvent, PaintEffect,
-    ParentElement as _, Pixels, Point, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled, Window, canvas, div, px,
+    App, InteractiveElement as _, IntoElement, MouseMoveEvent, PaintEffect, ParentElement as _,
+    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window,
+    canvas, div, px,
 };
 
 use super::{
