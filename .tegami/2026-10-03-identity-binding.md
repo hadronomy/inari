@@ -29,6 +29,15 @@ The Agent repairs a cached CA against its pin and replaces obsolete certificate
 names when fresh enrollment provides a one-time token. The protected key stays
 unchanged. All CA endpoints require HTTPS.
 
+Managed publication and Device Work now stop when certificate validation fails.
+The Agent closes an existing session and reports the certificate error in setup.
+Controller HTTPS uses separate trust before enrollment. A new invitation replaces
+cached enrollment and old configured credentials without replacing the Agent key.
+Concurrent enrollment calls share one request and preserve newer invitations.
+
+Root bootstrap reads Smallstep's JSON response. Issuance and renewal use the
+canonical Smallstep endpoints and retain the complete intermediate chain.
+
 Upgrade the Agent and Controller together for gateway protocol `2026-10-03`
 before enabling enrollment. Enrollment no longer sends an installed certificate,
 and the Controller migration removes its unused stored certificate column.

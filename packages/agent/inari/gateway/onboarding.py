@@ -22,8 +22,13 @@ from ..runtime.models import utc_now
 from ..security.files import write_text_owner_only
 from ..security.models import GatewayMode
 from ..security.secrets import SecretStore
+from ..security.tls import TlsContextFactory
 from .enrollment.service import UPSTREAM_ENROLLMENT_TOKEN_KEY
-from .models import UpstreamCertificateMode, UpstreamConnectionState
+from .models import (
+    ManagedCertificateState,
+    UpstreamCertificateMode,
+    UpstreamConnectionState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +127,7 @@ class ManagedOnboardingService:
     gateway_service: OnboardingGateway
     device_catalog: DeviceInventory
     status_path: Path
+    tls_context_factory: TlsContextFactory
     http_client_factory: Callable[..., httpx.AsyncClient] = httpx.AsyncClient
 
     async def preview(
@@ -131,7 +137,10 @@ class ManagedOnboardingService:
         controller_url: str | None = None,
     ) -> OnboardingControllerPreview:
         parsed = self.parse_invitation(invitation, controller_url=controller_url)
-        async with self.http_client_factory(timeout=5.0) as client:
+        async with self.http_client_factory(
+            verify=self.tls_context_factory.create_controller_context(),
+            timeout=5.0,
+        ) as client:
             response = await client.get(
                 f"{parsed.controller_url}/api/inari/v1/invitations/{parsed.invite_id}"
             )
@@ -274,6 +283,13 @@ class ManagedOnboardingService:
                 ),
                 **common,
             )
+        rejected_certificate = self._rejected_certificate_detail(upstream)
+        if rejected_certificate is not None:
+            return OnboardingStatus(
+                phase=OnboardingPhase.FAILED,
+                detail=rejected_certificate,
+                **common,
+            )
         if upstream.state in {
             UpstreamConnectionState.AUTH_FAILED,
             UpstreamConnectionState.PROTOCOL_MISMATCH,
@@ -304,6 +320,19 @@ class ManagedOnboardingService:
             detail="This computer is not connected to an Inari server.",
             **common,
         )
+
+    def _rejected_certificate_detail(self, upstream: UpstreamStatus) -> str | None:
+        # A rejected certificate only recovers through a fresh invitation, so
+        # setup needs the operator. Once an invitation is stored, the lifecycle
+        # status still describes the certificate that enrollment will replace.
+        lifecycle = upstream.certificate_lifecycle
+        if (
+            lifecycle is None
+            or lifecycle.state is not ManagedCertificateState.REBOOTSTRAP_REQUIRED
+            or self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY) is not None
+        ):
+            return None
+        return lifecycle.detail
 
     def confirm_devices(
         self,

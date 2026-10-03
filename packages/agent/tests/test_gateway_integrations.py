@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import ssl
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -26,6 +29,7 @@ from inari.gateway.enrollment.auth import (
 )
 from inari.gateway.enrollment.service import (
     UPSTREAM_CERTIFICATE_BOOTSTRAP_TOKEN_KEY,
+    UPSTREAM_ENROLLMENT_TOKEN_KEY,
     GatewayEnrollmentService,
 )
 from inari.gateway.models import (
@@ -37,6 +41,7 @@ from inari.gateway.models import (
     UpstreamEdgeProvider,
     resolve_mutual_tls_policy,
 )
+from inari.gateway.data_plane.zenoh import ZenohGatewayTransport
 from inari.gateway.protocol import GatewaySnapshotPayload
 from inari.security.certificates import CertificateLifecycleService
 from inari.security.certificates.crypto import ManagedCertificateCryptoService
@@ -51,6 +56,166 @@ from inari.security.models import GatewayMode
 from inari.security.policies import SecurityPolicyService
 from inari.security.secrets import MemorySecretStore
 from inari.security.tls import TlsContextFactory
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("replace_invitation", [False, True])
+async def test_enrollment_serializes_requests_and_preserves_a_newer_invitation(
+    tmp_path: Path, replace_invitation: bool
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    requests: list[str] = []
+    secrets = MemorySecretStore()
+    secrets.set_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY, "first-invitation")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.headers["Authorization"])
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, json=_enrollment_response_payload())
+
+    settings = AgentSettings(
+        gateway_mode=GatewayMode.MANAGED,
+        upstream_base_url="https://controller.example.com",
+        upstream_certificate_mode=UpstreamCertificateMode.NONE,
+    )
+    service = GatewayEnrollmentService(
+        settings=settings,
+        identity_service=AgentIdentityService(identity_path=tmp_path / "identity.pem"),
+        secret_store=secrets,
+        tls_context_factory=TlsContextFactory(settings),
+        certificate_service=CertificateLifecycleService(
+            certificate_path=tmp_path / "client.pem",
+            private_key_path=tmp_path / "identity.pem",
+        ),
+        auth_provider=cast(UpstreamAuthProvider, StaticAuthProvider({})),
+        metadata_path=tmp_path / "enrollment.json",
+        snapshot_provider=_gateway_snapshot_payload,
+        http_client_factory=lambda **kwargs: httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), **kwargs
+        ),
+    )
+    first = asyncio.create_task(service.ensure_enrolled())
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    if replace_invitation:
+        secrets.set_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY, "second-invitation")
+        release.set()
+        with pytest.raises(AgentError) as error:
+            await first
+        assert error.value.code == "ENROLLMENT_SUPERSEDED"
+        assert secrets.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY) == "second-invitation"
+        assert not service.metadata_path.exists()
+        assert await service.ensure_enrolled() is not None
+        assert requests == ["Bearer first-invitation", "Bearer second-invitation"]
+    else:
+        second = asyncio.create_task(service.ensure_enrolled())
+        release.set()
+        records = await asyncio.gather(first, second)
+        assert records[0] == records[1]
+        assert requests == ["Bearer first-invitation"]
+
+
+def test_controller_https_excludes_managed_credentials_and_uses_explicit_ca(
+    tmp_path: Path, monkeypatch
+) -> None:
+    key = ec.generate_private_key(ec.SECP256R1())
+    ca = _issue_certificate(
+        subject_name="Explicit Controller CA",
+        issuer_name="Explicit Controller CA",
+        subject_key=key.public_key(),
+        issuer_key=key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=1),
+        is_ca=True,
+    )
+    controller_ca = tmp_path / "controller-ca.pem"
+    controller_ca.write_bytes(ca.public_bytes(serialization.Encoding.PEM))
+    (tmp_path / "upstream-ca.pem").write_text("rejected managed root")
+    (tmp_path / "upstream-client-cert.pem").write_text("rejected client certificate")
+
+    def reject_client_credentials(*args, **kwargs):
+        pytest.fail("Controller HTTPS loaded managed client credentials")
+
+    monkeypatch.setattr(ssl.SSLContext, "load_cert_chain", reject_client_credentials)
+    context = TlsContextFactory(
+        AgentSettings(security_state_dir=tmp_path, tls_ca_path=controller_ca)
+    ).create_controller_context()
+    assert ca.public_bytes(serialization.Encoding.DER) in context.get_ca_certs(
+        binary_form=True
+    )
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname
+
+
+@pytest.mark.anyio
+async def test_closing_zenoh_session_wakes_listener_and_discards_old_commands(
+    tmp_path: Path,
+) -> None:
+    transport = ZenohGatewayTransport(
+        settings=AgentSettings(),
+        certificate_service=CertificateLifecycleService(
+            certificate_path=tmp_path / "client.pem",
+            private_key_path=tmp_path / "key.pem",
+        ),
+    )
+    closed = asyncio.Event()
+    transport._session_closed = closed
+    listener = asyncio.create_task(transport._next_command(closed))
+    await asyncio.sleep(0)
+    await transport.close()
+    assert await asyncio.wait_for(listener, timeout=2) is None
+    transport._command_queue.put_nowait(object())
+    await transport.close()
+    assert transport._command_queue.empty()
+
+
+def test_zenoh_uses_managed_root_and_reopens_after_certificate_renewal(
+    tmp_path: Path,
+) -> None:
+    key = ec.generate_private_key(ec.SECP256R1())
+    ca = _issue_certificate(
+        subject_name="Managed CA",
+        issuer_name="Managed CA",
+        subject_key=key.public_key(),
+        issuer_key=key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=1),
+        is_ca=True,
+    )
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    csr = x509.load_pem_x509_csr(identity.build_csr_pem().encode())
+    store = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=identity.identity_path,
+        ca_path=tmp_path / "managed-root.pem",
+    )
+    store.install_certificate_authority(
+        ca.public_bytes(serialization.Encoding.PEM).decode()
+    )
+    store.install(
+        certificate_pem=_issue_certificate_from_csr(csr, key, issuer_name="Managed CA")
+        .public_bytes(serialization.Encoding.PEM)
+        .decode()
+    )
+    transport = ZenohGatewayTransport(
+        settings=AgentSettings(
+            upstream_trust_client_ca=False, tls_ca_path=tmp_path / "controller-root.pem"
+        ),
+        certificate_service=store,
+    )
+    record = replace(
+        _enrollment_record(), certificate_mode=UpstreamCertificateMode.STEP_CA
+    )
+    config = transport._build_config(record)
+    assert json.loads(config.get_json("transport/link/tls/root_ca_certificate")) == str(
+        store.ca_path
+    )
+    before = transport._session_fingerprint(record)
+    store.install(
+        certificate_pem=_issue_certificate_from_csr(csr, key, issuer_name="Managed CA")
+        .public_bytes(serialization.Encoding.PEM)
+        .decode()
+    )
+    assert transport._session_fingerprint(record) != before
 
 
 @pytest.mark.anyio
@@ -397,8 +562,12 @@ async def test_step_ca_bootstrap_defaults_to_requiring_mtls_after_issuance(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "stored_protocol", [None, "2026-09-06", GATEWAY_PROTOCOL_VERSION]
+)
 async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
     tmp_path: Path,
+    stored_protocol: str | None,
 ) -> None:
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_cert = _issue_certificate(
@@ -483,10 +652,50 @@ async def test_managed_certificate_lifecycle_bootstraps_issues_and_clears_ott(
         ),
     )
 
-    await enrollment_service.ensure_enrolled()
-    certificate = await lifecycle.ensure_current(trigger="test")
+    identity = identity_service.get_or_create_identity()
+    original_key = identity_service.identity_path.read_bytes()
+    initial = await enrollment_service.ensure_enrolled()
+    assert initial is not None
+    assert await lifecycle.ensure_current(trigger="initial") is not None
+    old_csr = x509.load_pem_x509_csr(
+        identity_service.build_csr_pem(uri_sans=("urn:old:configured-san",)).encode()
+    )
+    old_certificate = _issue_certificate_from_csr(old_csr, ca_key)
+    certificate_service.install(
+        certificate_pem=old_certificate.public_bytes(
+            serialization.Encoding.PEM
+        ).decode()
+    )
+    metadata = json.loads(enrollment_service.metadata_path.read_text())
+    if stored_protocol is None:
+        metadata.pop("protocol_version")
+    else:
+        metadata["protocol_version"] = stored_protocol
+    enrollment_service.metadata_path.write_text(json.dumps(metadata))
+    if stored_protocol == GATEWAY_PROTOCOL_VERSION:
+        assert enrollment_service.load_enrollment() is not None
+    else:
+        assert enrollment_service.load_enrollment() is None
+    secret_store.set_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY, "fresh-invitation")
 
+    assert enrollment_service.load_enrollment() is None
+    renewed = await enrollment_service.ensure_enrolled()
+    assert renewed is not None
+    assert http_client.post_calls == 2
+    assert http_client.last_post_headers["Authorization"] == "Bearer fresh-invitation"
+    assert http_client.last_post_json["agent_id"] == identity.agent_id
+    certificate = await lifecycle.ensure_current(enrollment=renewed, trigger="test")
+
+    assert identity_service.identity_path.read_bytes() == original_key
     assert certificate is not None
+    issued = x509.load_pem_x509_certificate(certificate.certificate_path.read_bytes())
+    assert list(
+        issued.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    ) == [
+        x509.UniformResourceIdentifier(
+            identity_service.default_uri_san(identity.agent_id)
+        )
+    ]
     assert lifecycle.current_status().state.value == "valid"
     reloaded = enrollment_service.load_enrollment()
     assert reloaded is not None
@@ -845,6 +1054,9 @@ class FakeTextResponse:
 
     def raise_for_status(self) -> None:
         return None
+
+    def json(self) -> dict[str, str]:
+        return {"ca": self.text}
 
 
 def _issue_certificate(

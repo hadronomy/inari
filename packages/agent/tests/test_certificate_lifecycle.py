@@ -397,7 +397,7 @@ async def test_root_bootstrap_rejects_extra_trust_anchors(
     service.install_certificate_authority(pinned_pem + rogue_pem)
     transport = httpx.MockTransport(
         lambda request: httpx.Response(
-            200, text=pinned_pem + (rogue_pem if bundled_response else "")
+            200, json={"ca": pinned_pem + (rogue_pem if bundled_response else "")}
         )
     )
     provider = StepCaCertificateProvider(
@@ -848,6 +848,9 @@ class FakeAsyncResponse:
 
 
 class FakeTextResponse:
+    def json(self):
+        return {"ca": self.text}
+
     def __init__(self, text: str) -> None:
         self.text = text
         self.status_code = 200
@@ -1044,7 +1047,7 @@ async def test_lifecycle_checks_installed_trust_and_identity_before_use(
         requests.append(request)
         if request.method == "GET":
             assert request.url.path.endswith(_fingerprint(root))
-            return httpx.Response(200, text=root_pem)
+            return httpx.Response(200, json={"ca": root_pem})
         assert fresh_bootstrap and installed == "old_san"
         assert request.url.path.endswith("/sign")
 
@@ -1300,3 +1303,42 @@ async def test_step_ca_preserves_all_intermediates_when_ca_and_chain_are_present
         lower,
         upper,
     ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "payload", [{}, {"ca": None}, {"ca": []}, ["pem"], "plain PEM"]
+)
+async def test_root_bootstrap_requires_the_step_ca_json_contract(
+    tmp_path: Path, payload: object
+) -> None:
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=tmp_path / "key.pem",
+        ca_path=tmp_path / "root.pem",
+    )
+    calls = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        assert request.url.path == "/root/" + "a" * 64
+        assert "authorization" not in request.headers
+        return httpx.Response(200, json=payload)
+
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA
+        ),
+        certificate_service=service,
+        http_client_factory=lambda **kwargs: httpx.AsyncClient(
+            transport=httpx.MockTransport(respond), **kwargs
+        ),
+    )
+    with pytest.raises(TrustBootstrapError, match="JSON response"):
+        await provider.bootstrap_trust(
+            TrustBootstrapRequest(
+                enrollment=_certificate_enrollment(root_fingerprint="a" * 64)
+            )
+        )
+    assert len(calls) == 1
+    assert service.ca_path is not None and not service.ca_path.exists()

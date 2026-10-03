@@ -200,15 +200,8 @@ class SecurityProvider(Provider):
     security_policy_service = provide(SecurityPolicyService)
 
     @provide
-    def tls_context_factory(
-        self,
-        settings: AgentSettings,
-        certificate_lifecycle_service: CertificateLifecycleService,
-    ) -> TlsContextFactory:
-        return TlsContextFactory(
-            settings,
-            certificate_service=certificate_lifecycle_service,
-        )
+    def tls_context_factory(self, settings: AgentSettings) -> TlsContextFactory:
+        return TlsContextFactory(settings)
 
     @provide
     def upstream_auth_provider(

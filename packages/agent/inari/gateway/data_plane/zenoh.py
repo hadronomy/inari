@@ -13,7 +13,11 @@ import zenoh
 from ...config import AgentSettings
 from ...core.exceptions import AgentError
 from ...security.certificates.store import CertificateLifecycleService
-from ..models import GatewayEnrollmentRecord, ZenohDataPlaneAuthKind
+from ..models import (
+    GatewayEnrollmentRecord,
+    UpstreamCertificateMode,
+    ZenohDataPlaneAuthKind,
+)
 from ..protocol import (
     AGENT_PUBLICATION_ADAPTER,
     AgentCommandAcceptedMessage,
@@ -52,6 +56,7 @@ class ZenohGatewayTransport:
         self._lock = asyncio.Lock()
         self._runtime_resources_ready = False
         self._fingerprint: tuple[object, ...] | None = None
+        self._session_closed: asyncio.Event | None = None
         self._command_queue: asyncio.Queue[ControllerCommandMessage] = asyncio.Queue()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -63,15 +68,21 @@ class ZenohGatewayTransport:
         on_connected: Callable[[], Awaitable[None]],
         on_command: Callable[[ControllerCommandMessage], Awaitable[None]],
     ) -> None:
-        await self._ensure_runtime_resources(enrollment)
+        """Deliver Controller commands until this session closes.
+
+        Closing the transport, or reopening it for a different session, ends
+        the run so the caller can admit the next session again.
+        """
+        closed = await self._ensure_runtime_resources(enrollment)
         await on_connected()
         for command in await self._recover_commands_since(
             enrollment=enrollment,
             last_applied_controller_sequence=last_applied_controller_sequence,
         ):
+            if closed.is_set():
+                return
             await on_command(command)
-        while True:
-            command = await self._command_queue.get()
+        while (command := await self._next_command(closed)) is not None:
             await on_command(command)
 
     async def publish_status(
@@ -163,11 +174,12 @@ class ZenohGatewayTransport:
 
     async def _ensure_runtime_resources(
         self, enrollment: GatewayEnrollmentRecord
-    ) -> None:
+    ) -> asyncio.Event:
+        """Open the session and its command resources; return its close signal."""
         async with self._lock:
-            await self._ensure_session_locked(enrollment)
+            closed = await self._ensure_session_locked(enrollment)
             if self._runtime_resources_ready:
-                return
+                return closed
             self._loop = asyncio.get_running_loop()
             keyspace = self._keyspace(enrollment)
             session = self._session
@@ -175,13 +187,36 @@ class ZenohGatewayTransport:
             self._subscriber = await asyncio.to_thread(
                 session.declare_subscriber,
                 keyspace.live_commands(),
-                zenoh.handlers.Callback(self._handle_live_command_sample),
+                zenoh.handlers.Callback(
+                    lambda sample: self._handle_live_command_sample(
+                        sample, closed=closed
+                    )
+                ),
             )
             self._presence_token = await asyncio.to_thread(
                 session.liveliness().declare_token,
                 keyspace.presence(),
             )
             self._runtime_resources_ready = True
+            return closed
+
+    async def _next_command(
+        self, closed: asyncio.Event
+    ) -> ControllerCommandMessage | None:
+        if closed.is_set():
+            return None
+        command = asyncio.ensure_future(self._command_queue.get())
+        stop = asyncio.ensure_future(closed.wait())
+        try:
+            await asyncio.wait({command, stop}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            command.cancel()
+            stop.cancel()
+        if closed.is_set():
+            return None
+        if command.done() and not command.cancelled():
+            return command.result()
+        return None
 
     async def _recover_commands_since(
         self,
@@ -219,24 +254,38 @@ class ZenohGatewayTransport:
         )
         return list(handler)
 
-    async def _ensure_session_locked(self, enrollment: GatewayEnrollmentRecord) -> None:
+    async def _ensure_session_locked(
+        self, enrollment: GatewayEnrollmentRecord
+    ) -> asyncio.Event:
         fingerprint = self._session_fingerprint(enrollment)
-        if self._session is not None and self._fingerprint == fingerprint:
-            return
+        if (
+            self._session is not None
+            and self._session_closed is not None
+            and self._fingerprint == fingerprint
+        ):
+            return self._session_closed
         await self._close_locked()
         config = self._build_config(enrollment)
         self._session = await asyncio.to_thread(self._session_open, config)
         self._fingerprint = fingerprint
+        self._session_closed = asyncio.Event()
+        return self._session_closed
 
     async def _close_locked(self) -> None:
         subscriber = self._subscriber
         presence_token = self._presence_token
         session = self._session
+        session_closed = self._session_closed
         self._subscriber = None
         self._presence_token = None
         self._session = None
+        self._session_closed = None
         self._fingerprint = None
         self._runtime_resources_ready = False
+        if session_closed is not None:
+            session_closed.set()
+        while not self._command_queue.empty():
+            self._command_queue.get_nowait()
         if subscriber is not None:
             await asyncio.to_thread(subscriber.undeclare)
         if presence_token is not None:
@@ -255,7 +304,11 @@ class ZenohGatewayTransport:
             encoding=zenoh.Encoding.APPLICATION_JSON,
         )
 
-    def _handle_live_command_sample(self, sample: Any) -> None:
+    def _handle_live_command_sample(
+        self, sample: Any, *, closed: asyncio.Event
+    ) -> None:
+        if closed.is_set():
+            return
         if getattr(sample, "kind", None) is not zenoh.SampleKind.PUT:
             return
         try:
@@ -266,7 +319,12 @@ class ZenohGatewayTransport:
             return
         if self._loop is None:
             return
-        self._loop.call_soon_threadsafe(self._command_queue.put_nowait, command)
+
+        def deliver() -> None:
+            if not closed.is_set():
+                self._command_queue.put_nowait(command)
+
+        self._loop.call_soon_threadsafe(deliver)
 
     def _history_selector(
         self,
@@ -291,7 +349,7 @@ class ZenohGatewayTransport:
             "connect/endpoints",
             dump_json_payload(list(enrollment.data_plane.connect_endpoints)),
         )
-        root_ca = self._root_ca_path()
+        root_ca = self._root_ca_path(enrollment)
         if root_ca is not None:
             config.insert_json5(
                 "transport/link/tls/root_ca_certificate",
@@ -321,8 +379,16 @@ class ZenohGatewayTransport:
             )
         return config
 
-    def _root_ca_path(self) -> Path | None:
+    def _root_ca_path(self, enrollment: GatewayEnrollmentRecord) -> Path | None:
         _, _, managed_ca_path = self.certificate_service.current_cert_chain()
+        if enrollment.certificate_mode is UpstreamCertificateMode.STEP_CA:
+            if managed_ca_path is None:
+                raise AgentError(
+                    "UPSTREAM_CA_MISSING",
+                    "The managed data plane requires its pinned CA root.",
+                    status_code=503,
+                )
+            return managed_ca_path
         if managed_ca_path is not None and self.settings.upstream_trust_client_ca:
             return managed_ca_path
         return self.settings.tls_ca_path
@@ -331,6 +397,7 @@ class ZenohGatewayTransport:
         self, enrollment: GatewayEnrollmentRecord
     ) -> tuple[object, ...]:
         cert_path, key_path, ca_path = self.certificate_service.current_cert_chain()
+        certificate = self.certificate_service.current_certificate()
         return (
             enrollment.data_plane.session_mode.value,
             tuple(enrollment.data_plane.connect_endpoints),
@@ -340,6 +407,7 @@ class ZenohGatewayTransport:
             str(cert_path) if cert_path is not None else None,
             str(key_path) if key_path is not None else None,
             str(ca_path) if ca_path is not None else None,
+            certificate.serial_number if certificate is not None else None,
             str(self.settings.tls_ca_path)
             if self.settings.tls_ca_path is not None
             else None,

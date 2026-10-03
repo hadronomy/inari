@@ -14,6 +14,8 @@ from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
     ControllerAction,
     GatewayEnrollmentRecord,
+    ManagedCertificateState,
+    ManagedCertificateStatus,
     UpstreamDataPlaneKind,
     UpstreamConnectionState,
     ZenohDataPlaneAuthKind,
@@ -21,7 +23,11 @@ from inari.gateway.models import (
     ZenohSerialization,
     ZenohSessionMode,
 )
-from inari.gateway.protocol import AgentStatusSnapshotMessage, GatewaySnapshotPayload
+from inari.gateway.protocol import (
+    AgentStatusSnapshotMessage,
+    ControllerCancelJobMessage,
+    GatewaySnapshotPayload,
+)
 from inari.gateway.repositories import GatewayRepository
 from inari.gateway.state_events import GatewayStateEventProjector
 from inari.gateway.bridges.runtime import (
@@ -39,6 +45,8 @@ from inari.security.models import GatewayMode
 from inari.security.secrets import MemorySecretStore
 from inari.security.state_keys import AgentStateSigningKeyService
 from inari.core.version import API_VERSION, GATEWAY_PROTOCOL_VERSION
+from inari.security.certificates.lifecycle import ManagedCertificateLifecycleManager
+from tests.factories import StaticCertificateLifecycle, managed_certificate
 
 
 @pytest.mark.anyio
@@ -54,7 +62,10 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
             GatewayEnrollmentService,
             FakeEnrollmentService(None),
         ),
-        certificate_lifecycle_manager=None,
+        certificate_lifecycle_manager=cast(
+            ManagedCertificateLifecycleManager,
+            StaticCertificateLifecycle(managed_certificate(tmp_path / "client.pem")),
+        ),
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
         state_event_projector=GatewayStateEventProjector(
@@ -97,7 +108,10 @@ async def test_connector_marks_online_after_successful_status_sync(
             GatewayEnrollmentService,
             FakeEnrollmentService(enrollment),
         ),
-        certificate_lifecycle_manager=None,
+        certificate_lifecycle_manager=cast(
+            ManagedCertificateLifecycleManager,
+            StaticCertificateLifecycle(managed_certificate(tmp_path / "client.pem")),
+        ),
         snapshot_provider=_snapshot_provider,
         gateway_repository=GatewayRepository(store),
         state_event_projector=GatewayStateEventProjector(
@@ -118,6 +132,74 @@ async def test_connector_marks_online_after_successful_status_sync(
     assert len(transport.status_messages) == 1
     assert isinstance(transport.status_messages[0], AgentStatusSnapshotMessage)
     assert connector.current_status().controller_name == "Controller"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("operation", ["status", "listen", "outbox", "command"])
+@pytest.mark.parametrize(
+    "failure", ["Rejected root pin", "Rejected certificate identity"]
+)
+async def test_connector_closes_transport_before_work_when_certificate_is_rejected(
+    tmp_path: Path, operation: str, failure: str
+) -> None:
+    store = RuntimeStore(_database_path(tmp_path))
+    DatabaseMigrator(store.database_path).ensure_current()
+    repository = GatewayRepository(store)
+    publication = AgentStatusSnapshotMessage(
+        message_id="pending", snapshot=_snapshot_provider()
+    )
+    repository.enqueue_outbound(
+        message_type=publication.type.value,
+        payload=publication.model_dump(mode="json"),
+    )
+    lifecycle = StaticCertificateLifecycle(
+        None,
+        status=ManagedCertificateStatus(
+            state=ManagedCertificateState.REBOOTSTRAP_REQUIRED, detail=failure
+        ),
+    )
+    dispatcher = FakeCommandDispatcher()
+    transport = FakeDataPlaneTransport()
+    enrollment = _enrollment_record()
+    connector = GatewayConnector(
+        settings=AgentSettings(gateway_mode=GatewayMode.MANAGED),
+        enrollment_service=cast(
+            GatewayEnrollmentService, FakeEnrollmentService(enrollment)
+        ),
+        certificate_lifecycle_manager=cast(
+            ManagedCertificateLifecycleManager, lifecycle
+        ),
+        snapshot_provider=_snapshot_provider,
+        gateway_repository=repository,
+        state_event_projector=GatewayStateEventProjector(
+            store=store,
+            signing_keys=AgentStateSigningKeyService(MemorySecretStore()),
+            agent_boot_id="boot_test",
+        ),
+        command_dispatcher=cast(GatewayCommandDispatcher, dispatcher),
+        data_plane_transport=cast(GatewayDataPlaneTransport, transport),
+    )
+    if operation == "status":
+        await connector.sync_once()
+    elif operation == "listen":
+        await connector.listen_once()
+    elif operation == "outbox":
+        await connector.flush_outbox_once()
+    else:
+        await connector._handle_command(
+            ControllerCancelJobMessage(
+                message_id="cancel", command_id="cancel", sequence=1, job_id="job"
+            ),
+            session_enrollment=enrollment,
+        )
+    assert transport.closed
+    assert transport.connections == 0
+    assert not transport.status_messages
+    assert not transport.publications
+    assert dispatcher.cancel_calls == 0
+    assert len(repository.list_pending_outbox()) == 1
+    assert connector.current_status().state is UpstreamConnectionState.DISCONNECTED
+    assert connector.current_status().last_error == failure
 
 
 @pytest.mark.anyio
@@ -163,16 +245,22 @@ class FakeEnrollmentService:
     async def ensure_enrolled(self):
         return self.record
 
+    def load_enrollment(self):
+        return self.record
+
     async def handle_auth_failure(self, enrollment) -> None:
         self.invalidations += 1
 
 
 class FakeCommandDispatcher:
+    def __init__(self) -> None:
+        self.cancel_calls = 0
+
     async def handle_execute_device_command(self, message, *, enrollment) -> None:
         return None
 
     async def handle_cancel_job(self, message, *, enrollment) -> None:
-        return None
+        self.cancel_calls += 1
 
 
 class FakeDataPlaneTransport:
@@ -180,6 +268,7 @@ class FakeDataPlaneTransport:
         self.status_messages = []
         self.publications = []
         self.closed = False
+        self.connections = 0
 
     async def run_forever(
         self,
@@ -190,6 +279,7 @@ class FakeDataPlaneTransport:
         on_command,
     ) -> None:
         del enrollment, last_applied_controller_sequence, on_command
+        self.connections += 1
         await on_connected()
         return None
 

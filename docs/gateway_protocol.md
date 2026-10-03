@@ -237,16 +237,17 @@ The response rules are:
 For `step_ca` enrollment:
 
 1. The Agent requires a valid SHA-256 `root_fingerprint` before any CA request.
-   It fetches exactly one CA root and verifies its fingerprint.
+   It fetches `GET /root/{root_fingerprint}` and reads the JSON `ca` PEM string.
+   It verifies exactly one CA root against that fingerprint.
 2. It submits the same CSR with the controller-minted one-time token to the
-   step-ca sign endpoint.
+   step-ca `POST /sign` endpoint.
 3. It verifies that the returned certificate contains the CSR key, the authorized
    identity, client authentication usage, and `digitalSignature` key usage.
    It verifies the full chain against the pinned root.
 4. It stores the certificate and private key through the protected local
    credential boundary.
 5. It opens Zenoh with mutual TLS.
-6. Later renewals use certificate-backed authentication.
+6. Later renewals use certificate-backed authentication with `POST /renew`.
 
 The CA response supplies untrusted intermediate certificates. It MUST NOT replace
 the pinned root. The Agent stores the verified leaf and intermediate chain for
@@ -254,6 +255,18 @@ mutual TLS and preserves the root that passed fingerprint verification.
 Root bootstrap rejects certificate bundles. Enrollment and renewal TLS trust
 only the pinned root. They MUST NOT add operating-system trust roots or send a
 one-time token before pinned trust is available.
+
+Controller invitation preview and enrollment HTTPS use system trust and the
+explicit Controller CA bundle. They MUST NOT use the managed CA or present a
+managed client certificate. A new operator invitation supersedes cached enrollment
+and configured enrollment credentials. Unsupported cached protocol versions
+require fresh enrollment. Concurrent enrollment callers share one request, and a
+superseded response MUST NOT consume a newer invitation.
+
+Every data-plane operation requires a current certificate lifecycle result.
+Validation failure closes an existing session before publication or Device Work.
+Commands from a superseded enrollment MUST NOT execute under the new enrollment.
+Certificate renewal opens a new session with the renewed certificate.
 
 The controller mints the one-time CA token only after it has verified the
 invitation and CSR. It MUST NOT persist or reuse that token.

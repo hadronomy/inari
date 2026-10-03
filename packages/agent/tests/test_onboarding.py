@@ -26,6 +26,7 @@ from inari.security.models import (
     GatewaySecurityPolicy,
 )
 from inari.security.secrets import MemorySecretStore
+from inari.security.tls import TlsContextFactory
 
 INVITE_ID = "ABCDEFGH2345"
 INVITE_CODE = f"INR-{INVITE_ID}-ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567"
@@ -131,6 +132,7 @@ def onboarding_service(tmp_path, *, devices=()):
         gateway_service=StubGatewayService(settings),
         device_catalog=StubDeviceCatalog(tuple(devices)),
         status_path=tmp_path / "security" / "onboarding.json",
+        tls_context_factory=TlsContextFactory(settings),
         http_client_factory=preview_client_factory,
     )
     return service, settings, secret_store, config_path
@@ -326,6 +328,7 @@ def test_setup_completion_survives_agent_restart_and_controller_outage(
         gateway_service=StubGatewayService(settings),
         device_catalog=StubDeviceCatalog(),
         status_path=service.status_path,
+        tls_context_factory=TlsContextFactory(settings),
         http_client_factory=preview_client_factory,
     )
 
