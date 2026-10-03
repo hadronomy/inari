@@ -148,6 +148,7 @@ signing hierarchy.
 - [Release process](docs/releases.md)
 - [Controller database](docs/controller_database.md)
 - [Managed gateway protocol](docs/gateway_protocol.md)
+- [Signed Router policy](docs/router_policy.md)
 - [Managed deployment](docs/managed_gateway_stacks.md)
 - [Zenoh HTTP compatibility](docs/zenoh_rest_axum.md)
 - [Odoo print compatibility](docs/odoo-print-behaviours.md)
