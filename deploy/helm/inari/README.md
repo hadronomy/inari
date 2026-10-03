@@ -96,8 +96,13 @@ dropped capabilities, read-only root filesystems, bounded temporary storage,
 and no service-account token. The chart creates no RBAC because the application
 does not call the Kubernetes API.
 
-Pin production images with `image.digest`, `zenoh.image.digest`, and
-`tests.image.digest` when your deployment policy requires immutable artifacts.
+The default `image.digest` selects a signed Controller that understands this
+chart's configuration. A custom Controller image must use an explicit digest or
+tag. To select a tag, clear `image.digest` and set `image.tag`. The chart rejects
+an empty selection.
+
+Pin router and test images with `zenoh.image.digest` and `tests.image.digest`
+when your deployment policy requires immutable artifacts.
 
 ## Upgrades and removal
 

@@ -65,6 +65,14 @@ if helm lint --strict "${CHART}" --set unexpectedValue=true >"${workspace}/inval
 fi
 
 if helm template inari "${CHART}" \
+  --set-string image.tag= \
+  --set-string image.digest= \
+  >"${workspace}/missing-controller-image.log" 2>&1; then
+  printf 'chart accepted an empty Controller image selection\n' >&2
+  exit 1
+fi
+
+if helm template inari "${CHART}" \
   --set database.minConnections=64 \
   --set database.maxConnections=8 \
   >"${workspace}/invalid-database.log" 2>&1; then
@@ -132,6 +140,22 @@ helm template inari "${CHART}" \
   | yq --unwrapScalar '.data["inari-server.toml"]' \
   >"${workspace}/inari-server.toml"
 test -s "${workspace}/inari-server.toml"
+
+helm template inari "${CHART}" \
+  --namespace inari \
+  --values "${CHART}/ci/oidc-audiences-values.yaml" \
+  --show-only templates/configmap.yaml \
+  | yq --unwrapScalar '.data["inari-server.toml"]' \
+  >"${workspace}/oidc-audiences.toml"
+python3 - "${workspace}/inari-server.toml" "${workspace}/oidc-audiences.toml" <<'PYTHON'
+import sys
+import tomllib
+
+for path, audiences in zip(sys.argv[1:], ([], ["trusted-project"]), strict=True):
+    with open(path, "rb") as source:
+        oidc = tomllib.load(source)["identity"]["oidc"]
+    assert oidc["additional_id_token_audiences"] == audiences
+PYTHON
 
 helm template inari "${CHART}" \
   --namespace inari \

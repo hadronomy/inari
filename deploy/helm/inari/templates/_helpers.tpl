@@ -67,7 +67,7 @@ app.kubernetes.io/component: {{ .component }}
 
 {{/* Controller image reference. */}}
 {{- define "inari.controllerImage" -}}
-{{- include "inari.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "digest" .Values.image.digest "defaultTag" .Chart.AppVersion) -}}
+{{- include "inari.image" (dict "repository" .Values.image.repository "tag" .Values.image.tag "digest" .Values.image.digest "defaultTag" "") -}}
 {{- end }}
 
 {{/* Zenoh image reference. */}}
@@ -101,6 +101,9 @@ app.kubernetes.io/component: {{ .component }}
 
 {{/* Cross-field invariants JSON Schema cannot express portably. */}}
 {{- define "inari.validateValues" -}}
+{{- if not (or .Values.image.digest .Values.image.tag) -}}
+{{- fail "image.digest or image.tag must select a compatible Controller image" -}}
+{{- end -}}
 {{- if gt (int .Values.database.minConnections) (int .Values.database.maxConnections) -}}
 {{- fail "database.minConnections must not exceed database.maxConnections" -}}
 {{- end -}}
