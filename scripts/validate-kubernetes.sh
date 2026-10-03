@@ -135,22 +135,6 @@ test -s "${workspace}/inari-server.toml"
 
 helm template inari "${CHART}" \
   --namespace inari \
-  --values "${CHART}/ci/oidc-audiences-values.yaml" \
-  --show-only templates/configmap.yaml \
-  | yq --unwrapScalar '.data["inari-server.toml"]' \
-  >"${workspace}/oidc-audiences.toml"
-python3 - "${workspace}/inari-server.toml" "${workspace}/oidc-audiences.toml" <<'PYTHON'
-import sys
-import tomllib
-
-for path, audiences in zip(sys.argv[1:], ([], ["trusted-project"]), strict=True):
-    with open(path, "rb") as source:
-        oidc = tomllib.load(source)["identity"]["oidc"]
-    assert oidc["additional_id_token_audiences"] == audiences
-PYTHON
-
-helm template inari "${CHART}" \
-  --namespace inari \
   --values "${CHART}/ci/managed-work-values.yaml" \
   --show-only templates/configmap.yaml \
   | yq --unwrapScalar '.data["inari-server.toml"]' \

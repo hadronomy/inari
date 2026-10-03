@@ -243,11 +243,6 @@
           "properties": {
             "issuerUrl": { "$ref": "#/definitions/httpsUrl" },
             "clientId": { "type": "string", "minLength": 1 },
-            "additionalIdTokenAudiences": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$" }
-            },
             "clientSecret": { "$ref": "#/definitions/secretKeyReference" },
             "scopes": {
               "type": "array",

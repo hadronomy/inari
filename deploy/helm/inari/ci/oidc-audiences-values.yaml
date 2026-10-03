@@ -1,4 +1,0 @@
-identity:
-  oidc:
-    additionalIdTokenAudiences:
-      - trusted-project

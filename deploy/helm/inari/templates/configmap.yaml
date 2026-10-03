@@ -49,7 +49,6 @@ data:
     enabled = true
     issuer_url = {{ .Values.identity.oidc.issuerUrl | quote }}
     client_id = {{ .Values.identity.oidc.clientId | quote }}
-    additional_id_token_audiences = {{ .Values.identity.oidc.additionalIdTokenAudiences | toJson }}
     client_secret_file = "/var/run/secrets/inari/oidc/client-secret"
     scopes = {{ .Values.identity.oidc.scopes | toJson }}
     role_claim = {{ .Values.identity.oidc.roleClaim | quote }}

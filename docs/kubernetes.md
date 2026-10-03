@@ -116,8 +116,9 @@ it from a cloud load balancer.
 
 Some OIDC providers include additional audiences in ID tokens. ZITADEL includes
 the application project ID. Put each trusted identifier in
-`identity.oidc.additionalIdTokenAudiences`. The default is an empty list.
-The token must still include `identity.oidc.clientId`. For multiple audiences,
+`identity.oidc.additional_id_token_audiences` in the Controller TOML configuration.
+The default is an empty list.
+The token must still include `identity.oidc.client_id`. For multiple audiences,
 its `azp` claim must identify that client. The Controller rejects other audiences
 and checks the token signature, exact issuer, expiry, and login nonce.
 This setting does not change the Managed Workload Interface audience.
