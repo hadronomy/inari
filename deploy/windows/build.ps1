@@ -312,7 +312,7 @@ $Fxc = Require-WindowsSdkCommand "fxc.exe"
 $OsslSignCode = Require-Command "osslsigncode"
 $Syft = Require-Command "syft"
 $Uv = Require-Command "uv"
-$Cargo = Require-Command "cargo"
+$Mbx = Require-Command "mbx"
 $SigningPfx = Require-Environment "INARI_SIGNING_PFX"
 $SigningPassword = Require-Environment "INARI_SIGNING_PASSWORD"
 $RootCertificate = Require-Environment "INARI_CODE_SIGNING_ROOT_CERT"
@@ -459,7 +459,7 @@ try {
 
     Write-Host "Building the native GPUI Device Center."
     $env:GPUI_FXC_PATH = $Fxc
-    & $Cargo build --locked --release --package inari-device-center
+    & $Mbx build --locked --release --package inari-device-center
     Assert-NativeCommandSucceeded $LASTEXITCODE "Device Center build"
     $DeviceCenterExecutable = Join-Path $WorkspaceRoot "target\release\InariDeviceCenter.exe"
     if (-not (Test-Path -LiteralPath $DeviceCenterExecutable -PathType Leaf)) {
