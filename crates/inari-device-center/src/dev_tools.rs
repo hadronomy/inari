@@ -850,12 +850,20 @@ fn blurred_sample(radius: f32) -> impl IntoElement {
         .gap(px(Theme::SPACE_XS))
         .w(px(150.0))
         .child(div().text_body().child("Copied"))
-        .child(div().text_caption().child("A halo here means the taps are summing straight alpha."));
+        .child(
+            div()
+                .text_caption()
+                .child("A halo here means the taps are summing straight alpha."),
+        );
 
     div()
         .v_flex()
         .gap(px(Theme::SPACE_SM))
-        .child(div().text_caption().child(format!("blur({radius}px)")))
+        .child(
+            div()
+                .text_caption()
+                .child(format!("blur({radius}px)")),
+        )
         .child(effect::blurred(radius, sample))
 }
 

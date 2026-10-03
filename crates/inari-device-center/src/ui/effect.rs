@@ -11,7 +11,7 @@
 //! failing `mbx test` here instead.
 
 use gpui::effect::Effect;
-use gpui::{Hsla, IntoElement, Pixels, effect_layer, px};
+use gpui::{AnyElement, Hsla, IntoElement, Pixels, effect_layer, px};
 
 /// Film grain, to dither the banding out of large fills and long gradients.
 ///
@@ -141,11 +141,21 @@ impl Blur {
 ///
 /// `radius` is the CSS number. Costs two textures the size of the child plus its
 /// spread, so it is a thing to put on a glyph or a card, not on a scrolling list.
-pub fn blurred(radius: f32, child: impl IntoElement) -> impl IntoElement {
+pub fn blurred(radius: f32, child: impl IntoElement) -> AnyElement {
+    if !layers_supported() {
+        return child.into_any_element();
+    }
     let outset = Blur::reach(radius);
     let across = Blur { radius, axis: 0.0 };
     let down = Blur { radius, axis: 1.0 };
-    effect_layer(&down, effect_layer(&across, child).outset(outset)).outset(outset)
+    effect_layer(&down, effect_layer(&across, child).outset(outset))
+        .outset(outset)
+        .into_any_element()
+}
+
+/// The pinned Blade renderer discards captured subtrees instead of drawing them.
+pub fn layers_supported() -> bool {
+    cfg!(any(target_os = "macos", target_os = "windows"))
 }
 
 /// Register every effect the application owns.
