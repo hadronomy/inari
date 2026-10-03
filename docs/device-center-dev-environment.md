@@ -146,7 +146,7 @@ other, the inspector works inside it for free, because inspection is a
 the apparent duplication:
 
 | Concern | Bench | Application window |
-|---|---|---|
+| --- | --- | --- |
 | Panel host | GPUI inspector dock | GPUI inspector dock |
 | Tool set | the same | the same |
 | Selection model | `InspectorElementId` | `InspectorElementId` |
@@ -206,7 +206,7 @@ Storage is a `Global` keyed by `(story id, label)`. Types are inferred from the
 method, not from the value:
 
 | Call | Control |
-|---|---|
+| --- | --- |
 | `flag(label, bool)` | switch |
 | `range(label, f32, RangeInclusive<f32>)` | slider with a numeric readout |
 | `count(label, usize, RangeInclusive<usize>)` | stepper |
@@ -365,7 +365,7 @@ single change that matters most.
 Tokens (`theme.css:4-45`, `:387-510`):
 
 | Token | Value |
-|---|---|
+| --- | --- |
 | row height / radius | 36px / 8px |
 | surface / hover / active | white at 5% / 10% / 11% |
 | border / border hover | white at 10% / 15% |
@@ -461,7 +461,7 @@ capability, not layout taste.
 ## 7. The growth path, and what each step needs
 
 | Tool | What it needs |
-|---|---|
+| --- | --- |
 | Visual regression | `render_to_image` from `gpui`'s `test-support`, which is not in our feature set, plus a golden-image store and a diff viewer |
 | Repaint / invalidation heatmap | renderer instrumentation — a fork change, since `Scene` is `pub(crate)` |
 | Frame profiler | per-primitive timing out of the Metal and D3D renderers — a fork change |

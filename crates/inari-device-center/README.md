@@ -54,7 +54,7 @@ bottom right of every window; it is the entry point, and it is deliberately
 quiet until the pointer reaches it.
 
 | Shortcut | What it opens |
-|---|---|
+| --- | --- |
 | `cmd-alt-d` / `ctrl-alt-d` | the Bench: the story catalog and the stage |
 | `cmd-alt-i` / `ctrl-alt-i` | the devtools panel on the active window |
 
