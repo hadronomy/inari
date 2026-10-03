@@ -10,7 +10,8 @@ use url::Url;
 
 use crate::{
     AgentClientError, AgentClientResult, AgentEventStream, Device, DeviceId, EnrollmentPreview,
-    InvitationLink, Job, PairingMode, SetupSnapshot,
+    InvitationLink, Job, PairingDecision, PairingMode, PairingRequest, PairingRequestId,
+    SetupSnapshot,
     identity::{ClientIdentity, IdentityStore, create_identity},
     pairing::PairingGrant,
     transport,
@@ -269,6 +270,57 @@ impl AgentClient {
             .await?
             .join("docs")
             .map_err(AgentClientError::invalid_response)
+    }
+
+    /// Read the current request through the native administrator session.
+    pub async fn review_client_pairing(
+        &self,
+        id: &PairingRequestId,
+    ) -> AgentClientResult<PairingRequest> {
+        let transport = self.authorized_transport().await?;
+        let request = PairingRequest::try_from(
+            transport
+                .review_client_pairing_request(id.as_str())
+                .await
+                .map_err(|error| map_transport_error(error.into_untyped()))?
+                .into_inner(),
+        )?;
+        if request.id != *id {
+            return Err(AgentClientError::invalid_response(std::io::Error::other(
+                "Pairing Request identity changed.",
+            )));
+        }
+        Ok(request)
+    }
+
+    /// Save an explicit decision for this request and return its current state.
+    pub async fn decide_client_pairing(
+        &self,
+        id: &PairingRequestId,
+        decision: PairingDecision,
+    ) -> AgentClientResult<PairingRequest> {
+        let transport = self.authorized_transport().await?;
+        let payload = transport::types::PairingDecisionInput {
+            decision: match decision {
+                PairingDecision::Approve => "approve",
+                PairingDecision::Deny => "deny",
+            }
+            .parse()
+            .map_err(AgentClientError::invalid_response)?,
+        };
+        let request = PairingRequest::try_from(
+            transport
+                .decide_client_pairing_request(id.as_str(), &payload)
+                .await
+                .map_err(|error| map_transport_error(error.into_untyped()))?
+                .into_inner(),
+        )?;
+        if request.id != *id {
+            return Err(AgentClientError::invalid_response(std::io::Error::other(
+                "Pairing Request identity changed.",
+            )));
+        }
+        Ok(request)
     }
 
     pub async fn preview(
@@ -665,5 +717,141 @@ mod identity_cache_tests {
 
         assert_eq!(reads.load(Ordering::SeqCst), 1);
         assert_eq!(first.client_id, second.client_id);
+    }
+}
+
+#[cfg(test)]
+mod client_pairing_tests {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    use super::*;
+
+    struct EmptyIdentityStore;
+
+    impl IdentityStore for EmptyIdentityStore {
+        fn load(&self) -> AgentClientResult<Option<ClientIdentity>> {
+            Ok(None)
+        }
+        fn store(&self, _: &ClientIdentity) -> AgentClientResult<()> {
+            Ok(())
+        }
+    }
+
+    async fn fixture(
+        response: transport::types::PairingRequestResponse,
+    ) -> (AgentClient, tokio::task::JoinHandle<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let endpoint = format!("http://{}/", listener.local_addr().unwrap())
+            .parse()
+            .unwrap();
+        let client = AgentClient::new(
+            AgentClientOptions {
+                endpoint: Some(endpoint),
+                pairing_mode: PairingMode::Loopback,
+                request_timeout: Duration::from_secs(2),
+            },
+            EmptyIdentityStore,
+        )
+        .unwrap();
+        *client.token.lock().await = Some(AccessToken {
+            access_token: SecretString::from("pairing-test-token"),
+            expires_at: Utc::now() + ChronoDuration::minutes(5),
+        });
+        let body = serde_json::to_string(&response).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 4096];
+            loop {
+                let count = stream.read(&mut chunk).await.unwrap();
+                assert!(count > 0, "request ended before its body");
+                request.extend_from_slice(&chunk[..count]);
+                if let Some(header_end) = request
+                    .windows(4)
+                    .position(|part| part == b"\r\n\r\n")
+                {
+                    let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or_default();
+                    if request.len() >= header_end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn review_uses_the_authenticated_native_review_route() {
+        let (client, server) = fixture(crate::client_pairing::tests::response("pending")).await;
+        let id = PairingRequestId::parse("req_123").unwrap();
+        let request = client
+            .review_client_pairing(&id)
+            .await
+            .unwrap();
+        assert_eq!(request.id, id);
+        let sent = server.await.unwrap();
+        assert!(sent.starts_with("GET /pairing/v1/requests/req_123/review HTTP/1.1\r\n"));
+        assert!(
+            sent.to_ascii_lowercase()
+                .contains("authorization: bearer pairing-test-token\r\n")
+        );
+    }
+
+    #[tokio::test]
+    async fn decisions_send_only_the_selected_decision_to_the_reviewed_request() {
+        for (decision, value, state) in [
+            (PairingDecision::Approve, "approve", "approved"),
+            (PairingDecision::Deny, "deny", "denied"),
+        ] {
+            let (client, server) = fixture(crate::client_pairing::tests::response(state)).await;
+            let id = PairingRequestId::parse("req_123").unwrap();
+            client
+                .decide_client_pairing(&id, decision)
+                .await
+                .unwrap();
+            let sent = server.await.unwrap();
+            assert!(sent.starts_with("POST /pairing/v1/requests/req_123/decision HTTP/1.1\r\n"));
+            assert!(
+                sent.to_ascii_lowercase()
+                    .contains("authorization: bearer pairing-test-token\r\n")
+            );
+            let body = sent.split_once("\r\n\r\n").unwrap().1;
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(body).unwrap(),
+                serde_json::json!({"decision": value})
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn another_request_identity_cannot_replace_the_reviewed_request() {
+        for decision in [None, Some(PairingDecision::Approve)] {
+            let mut response = crate::client_pairing::tests::response("pending");
+            response.request_id = "req_other".into();
+            let (client, server) = fixture(response).await;
+            let id = PairingRequestId::parse("req_123").unwrap();
+            let result = match decision {
+                None => client.review_client_pairing(&id).await,
+                Some(decision) => {
+                    client
+                        .decide_client_pairing(&id, decision)
+                        .await
+                },
+            };
+            assert!(matches!(result, Err(AgentClientError::InvalidResponse(_))));
+            server.await.unwrap();
+        }
     }
 }
