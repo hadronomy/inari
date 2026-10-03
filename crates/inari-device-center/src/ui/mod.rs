@@ -12,6 +12,7 @@ pub mod gate;
 pub mod icon;
 pub mod material;
 pub mod motion;
+#[cfg(debug_assertions)]
 pub mod pixel_bloom;
 pub mod readout;
 pub mod status;
