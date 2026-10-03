@@ -4,7 +4,8 @@
 image:
   repository: ghcr.io/hadronomy/inari-server
   tag: ""
-  digest: ""
+  # Signed Controller source d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d.
+  digest: sha256:97f67d01db31381354f5cbc8cf896311eacde57788c6e68384618e7da103f21e
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -115,6 +116,8 @@ identity:
   oidc:
     issuerUrl: https://identity.example.com
     clientId: inari-controller
+    # Trust only named additional ID token audiences, such as the ZITADEL project ID.
+    additionalIdTokenAudiences: []
     clientSecret:
       name: inari-oidc
       key: client-secret
