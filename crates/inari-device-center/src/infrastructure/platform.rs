@@ -187,7 +187,7 @@ unsafe fn restore_under_pointer(handle: windows::Win32::Foundation::HWND) {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(test)))]
 fn windows_handle(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
     use raw_window_handle::RawWindowHandle;
 
@@ -196,4 +196,10 @@ fn windows_handle(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
         return None;
     };
     Some(windows::Win32::Foundation::HWND(handle.hwnd.get() as *mut std::ffi::c_void))
+}
+
+// GPUI test windows have no native operating-system handle.
+#[cfg(all(windows, test))]
+fn windows_handle(_: &Window) -> Option<windows::Win32::Foundation::HWND> {
+    None
 }
