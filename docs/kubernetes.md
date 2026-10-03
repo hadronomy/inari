@@ -29,7 +29,8 @@ Prepare these services and credentials before installing the chart:
    limits appropriate for the controller replica count.
 2. An OIDC confidential client. Register
    `https://<controller-host>/auth/callback` exactly and map provider roles to
-   Inari roles.
+   Inari roles. Set `identity.oidc.issuerUrl` to the exact discovery `issuer`
+   value. Preserve its trailing slash when present.
 3. A step-ca JWK provisioner and its encrypted signing key. The controller uses
    it only to mint short-lived, CSR-bound agent tokens.
 4. A controller client certificate for Zenoh.

@@ -9,7 +9,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
 use openidconnect::reqwest;
 use openidconnect::{
-    AccessTokenHash, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
+    AccessTokenHash, AuthorizationCode, ClientId, ClientSecret, CsrfToken, Nonce,
     OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenUrl,
 };
 use secrecy::{ExposeSecret, SecretString};
@@ -119,10 +119,6 @@ impl IdentityService {
             .ok_or_else(|| {
                 AppError::internal("oidc_configuration", "OIDC issuer URL is not configured.")
             })?;
-        let issuer = IssuerUrl::new(issuer.to_string()).map_err(|source| {
-            AppError::internal("oidc_configuration", "OIDC issuer URL is invalid.")
-                .with_source(source)
-        })?;
         let http_client = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
             .build()
