@@ -83,42 +83,6 @@ pub fn catalog() -> Vec<&'static Story> {
     stories
 }
 
-/// Register a story beside the component it previews.
-///
-/// ```ignore
-/// crate::story! {
-///     id: "control.button",
-///     name: "Button",
-///     scope: Scope::Controls,
-///     about: "Every emphasis, with the reporting swap.",
-///     render: |dial, _window, cx| { ... },
-/// }
-/// ```
-///
-/// The `#[cfg]` is inside the macro so a story never needs to remember that a
-/// release build carries no dev surfaces.
-#[macro_export]
-macro_rules! story {
-    (
-        id: $id:expr,
-        name: $name:expr,
-        scope: $scope:expr,
-        about: $about:expr,
-        render: $render:expr $(,)?
-    ) => {
-        #[cfg(debug_assertions)]
-        $crate::dev::story::__inventory::submit! {
-            $crate::dev::story::Story {
-                id: $id,
-                name: $name,
-                scope: $scope,
-                about: $about,
-                render: $render,
-            }
-        }
-    };
-}
-
 /// Reached only through [`story!`], so a caller never needs the dependency in
 /// scope.
 #[doc(hidden)]
