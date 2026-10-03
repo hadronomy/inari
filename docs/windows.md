@@ -223,6 +223,32 @@ the new service refuses startup because it cannot advertise a valid HTTPS name.
 
 ## Troubleshooting
 
+### Setup asks for an Agent restart
+
+After you accept an invitation, Device Center can show **Restart Inari to
+continue**. The Agent saved the connection. Select **Restart Agent** to apply it.
+Device Center remains open during the service restart.
+
+Device Center waits for the native service to stop and start. It then reads
+setup progress until the Agent requests Device selection or reports an error.
+Each native service transition has a 30-second limit. The connection check has
+a 90-second limit. If the connection check stops, select **Check again**.
+If the service restart fails, the restart action remains available.
+If the Agent still requires a restart after the connection check, select
+**Restart Agent** again.
+
+Closing setup hides its window and retains its progress. Select **Review setup**
+from the tray to restore it. Setup completion refreshes the operations window
+and tray before Device Center shows the operations window.
+
+The connection check does not grant Device access. Setup remains required until
+the Agent reports its completion. A stored completion from an earlier
+connection cannot bypass a pending restart.
+
+An automatic connection check never clears a failed credential-store read.
+An explicit restart or retry can clear the Client's cached identity result.
+The saved identity remains in the credential store.
+
 ### App Installer still says “Publisher: Unknown”
 
 Check the two machine stores:

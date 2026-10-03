@@ -3,8 +3,8 @@
 //! Driving enrollment belongs to the onboarding window, which owns the
 //! invitation field and the stage machine. This window only reads the result:
 //! the tray badge and the Overview guidance both depend on whether setup is
-//! complete, so the snapshot is loaded here too rather than passed across a
-//! window boundary that may not exist yet.
+//! complete. The shell reads an initial snapshot and accepts the latest setup
+//! result before the onboarding window hands over.
 
 use std::sync::Arc;
 
@@ -15,6 +15,15 @@ use super::DeviceCenter;
 use crate::infrastructure::{AgentRuntime, SetupResult};
 
 impl DeviceCenter {
+    pub(crate) fn accept_setup(&mut self, snapshot: SetupSnapshot, cx: &mut Context<Self>) {
+        self._setup_task = Self::load_setup(self.runtime.clone(), cx);
+        self.setup = snapshot;
+        if let Some(tray) = &self.tray {
+            tray.set_setup_required(self.setup.access != SetupAccess::Complete);
+        }
+        self.refresh_operational_data(cx);
+        cx.notify();
+    }
     pub(super) fn load_setup(runtime: Arc<AgentRuntime>, cx: &mut Context<Self>) -> Task<()> {
         Self::apply_setup(runtime.setup(), cx)
     }

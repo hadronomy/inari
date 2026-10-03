@@ -5,15 +5,15 @@ use std::{
 
 use inari_agent_client::{
     AgentClient, AgentClientError, AgentClientOptions, AgentClientResult, AgentConnection,
-    AgentEvent, Device, DeviceId, EnrollmentPreview, InvitationLink, Job, LocalAgentService,
-    LocalIdentityStore, PairingDecision, PairingRequest, PairingRequestId, ServiceControlResult,
-    ServiceState, SetupSnapshot,
+    AgentEvent, Device, DeviceId, EnrollmentPreview, IdentityStore, InvitationLink, Job,
+    LocalAgentService, LocalIdentityStore, PairingDecision, PairingRequest, PairingRequestId,
+    ServiceControlResult, ServiceState, SetupSnapshot,
 };
 #[cfg(windows)]
 use tokio::io::AsyncReadExt as _;
 use tokio::{
     runtime::Runtime,
-    sync::{broadcast, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     task::JoinSet,
     time,
 };
@@ -45,8 +45,17 @@ pub struct AgentRuntime {
 
 impl AgentRuntime {
     pub fn start() -> anyhow::Result<Arc<Self>> {
+        let runtime = Self::with_identity_store(LocalIdentityStore)?;
+        runtime.start_event_supervisor();
+        runtime.start_activation_server();
+        Ok(runtime)
+    }
+
+    pub(crate) fn with_identity_store(
+        identity_store: impl IdentityStore + 'static,
+    ) -> anyhow::Result<Arc<Self>> {
         let runtime = Runtime::new()?;
-        let client = AgentClient::new(AgentClientOptions::default(), LocalIdentityStore)?;
+        let client = AgentClient::new(AgentClientOptions::default(), identity_store)?;
         let (updates, _) = broadcast::channel(128);
         let runtime = Arc::new(Self {
             runtime: Mutex::new(Some(runtime)),
@@ -56,8 +65,6 @@ impl AgentRuntime {
             cancellation: CancellationToken::new(),
             updates,
         });
-        runtime.start_event_supervisor();
-        runtime.start_activation_server();
         Ok(runtime)
     }
 
@@ -160,6 +167,32 @@ impl AgentRuntime {
     pub fn restart_service(&self) -> oneshot::Receiver<ServiceControlResult<ServiceState>> {
         let service = self.service.clone();
         self.spawn_future(async move { service.restart().await })
+    }
+
+    pub fn follow_setup(
+        &self,
+        mode: super::SetupProgressMode,
+    ) -> mpsc::Receiver<Result<SetupSnapshot, super::SetupProgressError>> {
+        let client = self.client.clone();
+        let cancellation = self.cancellation.clone();
+        let (updates, receiver) = mpsc::channel(4);
+        self.spawn_owned(async move {
+            if mode != super::SetupProgressMode::Observe {
+                client.forget_identity().await;
+            }
+            tokio::select! {
+                () = cancellation.cancelled() => {},
+                () = super::setup::follow(
+                    || {
+                        let client = client.clone();
+                        async move { client.setup().await }
+                    },
+                    updates, mode == super::SetupProgressMode::AfterRestart,
+                    Duration::from_secs(90), Duration::from_secs(1),
+                ) => {},
+            }
+        });
+        receiver
     }
 
     fn spawn<T, F, Fut>(&self, operation: F) -> oneshot::Receiver<T>
@@ -317,7 +350,7 @@ pub(crate) fn agent_failure_message(error: &AgentClientError) -> &'static str {
             "Device Center stopped asking for its saved sign-in information. Select Check again to allow access."
         },
         AgentClientError::IdentityRequired | AgentClientError::PairingUnavailable(_) => {
-            "Device Center could not create a trusted connection. Restart the agent service, then try again."
+            "Device Center could not create a trusted connection. Select Check again. If this error continues, ask an administrator to verify the Agent installation."
         },
         AgentClientError::InvalidResponse(_) => {
             "The agent returned an invalid response. Restart the agent service."
