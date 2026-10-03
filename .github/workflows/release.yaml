@@ -10,6 +10,10 @@ on:
         description: Build a signed Windows candidate from this branch without publishing a release
         type: boolean
         default: false
+      windows_candidate_sequence:
+        description: Optional alpha sequence for an upgrade of an installed candidate
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -281,12 +285,14 @@ jobs:
       - name: Prepare candidate versions
         if: inputs.windows_candidate
         shell: pwsh
+        env:
+          WINDOWS_CANDIDATE_SEQUENCE: ${{ inputs.windows_candidate_sequence }}
         run: |
           bun install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw "Release dependency installation failed." }
           bun run build:release
           if ($LASTEXITCODE -ne 0) { throw "Release tooling build failed." }
-          node --input-type=module -e 'import { release } from "./tooling/release/dist/index.mjs"; const draft = await release.draft(); if (!draft.hasPending()) throw new Error("A candidate needs pending release changes."); await draft.apply();'
+          node --input-type=module -e 'import { prepareWindowsCandidate } from "./tooling/release/dist/index.mjs"; await prepareWindowsCandidate(process.env.WINDOWS_CANDIDATE_SEQUENCE);'
           if ($LASTEXITCODE -ne 0) { throw "Candidate version preparation failed." }
           mbx update --workspace
           if ($LASTEXITCODE -ne 0) { throw "Candidate Rust lockfile update failed." }
