@@ -11,25 +11,28 @@ use std::collections::HashSet;
 
 use chrono::Local;
 use gpui::{
-    Entity, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce,
-    StatefulInteractiveElement as _, Styled, WeakEntity, div, prelude::FluentBuilder as _, px, svg,
+    AnimationExt as _, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
+    RenderOnce, Styled, WeakEntity, div, prelude::FluentBuilder as _, px, svg,
 };
 use gpui_component::{
-    Disableable as _, IconName, StyledExt as _,
-    button::{Button, ButtonVariants as _},
-    checkbox::Checkbox,
-    input::{Input, InputState},
+    Disableable as _, IconName, StyledExt as _, checkbox::Checkbox, input::InputState,
 };
-use inari_agent_client::{DeviceId, EnrollmentPreview, SetupAccess, SetupSnapshot, SetupStage};
+use inari_agent_client::{
+    DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
+};
 
 use crate::{
     app::{
-        BeginSetup, ConfirmDevices, ContinueWithoutDevices, DeviceCenter, PreviewInvitation,
-        RetryConnection, StartOver,
+        BeginSetup, ConfirmDevices, ContinueWithoutDevices, PreviewInvitation, RetryConnection,
+        StartOver,
     },
+    onboarding::Onboarding,
     ui::{
         banner::Banner,
+        button::Button,
         content::{Field, Section, Typography as _},
+        field::CredentialField,
+        motion,
         status::Tone,
         surface::card,
         theme::{ActiveTheme as _, Theme},
@@ -49,7 +52,7 @@ pub struct SetupView {
     error: Option<String>,
     working: bool,
     selected_devices: HashSet<DeviceId>,
-    center: WeakEntity<DeviceCenter>,
+    center: WeakEntity<Onboarding>,
 }
 
 impl SetupView {
@@ -60,7 +63,7 @@ impl SetupView {
         error: Option<String>,
         working: bool,
         selected_devices: HashSet<DeviceId>,
-        center: WeakEntity<DeviceCenter>,
+        center: WeakEntity<Onboarding>,
     ) -> Self {
         Self { snapshot, invitation_input, preview, error, working, selected_devices, center }
     }
@@ -75,21 +78,27 @@ impl RenderOnce for SetupView {
         let working = self.working;
         let has_preview = self.preview.is_some();
         let selected_count = self.selected_devices.len();
+        // Parse the field as it stands, right here: the parse check, the
+        // submit gate, and the field's own error state are then true the
+        // moment the text is, with no owner state to fall behind. A parse is
+        // local and cheap; the network check stays on the action.
+        let value = self.invitation_input.read(cx).value();
+        let parses = InvitationLink::parse(value.as_str()).is_ok();
+        let empty = value.trim().is_empty();
+        // The field reports a failed attempt on the text itself; a network
+        // failure with a well-formed link leaves it alone.
+        let invalid = self.error.is_some() && !parses && !empty;
 
         div()
             .id("setup")
-            .size_full()
-            .overflow_y_scroll()
+            .v_flex()
+            .w_full()
+            .gap(px(Theme::SPACE_XL))
             .child(
                 div()
                     .v_flex()
                     .w_full()
-                    .max_w(px(600.0))
-                    .mx_auto()
                     .gap(px(Theme::SPACE_XL))
-                    .px(px(Theme::SPACE_2XL))
-                    .pt(px(Theme::SPACE_2XL))
-                    .pb(px(Theme::SPACE_2XL))
                     .child(
                         div()
                             .v_flex()
@@ -128,7 +137,11 @@ impl RenderOnce for SetupView {
                         let (title, tone) = if access == SetupAccess::Unknown {
                             ("Device Center cannot reach the agent", Tone::Caution)
                         } else {
-                            ("Connection required", Tone::Busy)
+                            // Neutral, not busy: nothing is under way here. The
+                            // computer is waiting for a person to paste a link,
+                            // and a busy tone would promise progress that is not
+                            // happening.
+                            ("Connection required", Tone::Neutral)
                         };
                         view.child(Banner::new("setup-status", tone, title, guidance))
                     })
@@ -146,8 +159,9 @@ impl RenderOnce for SetupView {
                             view.child(
                                 Section::new("Invitation link")
                                     .child(
-                                        Input::new(&self.invitation_input)
-                                            .cleanable(true)
+                                        CredentialField::new(self.invitation_input.clone())
+                                            .valid(parses)
+                                            .invalid(invalid)
                                             .disabled(working),
                                     )
                                     .when_some(self.preview, |form, preview| {
@@ -181,7 +195,10 @@ impl RenderOnce for SetupView {
                                                         "Review invitation"
                                                     },
                                                     IconName::Search,
-                                                    working,
+                                                    // An empty field has nothing to
+                                                    // review; the button says so
+                                                    // instead of an error banner.
+                                                    working || empty,
                                                     PreviewInvitation,
                                                     true,
                                                 )
@@ -234,7 +251,7 @@ impl RenderOnce for SetupView {
                                                 .on_click(move |checked, _, cx| {
                                                     center
                                                         .update(cx, |center, cx| {
-                                                            center.set_setup_device_selected(
+                                                            center.set_device_selected(
                                                                 id.clone(),
                                                                 *checked,
                                                                 cx,
@@ -324,11 +341,30 @@ fn stage_track(stage: SetupStage, theme: &Theme) -> impl IntoElement {
                         .enumerate()
                         .map(|(index, _)| {
                             let filled = reached.is_some_and(|current| index <= current);
-                            div()
+                            let segment = div()
                                 .h(px(3.0))
                                 .flex_1()
                                 .rounded_full()
-                                .bg(if filled { theme.accent } else { theme.hairline_strong })
+                                .bg(if filled { theme.accent } else { theme.hairline_strong });
+                            // Only the segment that just became current moves.
+                            // The id carries the stage, so advancing a step
+                            // remounts this one element and replays its fill;
+                            // the segments behind it are settled and hold
+                            // still, which is what makes the motion read as
+                            // "that step completed" rather than as the whole
+                            // track redrawing.
+                            let current = reached.is_some_and(|current| index == current);
+                            if current && motion::enabled() {
+                                segment
+                                    .with_animation(
+                                        ("setup-stage", index),
+                                        motion::settle(),
+                                        |segment, delta| segment.opacity(delta),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                segment.into_any_element()
+                            }
                         }),
                 ),
         )
@@ -351,16 +387,13 @@ fn action_button(
     action: impl gpui::Action,
     primary: bool,
 ) -> Button {
-    let action = Box::new(action);
     Button::new(id)
-        .when(primary, |button| button.primary())
         .when(!primary, |button| button.ghost())
+        .when(primary, |button| button.primary())
         .icon(icon)
         .label(label)
         .disabled(disabled)
-        .on_click(move |_, window, cx| {
-            window.dispatch_action(action.boxed_clone(), cx);
-        })
+        .action(action)
 }
 
 /// What the operator is agreeing to. Rendered before the connect action, never

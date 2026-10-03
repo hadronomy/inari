@@ -21,6 +21,7 @@ use crate::{
         focus,
         gate::Gate,
         icon::Symbol,
+        motion,
         status::{Status, StatusChip, Tone},
         surface::list_card,
         theme::{ActiveTheme as _, Theme},
@@ -114,6 +115,7 @@ impl RenderOnce for OverviewView {
                                 )
                                 .into_any_element()
                             } else {
+                                let attention_count = attention.len();
                                 div()
                                     .v_flex()
                                     .w_full()
@@ -125,12 +127,24 @@ impl RenderOnce for OverviewView {
                                                 .when(index > 0, |row| {
                                                     row.child(row_divider(theme))
                                                 })
-                                                .child(attention_row(
-                                                    index,
-                                                    item,
-                                                    &self.center,
-                                                    theme,
-                                                ))
+                                                .child(
+                                                    attention_row(index, item, &self.center, theme)
+                                                        // Same corner law as the device
+                                                        // rows: the wash is full-bleed,
+                                                        // the mask is rectangular, so the
+                                                        // end rows carry the card's curve.
+                                                        .when(index == 0, |row| {
+                                                            row.rounded_t(px(Theme::RADIUS_CARD))
+                                                        })
+                                                        .when(
+                                                            index == attention_count - 1,
+                                                            |row| {
+                                                                row.rounded_b(px(
+                                                                    Theme::RADIUS_CARD,
+                                                                ))
+                                                            },
+                                                        ),
+                                                )
                                         },
                                     ))
                                     .into_any_element()
@@ -185,11 +199,12 @@ fn attention_row(
     item: Attention,
     center: &WeakEntity<DeviceCenter>,
     theme: &Theme,
-) -> impl IntoElement {
+) -> gpui::Stateful<gpui::Div> {
     let click_target = item.target.clone();
     let key_target = item.target;
     let click_center = center.clone();
     let key_center = center.clone();
+    let fade_key = SharedString::from(format!("attention-{index}"));
     div()
         .id(("attention", index))
         .h_flex()
@@ -204,7 +219,17 @@ fn attention_row(
         .border_1()
         .border_color(gpui::transparent_black())
         .when(focus::visible(), |row| row.focus(|style| style.border_color(theme.focus_ring)))
-        .hover(|row| row.bg(theme.wash_hover))
+        .on_hover({
+            let fade_key = fade_key.clone();
+            move |hovered, window, _| {
+                if motion::hover_set(fade_key.clone(), *hovered) {
+                    // Refresh: request_animation_frame panics outside paint
+                    // (see hover_set).
+                    window.refresh();
+                }
+            }
+        })
+        .bg(motion::hover_blend(fade_key, theme.wash_hover))
         .active(|row| row.bg(theme.wash_pressed))
         .on_click(move |_, _, cx| open(&click_center, &click_target, cx))
         .on_key_down(move |event: &KeyDownEvent, _, cx| {

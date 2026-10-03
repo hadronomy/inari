@@ -54,10 +54,9 @@ def test_native_endpoint_rejects_an_unsafe_or_wrong_listener(endpoint) -> None:
 def test_endpoint_discovery_does_not_issue_or_rotate_pairing_material(mocker) -> None:
     mocker.patch("inari.host_service.windows_pairing.sys.platform", "win32")
     mocker.patch(
-        "inari.host_service.windows_pairing.package_family_for_process",
+        "inari.host_service.windows_pairing._client_package_family",
         return_value="Inari.Test",
     )
-    pipe_api = SimpleNamespace(GetNamedPipeClientProcessId=mocker.Mock(return_value=42))
     file_api = SimpleNamespace(
         ReadFile=mocker.Mock(return_value=(0, b"\x02")),
         WriteFile=mocker.Mock(),
@@ -65,7 +64,7 @@ def test_endpoint_discovery_does_not_issue_or_rotate_pairing_material(mocker) ->
     )
     mocker.patch(
         "inari.host_service.windows_pairing.importlib.import_module",
-        side_effect=lambda name: {"win32pipe": pipe_api, "win32file": file_api}[name],
+        return_value=file_api,
     )
     trust = mocker.Mock()
     server = WindowsPairingBootstrapServer(
@@ -85,13 +84,16 @@ def test_endpoint_discovery_does_not_issue_or_rotate_pairing_material(mocker) ->
 def test_endpoint_discovery_rejects_an_unrelated_package(mocker) -> None:
     mocker.patch("inari.host_service.windows_pairing.sys.platform", "win32")
     mocker.patch(
-        "inari.host_service.windows_pairing.package_family_for_process",
+        "inari.host_service.windows_pairing._client_package_family",
         return_value="Other.Package",
     )
-    pipe_api = SimpleNamespace(GetNamedPipeClientProcessId=mocker.Mock(return_value=42))
+    file_api = SimpleNamespace(
+        ReadFile=mocker.Mock(return_value=(0, b"\x02")),
+        WriteFile=mocker.Mock(),
+    )
     mocker.patch(
         "inari.host_service.windows_pairing.importlib.import_module",
-        return_value=pipe_api,
+        return_value=file_api,
     )
     server = WindowsPairingBootstrapServer(
         mocker.Mock(),
@@ -101,3 +103,4 @@ def test_endpoint_discovery_rejects_an_unrelated_package(mocker) -> None:
 
     with pytest.raises(PermissionError):
         server._serve_client("pipe")
+    file_api.WriteFile.assert_not_called()
