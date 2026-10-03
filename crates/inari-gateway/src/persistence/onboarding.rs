@@ -1,15 +1,12 @@
-use std::time::Duration;
-
 use chrono::{DateTime, Utc};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
-use subtle::ConstantTimeEq;
 
 use super::entity::value::InvitationState as StoredInvitationState;
-use super::entity::{invitation, invitation_attempt, organization, site};
+use super::entity::{invitation, organization, site};
 use super::{GatewayRepository, stored_time, utc_time};
 use crate::audit::{AuditAction, AuditContext, AuditEventDraft, AuditOutcome, AuditResource};
 use crate::onboarding::{InvitationCode, InvitationId, InvitationState, InvitationStatus};
@@ -193,92 +190,6 @@ impl GatewayRepository {
             .await
     }
 
-    pub async fn claim_invitation(
-        &self,
-        code: &InvitationCode,
-        agent_id: &str,
-        key_id: &str,
-        now: DateTime<Utc>,
-        failed_attempt_window: Duration,
-        max_failed_attempts: usize,
-    ) -> GatewayResult<()> {
-        let transaction = self.database.begin().await?;
-        let invitation = invitation::Entity::find_by_id(code.id().as_str())
-            .lock_exclusive()
-            .one(&transaction)
-            .await?
-            .ok_or_else(|| {
-                GatewayError::Forbidden("enrollment invitation was not accepted".into())
-            })?;
-        if invitation.state != StoredInvitationState::Created
-            || now >= utc_time(invitation.expires_at)
-        {
-            return Err(GatewayError::Forbidden("enrollment invitation is unavailable".into()));
-        }
-        let cutoff = now
-            - chrono::Duration::from_std(failed_attempt_window).map_err(|_| {
-                GatewayError::InvalidInput("failed-attempt window is out of range".into())
-            })?;
-        invitation_attempt::Entity::delete_many()
-            .filter(
-                invitation_attempt::COLUMN
-                    .invitation_id
-                    .eq(code.id().as_str()),
-            )
-            .filter(
-                invitation_attempt::COLUMN
-                    .attempted_at
-                    .lt(stored_time(cutoff)),
-            )
-            .exec(&transaction)
-            .await?;
-        let failures = invitation_attempt::Entity::find()
-            .filter(
-                invitation_attempt::COLUMN
-                    .invitation_id
-                    .eq(code.id().as_str()),
-            )
-            .count(&transaction)
-            .await?;
-        if failures >= u64::try_from(max_failed_attempts.max(1)).unwrap_or(u64::MAX) {
-            return Err(GatewayError::Forbidden("too many failed invitation attempts".into()));
-        }
-        let candidate = code.secret_digest();
-        if invitation.secret_digest.len() != candidate.len()
-            || !bool::from(
-                invitation
-                    .secret_digest
-                    .as_slice()
-                    .ct_eq(candidate.as_slice()),
-            )
-        {
-            invitation_attempt::ActiveModel {
-                invitation_id: Set(code.id().as_str().to_owned()),
-                attempted_at: Set(stored_time(now)),
-            }
-            .insert(&transaction)
-            .await?;
-            transaction.commit().await?;
-            return Err(GatewayError::Forbidden("enrollment invitation was not accepted".into()));
-        }
-        let mut update: invitation::ActiveModel = invitation.into();
-        update.state = Set(StoredInvitationState::Claimed);
-        update.claimed_at = Set(Some(stored_time(now)));
-        update.bound_agent_id = Set(Some(agent_id.to_owned()));
-        update.bound_key_id = Set(Some(key_id.to_owned()));
-        update.update(&transaction).await?;
-        invitation_attempt::Entity::delete_many()
-            .filter(
-                invitation_attempt::COLUMN
-                    .invitation_id
-                    .eq(code.id().as_str()),
-            )
-            .exec(&transaction)
-            .await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
     async fn expire_invitation(
         &self,
         invitation_id: &str,
@@ -318,7 +229,6 @@ impl TryFrom<invitation::Model> for InvitationStatus {
             state: model.state.into(),
             created_at: utc_time(model.created_at),
             expires_at: utc_time(model.expires_at),
-            claimed_at: model.claimed_at.map(utc_time),
             enrolled_at: model.enrolled_at.map(utc_time),
             online_at: model.online_at.map(utc_time),
             revoked_at: model.revoked_at.map(utc_time),
@@ -337,7 +247,6 @@ impl From<StoredInvitationState> for InvitationState {
     fn from(value: StoredInvitationState) -> Self {
         match value {
             StoredInvitationState::Created => Self::Created,
-            StoredInvitationState::Claimed => Self::Claimed,
             StoredInvitationState::Enrolled => Self::Enrolled,
             StoredInvitationState::Online => Self::Online,
             StoredInvitationState::Expired => Self::Expired,
@@ -347,6 +256,6 @@ impl From<StoredInvitationState> for InvitationState {
     }
 }
 
-fn expirable_states() -> [StoredInvitationState; 3] {
-    [StoredInvitationState::Created, StoredInvitationState::Claimed, StoredInvitationState::Failed]
+fn expirable_states() -> [StoredInvitationState; 2] {
+    [StoredInvitationState::Created, StoredInvitationState::Failed]
 }

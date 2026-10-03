@@ -9,7 +9,6 @@ use crate::protocol::{GatewaySnapshot, SiteId};
 #[serde(rename_all = "snake_case")]
 pub enum InvitationState {
     Created,
-    Claimed,
     Enrolled,
     Online,
     Expired,
@@ -30,7 +29,6 @@ impl InvitationState {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Created => "created",
-            Self::Claimed => "claimed",
             Self::Enrolled => "enrolled",
             Self::Online => "online",
             Self::Expired => "expired",
@@ -62,7 +60,6 @@ pub struct InvitationStatus {
     pub state: InvitationState,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
-    pub claimed_at: Option<DateTime<Utc>>,
     pub enrolled_at: Option<DateTime<Utc>>,
     pub online_at: Option<DateTime<Utc>>,
     pub revoked_at: Option<DateTime<Utc>>,

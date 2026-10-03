@@ -52,6 +52,15 @@ Agent certificate column. Upgrade both boundaries before enabling enrollment.
 
 Source: [cryptography certificate verification](https://cryptography.io/en/latest/x509/verification/).
 
+## Invitation boundary
+
+One database transaction verifies the invitation, mints the one-time CA token,
+stores the Agent, and consumes the invitation. A token or storage failure leaves
+the invitation unused. A retry after a lost response must match the stored
+enrollment fingerprint for the bound Agent. It cannot authorize another Agent.
+The [gateway protocol](gateway_protocol.md#invitation-consumption-and-retry)
+defines the contract.
+
 ## Router policy gate
 
 Zenoh 1.9 loads ACL rules at startup. Adminspace configuration writes do not
@@ -75,10 +84,6 @@ does not satisfy the Router policy gate.
 
 ## Other rollout gates
 
-- Invitation consumption and enrollment persistence need one atomic transaction.
-  The current claim commits before CA token creation and enrollment persistence.
-  A failure can consume an invitation without an enrollment. A retry must preserve
-  the exact protected Agent identity and must not authorize another Agent.
 - Device Center must retain the restart requirement and offer an explicit service
   restart. Setup must then follow the Agent state through connection and Device
   selection.

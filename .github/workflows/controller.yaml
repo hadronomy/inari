@@ -65,16 +65,31 @@ jobs:
           sudo apt-get install --yes --no-install-recommends postgresql
           sudo systemctl start postgresql
           sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE inari_test LOGIN PASSWORD 'inari_test'"
-          sudo -u postgres createdb --owner=inari_test inari_enrollment_test
+          sudo -u postgres createdb --owner=inari_test inari_enrollment_history_test
+          sudo -u postgres createdb --owner=inari_test inari_enrollment_contract_test
+          sudo -u postgres createdb --owner=inari_test inari_enrollment_http_test
           sudo -u postgres createdb --owner=inari_test inari_state_test
 
-      - name: Test enrollment key history and retirement
+      - name: Test enrollment migrations and key history
         run: >-
-          mbx test --locked --package inari-server
-          enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse
-          -- --ignored --exact managed_gateway::enrollment_tests::enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse
+          mbx test --locked --package inari-server --lib
+          -- --ignored --exact managed_gateway::enrollment_tests::enrollment_migrations_retire_claims_and_retain_key_history
         env:
-          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_enrollment_test
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_enrollment_history_test
+
+      - name: Test atomic invitation enrollment
+        run: >-
+          mbx test --locked --package inari-server --lib
+          -- --ignored --exact managed_gateway::enrollment_tests::enrollment_consumes_invitations_atomically
+        env:
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_enrollment_contract_test
+
+      - name: Test enrollment over HTTP
+        run: >-
+          mbx test --locked --package inari-server --test onboarding_http
+          -- --ignored --exact enrollment_consumes_the_invitation_once
+        env:
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_enrollment_http_test
 
       - name: Test signed Agent State and retirement
         run: >-
