@@ -6,10 +6,9 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Enrollment now consumes an invitation in the same transaction that
-        // stores the Agent, so `claimed` cannot occur. A claimed row has no
-        // enrollment fingerprint to bind a retry to, so it needs a new
-        // invitation. Enrolled rows keep a NULL fingerprint and reject retries.
+        // Claimed invitations have no fingerprint to authorize a retry. Mark
+        // them failed so the operator can create a new invitation. Existing
+        // enrolled invitations retain a NULL fingerprint and reject retries.
         manager
             .get_connection()
             .execute_unprepared(
