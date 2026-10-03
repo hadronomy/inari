@@ -16,12 +16,15 @@ issuance. The Agent must submit the same CSR after enrollment.
 
 Source: [Smallstep 0.30.2 JWK provisioner](https://github.com/smallstep/certificates/blob/v0.30.2/authority/provisioner/jwk.go).
 
-The previous Agent implementation accepted a response-provided issuer without
-a path to the pinned root. It also checked SAN values without their types and
-did not check the subject. The corrected boundary uses the existing cryptography
-library to validate the full client certificate chain. Response-provided
-intermediates remain untrusted until that path succeeds. The pinned root remains
-unchanged when the Agent stores its client chain.
+The Agent uses the existing cryptography library to validate the full client
+certificate chain. Response-provided intermediates remain untrusted until that
+path succeeds. The pinned root remains unchanged when the Agent stores its client
+chain. The certificate requires the protected Agent common name, its exact URI
+SAN, client authentication usage, and `digitalSignature` key usage.
+
+Root bootstrap requires a valid SHA-256 pin and exactly one CA certificate.
+Enrollment and renewal TLS trust only that root. A CA response cannot add another
+root, and operating-system trust roots cannot authorize certificate requests.
 
 Source: [cryptography certificate verification](https://cryptography.io/en/latest/x509/verification/).
 
@@ -43,9 +46,15 @@ router replica. Enrollment must wait for admission. Revocation must remove acces
 from existing sessions within the required limit. Stock ACL changes require
 router restart, so the policy path must include controlled session shutdown and
 reconnection.
+The chart disables enrollment and Zenoh by default. Enabling mutual TLS alone
+does not satisfy the Router policy gate.
 
 ## Other rollout gates
 
+- Invitation consumption and enrollment persistence need one atomic transaction.
+  The current claim commits before CA token creation and enrollment persistence.
+  A failure can consume an invitation without an enrollment. A retry must preserve
+  the exact protected Agent identity and must not authorize another Agent.
 - Device Center must retain the restart requirement and offer an explicit service
   restart. Setup must then follow the Agent state through connection and Device
   selection.

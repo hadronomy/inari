@@ -39,6 +39,10 @@ helm upgrade --install inari oci://ghcr.io/hadronomy/charts/inari \
 The pre-install or pre-upgrade Job must reach PostgreSQL. It takes the migration
 advisory lock and applies the embedded schema before controller pods roll.
 
+The chart starts with enrollment and Zenoh disabled. Keep them disabled until
+the pinned CA and exact per-Agent Router policy are ready. Enabling mutual TLS
+alone does not bind an Agent to its own namespace.
+
 Check the result:
 
 ```sh

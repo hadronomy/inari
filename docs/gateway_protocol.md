@@ -225,12 +225,13 @@ The response rules are:
 
 For `step_ca` enrollment:
 
-1. The agent fetches the CA root and compares its lowercase, separator-free
-   SHA-256 fingerprint with `root_fingerprint`.
+1. The Agent requires a valid SHA-256 `root_fingerprint` before any CA request.
+   It fetches exactly one CA root and verifies its fingerprint.
 2. It submits the same CSR with the controller-minted one-time token to the
    step-ca sign endpoint.
-3. It verifies that the returned certificate contains the CSR key and the
-   authorized identity. It verifies the full chain against the pinned root.
+3. It verifies that the returned certificate contains the CSR key, the authorized
+   identity, client authentication usage, and `digitalSignature` key usage.
+   It verifies the full chain against the pinned root.
 4. It stores the certificate and private key through the protected local
    credential boundary.
 5. It opens Zenoh with mutual TLS.
@@ -239,6 +240,9 @@ For `step_ca` enrollment:
 The CA response supplies untrusted intermediate certificates. It MUST NOT replace
 the pinned root. The Agent stores the verified leaf and intermediate chain for
 mutual TLS and preserves the root that passed fingerprint verification.
+Root bootstrap rejects certificate bundles. Enrollment and renewal TLS trust
+only the pinned root. They MUST NOT add operating-system trust roots or send a
+one-time token before pinned trust is available.
 
 The controller mints the one-time CA token only after it has verified the
 invitation and CSR. It MUST NOT persist or reuse that token.

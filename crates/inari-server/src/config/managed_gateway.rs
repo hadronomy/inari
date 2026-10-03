@@ -122,6 +122,16 @@ impl ManagedGatewayConfig {
                 .is_none()
                 || self
                     .certificate
+                    .step_ca_root_fingerprint
+                    .as_deref()
+                    .is_none_or(|fingerprint| {
+                        fingerprint.len() != 64
+                            || !fingerprint
+                                .bytes()
+                                .all(|byte| byte.is_ascii_hexdigit())
+                    })
+                || self
+                    .certificate
                     .step_ca_provisioner
                     .as_deref()
                     .is_none_or(str::is_empty)
@@ -136,7 +146,7 @@ impl ManagedGatewayConfig {
                     .is_none()
             {
                 return Err(ConfigError::invalid(
-                    "step-ca mode requires base_url, provisioner, key_id, and signing_key_file.",
+                    "step-ca mode requires base_url, a SHA-256 root_fingerprint, provisioner, key_id, and signing_key_file.",
                 ));
             }
             if !(Duration::from_secs(10)..=Duration::from_secs(60 * 60))
@@ -469,4 +479,42 @@ pub enum StepCaSigningAlgorithm {
     #[default]
     EdDsa,
     Es256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_ca_requires_a_valid_root_pin_before_enrollment() {
+        let mut config = ManagedGatewayConfig { enabled: true, ..ManagedGatewayConfig::default() };
+        config.data_plane.connect_endpoints = vec!["tls/router.example.com:7447".into()];
+        config.certificate.mode = ManagedGatewayCertificateMode::StepCa;
+        config.certificate.step_ca_base_url = Some(
+            "https://ca.example.com"
+                .parse()
+                .unwrap(),
+        );
+        config.certificate.step_ca_provisioner = Some("agents".into());
+        config.certificate.step_ca_key_id = Some("test-key".into());
+        config
+            .certificate
+            .step_ca_signing_key_file = Some("/test/key.pem".into());
+        for fingerprint in [None, Some("".into()), Some("z".repeat(64)), Some("a".repeat(63))] {
+            config
+                .certificate
+                .step_ca_root_fingerprint = fingerprint;
+            assert!(
+                config
+                    .validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("root_fingerprint")
+            );
+        }
+        config
+            .certificate
+            .step_ca_root_fingerprint = Some("a".repeat(64));
+        config.validate().unwrap();
+    }
 }
