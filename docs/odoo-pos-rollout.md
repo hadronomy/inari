@@ -163,3 +163,51 @@ anchor. The exact production Odoo origin received HTTP 200 for its receipt
 preflight. An untrusted origin received HTTP 400. An unauthenticated receipt
 submission received HTTP 401. The probe stopped the Agent after these checks.
 This does not install a production certificate or pair the live POS browser.
+
+## October 3 WORKSTATION upgrade and Controller recovery
+
+WORKSTATION runs signed candidate `1.20.0-alpha.13`, MSIX `1.20.0.1013`, from
+source `01bad52b83ba977fe88b60f03ac5e060cb57f7f0`. The package includes the
+integrated Device Center UI, Client Pairing controls, and local connection fix.
+Its build is [run 37099088646](https://github.com/hadronomy/inari/actions/runs/37099088646).
+The MSIX SHA-256 is
+`8f97b310776f419a1d1f70ef0c68c083b79c2b921c10ea82c6cf4366e0b36b2d`.
+
+All seven artifact checksums passed. GitHub provenance and the SPDX attestation
+passed for the exact branch and source commit. Windows accepted the publisher
+signature through its existing trust chain. The Agent and Device Center paths
+both point to the alpha.13 package. The Agent runs as `LocalService`.
+
+The upgrade preserved the Agent configuration, identity, pairing public keys,
+and TLS files. The database backup passed verification. The protected backup
+is `C:\ProgramData\InariUpgradeBackups\01bad52b83ba\state`.
+The completed installation tasks and temporary signing branch policy were removed.
+
+Trusted HTTPS returns `401` for unpaired access to `/system/status`.
+Device Center authenticated through loopback: `/auth/local-challenge`,
+`/auth/local-token`, and `/onboarding/status` returned HTTP 200. The new UI
+shows the required organization invitation step. Operations-window and Client
+Pairing acceptance still require enrollment.
+
+The Controller runs the signed image from main source
+`d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d`. Its image digest is
+`sha256:97f67d01db31381354f5cbc8cf896311eacde57788c6e68384618e7da103f21e`.
+The keyless signature passed verification for `controller-image.yaml` on
+`refs/heads/main` and the GitHub Actions OIDC issuer. Infrastructure PR 35 is
+merged at `4d5bb161198c02314734f6d1ae41f7bdd40c108c`. Flux and Helm report Ready.
+Trusted HTTPS health and readiness checks passed. PostgreSQL and OIDC are ready.
+
+Chart `controller-chart@0.3.2` uses OCI digest
+`sha256:b524cc4da6fc8b699f36aaa741f5e6a39ae341d3e58898a41299aa784464eb5b`.
+Cosign and Flux verified its `release.yaml` signature on `refs/heads/main`.
+The runtime explicitly trusts ZITADEL project `393403791438774388` alongside
+client `393403793837981812` and verifies the authorized party for multiple audiences.
+
+The Controller opened in the shared preview after a fresh ZITADEL sign-in.
+Its persisted session has the administrator role. Its subject matches the
+active ZITADEL account `hadronomy@mizonaecologica.es`. The ID token contains no
+email claim; account verification uses the provider's user record.
+Organization and Site database records remain absent until the supported
+enrollment bootstrap runs. Certificate issuance, enrollment, and Zenoh remain
+disabled. No receipt Binding Revision was activated and no physical receipt
+passed the full Inari path.

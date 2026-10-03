@@ -10,9 +10,11 @@ the workstation's 80-VII-UL USB printer.
 - POS configuration: `2`
 - Infrastructure: `mze-infra`, cluster `shadow`
 - Agent Host: Windows `workstation`
-- Deployed release commit: `53d0572853885ed19a066af177a4410f8b45f606`
-- Edge release: `edge@1.20.0-alpha.11`
-- Windows package: `1.20.0.1011`
+- Odoo release commit: `53d0572853885ed19a066af177a4410f8b45f606`
+- Odoo shared contracts: `1.20.0a11`
+- Windows candidate source: `01bad52b83ba977fe88b60f03ac5e060cb57f7f0`
+- Windows candidate: `1.20.0-alpha.13`, MSIX `1.20.0.1013`
+- Controller source: `d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d`
 
 Status: **in progress**. Odoo and the Windows Agent are installed. The receipt
 Binding Revision is inactive. No physical receipt passed the full Inari path.
@@ -96,14 +98,17 @@ evidence, not a passed Inari Device Test.
 The operator authorized ZITADEL for the Controller's production OIDC provider.
 Infrastructure PRs 29 and 30 deploy it at
 `https://auth.eden.mizonaecologica.es` and permit its exact OpenBao secret path.
-The Helm release, database, API, and Login UI are ready. Trusted HTTPS discovery
-reports the exact issuer. OIDC client provisioning remains in progress.
+The Helm release, database, API, and OIDC discovery are ready. The Controller
+opened through ZITADEL with `hadronomy@mizonaecologica.es`. Its persisted
+administrator session matches that active ZITADEL account by subject.
+Organization and Site database records remain absent until the supported
+enrollment bootstrap runs. Certificate issuance, enrollment, and Zenoh remain disabled.
 
-Executor's Windows SSH transport works. Its existing `windows-mcp-relay` task
-was stopped. Starting that task restored the desktop snapshot without a
-credential change. The installed Device Center uses a fixed loopback HTTP
-address and cannot reach the Agent's HTTPS listener. The native endpoint fix
-must pass its Windows checks and enter a signed release before Client Pairing.
+The signed alpha.13 package runs on WORKSTATION. Device Center discovers the
+protected Agent Endpoint and authenticates through trusted HTTPS over loopback.
+The challenge, token, and onboarding requests returned HTTP 200. The new UI
+shows the organization invitation step. Enrollment must finish before the
+operations window and Client Pairing acceptance checks.
 
 The operator supplied rear-label model `POS-8370` and serial `25103000100009`.
 Keep these facts separate from the self-test model and USB descriptor serial.
@@ -132,8 +137,9 @@ the Odoo runtime. Keep the existing Odoo image and MZE addon ownership intact.
 ## Evidence
 
 See [the rollout checks](odoo-pos-rollout.md) for the completed Odoo and native
-Windows results. The October 2 deployment evidence follows. Full Release
-Readiness and physical acceptance remain incomplete.
+Windows results, including the October 3 upgrade and Controller recovery.
+The October 2 deployment evidence follows. Full Release Readiness and physical
+acceptance remain incomplete.
 
 ## Production deployment on October 2
 

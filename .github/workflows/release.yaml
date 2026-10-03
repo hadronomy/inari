@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      windows_candidate:
+        description: Build a signed Windows candidate from this branch without publishing a release
+        type: boolean
+        default: false
+      windows_candidate_sequence:
+        description: Optional alpha sequence for an upgrade of an installed candidate
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -52,8 +61,13 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          WINDOWS_CANDIDATE: ${{ inputs.windows_candidate || false }}
         run: |
           set -euo pipefail
+          if [[ "${WINDOWS_CANDIDATE}" == "true" ]]; then
+            printf 'publish=false\nedge=true\ncontroller_chart=false\n' >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
           bun run build:release >/dev/null
           plan="$(node tooling/release/dist/cli.mjs workflow-plan)"
           {
@@ -109,7 +123,7 @@ jobs:
 
   odoo_addons:
     name: Publish Inari Odoo addon artifact
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !inputs.windows_candidate
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -177,7 +191,7 @@ jobs:
 
   version:
     name: Open or update Version Packages PR
-    if: needs.plan.outputs.publish == 'false'
+    if: needs.plan.outputs.publish == 'false' && !inputs.windows_candidate
     needs: [plan, validate]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -240,7 +254,7 @@ jobs:
 
   windows:
     name: Build signed Device Center
-    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.edge == 'true'
+    if: (needs.plan.outputs.publish == 'true' && needs.plan.outputs.edge == 'true') || inputs.windows_candidate
     needs: [plan, validate]
     runs-on: windows-2025
     timeout-minutes: 30
@@ -260,8 +274,30 @@ jobs:
       - name: Install pinned build tools
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
         with:
-          install_args: uv aqua:anchore/syft github:mtrojnar/osslsigncode
+          install_args: node bun uv aqua:anchore/syft github:mtrojnar/osslsigncode
           cache: true
+
+      - name: Set up mbx
+        uses: jdx/mr-boxington-action@2bbb8f141e40e388b509cc68fe0bfbe7bc4b6818 # v1
+        with:
+          version: 0.4.0
+
+      - name: Prepare candidate versions
+        if: inputs.windows_candidate
+        shell: pwsh
+        env:
+          WINDOWS_CANDIDATE_SEQUENCE: ${{ inputs.windows_candidate_sequence }}
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw "Release dependency installation failed." }
+          bun run build:release
+          if ($LASTEXITCODE -ne 0) { throw "Release tooling build failed." }
+          node --input-type=module -e 'import { prepareWindowsCandidate } from "./tooling/release/dist/index.mjs"; await prepareWindowsCandidate(process.env.WINDOWS_CANDIDATE_SEQUENCE);'
+          if ($LASTEXITCODE -ne 0) { throw "Candidate version preparation failed." }
+          mbx update --workspace
+          if ($LASTEXITCODE -ne 0) { throw "Candidate Rust lockfile update failed." }
+          uv lock
+          if ($LASTEXITCODE -ne 0) { throw "Candidate Python lockfile update failed." }
 
       # The frozen application must carry CPython's matching OpenSSL runtime.
       # Avoid resolving a same-named DLL from the runner-wide OpenSSL install.

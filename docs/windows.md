@@ -93,6 +93,23 @@ if ($ActualHash -ne $ExpectedHash) {
 
 Stop if either value differs.
 
+## Build a branch candidate
+
+Run the Release workflow on the intended branch with `windows_candidate=true`.
+The protected `windows-release` environment still controls access to the signing key.
+
+The workflow applies pending Tegami versions inside its temporary checkout.
+It builds the same signed MSIX, checksums, SBOM, and provenance as a release.
+Download the `inari-windows-release` artifact from that workflow run.
+Check its provenance, package signature, and checksum before installation.
+
+Candidate mode does not publish packages or create a Version Packages PR.
+The attestation identifies the selected branch and source commit.
+The candidate needs pending release changes so its package version advances.
+For an upgrade of an installed candidate, set `windows_candidate_sequence` to
+an alpha sequence greater than the installed sequence. The value cannot precede
+the pending Tegami version. Stable packages keep their independent versions.
+
 ## Trust the publisher
 
 Inari’s alpha releases use a private code-signing hierarchy. Windows needs the
@@ -292,12 +309,15 @@ do not use proxy settings or the hostname’s LAN or overlay address.
 
 ## Building the Device Center here
 
-Pin the toolchain for every Cargo invocation:
+Pin the toolchain for every Rust build:
 
 ```powershell
 $env:RUSTUP_TOOLCHAIN = "stable"
-cargo build -p inari-device-center
+mbx build -p inari-device-center
 ```
+
+mbx manages Cargo storage and build output through its own configuration.
+Run the command without manual `CARGO_HOME` or `CARGO_TARGET_DIR` overrides.
 
 Without it the build fails with `E0514: found crate ... compiled by an
 incompatible version of rustc`, and a full `cargo clean` does not help.
