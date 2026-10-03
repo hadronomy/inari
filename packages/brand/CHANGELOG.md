@@ -1,3 +1,9 @@
+## inari-brand@1.20.0-alpha.12
+
+### Preserve the configured OIDC issuer
+
+The Controller keeps the exact OIDC issuer during configuration and discovery. Identity providers whose issuer omits a root trailing slash can start and authenticate without an issuer mismatch.
+
 ## inari-brand@1.20.0-alpha.11
 
 ### Start the packaged Windows agent

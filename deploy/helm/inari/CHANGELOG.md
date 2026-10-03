@@ -1,3 +1,14 @@
+## inari@0.3.2
+
+### Configure trusted OIDC ID token audiences
+
+Set `identity.oidc.additionalIdTokenAudiences` when your identity provider
+includes a trusted project identifier in ID tokens. The Controller still
+requires its client ID and checks the authorized party for multiple audiences.
+
+The chart pins a compatible Controller image by digest. Custom image selections
+must use an explicit digest or tag; the chart rejects an empty selection.
+
 ## inari@0.3.1
 
 ### Trust a private PostgreSQL CA during deployment

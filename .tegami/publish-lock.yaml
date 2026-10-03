@@ -1,21 +1,36 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Trust a private PostgreSQL CA during deployment\n\nThe chart can mount an existing database CA Secret in the Controller and its\nmigration Job. Use `database.caCertificateSecret` with a PostgreSQL URL that\nrequires `sslmode=verify-full` and points `sslrootcert` to the mounted CA.\n"
-    filename: 2026-10-02-40c219a8.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve the configured OIDC issuer\n\nThe Controller keeps the exact OIDC issuer during configuration and discovery. Identity providers whose issuer omits a root trailing slash can start and authenticate without an issuer mismatch.\n"
+    filename: 2026-10-03-e9360a12.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Configure trusted OIDC ID token audiences\n\nSet `identity.oidc.additionalIdTokenAudiences` when your identity provider\nincludes a trusted project identifier in ID tokens. The Controller still\nrequires its client ID and checks the authorized party for multiple audiences.\n\nThe chart pins a compatible Controller image by digest. Custom image selections\nmust use an explicit digest or tag; the chart rejects an empty selection.\n"
+    filename: 2026-10-03-0a9b2f71.md
     v: 0.0.0
 core:packages:
-  - id: cargo:inari-agent-client
-    updated: false
-  - id: cargo:inari-device-center
-    updated: false
-  - id: pip:inari
-    updated: false
-  - id: pip:inari-brand
-    updated: false
-  - id: pip:inari-print-contracts
-    updated: false
   - changelogIds:
-      - 2026-10-02-40c219a8.md
+      - 2026-10-03-e9360a12.md
+    id: cargo:inari-agent-client
+    updated: true
+  - changelogIds:
+      - 2026-10-03-e9360a12.md
+    id: cargo:inari-device-center
+    updated: true
+  - changelogIds:
+      - 2026-10-03-e9360a12.md
+    id: pip:inari-brand
+    updated: true
+  - changelogIds:
+      - 2026-10-03-e9360a12.md
+    id: pip:inari
+    updated: true
+  - changelogIds:
+      - 2026-10-03-e9360a12.md
+    id: pip:inari-print-contracts
+    updated: true
+  - changelogIds:
+      - 2026-10-03-0a9b2f71.md
     id: helm:inari
     updated: true
-  - id: msix:inari-device-center
-    updated: false
+  - changelogIds:
+      - 2026-10-03-e9360a12.md
+    id: msix:inari-device-center
+    updated: true
