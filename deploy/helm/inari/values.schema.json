@@ -458,7 +458,21 @@
               }
             },
             "requiresMutualTlsAfterIssuance": { "type": "boolean" }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "mode": { "const": "step_ca" } } },
+              "then": {
+                "properties": {
+                  "stepCa": {
+                    "properties": {
+                      "rootFingerprint": { "pattern": "^[a-fA-F0-9]{64}$" }
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     },

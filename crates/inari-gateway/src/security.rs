@@ -144,6 +144,11 @@ pub fn validate_identity(
     let public_key: [u8; 32] = public_key
         .try_into()
         .map_err(|_| GatewayError::InvalidInput("Ed25519 public key must be 32 bytes".into()))?;
+    let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&public_key)
+        .map_err(|_| GatewayError::InvalidInput("Ed25519 public key is invalid".into()))?;
+    if verifying_key.is_weak() {
+        return Err(GatewayError::InvalidInput("Ed25519 public key must not be weak".into()));
+    }
     let digest = hex::encode(Sha256::digest(public_key));
     if agent_id.as_str() != format!("agt_{}", &digest[..24])
         || key_id != format!("kid_{}", &digest[..12])
@@ -303,6 +308,27 @@ mod tests {
         assert!(!identity.jwk_thumbprint.is_empty());
         let (_, pem) = x509_parser::pem::parse_x509_pem(CSR.as_bytes()).unwrap();
         assert_eq!(identity.csr_fingerprint, URL_SAFE_NO_PAD.encode(Sha256::digest(pem.contents)));
+    }
+
+    #[test]
+    fn rejects_weak_transport_keys_before_reading_the_csr() {
+        let (_, _, mut jwk) = identity_jwk(1);
+        if let jsonwebtoken::jwk::AlgorithmParameters::OctetKeyPair(parameters) = &mut jwk.algorithm
+        {
+            parameters.x = URL_SAFE_NO_PAD.encode([0; 32]);
+        }
+        let digest = hex::encode(Sha256::digest([0; 32]));
+        let key_id = format!("kid_{}", &digest[..12]);
+        jwk.common.key_id = Some(key_id.clone());
+        let agent_id = format!("agt_{}", &digest[..24])
+            .parse()
+            .unwrap();
+        let error = validate_identity(&agent_id, &key_id, &jwk, "", None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("must not be weak")
+        );
     }
 
     #[test]

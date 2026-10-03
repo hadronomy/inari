@@ -150,7 +150,8 @@ observability:
   includeThreadNames: false
 
 managedGateway:
-  enabled: true
+  # Enable after the pinned CA and per-Agent Router policy are ready.
+  enabled: false
   controllerName: Inari Controller
   controllerInstanceId: controller-production
   supportedProtocolVersions:
@@ -184,7 +185,7 @@ managedGateway:
     caCertificateSecret: null
     requestTimeout: 5s
   onboarding:
-    enabled: true
+    enabled: false
     invitationTtl: 10m
     failedAttemptWindow: 1m
     maxFailedAttempts: 5
@@ -194,7 +195,7 @@ managedGateway:
     namespacePrefix: iot/v1/agents
     closeLinkOnExpiration: true
   certificate:
-    mode: step_ca
+    mode: none
     stepCa:
       baseUrl: https://step-ca.example.com
       rootFingerprint: replace-with-root-sha256-fingerprint
@@ -223,7 +224,7 @@ migrations:
       memory: 128Mi
 
 zenoh:
-  enabled: true
+  enabled: false
   image:
     repository: eclipse/zenoh
     tag: 1.9.0

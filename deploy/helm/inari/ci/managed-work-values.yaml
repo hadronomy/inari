@@ -1,7 +1,15 @@
 managedGateway:
+  enabled: true
+  certificate:
+    mode: step_ca
+    stepCa:
+      rootFingerprint: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   dispatch:
     enabled: true
   payloadProtection:
     caCertificateSecret:
       name: inari-openbao-ca
       key: ca.crt
+
+zenoh:
+  enabled: true

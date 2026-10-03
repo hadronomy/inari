@@ -231,16 +231,27 @@ class StepCaCertificateProvider:
             enrollment.trust.root_fingerprint if enrollment.trust is not None else None
         )
         if not root_fingerprint:
-            return None
+            raise TrustBootstrapError(
+                "STEP_CA_ROOT_FINGERPRINT_MISSING",
+                "The Controller did not provide a step-ca root fingerprint.",
+                rebootstrap_required=True,
+            )
+        root_fingerprint = _normalize_fingerprint(root_fingerprint)
+        if len(root_fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in root_fingerprint
+        ):
+            raise TrustBootstrapError(
+                "STEP_CA_ROOT_FINGERPRINT_INVALID",
+                "The Controller step-ca root fingerprint is not a SHA-256 digest.",
+                rebootstrap_required=True,
+            )
 
         ca_path = self.certificate_service.ca_path
         if ca_path is not None and ca_path.exists():
-            actual_fingerprint = None
+            root = None
             with suppress(Exception):
-                actual_fingerprint = _certificate_fingerprint(
-                    ca_path.read_text(encoding="utf-8")
-                )
-            if actual_fingerprint == _normalize_fingerprint(root_fingerprint):
+                root = _load_single_ca(ca_path.read_bytes())
+            if root is not None and _certificate_fingerprint(root) == root_fingerprint:
                 return None
 
         root_url = f"{enrollment.base_url.rstrip('/')}/1.0/root/{root_fingerprint}"
@@ -274,14 +285,17 @@ class StepCaCertificateProvider:
                 failure_reason=ManagedCertificateFailureReason.NETWORK_ERROR,
             ) from exc
 
-        actual_fingerprint = _certificate_fingerprint(root_pem)
-        if actual_fingerprint != _normalize_fingerprint(root_fingerprint):
+        root = _load_single_ca(root_pem.encode("utf-8"))
+        actual_fingerprint = _certificate_fingerprint(root)
+        if actual_fingerprint != root_fingerprint:
             raise TrustBootstrapError(
                 "STEP_CA_ROOT_FINGERPRINT_MISMATCH",
                 "step-ca root certificate fingerprint did not match the controller-provided fingerprint.",
                 rebootstrap_required=True,
             )
-        self.certificate_service.install_certificate_authority(root_pem)
+        self.certificate_service.install_certificate_authority(
+            root.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+        )
 
     async def enroll(
         self, request: CertificateEnrollmentRequest
@@ -399,12 +413,18 @@ class StepCaCertificateProvider:
         return None
 
     def _verify_context(self) -> ssl.SSLContext:
-        context = ssl.create_default_context()
-        if (
-            self.certificate_service.ca_path is not None
-            and self.certificate_service.ca_path.exists()
-        ):
-            context.load_verify_locations(cafile=str(self.certificate_service.ca_path))
+        ca_path = self.certificate_service.ca_path
+        if ca_path is None or not ca_path.exists():
+            raise TrustBootstrapError(
+                "STEP_CA_ROOT_MISSING",
+                "No pinned step-ca root is available for the certificate request.",
+                rebootstrap_required=True,
+            )
+        root = _load_single_ca(ca_path.read_bytes())
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(
+            cadata=root.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+        )
         return context
 
 
@@ -536,6 +556,20 @@ def _validate_certificate_lifetime(certificate: x509.Certificate) -> None:
 
 def _validate_certificate_usage(certificate: x509.Certificate) -> None:
     try:
+        key_usage = certificate.extensions.get_extension_for_class(x509.KeyUsage).value
+    except x509.ExtensionNotFound as exc:
+        raise AgentError(
+            "STEP_CA_CERTIFICATE_KEY_USAGE_MISSING",
+            "step-ca returned a client certificate without key usage.",
+            status_code=502,
+        ) from exc
+    if not key_usage.digital_signature:
+        raise AgentError(
+            "STEP_CA_CERTIFICATE_SIGNATURE_USAGE_MISSING",
+            "step-ca returned a client certificate that cannot sign a TLS handshake.",
+            status_code=502,
+        )
+    try:
         usage = certificate.extensions.get_extension_for_class(
             x509.ExtendedKeyUsage
         ).value
@@ -637,9 +671,9 @@ def _validate_certificate_chain(
             "No step-ca trust root was available to validate the client certificate.",
             status_code=502,
         )
-    roots = x509.load_pem_x509_certificates(ca_path.read_bytes())
+    root = _load_single_ca(ca_path.read_bytes())
     try:
-        verifier = PolicyBuilder().store(Store(roots)).build_client_verifier()
+        verifier = PolicyBuilder().store(Store([root])).build_client_verifier()
         return tuple(verifier.verify(certificate, intermediates).chain)
     except VerificationError as exc:
         raise AgentError(
@@ -656,8 +690,24 @@ def _public_key_bytes(public_key) -> bytes:
     )
 
 
-def _certificate_fingerprint(certificate_pem: str) -> str:
-    certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
+def _load_single_ca(certificate_pem: bytes) -> x509.Certificate:
+    try:
+        certificates = x509.load_pem_x509_certificates(certificate_pem)
+        if len(certificates) != 1:
+            raise ValueError("expected one certificate")
+        root = certificates[0]
+        if not root.extensions.get_extension_for_class(x509.BasicConstraints).value.ca:
+            raise ValueError("expected a CA certificate")
+    except (ValueError, x509.ExtensionNotFound) as exc:
+        raise TrustBootstrapError(
+            "STEP_CA_ROOT_INVALID",
+            "step-ca trust requires exactly one CA certificate.",
+            rebootstrap_required=True,
+        ) from exc
+    return root
+
+
+def _certificate_fingerprint(certificate: x509.Certificate) -> str:
     return sha256(
         certificate.public_bytes(encoding=serialization.Encoding.DER)
     ).hexdigest()

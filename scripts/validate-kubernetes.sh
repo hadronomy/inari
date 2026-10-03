@@ -81,6 +81,7 @@ if helm template inari "${CHART}" \
 fi
 
 if helm template inari "${CHART}" \
+  --set zenoh.enabled=true \
   --set zenoh.config.accessControl.enabled=false \
   >"${workspace}/invalid-zenoh-acl.log" 2>&1; then
   printf 'chart accepted generated Zenoh configuration without access control\n' >&2
@@ -88,9 +89,18 @@ if helm template inari "${CHART}" \
 fi
 
 if helm template inari "${CHART}" \
+  --set zenoh.enabled=true \
   --set-json 'zenoh.config.accessControl.trustedPeerCommonNames=[]' \
   >"${workspace}/invalid-zenoh-principals.log" 2>&1; then
   printf 'chart accepted generated Zenoh configuration without trusted principals\n' >&2
+  exit 1
+fi
+
+if helm template inari "${CHART}" \
+  --values "${CHART}/ci/managed-work-values.yaml" \
+  --set-string managedGateway.certificate.stepCa.rootFingerprint=invalid \
+  >"${workspace}/invalid-ca-pin.log" 2>&1; then
+  printf 'chart accepted step-ca without a SHA-256 root fingerprint\n' >&2
   exit 1
 fi
 
@@ -172,10 +182,15 @@ for path, enabled in zip(sys.argv[1:], (False, True), strict=True):
         managed = tomllib.load(source)["managed_gateway"]
     assert managed["dispatch"]["enabled"] is enabled
     assert ("managed_work:dispatch" in managed["controller_actions"]) is enabled
+    if not enabled:
+        assert managed["enabled"] is False
+        assert managed["onboarding"]["enabled"] is False
+        assert managed["certificate"]["mode"] == "none"
 PYTHON
 
 helm template inari "${CHART}" \
   --namespace inari \
+  --set zenoh.enabled=true \
   --show-only templates/zenoh-configmap.yaml \
   | yq --unwrapScalar '.data["config.json5"]' \
   >"${workspace}/zenoh.json"
