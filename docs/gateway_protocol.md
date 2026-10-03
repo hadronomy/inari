@@ -230,14 +230,37 @@ For `step_ca` enrollment:
 2. It submits the same CSR with the controller-minted one-time token to the
    step-ca sign endpoint.
 3. It verifies that the returned certificate contains the CSR key and the
-   authorized identity.
+   authorized identity. It verifies the full chain against the pinned root.
 4. It stores the certificate and private key through the protected local
    credential boundary.
 5. It opens Zenoh with mutual TLS.
 6. Later renewals use certificate-backed authentication.
 
+The CA response supplies untrusted intermediate certificates. It MUST NOT replace
+the pinned root. The Agent stores the verified leaf and intermediate chain for
+mutual TLS and preserves the root that passed fingerprint verification.
+
 The controller mints the one-time CA token only after it has verified the
 invitation and CSR. It MUST NOT persist or reuse that token.
+
+The Agent Identity uses an Ed25519 key. Let `digest` be the lowercase hexadecimal
+SHA-256 digest of the raw 32-byte public key. `agent_id` MUST equal `agt_` followed
+by the first 24 digest characters. `key_id` MUST equal `kid_` followed by the first
+12 digest characters. The Controller rejects different identifiers before it
+claims an invitation or issues a CA token.
+
+The CSR subject MUST contain exactly one common name equal to `agent_id`. Its
+SAN extension MUST contain exactly one URI, `urn:inari:<agent_id>`. The Controller
+checks the signed CSR and an existing certificate against this contract.
+Certificate issuance and renewal use the same identity contract on the Agent.
+The Agent rejects missing, additional, duplicate, or incorrectly typed names,
+even when the CA signature and public key are valid.
+
+Certificate names come from the protected Agent Identity. The Controller does
+not accept a global SAN override. Remove `step_ca_authorized_sans` from a
+Controller configuration and `managedGateway.certificate.stepCa.authorizedSans`
+from Helm values when upgrading an existing step-ca deployment. A transport key
+replacement creates a new Agent Identity.
 
 ## Zenoh keyspace
 

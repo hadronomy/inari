@@ -31,6 +31,7 @@ from inari.security.certificates.crypto import ManagedCertificateCryptoService
 from inari.security.certificates.lifecycle import ManagedCertificateLifecycleManager
 from inari.security.certificates.providers import (
     CertificateEnrollmentRequest,
+    CertificateRenewalRequest,
     ClientCertificateProvider,
     ProvisionedCertificateMaterial,
     StepCaCertificateProvider,
@@ -107,8 +108,12 @@ async def test_lifecycle_recovers_invalid_local_certificate_with_fresh_bootstrap
             certificate_enrollment=_certificate_enrollment(
                 root_fingerprint=_fingerprint(ca_cert),
                 token="ott_bootstrap_token",
-                subject="agt_test",
-                authorized_sans=("urn:inari:agt_test",),
+                subject=identity_service.get_or_create_identity().agent_id,
+                authorized_sans=(
+                    identity_service.default_uri_san(
+                        identity_service.get_or_create_identity().agent_id
+                    ),
+                ),
             )
         )
     )
@@ -248,6 +253,9 @@ async def test_step_ca_provider_rejects_certificate_signed_by_wrong_ca(
         private_key_path=tmp_path / "identity.pem",
         ca_path=tmp_path / "upstream-ca.pem",
     )
+    certificate_service.install_certificate_authority(
+        trusted_ca_cert.public_bytes(serialization.Encoding.PEM).decode()
+    )
     provider = StepCaCertificateProvider(
         settings=AgentSettings(
             gateway_mode=GatewayMode.MANAGED,
@@ -272,11 +280,215 @@ async def test_step_ca_provider_rejects_certificate_signed_by_wrong_ca(
                 enrollment=_certificate_enrollment(
                     root_fingerprint=_fingerprint(trusted_ca_cert),
                     token="ott_bootstrap_token",
-                    subject="agt_test",
+                    subject=identity_service.get_or_create_identity().agent_id,
                 ),
                 csr_pem=identity_service.build_csr_pem(),
             )
         )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "case", ["valid", "rogue_root", "not_ca", "expired", "missing_intermediate"]
+)
+async def test_step_ca_chain_ends_at_the_pinned_root(tmp_path: Path, case: str) -> None:
+    root_key = ec.generate_private_key(ec.SECP256R1())
+    root = _issue_certificate(
+        subject_name="Pinned root",
+        issuer_name="Pinned root",
+        subject_key=root_key.public_key(),
+        issuer_key=root_key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    root_pem = root.public_bytes(serialization.Encoding.PEM).decode()
+    issuer_key = ec.generate_private_key(ec.SECP256R1())
+    issuer = _issue_certificate(
+        subject_name="Intermediate",
+        issuer_name="Pinned root",
+        subject_key=issuer_key.public_key(),
+        issuer_key=ec.generate_private_key(ec.SECP256R1())
+        if case == "rogue_root"
+        else root_key,
+        not_valid_after=datetime.now(UTC)
+        + (timedelta(seconds=-10) if case == "expired" else timedelta(days=30)),
+        is_ca=case != "not_ca",
+    )
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    csr_pem = identity.build_csr_pem()
+    certificate = _issue_certificate_from_csr(
+        x509.load_pem_x509_csr(csr_pem.encode()), issuer_key, issuer_name="Intermediate"
+    )
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=identity.identity_path,
+        ca_path=tmp_path / "ca.pem",
+    )
+    service.install_certificate_authority(root_pem)
+    response = {
+        "crt": certificate.public_bytes(serialization.Encoding.PEM).decode(),
+        "ca": ""
+        if case == "missing_intermediate"
+        else issuer.public_bytes(serialization.Encoding.PEM).decode(),
+    }
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=response))
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA
+        ),
+        certificate_service=service,
+        http_client_factory=lambda **kwargs: httpx.AsyncClient(
+            transport=transport, **kwargs
+        ),
+    )
+    request = CertificateEnrollmentRequest(
+        enrollment=_certificate_enrollment(token="test-ott"), csr_pem=csr_pem
+    )
+    if case == "valid":
+        material = await provider.enroll(request)
+        assert material is not None
+        chain = x509.load_pem_x509_certificates(material.certificate_chain_pem.encode())
+        assert chain == [certificate, issuer]
+        service.install(certificate_pem=material.certificate_chain_pem)
+        assert (
+            x509.load_pem_x509_certificates(service.certificate_path.read_bytes())
+            == chain
+        )
+    else:
+        with pytest.raises(AgentError, match="pinned CA root"):
+            await provider.enroll(request)
+    assert service.ca_path is not None
+    assert service.ca_path.read_text() == root_pem
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("renew", [False, True])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "valid",
+        "subject",
+        "extra_subject",
+        "missing_san",
+        "other_uri",
+        "dns",
+        "extra_san",
+        "duplicate_san",
+        "other_name",
+    ],
+)
+async def test_step_ca_validates_identity_before_returning_material(
+    tmp_path: Path, renew: bool, mutation: str
+) -> None:
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_cert = _issue_certificate(
+        subject_name="Example Step CA",
+        issuer_name="Example Step CA",
+        subject_key=ca_key.public_key(),
+        issuer_key=ca_key,
+        not_valid_after=datetime.now(tz=UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    ca_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode()
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    csr_pem = identity.build_csr_pem()
+    csr = x509.load_pem_x509_csr(csr_pem.encode())
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=identity.identity_path,
+        ca_path=tmp_path / "ca.pem",
+    )
+    current = _issue_certificate_from_csr(csr, ca_key)
+    current_pem = current.public_bytes(serialization.Encoding.PEM).decode()
+    if renew:
+        service.install(certificate_pem=current_pem, ca_certificate_pem=ca_pem)
+    else:
+        service.install_certificate_authority(ca_pem)
+
+    expected_uri = identity.default_uri_san(identity.get_or_create_identity().agent_id)
+    subject = csr.subject
+    sans: list[x509.GeneralName] = [x509.UniformResourceIdentifier(expected_uri)]
+    if mutation == "subject":
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "agt_other")])
+    elif mutation == "extra_subject":
+        subject = x509.Name(
+            [*subject, x509.NameAttribute(NameOID.COMMON_NAME, "agt_other")]
+        )
+    elif mutation == "other_uri":
+        sans = [x509.UniformResourceIdentifier("urn:inari:agt_other")]
+    elif mutation == "dns":
+        sans = [x509.DNSName(expected_uri)]
+    elif mutation == "extra_san":
+        sans.append(x509.DNSName("other.example.com"))
+    elif mutation == "duplicate_san":
+        sans += sans
+    elif mutation == "other_name":
+        sans.append(x509.OtherName(x509.ObjectIdentifier("1.2.3.4"), b"\x0c\x05other"))
+    builder = x509.CertificateSigningRequestBuilder().subject_name(subject)
+    if mutation != "missing_san":
+        builder = builder.add_extension(
+            x509.SubjectAlternativeName(sans), critical=False
+        )
+    key = serialization.load_pem_private_key(identity.identity_path.read_bytes(), None)
+    returned = _issue_certificate_from_csr(builder.sign(key, None), ca_key)
+    response = {
+        "crt": returned.public_bytes(serialization.Encoding.PEM).decode(),
+        "ca": ca_pem,
+    }
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=response))
+
+    def client_factory(**kwargs) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=transport, **kwargs)
+
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA
+        ),
+        certificate_service=service,
+        http_client_factory=client_factory,
+    )
+    enrollment = _certificate_enrollment(
+        subject=identity.get_or_create_identity().agent_id,
+        authorized_sans=(expected_uri,),
+        token="test-one-time-token",
+    )
+    operation = (
+        provider.renew(CertificateRenewalRequest(enrollment=enrollment))
+        if renew
+        else provider.enroll(
+            CertificateEnrollmentRequest(enrollment=enrollment, csr_pem=csr_pem)
+        )
+    )
+    if mutation == "valid":
+        assert await operation is not None
+    else:
+        with pytest.raises(AgentError, match="Agent Identity|alternative name"):
+            await operation
+    if renew:
+        assert service.certificate_path.read_text() == current_pem
+    else:
+        assert not service.certificate_path.exists()
+
+
+def test_certificate_request_preserves_enrollment_csr_fingerprint(
+    tmp_path: Path,
+) -> None:
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    csr = identity.build_csr_pem()
+    agent_id = identity.get_or_create_identity().agent_id
+    crypto = ManagedCertificateCryptoService(identity_service=identity)
+    request = crypto.build_request(
+        _certificate_enrollment(
+            subject=agent_id, authorized_sans=(identity.default_uri_san(agent_id),)
+        )
+    )
+    assert request.csr_pem == csr
+    for enrollment in [
+        _certificate_enrollment(subject="agt_other"),
+        _certificate_enrollment(authorized_sans=("urn:inari:agt_other",)),
+    ]:
+        with pytest.raises(AgentError, match="Agent Identity"):
+            crypto.build_request(enrollment)
 
 
 @pytest.mark.anyio
@@ -376,7 +588,7 @@ class SlowProvider(PendingProvider):
         self.calls += 1
         await asyncio.sleep(0.05)
         certificate = _issue_ephemeral_certificate("agt_test")
-        return ProvisionedCertificateMaterial(leaf_certificate_pem=certificate)
+        return ProvisionedCertificateMaterial(certificate_chain_pem=certificate)
 
 
 class StepCaHttpClient:
@@ -480,6 +692,27 @@ def _issue_certificate(
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))
         .not_valid_after(not_valid_after)
         .add_extension(x509.BasicConstraints(ca=is_ca, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=is_ca,
+                crl_sign=is_ca,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(subject_key), critical=False
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
+            critical=False,
+        )
     )
     if not is_ca:
         builder = builder.add_extension(
@@ -494,18 +727,38 @@ def _issue_certificate_from_csr(
     issuer_key,
     *,
     not_valid_after: datetime | None = None,
+    issuer_name: str = "Example Step CA",
 ):
     builder = (
         x509.CertificateBuilder()
         .subject_name(csr.subject)
-        .issuer_name(
-            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Example Step CA")])
-        )
+        .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)]))
         .public_key(csr.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))
         .not_valid_after(not_valid_after or (datetime.now(tz=UTC) + timedelta(days=7)))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(csr.public_key()), critical=False
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
+            critical=False,
+        )
         .add_extension(
             x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
             critical=False,

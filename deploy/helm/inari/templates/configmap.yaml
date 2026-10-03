@@ -121,7 +121,6 @@ data:
     step_ca_signing_key_file = "/var/run/secrets/inari/step-ca/provisioner-key.pem"
     step_ca_signing_algorithm = {{ .Values.managedGateway.certificate.stepCa.signingAlgorithm | quote }}
     step_ca_token_ttl = {{ .Values.managedGateway.certificate.stepCa.tokenTtl | quote }}
-    step_ca_authorized_sans = {{ .Values.managedGateway.certificate.stepCa.authorizedSans | toJson }}
     {{- end }}
     requires_mutual_tls_after_issuance = {{ .Values.managedGateway.certificate.requiresMutualTlsAfterIssuance }}
 

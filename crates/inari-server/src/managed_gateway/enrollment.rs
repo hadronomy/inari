@@ -29,6 +29,7 @@ impl ManagedGatewayController {
             return Err(AppError::bad_request("Enrollment key_id is required."));
         }
         let identity = validate_identity(
+            &request.agent_id,
             &request.key_id,
             &request.public_jwk,
             &request.csr_pem,
@@ -247,16 +248,7 @@ impl ManagedGatewayController {
                         AppError::service_unavailable("step-ca base URL is not configured.")
                     })?
                     .to_string();
-                let authorized_sans = if certificate
-                    .step_ca_authorized_sans
-                    .is_empty()
-                {
-                    vec![format!("urn:inari:{agent_id}")]
-                } else {
-                    certificate
-                        .step_ca_authorized_sans
-                        .clone()
-                };
+                let authorized_sans = vec![format!("urn:inari:{agent_id}")];
                 let bootstrap_auth = self
                     .inner
                     .certificate_issuer

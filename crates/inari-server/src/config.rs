@@ -41,7 +41,6 @@ const ENV_LIST_KEYS: &[&str] = &[
     "managed_gateway.controller_actions",
     "managed_gateway.supported_protocol_versions",
     "managed_gateway.data_plane.connect_endpoints",
-    "managed_gateway.certificate.step_ca_authorized_sans",
     "zenoh.access_control.managed_gateway_cert_common_names",
     "zenoh.connect_endpoints",
     "zenoh.listen_endpoints",

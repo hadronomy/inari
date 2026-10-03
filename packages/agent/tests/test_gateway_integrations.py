@@ -522,8 +522,12 @@ async def test_step_ca_provider_bootstraps_root_and_issues_certificate(
         certificate_enrollment=_certificate_enrollment(
             root_fingerprint=_fingerprint(ca_cert),
             token="ott_bootstrap_token",
-            subject="agt_test",
-            authorized_sans=("urn:inari:agt_test",),
+            subject=identity_service.get_or_create_identity().agent_id,
+            authorized_sans=(
+                identity_service.default_uri_san(
+                    identity_service.get_or_create_identity().agent_id
+                ),
+            ),
         )
     )
 
@@ -543,8 +547,7 @@ async def test_step_ca_provider_bootstraps_root_and_issues_certificate(
 
     assert material is not None
     installed = certificate_service.install(
-        certificate_pem=material.leaf_certificate_pem,
-        ca_certificate_pem=material.ca_bundle_pem,
+        certificate_pem=material.certificate_chain_pem,
     )
     assert installed is not None
     assert (tmp_path / "upstream-ca.pem").exists()
@@ -623,8 +626,7 @@ async def test_step_ca_provider_replaces_rotated_root_certificate(
 
     assert material is not None
     installed = certificate_service.install(
-        certificate_pem=material.leaf_certificate_pem,
-        ca_certificate_pem=material.ca_bundle_pem,
+        certificate_pem=material.certificate_chain_pem,
     )
     assert installed is not None
     assert certificate_service.ca_path is not None
@@ -853,6 +855,27 @@ def _issue_certificate(
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))
         .not_valid_after(not_valid_after)
         .add_extension(x509.BasicConstraints(ca=is_ca, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=is_ca,
+                crl_sign=is_ca,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(subject_key), critical=False
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
+            critical=False,
+        )
     )
     return builder.sign(issuer_key, hashes.SHA256())
 
@@ -872,6 +895,27 @@ def _issue_certificate_from_csr(
         .not_valid_before(datetime.now(tz=UTC) - timedelta(minutes=1))
         .not_valid_after(datetime.now(tz=UTC) + timedelta(days=7))
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(csr.public_key()), critical=False
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()),
+            critical=False,
+        )
         .add_extension(
             x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH]),
             critical=False,
