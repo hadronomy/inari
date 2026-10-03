@@ -14,7 +14,7 @@ Start the Python agent first, then launch the GPUI client:
 
 ```sh
 uv run --directory packages/agent inari serve
-cargo run -p inari-device-center
+mbx run -p inari-device-center
 ```
 
 The committed projection in `contracts/local-agent.codegen.openapi.json` generates the
@@ -81,7 +81,8 @@ Each `dial` call declares a control, gives it a default, and returns its current
 value. The panel shows the knobs the render actually read, in the order it read
 them.
 
-See `docs/device-center-dev-environment.md` for the research and the reasoning.
+See the [development environment](../../docs/device-center-dev-environment.md)
+for the controls and their behavior.
 
 ### Design system
 
@@ -104,10 +105,10 @@ light and dark in both materials.
 
 ### Window material
 
-GPUI 0.2.2 can blur the content behind a window and nothing else. There is no
-per-element backdrop filter, so no surface claims one: the chrome is
-translucent over one real window blur, content surfaces use thin tonal washes,
-and floating overlays keep a denser legibility tint.
+Device Center pins a GPUI 0.2.2 fork for GPU effects. The chrome uses native
+window blur. Content surfaces use tonal washes, and floating overlays use a
+denser tint. Authored WGSL effects use the fork's renderer contract. See the
+[GPU effects architecture](../../docs/device-center-gpu-effects-architecture.md).
 
 | Platform | Behind-window blur | Default |
 | --- | --- | --- |
