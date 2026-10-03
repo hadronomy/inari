@@ -46,15 +46,14 @@ fn effect(input: EffectInput) -> vec4<f32> {
     // A jittered delay, so the front of the bloom is ragged rather than a clean
     // expanding circle.
     let jitter = 0.75 + 0.5 * bloom_hash(index + vec2<f32>(2.6, 7.1));
-    let origin = vec2<f32>(origin_x(input), origin_y(input)) * input.scale;
+    let origin = origin(input) * input.scale;
     let delay = length(centre - origin) / max(spread(input), 1.0) * jitter;
     let travel = clamp((age(input) - delay) / (DURATION * jitter), 0.0, 1.0);
 
-    let heading = direction(input);
     var reach = 0.0;
-    if heading > 0.0 {
+    if pointer_is_inside(input) {
         reach = travel;
-    } else if heading < 0.0 {
+    } else if !pointer_is_never(input) {
         reach = 1.0 - travel;
     }
     if reach <= 0.0 {

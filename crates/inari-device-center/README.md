@@ -14,7 +14,7 @@ Start the Python agent first, then launch the GPUI client:
 
 ```sh
 uv run --directory packages/agent inari serve
-cargo run -p inari-device-center
+mbx run -p inari-device-center
 ```
 
 The committed projection in `contracts/local-agent.codegen.openapi.json` generates the
@@ -39,11 +39,50 @@ The crate is organized by product feature:
 - `features/` owns setup, overview, devices, activity, and support views;
 - `infrastructure/` owns the supervised client runtime, tray, activation, and
   platform integration;
-- `ui/` is the Inari design system over GPUI Component.
+- `ui/` is the Inari design system over GPUI Component;
+- `dev/` is the development environment, compiled only under
+  `debug_assertions`.
 
 Mutable screen state lives in GPUI entities. Long-running network work belongs
 to the owned Tokio runtime in `infrastructure/runtime.rs`, which cancels and
 joins its tasks during shutdown.
+
+### Development environment
+
+Debug builds carry a Bench and a set of devtools. A small launcher floats at the
+bottom right of every window; it is the entry point, and it is deliberately
+quiet until the pointer reaches it.
+
+| Shortcut | What it opens |
+| --- | --- |
+| `cmd-alt-d` / `ctrl-alt-d` | the Bench: the story catalog and the stage |
+| `cmd-alt-i` / `ctrl-alt-i` | the devtools panel on the active window |
+
+The panel is docked in GPUI's own inspector strip, so it never covers what is
+being judged, and GPUI's element picker works with it. Five tools share it:
+Knobs, Element, Layout, Frames, and Stage.
+
+Add a story next to the component it previews. There is no central list:
+
+```rust
+crate::story! {
+    id: "control.button",
+    name: "Button",
+    scope: crate::dev::Scope::Controls,
+    about: "Every emphasis, with the reporting swap.",
+    render: |dial, _window, _cx| {
+        let disabled = dial.flag("Disabled", false);
+        ...
+    },
+}
+```
+
+Each `dial` call declares a control, gives it a default, and returns its current
+value. The panel shows the knobs the render actually read, in the order it read
+them.
+
+See the [development environment](../../docs/device-center-dev-environment.md)
+for the controls and their behavior.
 
 ### Design system
 
@@ -66,10 +105,10 @@ light and dark in both materials.
 
 ### Window material
 
-GPUI 0.2.2 can blur the content behind a window and nothing else. There is no
-per-element backdrop filter, so no surface claims one: the chrome is
-translucent over one real window blur, content surfaces use thin tonal washes,
-and floating overlays keep a denser legibility tint.
+Device Center pins a GPUI 0.2.2 fork for GPU effects. The chrome uses native
+window blur. Content surfaces use tonal washes, and floating overlays use a
+denser tint. Authored WGSL effects use the fork's renderer contract. See the
+[GPU effects architecture](../../docs/device-center-gpu-effects-architecture.md).
 
 | Platform | Behind-window blur | Default |
 | --- | --- | --- |

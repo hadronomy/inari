@@ -1,0 +1,1125 @@
+//! The docked tool surface.
+//!
+//! GPUI reserves a fixed 30rem strip on the right of any window that has an
+//! inspector and prepaints whatever `App::set_inspector_renderer` returns into
+//! it (`window.rs:2019-2031`, `window.rs:4582-4596`). That strip is the panel.
+//!
+//! Hosting the panel there rather than floating it costs one constraint — the
+//! width is not ours — and removes three problems: the panel never occludes the
+//! surfaces being judged, it needs no drag or z-order model of its own, and the
+//! inspector's own picking mode is already wired to it. Browser devtools dock
+//! for the same reasons.
+//!
+//! The Bench and the application window get the same panel and the same tools.
+//! Only what the tools have to say differs.
+
+use std::{cell::RefCell, collections::HashMap, collections::HashSet, time::Duration};
+
+use gpui::{
+    AnyElement, App, AppContext as _, BorrowAppContext as _, Context, DivInspectorState, Entity,
+    Global, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Window, WindowId, div,
+    prelude::FluentBuilder as _, px,
+};
+use gpui_component::{
+    IconName, Selectable as _, Sizable as _, StyledExt as _,
+    button::{Button, ButtonVariants as _},
+    chart::{AreaChart, BarChart},
+    input::{InputEvent, InputState},
+    switch::Switch,
+};
+
+use crate::{
+    dev::{
+        chart, control,
+        dial::{self, Kind, Knob, Value},
+        element, frames,
+    },
+    ui::{
+        content::Typography as _,
+        material, motion,
+        theme::{ActiveTheme as _, Appearance, Theme},
+    },
+};
+
+/// One screen of the panel.
+///
+/// A screen has something to read. That is the whole membership test, and it is
+/// why picking an element and outlining every div are not screens: they change
+/// how the *window* behaves and have nothing of their own to show. Giving them
+/// tabs cost a click on the way in and left a screen that said nothing on the
+/// way out — the selection went one place and its report went another.
+///
+/// Modes live on the bar beside the tabs, and picking hands the panel straight
+/// to [`Screen::Element`], which is the only screen that has anything to say
+/// about what was picked.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Screen {
+    /// The current story's live parameters. Empty outside the Bench.
+    #[default]
+    Knobs,
+    /// The selected element: geometry, the box model, and the live style
+    /// editors.
+    Element,
+    /// How often the window is rebuilding itself.
+    Frames,
+    /// Appearance, material, motion, and the size the stage is judged at.
+    Stage,
+}
+
+impl Screen {
+    pub const ALL: [Self; 4] = [Self::Knobs, Self::Element, Self::Frames, Self::Stage];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Knobs => "Knobs",
+            Self::Element => "Element",
+            Self::Frames => "Frames",
+            Self::Stage => "Stage",
+        }
+    }
+
+    pub fn icon(self) -> IconName {
+        match self {
+            Self::Knobs => IconName::Settings2,
+            Self::Element => IconName::Inspector,
+            Self::Frames => IconName::ChartPie,
+            Self::Stage => IconName::Palette,
+        }
+    }
+}
+
+/// What the panel shows and what the floating layer draws. One value, read by
+/// both surfaces, so a toggle flipped in the panel shows up in the overlay
+/// without either knowing about the other.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Deck {
+    pub screen: Screen,
+    /// GPUI's own `DebugBelow`: a red outline around every div, with no
+    /// instrumentation in any component. A mode, not a screen.
+    pub outline_all: bool,
+    /// The width the stage is held at, or the full stage when `None`.
+    pub stage_width: Option<f32>,
+    /// Bumped when knobs are reset, so the panel drops the control entities it
+    /// caches and rebuilds them at the new values.
+    pub generation: usize,
+    /// What the next panel render should do to the picker.
+    pub picker: Picker,
+}
+
+/// What the panel should do to GPUI's picker on its next render.
+///
+/// One value with three named intents rather than a pair of booleans, because
+/// "arm" and "disarm" are not independent: they are the two things that can be
+/// asked for, and asking for both is not a state anyone means.
+///
+/// The indirection exists because the two places that decide — the launcher and
+/// `show` — have no `Inspector` to hand, and the one place that has it is the
+/// renderer.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Picker {
+    /// Leave it as it is.
+    #[default]
+    AsIs,
+    /// Arm it: someone asked to pick.
+    Arm,
+    /// Stand it down: the dock was opened to read a screen, not to pick.
+    ///
+    /// An inspector is created armed, so without this every dock open would
+    /// spend the next click in the window selecting whatever was under it.
+    Disarm,
+}
+
+/// Every window's deck.
+///
+/// Keyed by window, because a panel belongs to the window it is docked in. Held
+/// as one value it was not a shared preference but a collision: switching the
+/// Bench to the Element screen switched the application's panel too, and the two
+/// then fought over the one set of controls between them, every frame.
+#[derive(Default)]
+struct Decks(HashMap<WindowId, Deck>);
+
+impl Global for Decks {}
+
+pub fn deck(window: &Window, cx: &App) -> Deck {
+    let window_id = window.window_handle().window_id();
+    cx.try_global::<Decks>()
+        .and_then(|decks| decks.0.get(&window_id).copied())
+        .unwrap_or_default()
+}
+
+pub fn adjust(window: &Window, cx: &mut App, change: impl FnOnce(&mut Deck)) {
+    let window_id = window.window_handle().window_id();
+    let mut deck = deck(window, cx);
+    change(&mut deck);
+    if !cx.has_global::<Decks>() {
+        cx.set_global(Decks::default());
+    }
+    cx.update_global(|decks: &mut Decks, _| decks.0.insert(window_id, deck));
+    cx.refresh_windows();
+}
+
+/// Whether GPUI is reserving the strip for us.
+///
+/// `Window::inspector` is private and there is no public reader, so the panel
+/// reports its own existence instead: it raises `drawn` every time GPUI renders
+/// it, and the floating layer lowers the flag at the start of each root render.
+/// Root prepaints before inspector (`window.rs:2035-2042`), so `open` answers
+/// for the previous frame — one frame stale, and self-correcting, which is
+/// enough to decide whether a click should open the dock or only switch tools.
+/// Per window, because the Bench and the application window each have their
+/// own dock and their own answer.
+#[derive(Default)]
+pub struct Dock {
+    drawn: HashSet<WindowId>,
+    open: HashSet<WindowId>,
+}
+
+impl Global for Dock {}
+
+/// Called from the panel each time GPUI renders it.
+fn mark_drawn(window: &Window, cx: &mut App) {
+    let id = window.window_handle().window_id();
+    if !cx.has_global::<Dock>() {
+        cx.set_global(Dock::default());
+    }
+    cx.update_global(|dock: &mut Dock, _| dock.drawn.insert(id));
+}
+
+/// Called from the floating layer at the top of every root render.
+pub fn observe(window: &Window, cx: &mut App) {
+    let id = window.window_handle().window_id();
+    if !cx.has_global::<Dock>() {
+        cx.set_global(Dock::default());
+    }
+    cx.update_global(|dock: &mut Dock, _| {
+        if dock.drawn.remove(&id) {
+            dock.open.insert(id);
+        } else {
+            dock.open.remove(&id);
+        }
+    });
+}
+
+pub fn is_open(window: &Window, cx: &App) -> bool {
+    let id = window.window_handle().window_id();
+    cx.try_global::<Dock>()
+        .is_some_and(|dock| dock.open.contains(&id))
+}
+
+/// Show `screen`, opening the dock if it is closed.
+pub fn show(screen: Screen, window: &mut Window, cx: &mut App) {
+    // A second press on the screen already showing closes the dock, so one
+    // control both opens and dismisses.
+    let dismiss = is_open(window, cx) && deck(window, cx).screen == screen;
+    let opening = !dismiss && !is_open(window, cx);
+    adjust(window, cx, |deck| {
+        deck.screen = screen;
+        if opening {
+            // Opened to read, not to pick.
+            deck.picker = Picker::Disarm;
+        }
+    });
+    if dismiss || opening {
+        window.toggle_inspector(cx);
+    }
+}
+
+/// Arm GPUI's picker, and hand the panel to the screen that will have something
+/// to say the moment anything is picked.
+pub fn pick(inspector: &mut gpui::Inspector, window: &mut Window, cx: &mut App) {
+    adjust(window, cx, |deck| deck.screen = Screen::Element);
+    inspector.start_picking();
+    window.refresh();
+}
+
+/// The same, from somewhere with no `Inspector` to hand — the launcher.
+///
+/// One press: the dock opens on the Element screen with the picker armed, so
+/// the click that lands on something is the same click that shows its report.
+pub fn start_pick(window: &mut Window, cx: &mut App) {
+    let opening = !is_open(window, cx);
+    adjust(window, cx, |deck| {
+        deck.screen = Screen::Element;
+        deck.picker = Picker::Arm;
+    });
+    if opening {
+        window.toggle_inspector(cx);
+    }
+}
+
+/// Install the renderer. Must run after `gpui_component::init`, which registers
+/// its own; the last writer wins and we host its editors inside ours.
+pub fn install(cx: &mut App) {
+    // One set of editors per window. Shared, the two panels handed the same
+    // `DivInspector` a different element every frame, and setting an editor's
+    // value puts its scroll back to the top — so the style blocks could not be
+    // scrolled at all while both windows were open.
+    let editors: RefCell<HashMap<WindowId, Entity<gpui_component::DivInspector>>> =
+        RefCell::new(HashMap::new());
+    cx.register_inspector_element(move |id, state: &DivInspectorState, window, cx| {
+        // Refreshed every frame, whatever the panel is showing. The overlay
+        // draws from this, and a box that is only refreshed while its own
+        // screen is open is a box that lies the moment you look away.
+        element::remember(state, window, cx);
+        if deck(window, cx).screen != Screen::Element {
+            return gpui::Empty.into_any_element();
+        }
+        let window_id = window.window_handle().window_id();
+        let editors = editors
+            .borrow_mut()
+            .entry(window_id)
+            .or_insert_with(|| cx.new(|cx| gpui_component::DivInspector::new(window, cx)))
+            .clone();
+        editors.update(cx, |div_inspector, cx| {
+            div_inspector.update_inspected_element(id.clone(), state.clone(), window, cx);
+        });
+        element::tool(&id, &editors, window, cx)
+    });
+
+    let panels: RefCell<HashMap<WindowId, Entity<Panel>>> = RefCell::new(HashMap::new());
+    cx.set_inspector_renderer(Box::new(move |inspector, window, cx| {
+        mark_drawn(window, cx);
+        match deck(window, cx).picker {
+            Picker::AsIs => {},
+            Picker::Arm => {
+                inspector.start_picking();
+                adjust(window, cx, |deck| deck.picker = Picker::AsIs);
+            },
+            Picker::Disarm => {
+                inspector.stop_picking();
+                adjust(window, cx, |deck| deck.picker = Picker::AsIs);
+            },
+        }
+        let panel = panels
+            .borrow_mut()
+            .entry(window.window_handle().window_id())
+            .or_insert_with(|| cx.new(|_| Panel::default()))
+            .clone();
+        // Always run, whatever the screen: the closure above is what keeps the
+        // selection's geometry current, and it is cheap when nothing is asking
+        // for the editors.
+        let states = inspector.render_inspector_states(window, cx);
+        let states = if deck(window, cx).screen == Screen::Element { states } else { Vec::new() };
+        let picking = inspector.is_picking();
+        let body = panel.update(cx, |panel, cx| panel.body(states, window, cx));
+        chrome(body, picking, window, cx)
+    }));
+}
+
+/// The control entities the panel keeps between frames.
+///
+/// Sliders and text fields own their own drag and caret state, so they have to
+/// outlive one render. They are keyed by knob label and dropped whenever the
+/// story changes or the knobs are reset — the store stays authoritative.
+#[derive(Default)]
+struct Panel {
+    story: Option<&'static str>,
+    generation: usize,
+    fields: HashMap<&'static str, Entity<InputState>>,
+    subscriptions: Vec<Subscription>,
+}
+
+impl Panel {
+    /// The selected tool's content. The chrome around it is built by the
+    /// renderer, which holds the `Inspector` the pick button needs.
+    fn body(
+        &mut self,
+        states: Vec<AnyElement>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.inari().clone();
+        let deck = deck(window, cx);
+        // A slider mid-travel and a press mid-drag both need the next frame.
+        if control::animating() {
+            window.request_animation_frame();
+        }
+
+        match deck.screen {
+            Screen::Knobs => self.knobs(window, cx),
+            Screen::Element => {
+                if states.is_empty() {
+                    hint(&theme, "Pick an element to inspect it.")
+                } else {
+                    div()
+                        .v_flex()
+                        .gap(px(Theme::SPACE_MD))
+                        .children(states)
+                        .into_any_element()
+                }
+            },
+            Screen::Frames => frames_tool(&theme, window, cx),
+            Screen::Stage => stage_tool(&theme, deck, cx),
+        }
+    }
+
+    /// The knobs the last story render recorded, in the order it read them.
+    fn knobs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.inari().clone();
+        let Some(story) = dial::active_story(cx) else {
+            return hint(&theme, "Open the Bench to tune a story.");
+        };
+        let generation = deck(window, cx).generation;
+        if self.story != Some(story) || self.generation != generation {
+            self.story = Some(story);
+            self.generation = generation;
+            self.fields.clear();
+            control::forget();
+            self.subscriptions.clear();
+        }
+
+        let schema = dial::schema(cx);
+        if schema.is_empty() {
+            return hint(&theme, "This story declares no knobs.");
+        }
+
+        let moved = schema.iter().any(Knob::is_moved);
+        // Actions are not values, so they do not belong in the run of value
+        // rows. They belong with Reset, which is the panel's own action, on one
+        // line at the foot — where a row of things you *press* reads as a row of
+        // things you press rather than as more knobs that happen to be buttons.
+        let (actions, values): (Vec<&Knob>, Vec<&Knob>) = schema
+            .iter()
+            .partition(|knob| matches!(knob.kind, Kind::Press));
+
+        let rows: Vec<AnyElement> = values
+            .iter()
+            .map(|knob| self.row(story, knob, window, cx))
+            .collect();
+        let footer: Vec<AnyElement> = actions
+            .iter()
+            .map(|knob| self.row(story, knob, window, cx))
+            .collect();
+
+        div()
+            .v_flex()
+            // DialKit sets its rows four pixels apart. Any more and the panel
+            // stops reading as one instrument.
+            .gap(px(4.0))
+            .w_full()
+            .children(rows)
+            .child(
+                div()
+                    .h_flex()
+                    .gap(px(4.0))
+                    .w_full()
+                    .pt(px(Theme::SPACE_SM))
+                    .children(footer.into_iter().map(|action| {
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(action)
+                    }))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(control::reset(
+                                &theme,
+                                moved,
+                                move |window: &mut Window, cx: &mut App| {
+                                    dial::reset(story, cx);
+                                    adjust(window, cx, |deck| deck.generation += 1);
+                                },
+                            )),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn row(
+        &mut self,
+        story: &'static str,
+        knob: &Knob,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.inari().clone();
+        let label = knob.label;
+        let key = SharedString::from(format!("{story}/{label}"));
+
+        match &knob.kind {
+            Kind::Group => control::heading(&theme, label).into_any_element(),
+
+            Kind::Flag => control::Toggle::new(
+                key,
+                label,
+                matches!(knob.value, Value::Flag(true)),
+                move |checked, _, cx| {
+                    dial::set(story, label, Value::Flag(checked), cx);
+                    cx.refresh_windows();
+                },
+            )
+            .into_any_element(),
+
+            Kind::Range { lo, hi, step } => control::Slider::new(
+                key,
+                label,
+                number(&knob.value),
+                *lo..=*hi,
+                *step,
+                move |value, _, cx| {
+                    dial::set(story, label, Value::Number(value), cx);
+                    cx.refresh_windows();
+                },
+            )
+            .into_any_element(),
+
+            Kind::Count { lo, hi } => control::labelled(
+                &theme,
+                label,
+                control::stepper(
+                    &theme,
+                    key,
+                    number(&knob.value) as usize,
+                    *lo..=*hi,
+                    move |value, _, cx| {
+                        dial::set(story, label, Value::Number(value as f32), cx);
+                        cx.refresh_windows();
+                    },
+                ),
+            )
+            .into_any_element(),
+
+            Kind::Text => {
+                let state = self.field_state(story, knob, window, cx);
+                control::text_row(&theme, key, label, &state).into_any_element()
+            },
+
+            Kind::Pick { labels } => {
+                let selected = match knob.value {
+                    Value::Choice(index) => index,
+                    _ => 0,
+                };
+                control::labelled(
+                    &theme,
+                    label,
+                    control::Segmented::new(
+                        key,
+                        labels
+                            .iter()
+                            .map(|name| SharedString::new_static(name))
+                            .collect(),
+                        selected,
+                        move |index, _, cx| {
+                            dial::set(story, label, Value::Choice(index), cx);
+                            cx.refresh_windows();
+                        },
+                    ),
+                )
+                .into_any_element()
+            },
+
+            Kind::Press => control::Action::new(key, label, move |_, cx| {
+                dial::press(story, label, cx);
+                cx.refresh_windows();
+            })
+            .into_any_element(),
+        }
+    }
+
+    /// The slider entity for `knob`, built once and kept until the story or the
+    /// generation changes.
+    fn field_state(
+        &mut self,
+        story: &'static str,
+        knob: &Knob,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
+        let label = knob.label;
+        if let Some(state) = self.fields.get(label) {
+            return state.clone();
+        }
+        let initial = match &knob.value {
+            Value::Text(text) => text.to_string(),
+            _ => String::new(),
+        };
+        let state = cx.new(|cx| InputState::new(window, cx).default_value(initial));
+        let focus_key = SharedString::from(format!("{story}/{label}-focus"));
+        self.subscriptions
+            .push(cx.subscribe(&state, move |_, state, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
+                    let text = state.read(cx).value().to_string();
+                    dial::set(story, label, Value::Text(text.into()), cx);
+                    cx.refresh_windows();
+                },
+                // A field cannot see its own focus from inside the row, so the
+                // owner reports the flip and the chrome eases off the same
+                // clock as every other wash.
+                InputEvent::Focus | InputEvent::Blur
+                    if motion::hover_set(focus_key.clone(), matches!(event, InputEvent::Focus)) =>
+                {
+                    cx.refresh_windows();
+                },
+                _ => {},
+            }));
+        self.fields.insert(label, state.clone());
+        state
+    }
+}
+
+fn number(value: &Value) -> f32 {
+    match value {
+        Value::Number(number) => *number,
+        _ => 0.0,
+    }
+}
+
+// ---- panel chrome ----
+
+/// The panel frame: the tool tabs, the picker, and the body under them.
+fn chrome(
+    body: AnyElement,
+    picking: bool,
+    window: &mut Window,
+    cx: &mut Context<gpui::Inspector>,
+) -> AnyElement {
+    let theme = cx.inari().clone();
+    let deck = deck(window, cx);
+    let tab = |screen: Screen| {
+        Button::new(SharedString::from(format!("dev-screen-{}", screen.title())))
+            .icon(screen.icon())
+            .ghost()
+            .small()
+            .selected(screen == deck.screen)
+            .tooltip(screen.title())
+            .on_click(move |_, window: &mut Window, cx: &mut App| {
+                adjust(window, cx, |deck| deck.screen = screen)
+            })
+    };
+
+    let bar = div()
+        .h_flex()
+        .items_center()
+        .justify_between()
+        .h(px(Theme::TITLEBAR_HEIGHT))
+        .px(px(Theme::SPACE_SM))
+        .border_b_1()
+        .border_color(theme.hairline)
+        .child(
+            div()
+                .h_flex()
+                .gap(px(2.0))
+                .children(Screen::ALL.map(tab)),
+        )
+        .child(
+            div()
+                .h_flex()
+                .gap(px(2.0))
+                // Two modes, not two screens. They change how the window
+                // behaves and have nothing of their own to read, so they sit on
+                // the bar rather than taking a tab that would open onto
+                // something empty.
+                .child(
+                    Button::new("dev-outline")
+                        .icon(IconName::Frame)
+                        .ghost()
+                        .small()
+                        .selected(deck.outline_all)
+                        .tooltip("Outline every element")
+                        .on_click(|_, window: &mut Window, cx: &mut App| {
+                            adjust(window, cx, |deck| deck.outline_all = !deck.outline_all)
+                        }),
+                )
+                .child(
+                    Button::new("dev-pick")
+                        .icon(IconName::Search)
+                        .ghost()
+                        .small()
+                        .selected(picking)
+                        .tooltip("Pick an element — scroll to walk up its ancestors")
+                        .on_click(cx.listener(|inspector: &mut gpui::Inspector, _, window, cx| {
+                            pick(inspector, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new("dev-close")
+                        .icon(IconName::Close)
+                        .ghost()
+                        .small()
+                        .on_click(|_, window: &mut Window, cx: &mut App| {
+                            window.toggle_inspector(cx);
+                        }),
+                ),
+        );
+
+    div()
+        .size_full()
+        .v_flex()
+        .bg(theme.chrome)
+        .border_l_1()
+        .border_color(theme.hairline)
+        .font_family(theme.font_sans.clone())
+        .text_color(theme.text)
+        .child(bar)
+        .child(
+            div()
+                .id("dev-panel-body")
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_y_scroll()
+                .p(px(Theme::SPACE_MD))
+                .child(body),
+        )
+        // A press that leaves the track it started on still belongs to that
+        // slider, and the rubber band is travel past the track by definition.
+        .children(control::capture_sheet())
+        .into_any_element()
+}
+
+fn hint(theme: &Theme, message: &'static str) -> AnyElement {
+    div()
+        .w_full()
+        .py(px(Theme::SPACE_LG))
+        .text_caption()
+        .text_color(theme.text_tertiary)
+        .child(message)
+        .into_any_element()
+}
+
+// ---- the tools that need no state ----
+
+/// One frame, as the chart plots it.
+///
+/// The bands are cumulative and the labels count backwards from now, so the
+/// newest frame is on the right where a reader's eye already is.
+struct Plotted {
+    age: SharedString,
+    total: f64,
+    upper: f64,
+    lower: f64,
+}
+
+/// One kind of primitive in the frame.
+struct Counted {
+    kind: &'static str,
+    count: f64,
+}
+
+/// The performance screen.
+///
+/// Four questions, in the order a developer asks them: is it keeping up, where
+/// is the time going, what is the frame made of, and is anything growing that
+/// should not be.
+///
+/// The charts are `gpui_component`'s. It ships a plotting library — scales,
+/// axes, dashed grids, shapes and tooltips — and we already depend on it, so
+/// hand-painting bars was reinventing an axis badly. Series colours are given
+/// explicitly rather than left to its `chart_1..5` palette, which our theme does
+/// not define and which would arrive from somewhere else's idea of a chart.
+fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
+    let cadence = frames::cadence(cx);
+    let samples = frames::samples(cx);
+    let stats = window.frame_stats();
+    let latest = samples
+        .last()
+        .copied()
+        .unwrap_or_default();
+    let missed = chart::over_budget(&samples);
+
+    let last = samples.len().saturating_sub(1);
+    let plotted: Vec<Plotted> = samples
+        .iter()
+        .enumerate()
+        .map(|(index, sample)| {
+            let (total, upper, lower) = sample.bands();
+            Plotted {
+                age: if index == last { "now".into() } else { format!("-{}", last - index).into() },
+                total,
+                upper,
+                lower,
+            }
+        })
+        .collect();
+
+    let counted: Vec<Counted> = [
+        ("Quads", stats.quads),
+        ("Glyphs", stats.monochrome_sprites),
+        ("Images", stats.polychrome_sprites),
+        ("Shadows", stats.shadows),
+        ("Paths", stats.paths),
+        ("Lines", stats.underlines),
+        ("Effects", stats.effects),
+        ("Surfaces", stats.surfaces),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(kind, count)| Counted { kind, count: count as f64 })
+    .collect();
+
+    div()
+        .v_flex()
+        .gap(px(Theme::SPACE_SM))
+        .w_full()
+        .child(group(theme, "Keeping up"))
+        .child(reading(theme, "Renders per second", &cadence.rate.to_string()))
+        .child(reading(theme, "Missed 60Hz", &format!("{missed} of {}", samples.len().max(1))))
+        .child(reading(theme, "Median frame", &millis(chart::percentile(&samples, 0.5))))
+        .child(reading(theme, "Worst in 95", &millis(chart::percentile(&samples, 0.95))))
+        .child(
+            // Largest band first: an area chart fills from its baseline, so a
+            // later series drawn over a larger one would bury it.
+            // The chart element asks for 100% of its parent, and a percentage
+            // needs a *definite* box to resolve against. Inside the scrolling
+            // body it had neither, so it laid out at its content size — nothing
+            // — and drew itself into the corner. A grown flex item gives it a
+            // real width, and the row's height gives it a real height.
+            div().flex().w_full().child(
+                plot(px(170.0)).child(
+                    AreaChart::new(plotted)
+                        .x(|frame: &Plotted| frame.age.clone())
+                        .y(|frame: &Plotted| frame.total)
+                        .stroke(theme.text_tertiary)
+                        .fill(Hsla { a: 0.18, ..theme.text_tertiary })
+                        .y(|frame: &Plotted| frame.upper)
+                        .stroke(theme.info)
+                        .fill(Hsla { a: 0.35, ..theme.info })
+                        .y(|frame: &Plotted| frame.lower)
+                        .stroke(theme.accent)
+                        .fill(Hsla { a: 0.45, ..theme.accent })
+                        .linear()
+                        .tick_margin(20),
+                ),
+            ),
+        )
+        .child(
+            div()
+                .text_caption()
+                .text_color(theme.text_tertiary)
+                .child(
+                    "Build, then paint, then the rest of `draw`, stacked, scaled to the frames \
+                     themselves. A budget line would set the ceiling at 16.7 ms and squash a fast \
+                     window into the floor, so the budget is counted above instead of drawn. A low \
+                     median with a few tall spikes is a stutter, not a slow window — and the two \
+                     want different fixes.",
+                ),
+        )
+        .child(group(theme, "Where the time went"))
+        .child(phase(theme, "Build", latest.build, latest.total, theme.accent))
+        .child(phase(theme, "Paint", latest.paint, latest.total, theme.info))
+        .child(phase(theme, "Everything else", latest.rest(), latest.total, theme.text_tertiary))
+        .child(group(theme, "What the frame is made of"))
+        .child(
+            div()
+                .flex()
+                .w_full()
+                .child(plot(px(170.0)).child({
+                    let ink = theme.accent;
+                    BarChart::new(counted)
+                        .x(|part: &Counted| part.kind)
+                        .y(|part: &Counted| part.count)
+                        .fill(move |_: &Counted| ink)
+                        .label(|part: &Counted| format!("{}", part.count as usize))
+                })),
+        )
+        .child(reading(theme, "Draw operations", &stats.operations.to_string()))
+        .child(group(theme, "Held between frames"))
+        .child(reading(theme, "Hitboxes", &stats.hitboxes.to_string()))
+        .child(reading(theme, "Element states", &stats.element_states.to_string()))
+        .child(reading(theme, "Deferred draws", &stats.deferred_draws.to_string()))
+        .child(
+            div()
+                .text_caption()
+                .text_color(theme.text_tertiary)
+                .child(
+                    "These three are retained. A number that climbs and never comes back down is \
+                     what a leak looks like from here.",
+                ),
+        )
+        .into_any_element()
+}
+
+/// A definite box for a chart to fill.
+///
+/// `IntoPlot` gives a chart `Size::full()`, which is a percentage, and a
+/// percentage resolves to nothing without a definite parent. The outer row
+/// fixes the height and the grown item fixes the width.
+fn plot(height: gpui::Pixels) -> gpui::Div {
+    div()
+        .flex_1()
+        .min_w(px(0.0))
+        .w_full()
+        .h(height)
+}
+
+/// One phase of the last frame: its cost, and its share of the whole.
+fn phase(
+    theme: &Theme,
+    label: &'static str,
+    value: Duration,
+    total: Duration,
+    ink: gpui::Hsla,
+) -> impl IntoElement {
+    let share = if total.is_zero() {
+        0.0
+    } else {
+        (value.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+    };
+    div()
+        .v_flex()
+        .gap(px(3.0))
+        .w_full()
+        .child(reading(theme, label, &millis(value)))
+        .child(
+            div()
+                .w_full()
+                .h(px(3.0))
+                .rounded_full()
+                .bg(theme.hairline)
+                .child(
+                    div()
+                        .h_full()
+                        .w(gpui::relative(share))
+                        .rounded_full()
+                        .bg(ink),
+                ),
+        )
+}
+
+fn stage_tool(theme: &Theme, deck: Deck, cx: &App) -> AnyElement {
+    let width = |label: &'static str, value: Option<f32>| {
+        let selected = deck.stage_width == value;
+        div()
+            .id(label)
+            .flex_1()
+            .h(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(Theme::RADIUS_CONTROL - 2.0))
+            .text_size(px(11.0))
+            .when(selected, |chip| {
+                chip.bg(theme.surface_overlay)
+                    .text_color(theme.text)
+            })
+            .when(!selected, |chip| {
+                chip.text_color(theme.text_tertiary)
+                    .hover(|style| style.bg(theme.wash_hover))
+            })
+            .child(label)
+            .on_click(move |_, window: &mut Window, cx: &mut App| {
+                adjust(window, cx, |deck| deck.stage_width = value)
+            })
+    };
+
+    let appearance = |label: &'static str, pick: Option<Appearance>| {
+        div()
+            .id(label)
+            .flex_1()
+            .h(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(Theme::RADIUS_CONTROL - 2.0))
+            .text_size(px(11.0))
+            .text_color(theme.text_tertiary)
+            .hover(|style| style.bg(theme.wash_hover))
+            .child(label)
+            .on_click(move |_, window: &mut Window, cx: &mut App| match pick {
+                // Pinned against the OS. The next appearance event writes over
+                // it, which is right: this is a preview control, not a
+                // preference.
+                Some(appearance) => {
+                    Theme::resolve(appearance, material::resolve()).install(cx);
+                    window.set_background_appearance(material::resolve().window_background());
+                    cx.refresh_windows();
+                },
+                None => Theme::sync(window, cx),
+            })
+    };
+
+    let _ = cx;
+    div()
+        .v_flex()
+        .gap(px(Theme::SPACE_SM))
+        .w_full()
+        .child(group(theme, "Appearance"))
+        .child(
+            div()
+                .h_flex()
+                .gap(px(2.0))
+                .p(px(2.0))
+                .rounded(px(Theme::RADIUS_CONTROL))
+                .bg(theme.surface_raised)
+                .child(appearance("Light", Some(Appearance::Light)))
+                .child(appearance("Dark", Some(Appearance::Dark)))
+                .child(appearance("Follow OS", None)),
+        )
+        .child(toggle(
+            theme,
+            "dev-translucent",
+            "Translucent window",
+            material::resolve().is_glass(),
+            |checked, cx| {
+                material::set_prefer_opaque(!checked);
+                cx.refresh_windows();
+            },
+        ))
+        .child(toggle(
+            theme,
+            "dev-reduced-motion",
+            "Reduced motion",
+            motion::reduced(),
+            |checked, cx| {
+                motion::set_reduced(*checked);
+                cx.refresh_windows();
+            },
+        ))
+        .child(group(theme, "Stage width"))
+        .child(
+            div()
+                .h_flex()
+                .gap(px(2.0))
+                .p(px(2.0))
+                .rounded(px(Theme::RADIUS_CONTROL))
+                .bg(theme.surface_raised)
+                .child(width("Fill", None))
+                .child(width("360", Some(360.0)))
+                .child(width("560", Some(560.0)))
+                .child(width("880", Some(880.0))),
+        )
+        .into_any_element()
+}
+
+fn group(theme: &Theme, title: &'static str) -> impl IntoElement {
+    div()
+        .w_full()
+        .pt(px(Theme::SPACE_SM))
+        .text_caption()
+        .text_color(theme.text_tertiary)
+        .child(title)
+}
+
+fn toggle(
+    theme: &Theme,
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    change: impl Fn(&bool, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .h_flex()
+        .items_center()
+        .justify_between()
+        .gap(px(Theme::SPACE_MD))
+        .w_full()
+        .min_h(px(26.0))
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .child(
+            Switch::new(id)
+                .checked(checked)
+                .on_click(move |checked, _, cx| change(checked, cx)),
+        )
+}
+
+fn reading(theme: &Theme, label: &'static str, value: &str) -> impl IntoElement {
+    div()
+        .h_flex()
+        .items_baseline()
+        .justify_between()
+        .gap(px(Theme::SPACE_MD))
+        .w_full()
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .font_family(theme.font_mono.clone())
+                .text_color(theme.text)
+                .child(value.to_string()),
+        )
+}
+
+fn millis(duration: Duration) -> String {
+    format!("{:.1} ms", duration.as_secs_f32() * 1000.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_component::IconNamed as _;
+
+    use super::*;
+    use crate::assets::BrandAssets;
+
+    /// Every glyph the panel names, whether it is a tab or a control.
+    ///
+    /// GPUI draws a missing SVG as nothing at all — no warning, no placeholder,
+    /// no log line. Two tool tabs shipped blank before this test existed, and
+    /// the only way anyone found out was by looking at the pixels.
+    const GLYPHS: [IconName; 7] = [
+        IconName::Settings2,
+        IconName::Inspector,
+        IconName::Frame,
+        IconName::ChartPie,
+        IconName::Palette,
+        IconName::Search,
+        IconName::Close,
+    ];
+
+    #[test]
+    fn every_glyph_the_panel_names_is_embedded() {
+        for glyph in GLYPHS {
+            let path = glyph.path();
+            assert!(
+                BrandAssets::get(path.as_ref()).is_some(),
+                "missing {path}; the panel would draw nothing there"
+            );
+        }
+    }
+
+    #[test]
+    fn every_screen_tab_has_an_embedded_glyph() {
+        for screen in Screen::ALL {
+            let path = screen.icon().path();
+            assert!(
+                BrandAssets::get(path.as_ref()).is_some(),
+                "{} has no embedded glyph at {path}",
+                screen.title()
+            );
+        }
+    }
+
+    #[test]
+    fn the_stepper_arrows_are_embedded() {
+        for glyph in [IconName::Minus, IconName::Plus] {
+            let path = glyph.path();
+            assert!(BrandAssets::get(path.as_ref()).is_some(), "missing {path}");
+        }
+    }
+
+    #[test]
+    fn no_two_screens_share_a_glyph() {
+        let mut paths: Vec<SharedString> = Screen::ALL
+            .iter()
+            .map(|screen| screen.icon().path())
+            .collect();
+        paths.sort();
+        let count = paths.len();
+        paths.dedup();
+        assert_eq!(paths.len(), count, "two tabs would be indistinguishable");
+    }
+
+    #[test]
+    fn a_mode_never_takes_a_tab() {
+        // Outlining and picking change how the window behaves and have nothing
+        // to read. A tab for either would open onto an empty screen.
+        for screen in Screen::ALL {
+            assert!(
+                !matches!(screen.title(), "Layout" | "Pick"),
+                "{} is a mode, not a screen",
+                screen.title()
+            );
+        }
+    }
+}

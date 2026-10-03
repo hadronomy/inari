@@ -10,8 +10,8 @@
 //! that would have been a black rectangle on a customer's Windows machine is a
 //! failing `mbx test` here instead.
 
-use gpui::effect::Effect;
-use gpui::{AnyElement, Hsla, IntoElement, Pixels, effect_layer, px};
+use gpui::effect::{Effect, ShaderEnum};
+use gpui::{AnyElement, Hsla, IntoElement, Pixels, Point, effect_layer, px};
 
 /// Film grain, to dither the banding out of large fills and long gradients.
 ///
@@ -46,13 +46,11 @@ impl Default for Grain {
 pub struct PixelBloom {
     /// Seconds the wall has been on screen, for the idle breath of lit cells.
     pub time: f32,
-    /// Grid spacing in logical pixels. A dot is a fraction of this, so the
-    /// field reads as scattered points rather than as tiles.
-    pub gap: f32,
-    /// Where the bloom starts, in logical pixels from the wall's top-left.
-    pub origin_x: f32,
-    /// The other half of the origin.
-    pub origin_y: f32,
+    /// Grid spacing. A dot is a fraction of this, so the field reads as
+    /// scattered points rather than as tiles.
+    pub gap: Pixels,
+    /// Where the bloom starts, from the wall's top-left.
+    pub origin: Point<Pixels>,
     /// The largest a dot grows, as a fraction of its cell.
     pub dot_size: f32,
     /// Device pixels the bloom front travels per second.
@@ -63,10 +61,9 @@ pub struct PixelBloom {
     pub glow: f32,
     /// Seconds since the pointer last entered or left.
     pub age: f32,
-    /// `1` while the pointer is inside, `-1` after it leaves, `0` before the
-    /// wall has ever been pointed at. Two floats rather than a signed `age`,
-    /// because "never" and "left just now" are not the same state.
-    pub direction: f32,
+    /// What the pointer last did. Beside `age` rather than folded into its
+    /// sign, because "never" and "left just now" are not the same state.
+    pub pointer: Pointer,
     /// The colour of cells nearest the origin.
     pub near: Hsla,
     /// The colour cells drift towards, picked per cell rather than by distance,
@@ -78,19 +75,32 @@ impl Default for PixelBloom {
     fn default() -> Self {
         Self {
             time: 0.0,
-            gap: 7.0,
-            origin_x: 0.0,
-            origin_y: 0.0,
+            gap: px(7.0),
+            origin: Point::default(),
             dot_size: 0.4,
             spread: 1400.0,
             shimmer: 2.4,
             glow: 0.45,
             age: 0.0,
-            direction: 0.0,
+            pointer: Pointer::Never,
             near: gpui::blue(),
             far: gpui::blue(),
         }
     }
+}
+
+/// What the pointer has last done to a wall.
+///
+/// The shader branches on `pointer_is_inside(input)` and friends, generated
+/// from these variants, so neither side spells a number.
+#[derive(ShaderEnum, Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Pointer {
+    /// The wall has never been pointed at, so nothing has bloomed.
+    Never,
+    /// The pointer is inside, and the bloom is running out from its origin.
+    Inside,
+    /// The pointer has left, and the field is unwinding in the order it arrived.
+    Left,
 }
 
 /// A blur of whatever it is applied to, with a tint over the top.
@@ -106,23 +116,56 @@ pub struct Frost {
     pub tint: Hsla,
 }
 
+/// Which way a separable pass runs.
+///
+/// A Gaussian is separable, so a blur is two passes over one axis each. Nothing
+/// else is a direction, and an axis between the two is not a slower blur — it
+/// is a value the shader would have to round.
+#[derive(ShaderEnum, Copy, Clone, Debug, Eq, PartialEq)]
+enum Axis {
+    Across,
+    Down,
+}
+
+/// A mark eroded into cracked, weathered stone.
+///
+/// For the one state that is not a failure but an absence: a component that was
+/// never installed. A broken path is drawn with a cut wire, and a cut wire is
+/// wrong for something that is simply not there.
+#[derive(Effect, Copy, Clone, Debug, PartialEq)]
+#[effect(name = "inari.weathered", source = "effect/weathered.wgsl")]
+pub struct Weathered {
+    /// How far gone, 0..1. Drives the cracks, the pitting and the bleaching
+    /// together, so the state has one dial rather than three.
+    pub amount: f32,
+    /// Offsets the field. Two weathered marks on one screen are not the same
+    /// stone unless they are given the same seed.
+    pub seed: f32,
+    /// What the stone bleaches towards. Its alpha is how much of it arrives.
+    pub tint: Hsla,
+}
+
+impl Default for Weathered {
+    fn default() -> Self {
+        Self { amount: 0.68, seed: 0.0, tint: gpui::hsla(0.09, 0.06, 0.62, 0.55) }
+    }
+}
+
 /// One axis of a Gaussian blur. Use [`blurred`]; this is half of it.
 #[derive(Effect, Copy, Clone, Debug, PartialEq)]
 #[effect(name = "inari.blur", source = "effect/blur.wgsl")]
 struct Blur {
-    /// The CSS `blur()` radius in logical pixels, which the shader halves to
-    /// get a sigma.
-    radius: f32,
-    /// `0` across, `1` down.
-    axis: f32,
+    /// The CSS `blur()` radius, which the shader halves to get a sigma.
+    radius: Pixels,
+    axis: Axis,
 }
 
 impl Blur {
-    /// Three sigma, in logical pixels: how far the kernel reads and how far the
-    /// result spreads. Both are the same number, and it is what [`blurred`]
-    /// hands each layer as its outset.
-    fn reach(radius: f32) -> Pixels {
-        px(radius * 1.5)
+    /// Three sigma: how far the kernel reads and how far the result spreads.
+    /// Both are the same number, and it is what [`blurred`] hands each layer as
+    /// its outset.
+    fn reach(radius: Pixels) -> Pixels {
+        radius * 1.5
     }
 }
 
@@ -141,13 +184,13 @@ impl Blur {
 ///
 /// `radius` is the CSS number. Costs two textures the size of the child plus its
 /// spread, so it is a thing to put on a glyph or a card, not on a scrolling list.
-pub fn blurred(radius: f32, child: impl IntoElement) -> AnyElement {
+pub fn blurred(radius: Pixels, child: impl IntoElement) -> AnyElement {
     if !layers_supported() {
         return child.into_any_element();
     }
     let outset = Blur::reach(radius);
-    let across = Blur { radius, axis: 0.0 };
-    let down = Blur { radius, axis: 1.0 };
+    let across = Blur { radius, axis: Axis::Across };
+    let down = Blur { radius, axis: Axis::Down };
     effect_layer(&down, effect_layer(&across, child).outset(outset))
         .outset(outset)
         .into_any_element()
@@ -167,12 +210,13 @@ pub fn register_all() {
     gpui::effect::register(PixelBloom::definition());
     gpui::effect::register(Frost::definition());
     gpui::effect::register(Blur::definition());
+    gpui::effect::register(Weathered::definition());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::effect::{self, EffectDef, Parameter, ParameterKind, ShaderTarget};
+    use gpui::effect::{self, EffectDef, ParameterDef, ParameterKind, ShaderTarget};
 
     /// Exercises the parts of the ABI an effect is most likely to touch, so a
     /// change to the preamble that breaks one of them fails here rather than in
@@ -180,8 +224,8 @@ mod tests {
     const SAMPLE: EffectDef = EffectDef {
         name: "inari.abi-sample",
         parameters: &[
-            Parameter { name: "tint", kind: ParameterKind::Color },
-            Parameter { name: "blend", kind: ParameterKind::Scalar },
+            ParameterDef { name: "tint", kind: ParameterKind::Color },
+            ParameterDef { name: "blend", kind: ParameterKind::Scalar },
         ],
         wgsl: r#"
 fn effect(input: EffectInput) -> vec4<f32> {
@@ -197,7 +241,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
     /// a generative effect never touches.
     const OVER_SAMPLE: EffectDef = EffectDef {
         name: "inari.over-sample",
-        parameters: &[Parameter { name: "amount", kind: ParameterKind::Scalar }],
+        parameters: &[ParameterDef { name: "amount", kind: ParameterKind::Scalar }],
         wgsl: r#"
 fn effect(input: EffectInput) -> vec4<f32> {
     let shifted = source(input.uv + vec2<f32>(amount(input), 0.0));
@@ -224,8 +268,84 @@ fn effect(input: EffectInput) -> vec4<f32> {
         // than that and the tail is cut off at the element's edge, which is
         // the exact artefact the outset exists to remove.
         for radius in [0.5, 2.0, 8.0, 40.0] {
-            assert_eq!(Blur::reach(radius), px(3.0 * (radius / 2.0)), "at radius {radius}");
+            assert_eq!(Blur::reach(px(radius)), px(3.0 * (radius / 2.0)), "at radius {radius}");
         }
+    }
+
+    /// An enum's constants, as generated code would emit them: one per variant,
+    /// whether or not the shader branches on all of them.
+    ///
+    /// `Pointer` has three states and `pixel_bloom.wgsl` branches on two, so
+    /// generating a constant per variant means shipping unused ones. HLSL turns
+    /// a module constant into `static const`, and Shader Model 5.0 is the
+    /// strictest target we have.
+    const UNUSED_VARIANTS: EffectDef = EffectDef {
+        name: "inari.unused-variants",
+        parameters: &[ParameterDef { name: "mode", kind: ParameterKind::Enum(Pointer::VARIANTS) }],
+        wgsl: r#"
+fn effect(input: EffectInput) -> vec4<f32> {
+    if mode_is_inside(input) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(0.0);
+}
+"#,
+    };
+
+    #[test]
+    fn a_variant_the_shader_never_names_still_translates() {
+        for target in TARGETS {
+            let source = effect::translate(&UNUSED_VARIANTS, target)
+                .unwrap_or_else(|error| panic!("{target:?}: {error:#}"));
+            if target == ShaderTarget::Hlsl {
+                println!("--- HLSL for an enum with unused variants ---");
+                for line in source
+                    .lines()
+                    .filter(|line| line.contains("MODE_"))
+                {
+                    println!("{line}");
+                }
+                println!("--- end ---");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fxc_accepts_a_variant_the_shader_never_names() {
+        // Decides whether generated enum constants can be emitted eagerly, one
+        // per variant, or only for the variants a shader actually mentions.
+        effect::validate_direct3d(&UNUSED_VARIANTS).unwrap();
+    }
+
+    #[test]
+    fn an_axis_is_the_only_thing_a_blur_pass_can_run_along() {
+        // The whole reason `axis` is not an `f32`: there is no third value for
+        // it to hold, and the shader gets a name for each of the two.
+        assert_eq!(Axis::VARIANTS.len(), 2);
+        assert_eq!(Axis::Across.discriminant(), 0);
+        assert_eq!(Axis::Down.discriminant(), 1);
+    }
+
+    #[test]
+    fn the_blur_shader_branches_on_a_generated_predicate() {
+        // Not on a number. `axis_is_down` is generated from the enum, so a
+        // renamed variant fails to translate with the name in the message
+        // instead of silently branching the other way.
+        let wgsl = include_str!("effect/blur.wgsl");
+        assert!(wgsl.contains("axis_is_down(input)"), "the blur spells its own axis");
+    }
+
+    #[test]
+    fn the_wall_shader_branches_on_generated_predicates() {
+        let wgsl = include_str!("effect/pixel_bloom.wgsl");
+        for predicate in ["pointer_is_inside(input)", "pointer_is_never(input)"] {
+            assert!(wgsl.contains(predicate), "the wall does not use `{predicate}`");
+        }
+        assert!(
+            !wgsl.contains("const NEVER") && !wgsl.contains("const INSIDE"),
+            "the wall still spells a discriminant by hand"
+        );
     }
 
     #[test]
@@ -253,6 +373,19 @@ fn effect(input: EffectInput) -> vec4<f32> {
                     .unwrap_or_else(|error| panic!("`{}` for {target:?}: {error:#}", def.name));
             }
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fxc_accepts_every_effect_we_ship() {
+        // `every_effect_we_ship_compiles_for_every_backend` proves naga emits
+        // HLSL. fxc is the one that decides whether the pipeline gets built,
+        // and it refuses things naga is happy to write — a register space, a
+        // resource limit, an intrinsic Shader Model 5.0 does not have. The
+        // renderer logs a rejected shader and draws nothing, so without this
+        // the first report is a customer describing a blank rectangle.
+        register_all();
+        effect::validate_all_direct3d().unwrap();
     }
 
     #[test]
@@ -357,7 +490,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
         // translation error rather than a wrong pixel.
         const STALE: EffectDef = EffectDef {
             name: "inari.stale-sample",
-            parameters: &[Parameter { name: "amount", kind: ParameterKind::Scalar }],
+            parameters: &[ParameterDef { name: "amount", kind: ParameterKind::Scalar }],
             wgsl: "fn effect(input: EffectInput) -> vec4<f32> { return vec4<f32>(renamed(input)); }",
         };
         let message = format!("{:#}", effect::translate(&STALE, ShaderTarget::Wgsl).unwrap_err());
@@ -375,7 +508,7 @@ fn effect(input: EffectInput) -> vec4<f32> {
     fn more_parameters_than_slots_is_reported_against_the_effect() {
         const TOO_MANY: EffectDef = EffectDef {
             name: "inari.too-many-sample",
-            parameters: &[Parameter { name: "tint", kind: ParameterKind::Color }; 5],
+            parameters: &[ParameterDef { name: "tint", kind: ParameterKind::Color }; 5],
             wgsl: "fn effect(input: EffectInput) -> vec4<f32> { return tint(input); }",
         };
         let message =
@@ -399,15 +532,11 @@ fn effect(input: EffectInput) -> vec4<f32> {
     fn the_derive_packs_fields_in_declaration_order() {
         // The generated accessors read slot n; this is the other half of that
         // agreement, and the derive is what keeps them together.
-        let params = Grain { amount: 0.25, size: 3.0, seed: 7.0 }.params();
-        assert_eq!(params[0], 0.25);
-        assert_eq!(params[1], 3.0);
-        assert_eq!(params[2], 7.0);
-        assert!(
-            params[3..]
-                .iter()
-                .all(|value| *value == 0.0)
-        );
+        let params = effect::Params::of(&Grain { amount: 0.25, size: 3.0, seed: 7.0 });
+        assert_eq!(params.slot(0), 0.25);
+        assert_eq!(params.slot(1), 3.0);
+        assert_eq!(params.slot(2), 7.0);
+        assert_eq!(params.slot(3), 0.0, "a slot no field claimed is not zero");
     }
 
     #[test]
@@ -423,4 +552,135 @@ fn effect(input: EffectInput) -> vec4<f32> {
     fn grain_rests_below_the_threshold_where_it_stops_being_a_substrate() {
         assert!(Grain::default().amount < 0.05, "grain would read as texture");
     }
+}
+
+crate::story! {
+    id: "effect.frost",
+    name: "Frost",
+    scope: crate::dev::Scope::Effects,
+    about: "A blur over real content, beside the same card untouched. A capture \
+            that never resolved looks exactly like the one on the right.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::{content::Typography as _, theme::Theme};
+
+        let radius = dial.range("Radius", 6.0, 0.0..=24.0);
+        let card = |label: &'static str, radius: f32| {
+            gpui::effect_layer(
+                &Frost { radius, tint: gpui::rgba(0x6ea8fe22).into() },
+                gpui::div()
+                    .v_flex()
+                    .gap(gpui::px(Theme::SPACE_SM))
+                    .w(gpui::px(220.0))
+                    .p(gpui::px(Theme::SPACE_LG))
+                    .bg(gpui::rgb(0x1c1f26))
+                    .child(gpui::div().text_body().child(label))
+                    .child(gpui::div().text_caption().child(
+                        "Small text is the honest test: a blur that is not running still reads.",
+                    )),
+            )
+            .corner_radii(gpui::px(Theme::RADIUS_CARD))
+        };
+
+        gpui::div()
+            .h_flex()
+            .gap(gpui::px(Theme::SPACE_LG))
+            .child(card("Blurred", radius))
+            .child(card("Untouched", 0.0))
+            .into_any_element()
+    },
+}
+
+crate::story! {
+    id: "effect.blur",
+    name: "Blur",
+    scope: crate::dev::Scope::Effects,
+    about: "A separable Gaussian over real text. A glyph is the hardest thing \
+            to blur: it is mostly edge, so a premultiplication mistake shows up \
+            as a dark rim.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::{content::Typography as _, theme::Theme};
+
+        let single = dial.range("Radius", 6.0, 0.0..=24.0);
+        let sample = || {
+            gpui::div()
+                .v_flex()
+                .gap(gpui::px(Theme::SPACE_XS))
+                .w(gpui::px(150.0))
+                .child(gpui::div().text_body().child("Copied"))
+                .child(gpui::div().text_caption().child(
+                    "A halo here means the taps are summing straight alpha.",
+                ))
+        };
+        let column = |radius: gpui::Pixels| {
+            gpui::div()
+                .v_flex()
+                .gap(gpui::px(Theme::SPACE_SM))
+                .child(
+                    gpui::div()
+                        .text_caption()
+                        .child(format!("blur({}px)", f32::from(radius))),
+                )
+                .child(blurred(radius, sample()))
+        };
+
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(Theme::SPACE_XL))
+            .child(column(gpui::px(single)))
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .items_start()
+                    .gap(gpui::px(Theme::SPACE_LG))
+                    .children([0.0, 1.0, 2.0, 6.0, 16.0].map(|radius| column(gpui::px(radius)))),
+            )
+            .into_any_element()
+    },
+}
+
+crate::story! {
+    id: "effect.weathered",
+    name: "Weathered",
+    scope: crate::dev::Scope::Effects,
+    about: "The mark as old stone. Shown at the size the gate draws it and again \
+            enlarged: 40px hides whether the cracks are cracks.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::{content::Typography as _, theme::Theme};
+
+        let wear = dial.range("Wear", 0.68, 0.0..=1.0);
+        let seed = dial.range("Seed", Weathered::default().seed, 0.0..=32.0);
+        let mark = |wear: f32, edge: f32| {
+            gpui::div()
+                .v_flex()
+                .items_center()
+                .gap(gpui::px(Theme::SPACE_SM))
+                .child(gpui::effect_layer(
+                    &Weathered { amount: wear, seed, ..Weathered::default() },
+                    gpui::svg()
+                        .path("inari-mark-torii-ui.svg")
+                        .size(gpui::px(edge))
+                        .flex_none()
+                        .text_color(gpui::rgb(0xb9b2a8)),
+                ))
+                .child(
+                    gpui::div()
+                        .text_caption()
+                        .child(format!("{:.0}%", wear * 100.0)),
+                )
+        };
+
+        gpui::div()
+            .h_flex()
+            .items_end()
+            .gap(gpui::px(Theme::SPACE_XL))
+            .children([0.0, 0.35, 0.68, 1.0].map(|step| mark(step, 40.0)))
+            .child(mark(wear, 132.0))
+            .into_any_element()
+    },
 }

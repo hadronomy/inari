@@ -455,3 +455,36 @@ mod tests {
         }
     }
 }
+
+crate::story! {
+    id: "surface.banner",
+    name: "Banner",
+    scope: crate::dev::Scope::Surfaces,
+    about: "Notices block nothing; alerts stop device work. The difference has \
+            to be visible without reading.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+        use crate::ui::status::Tone;
+
+        let title = dial.text("Title", "Agent unreachable");
+        let detail = dial.text(
+            "Detail",
+            "Device Center could not reach the agent. Start the service, then try again.",
+        );
+
+        let banner = |id: &'static str, tone: Tone| {
+            Banner::new(id, tone, title.clone(), detail.clone())
+        };
+
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(16.0))
+            .child(banner("story-positive", Tone::Positive))
+            .child(banner("story-busy", Tone::Busy))
+            .child(banner("story-neutral", Tone::Neutral))
+            .child(banner("story-caution", Tone::Caution))
+            .child(banner("story-critical", Tone::Critical))
+            .into_any_element()
+    },
+}

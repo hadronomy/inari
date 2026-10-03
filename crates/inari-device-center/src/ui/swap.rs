@@ -6,10 +6,12 @@
 //! heard. Landing the tick in a single frame throws that away — the change is
 //! over before the eye that caused it arrives.
 //!
-//! The web recipe is transitions.dev's icon swap and text swap. Both stack the
-//! two states in one slot and cross-fade between them: the glyph scales, the
-//! label leaves upward and arrives from below, and a 2px blur bridges the
-//! moment when both are half-present.
+//! The web recipe is transitions.dev's icon swap and its text swap, and they
+//! are not the same transition. The icon crossfades: two marks in one slot,
+//! one scaling and blurring out while the other scales and sharpens in. The
+//! text runs in sequence: the old label leaves upward and is gone before the
+//! new one arrives from below. Both blur by the same amount at their far end,
+//! and that blur is what makes either legible while it moves.
 //!
 //! One thing had to change on the way over. **There is no scale transform for
 //! a div.** GPUI can scale an SVG, about its own centre, and nothing else — so
@@ -24,8 +26,8 @@
 //! [`motion::SWAP_SCALE`] be small enough for the swap to have a pop in it.
 
 use gpui::{
-    AnyElement, App, Hsla, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled,
-    Transformation, Window, div, px, size, svg,
+    AnyElement, App, Hsla, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    Styled, Transformation, Window, div, px, size, svg,
 };
 
 use super::{content::Typography as _, effect, icon::Symbol, motion};
@@ -41,14 +43,17 @@ struct Phase {
 }
 
 impl Phase {
-    /// A straight crossfade: the two halves always sum to one.
+    /// A constant-power crossfade.
     ///
-    /// They cross at half strength each, which only works because the blur is
-    /// deepest at exactly that moment. Without it the middle of the swap shows
-    /// two distinct marks at 50% and the whole thing reads as a stack rather
-    /// than as one mark becoming another.
+    /// Fading one mark down while another comes up is the same problem as
+    /// crossfading two uncorrelated sounds: the halves are different shapes in
+    /// different places, so their presence adds in power rather than in
+    /// amplitude. Split the fraction linearly and the midpoint has two marks at
+    /// half strength and reads as *less* than either — a dip where the control
+    /// briefly says nothing. Taking the square root holds the pair at constant
+    /// strength right through the crossing.
     fn new(eased: f32) -> Self {
-        Self { leaving: 1.0 - eased, arriving: eased, eased }
+        Self { leaving: (1.0 - eased).sqrt(), arriving: eased.sqrt(), eased }
     }
 }
 
@@ -92,6 +97,10 @@ pub struct IconSwap {
     edge: f32,
     resting_color: Hsla,
     active_color: Hsla,
+    /// A point on the curve to hold still at, instead of running. See
+    /// [`IconSwap::pinned`].
+    #[cfg(debug_assertions)]
+    pinned: Option<f32>,
     /// How present the resting glyph is allowed to be at most. A copy hint
     /// that only exists under the pointer carries the hover fade here, while
     /// the state it swaps to ignores it — an acknowledgement the operator can
@@ -113,6 +122,8 @@ pub fn icon(
         edge: 14.0,
         resting_color: gpui::white(),
         active_color: gpui::white(),
+        #[cfg(debug_assertions)]
+        pinned: None,
         resting_alpha: 1.0,
     }
 }
@@ -133,10 +144,34 @@ impl IconSwap {
         self.resting_alpha = alpha;
         self
     }
+
+    /// Hold the swap still, `fraction` of the way through.
+    ///
+    /// A swap is [`motion::SWAP`] long, which is too fast to judge while it
+    /// runs and is exactly what has to be judged: the frames worth arguing
+    /// about are the ones where both halves are present. Pinning renders those
+    /// frames through the same code the running control uses, so a preview
+    /// cannot drift from the thing it previews.
+    ///
+    /// `fraction` is how far along the halves are, not how much time has
+    /// passed. [`motion::EASE_SWAP`] is steep enough that even sampling by time
+    /// spends most of its frames on the two ends where nothing moves, and shows
+    /// the crossing in one of them.
+    #[cfg(debug_assertions)]
+    pub fn pinned(mut self, fraction: f32) -> Self {
+        self.pinned = Some(fraction);
+        self
+    }
 }
 
 impl RenderOnce for IconSwap {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        #[cfg(debug_assertions)]
+        let phase = match self.pinned {
+            Some(fraction) => Phase::new(fraction),
+            None => phase(window, &self.key, self.showing_active, motion::SWAP),
+        };
+        #[cfg(not(debug_assertions))]
         let phase = phase(window, &self.key, self.showing_active, motion::SWAP);
         // Scale runs the whole eased fraction while the fades run their offset
         // halves: the mark that is leaving keeps shrinking after it has gone,
@@ -150,8 +185,9 @@ impl RenderOnce for IconSwap {
         // Each half is as far out of focus as it is far from resting, so the
         // blur is deepest where the two cross and gone by the time either one
         // is alone on screen.
-        let leaving_blur = motion::SWAP_BLUR * phase.eased;
-        let arriving_blur = motion::SWAP_BLUR * (1.0 - phase.eased);
+        let deepest = self.edge * motion::SWAP_BLUR;
+        let leaving_blur = px(deepest * phase.eased);
+        let arriving_blur = px(deepest * (1.0 - phase.eased));
 
         div()
             .relative()
@@ -191,7 +227,7 @@ fn glyph(
     color: Hsla,
     alpha: f32,
     scale: f32,
-    blur: f32,
+    blur: Pixels,
 ) -> impl IntoElement {
     let mark = svg()
         .absolute()
@@ -209,10 +245,15 @@ fn glyph(
 
 /// Below this a blur moves no pixel anyone can see, and still costs two
 /// textures and two composites to do it.
-const VISIBLE_BLUR: f32 = 0.1;
+const VISIBLE_BLUR: Pixels = px(0.1);
+
+/// The size of the mark a label swap blurs, which is its own type size. Taken
+/// from `Typography::text_body` rather than measured, because a label's blur
+/// only has to match the glyph beside it and both are set from the same scale.
+const LABEL_SIZE: f32 = 13.5;
 
 /// Blur `content`, unless the radius is too small to see.
-fn soften(radius: f32, content: impl IntoElement) -> AnyElement {
+fn soften(radius: Pixels, content: impl IntoElement) -> AnyElement {
     if radius < VISIBLE_BLUR {
         return content.into_any_element();
     }
@@ -221,20 +262,32 @@ fn soften(radius: f32, content: impl IntoElement) -> AnyElement {
 
 /// Two labels in one slot, the second replacing the first.
 ///
-/// `resting` stays in the layout and reserves the width, so the control keeps
-/// its size and the controls beside it never shuffle along; `active` is
-/// painted over it. The one leaving rises and fades, the one arriving comes up
-/// from below — the direction transitions.dev uses, and the reason a swap
-/// reads as one label becoming another rather than as two labels blinking.
-///
-/// The resting label is the one that has to be the wider of the two, since it
-/// is the one holding the space open.
+/// The slot is held open by whichever label is longer, so the control keeps its
+/// size, the controls beside it never shuffle along, and neither word is cut
+/// off by a box measured for the other. The one leaving rises and fades, the
+/// one arriving comes up from below — the direction transitions.dev uses, and
+/// the reason a swap reads as one label becoming another rather than as two
+/// labels blinking.
 #[derive(IntoElement)]
 pub struct LabelSwap {
     key: SharedString,
     resting: SharedString,
     active: SharedString,
     showing_active: bool,
+    /// See [`IconSwap::pinned`]; a label is worth looking at for the opposite
+    /// reason, which is that its halves must never meet.
+    #[cfg(debug_assertions)]
+    pinned: Option<f32>,
+}
+
+impl LabelSwap {
+    /// Hold the swap still, `fraction` of the way through. See
+    /// [`IconSwap::pinned`].
+    #[cfg(debug_assertions)]
+    pub fn pinned(mut self, fraction: f32) -> Self {
+        self.pinned = Some(fraction);
+        self
+    }
 }
 
 pub fn label(
@@ -243,49 +296,109 @@ pub fn label(
     active: impl Into<SharedString>,
     showing_active: bool,
 ) -> LabelSwap {
-    LabelSwap { key: key.into(), resting: resting.into(), active: active.into(), showing_active }
+    LabelSwap {
+        key: key.into(),
+        resting: resting.into(),
+        active: active.into(),
+        showing_active,
+        #[cfg(debug_assertions)]
+        pinned: None,
+    }
 }
 
 impl RenderOnce for LabelSwap {
     fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+        #[cfg(debug_assertions)]
+        let phase = match self.pinned {
+            Some(fraction) => Phase::new(fraction),
+            None => phase(window, &self.key, self.showing_active, motion::SWAP),
+        };
+        #[cfg(not(debug_assertions))]
         let phase = phase(window, &self.key, self.showing_active, motion::SWAP);
         let travel = motion::SWAP_TRAVEL;
+        let deepest = LABEL_SIZE * motion::SWAP_BLUR;
+
+        // A word is not a mark. transitions.dev crossfades two icons in one
+        // slot, but swaps text in sequence: the old label leaves completely,
+        // the text changes, and the new one arrives from below. Two words
+        // overlapping do not read as one word changing — they read as two
+        // words, because a reader is trying to make letters out of both.
+        //
+        // Splitting the eased fraction gives each half the curve it wants for
+        // free: the first half of an ease-in-out is an ease-in, which is how a
+        // label should leave, and the second half is an ease-out, which is how
+        // one should arrive and settle.
+        let leaving = (phase.eased / 0.5).clamp(0.0, 1.0);
+        let arriving = ((phase.eased - 0.5) / 0.5).clamp(0.0, 1.0);
+
+        // The resting label stays in the tree after it has faded out. It is
+        // what holds the slot's width, and the arriving label is positioned
+        // absolutely inside that slot — drop the one and the other has no box
+        // to sit in, so the second half of every swap renders nothing.
+        let present = 1.0 - leaving;
+        let leaving_blur = if present > 0.004 { px(deepest * leaving) } else { px(0.0) };
+
+        // Neither word is in the layout. A transparent copy of the longer one
+        // holds the slot open and both real labels are positioned inside it,
+        // which is what the web recipe gets from stacking them in one grid
+        // cell. The slot used to be whichever label was resting, and a longer
+        // arriving word was then laid out in a box measured for a shorter one —
+        // a rule the documentation asked callers to keep, which is not
+        // something a caller can see at the call site.
+        let sizer = if self.active.chars().count() > self.resting.chars().count() {
+            self.active.clone()
+        } else {
+            self.resting.clone()
+        };
 
         div()
             .relative()
             .flex_none()
-            .child(soften(
-                motion::SWAP_BLUR * phase.eased,
+            .child(
                 div()
                     .text_body()
                     .font_weight(gpui::FontWeight::MEDIUM)
-                    .opacity(phase.leaving)
-                    // A relative inset, which taffy resolves after layout, so
-                    // the label moves the way a CSS transform would and its
-                    // neighbours do not follow it.
-                    .relative()
-                    .top(px(-travel * phase.eased))
-                    .child(self.resting),
-            ))
-            .child(soften(
-                motion::SWAP_BLUR * (1.0 - phase.eased),
-                div()
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    // Left, not centred. The resting label holds the width, so
-                    // centring a shorter one inside it strands the glyph beside
-                    // it with a gap the resting state never has; aligned to the
-                    // same edge, the mark and the word stay one unit and the
-                    // slack falls after them where nothing reads it.
-                    .justify_start()
-                    .text_body()
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .opacity(phase.arriving)
-                    .top(px(travel * (1.0 - phase.eased)))
-                    .child(self.active),
-            ))
+                    .opacity(0.0)
+                    .child(sizer),
+            )
+            .child({
+                soften(
+                    leaving_blur,
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_start()
+                        .text_body()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .opacity(present)
+                        .top(px(-travel * leaving))
+                        .child(self.resting),
+                )
+            })
+            .children((arriving > 0.004).then(|| {
+                soften(
+                    px(deepest * (1.0 - arriving)),
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        // Left, not centred. The slot is as wide as the longer
+                        // word, so centring the shorter one inside it strands
+                        // the glyph beside it with a gap the resting state
+                        // never has; aligned to the same edge, the mark and the
+                        // word stay one unit and the slack falls after them
+                        // where nothing reads it.
+                        .justify_start()
+                        .text_body()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .opacity(arriving)
+                        .top(px(travel * (1.0 - arriving)))
+                        .child(self.active),
+                )
+            }))
     }
 }
 
@@ -294,17 +407,92 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_two_halves_always_sum_to_one_state() {
-        // A crossfade that dips below one shows the background through the
-        // middle of the swap, and one that rises above it stacks two marks.
+    fn the_two_halves_hold_constant_power_across_the_crossing() {
+        // Presence adds in power, not in amplitude, because the halves are
+        // different shapes in different places. Splitting the fraction linearly
+        // leaves the midpoint reading as less than either end — the dip this
+        // exists to remove.
         for step in 0..=100 {
             let phase = Phase::new(step as f32 / 100.0);
+            let power = phase.leaving.powi(2) + phase.arriving.powi(2);
+            assert!((power - 1.0).abs() < 1e-5, "power is {power} at {step}%");
+        }
+    }
+
+    #[test]
+    fn the_crossing_carries_more_than_half_of_each_mark() {
+        // The number that makes the difference: an even split is 0.5 each and
+        // visibly thin. Constant power puts both at about 0.707, which is what
+        // keeps the control legible while it changes its mind.
+        let crossing = Phase::new(0.5);
+        assert!(crossing.leaving > 0.7, "leaving is {}", crossing.leaving);
+        assert!(crossing.arriving > 0.7, "arriving is {}", crossing.arriving);
+    }
+
+    #[test]
+    fn a_blur_is_measured_against_the_mark_it_softens() {
+        // A flat 2px is a smudge on a 13px readout mark and barely an edge on a
+        // 56px one. The ratio keeps a swap looking the same at any size.
+        let readout = 13.0 * motion::SWAP_BLUR;
+        let oversized = 56.0 * motion::SWAP_BLUR;
+        assert!(readout < 2.0, "the small mark is over-blurred: {readout}");
+        assert!(oversized > 6.0, "the large mark is under-blurred: {oversized}");
+    }
+
+    #[test]
+    fn the_slot_is_measured_for_the_longer_word() {
+        // Either order at the call site has to work. Sizing to whichever label
+        // happened to be resting meant a longer arriving word was laid out in a
+        // box measured for a shorter one, and got cut off.
+        fn sizer<'a>(resting: &'a str, active: &'a str) -> &'a str {
+            if active.chars().count() > resting.chars().count() { active } else { resting }
+        }
+        assert_eq!(sizer("Copy", "Copied"), "Copied");
+        assert_eq!(sizer("Copy all details", "Copied"), "Copy all details");
+        assert_eq!(sizer("Save", "Save"), "Save");
+    }
+
+    #[test]
+    fn a_label_is_never_two_words_at_once() {
+        // The icon crossfades and the label does not. Two words overlapping
+        // read as two words, because a reader tries to make letters out of
+        // both — which is why transitions.dev swaps text in sequence and
+        // crossfades only marks.
+        for step in 0..=200 {
+            let eased = step as f32 / 200.0;
+            let leaving = (eased / 0.5).clamp(0.0, 1.0);
+            let arriving = ((eased - 0.5) / 0.5).clamp(0.0, 1.0);
+            let both_present = (1.0 - leaving) > 0.004 && arriving > 0.004;
+            assert!(!both_present, "two labels visible at eased {eased}");
+        }
+    }
+
+    #[test]
+    fn the_slot_keeps_its_width_after_the_first_label_has_gone() {
+        // The arriving label sits absolutely inside the slot the resting label
+        // measures. If the resting one is dropped once it is invisible the slot
+        // collapses, and the whole second half of the swap renders nothing —
+        // which looks like the transition failing rather than like a layout
+        // that lost its only content.
+        for step in 0..=200 {
+            let eased = step as f32 / 200.0;
+            let leaving = (eased / 0.5).clamp(0.0, 1.0);
+            let present = 1.0 - leaving;
+            let blur_is_paid_for = present > 0.004;
             assert!(
-                (phase.leaving + phase.arriving - 1.0).abs() < 1e-6,
-                "the halves sum to {} at {step}%",
-                phase.leaving + phase.arriving
+                blur_is_paid_for || present == 0.0,
+                "an invisible label is still being blurred at {eased}"
             );
         }
+    }
+
+    #[test]
+    fn a_label_leaves_completely_before_the_next_arrives() {
+        let midpoint = 0.5_f32;
+        let leaving = (midpoint / 0.5).clamp(0.0, 1.0);
+        let arriving = ((midpoint - 0.5) / 0.5).clamp(0.0, 1.0);
+        assert_eq!(1.0 - leaving, 0.0, "the old label is still on screen");
+        assert_eq!(arriving, 0.0, "the new label has already started");
     }
 
     #[test]
@@ -387,4 +575,85 @@ mod tests {
             assert!((0.0..=1.0).contains(&value), "{value} at {step}");
         }
     }
+}
+
+crate::story! {
+    id: "motion.swap",
+    name: "Swap",
+    scope: crate::dev::Scope::Motion,
+    about: "A mark crossfades; a word does not. Held still along the curve, \
+            because the middle is where the two recipes disagree.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::{IconName, StyledExt as _};
+        use crate::ui::{content::Typography as _, icon::Symbol, theme::Theme};
+
+        // One frame, held. A transition cannot be judged while it is running:
+        // the eye reports that something happened, not what.
+        let held = dial.range("Progress", 0.5, 0.0..=1.0);
+        let size = dial.range("Size", 56.0, 14.0..=96.0);
+
+        let mark = |progress: f32, size: f32| {
+            gpui::div()
+                .v_flex()
+                .items_center()
+                .gap(gpui::px(Theme::SPACE_SM))
+                .child(
+                    icon(
+                        gpui::SharedString::from(format!("story-swap-{progress}-{size}")),
+                        Symbol::Component(IconName::Copy),
+                        Symbol::Component(IconName::Check),
+                        true,
+                    )
+                    .size(size)
+                    .tones(gpui::white(), gpui::rgb(0x4ade80).into())
+                    .pinned(progress),
+                )
+                .child(
+                    gpui::div()
+                        .text_caption()
+                        .child(format!("{:.0}%", progress * 100.0)),
+                )
+        };
+        let word = |fraction: f32| {
+            gpui::div()
+                .v_flex()
+                .items_start()
+                .w(gpui::px(74.0))
+                .child(
+                    label(
+                        gpui::SharedString::from(format!("story-swap-label-{fraction}")),
+                        "Copy",
+                        "Copied",
+                        true,
+                    )
+                    .pinned(fraction),
+                )
+        };
+
+        let steps = [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0];
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(Theme::SPACE_XL))
+            .child(mark(held, size))
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .gap(gpui::px(Theme::SPACE_XL))
+                    .items_end()
+                    .children(steps.map(|step| mark(step, 56.0))),
+            )
+            .child(
+                gpui::div()
+                    .h_flex()
+                    .gap(gpui::px(Theme::SPACE_XL))
+                    .items_end()
+                    .children(steps.map(word)),
+            )
+            .child(gpui::div().text_caption().child(
+                "Sampled through the transition, not through its duration: the curve spends its \
+                 first and last thirds barely moving.",
+            ))
+            .into_any_element()
+    },
 }

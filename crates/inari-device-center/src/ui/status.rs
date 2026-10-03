@@ -73,6 +73,13 @@ impl Tone {
 #[derive(Clone, Debug)]
 pub struct Status {
     pub tone: Tone,
+    /// Whether the thing this describes is absent rather than unwell.
+    ///
+    /// "Stopped" and "Not installed" are both critical and both stop device
+    /// work, but only one of them is a hole where a component should be. A
+    /// screen that draws the difference — the gate does — needs to be able to
+    /// ask, and the tone cannot answer.
+    pub missing: bool,
     pub label: SharedString,
     /// One sentence on what this means or what to do. Kept beside the label so
     /// a state can never appear somewhere without its explanation available.
@@ -81,7 +88,13 @@ pub struct Status {
 
 impl Status {
     fn new(tone: Tone, label: &'static str, detail: &'static str) -> Self {
-        Self { tone, label: label.into(), detail: detail.into() }
+        Self { tone, missing: false, label: label.into(), detail: detail.into() }
+    }
+
+    /// Mark this as an absence rather than a fault. See [`Status::missing`].
+    fn absent(mut self) -> Self {
+        self.missing = true;
+        self
     }
 
     pub fn device(state: DeviceState) -> Self {
@@ -159,7 +172,8 @@ impl Status {
                 Tone::Critical,
                 "Not installed",
                 "Repair the Inari installation to restore the service.",
-            ),
+            )
+            .absent(),
             ServiceState::Unavailable => Self::new(
                 Tone::Critical,
                 "Unavailable",
@@ -292,4 +306,50 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(debug_assertions)]
+impl crate::dev::Choice for Tone {
+    const VARIANTS: &'static [(Self, &'static str)] = &[
+        (Self::Positive, "Positive"),
+        (Self::Busy, "Busy"),
+        (Self::Neutral, "Neutral"),
+        (Self::Caution, "Caution"),
+        (Self::Critical, "Critical"),
+    ];
+}
+
+crate::story! {
+    id: "feedback.status",
+    name: "Status",
+    scope: crate::dev::Scope::Feedback,
+    about: "Every tone as a dot and as a chip, at the sizes they ship at.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
+        use gpui_component::StyledExt as _;
+
+        let size = dial.range("Dot size", 8.0, 4.0..=24.0);
+
+        let row = |tone: Tone| {
+            gpui::div()
+                .h_flex()
+                .items_center()
+                .gap(gpui::px(16.0))
+                .child(StatusDot::new(tone).size(size))
+                .child(StatusChip::new(Status::new(
+                    tone,
+                    "Label",
+                    "One sentence on what this means.",
+                )))
+        };
+
+        gpui::div()
+            .v_flex()
+            .gap(gpui::px(12.0))
+            .children(
+                [Tone::Positive, Tone::Busy, Tone::Neutral, Tone::Caution, Tone::Critical]
+                    .map(row),
+            )
+            .into_any_element()
+    },
 }

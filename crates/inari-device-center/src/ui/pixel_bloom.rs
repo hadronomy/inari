@@ -6,16 +6,13 @@
 use std::{cell::RefCell, collections::HashMap, time::Instant};
 
 use gpui::{
-    App, AppContext as _, Entity, InteractiveElement as _, IntoElement, MouseMoveEvent,
-    PaintEffect, ParentElement as _, Pixels, Point, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, Styled, Window, canvas, div, px,
+    App, InteractiveElement as _, IntoElement, MouseMoveEvent, PaintEffect, ParentElement as _,
+    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window,
+    canvas, div, px,
 };
-use gpui_component::StyledExt as _;
-use gpui_component::slider::{Slider, SliderState, SliderValue};
 
 use super::{
-    content::Typography as _,
-    effect::PixelBloom,
+    effect::{PixelBloom, Pointer},
     motion,
     theme::{ActiveTheme as _, Theme},
 };
@@ -26,8 +23,8 @@ use super::{
 pub struct Tuning {
     /// Bloom from where the pointer entered, rather than always from the centre.
     pub from_pointer: bool,
-    /// Grid spacing in logical pixels.
-    pub gap: f32,
+    /// Grid spacing.
+    pub gap: Pixels,
     /// The largest a dot grows, as a fraction of its cell.
     pub dot_size: f32,
     /// Device pixels the bloom front travels per second.
@@ -66,7 +63,7 @@ struct Wall {
     /// When the pointer last entered or left.
     turned: Instant,
     /// `1` inside, `-1` after leaving, `0` before the wall has been pointed at.
-    direction: f32,
+    state: Pointer,
 }
 
 impl Default for Wall {
@@ -78,7 +75,7 @@ impl Default for Wall {
             turned: Instant::now(),
             // The wall introduces itself: it blooms in from its centre when it
             // first appears, rather than waiting to be pointed at.
-            direction: 1.0,
+            state: Pointer::Inside,
         }
     }
 }
@@ -103,15 +100,15 @@ fn track(key: SharedString, position: Point<Pixels>) {
 /// Returns whether anything changed, so the caller only redraws when it did.
 fn turn(key: SharedString, hovered: bool) -> bool {
     with_wall(key, |wall| {
-        let direction = if hovered { 1.0 } else { -1.0 };
-        if wall.direction == direction {
+        let state = if hovered { Pointer::Inside } else { Pointer::Left };
+        if wall.state == state {
             return false;
         }
         // The bloom starts where the pointer came in, and unwinds towards where
         // it was when it left.
         wall.origin = wall.pointer;
         wall.turned = Instant::now();
-        wall.direction = direction;
+        wall.state = state;
         true
     })
 }
@@ -123,7 +120,7 @@ fn turn(key: SharedString, hovered: bool) -> bool {
 pub fn restart(key: impl Into<SharedString>) {
     with_wall(key.into(), |wall| {
         wall.turned = Instant::now();
-        wall.direction = 1.0;
+        wall.state = Pointer::Inside;
     });
 }
 
@@ -173,13 +170,13 @@ impl RenderOnce for PixelWall {
                     |_, _, _| (),
                     move |bounds, _, window: &mut Window, _| {
                         let reduced = motion::reduced();
-                        let (time, origin, age, direction) = with_wall(key.clone(), |wall| {
+                        let (time, origin, age, state) = with_wall(key.clone(), |wall| {
                             (
                                 wall.opened.elapsed().as_secs_f32(),
                                 wall.origin
                                     .unwrap_or_else(|| bounds.center()),
                                 wall.turned.elapsed().as_secs_f32(),
-                                wall.direction,
+                                wall.state,
                             )
                         });
 
@@ -190,14 +187,13 @@ impl RenderOnce for PixelWall {
                                 // and a bloom already at its destination.
                                 time: if reduced { 0.0 } else { time },
                                 gap: tuning.gap,
-                                origin_x: f32::from(origin.x - bounds.origin.x),
-                                origin_y: f32::from(origin.y - bounds.origin.y),
+                                origin: origin - bounds.origin,
                                 dot_size: tuning.dot_size,
                                 spread: tuning.spread,
                                 shimmer: if reduced { 0.0 } else { tuning.shimmer },
                                 glow: tuning.glow,
                                 age: if reduced { f32::MAX } else { age },
-                                direction,
+                                pointer: state,
                                 near,
                                 far,
                             },
@@ -216,104 +212,31 @@ impl RenderOnce for PixelWall {
     }
 }
 
-/// The sliders and the switch that drive a wall's [`Tuning`].
-///
-/// Owned by whatever page shows the wall, because a slider needs entity state
-/// and the wall itself deliberately does not.
-pub struct WallControls {
-    from_pointer: bool,
-    gap: Entity<SliderState>,
-    dot_size: Entity<SliderState>,
-    spread: Entity<SliderState>,
-    shimmer: Entity<SliderState>,
-    glow: Entity<SliderState>,
-}
+crate::story! {
+    id: "effect.pixel-wall",
+    name: "Pixel wall",
+    scope: crate::dev::Scope::Effects,
+    about: "Point at it. Every number the shader takes is a knob, so tuning is \
+            a drag rather than a rebuild.",
+    render: |dial, _window, _cx| {
+        use gpui::{ParentElement as _, Styled as _};
 
-impl WallControls {
-    pub fn new(cx: &mut App) -> Self {
-        let resting = Tuning::default();
-        let slider = |min: f32, max: f32, step: f32, value: f32, cx: &mut App| {
-            cx.new(|_| {
-                // `max` before `min`: setting the minimum re-clamps the thumb
-                // against whatever maximum is in force, and the default is 100,
-                // so a range that starts above it panics.
-                SliderState::new()
-                    .max(max)
-                    .min(min)
-                    .step(step)
-                    .default_value(value)
-            })
+        let tuning = Tuning {
+            from_pointer: dial.flag("From the pointer", true),
+            gap: px(dial.range("Gap", 8.0, 4.0..=24.0)),
+            dot_size: dial.range("Dot size", Tuning::default().dot_size, 0.1..=0.9),
+            spread: dial.range("Spread", Tuning::default().spread, 200.0..=4000.0),
+            shimmer: dial.range("Shimmer", Tuning::default().shimmer, 0.0..=8.0),
+            glow: dial.range("Glow", Tuning::default().glow, 0.0..=1.0),
         };
-        Self {
-            from_pointer: resting.from_pointer,
-            gap: slider(4.0, 24.0, 1.0, resting.gap, cx),
-            dot_size: slider(0.1, 0.9, 0.02, resting.dot_size, cx),
-            spread: slider(200.0, 4000.0, 50.0, resting.spread, cx),
-            shimmer: slider(0.0, 8.0, 0.1, resting.shimmer, cx),
-            glow: slider(0.0, 1.0, 0.05, resting.glow, cx),
+        if dial.press("Replay") {
+            restart("story-pixel-wall");
         }
-    }
-
-    /// The wall's settings as the sliders currently stand.
-    pub fn tuning(&self, cx: &App) -> Tuning {
-        let read = |state: &Entity<SliderState>| match state.read(cx).value() {
-            SliderValue::Single(value) => value,
-            // A range slider cannot be built here, so its start is as good an
-            // answer as any and better than refusing to draw.
-            SliderValue::Range(start, _) => start,
-        };
-        Tuning {
-            from_pointer: self.from_pointer,
-            gap: read(&self.gap),
-            dot_size: read(&self.dot_size),
-            spread: read(&self.spread),
-            shimmer: read(&self.shimmer),
-            glow: read(&self.glow),
-        }
-    }
-
-    pub fn toggle_origin(&mut self) {
-        self.from_pointer = !self.from_pointer;
-    }
-
-    /// Whether the bloom starts at the pointer rather than the centre.
-    pub fn blooms_from_pointer(&self) -> bool {
-        self.from_pointer
-    }
-
-    pub fn render(&self, cx: &App) -> impl IntoElement {
-        let theme = cx.inari();
-        let tuning = self.tuning(cx);
-        let row = |name: &'static str, reading: String, slider: Slider| {
-            div()
-                .h_flex()
-                .items_center()
-                .gap(px(Theme::SPACE_MD))
-                .child(
-                    div()
-                        .w(px(76.0))
-                        .text_caption()
-                        .text_color(theme.text_secondary)
-                        .child(name),
-                )
-                .child(div().flex_1().child(slider))
-                .child(
-                    div()
-                        .w(px(56.0))
-                        .text_technical()
-                        .text_color(theme.text_tertiary)
-                        .child(reading),
-                )
-        };
 
         div()
-            .v_flex()
-            .gap(px(Theme::SPACE_SM))
+            .h(px(380.0))
             .w_full()
-            .child(row("Gap", format!("{:.0}px", tuning.gap), Slider::new(&self.gap)))
-            .child(row("Dot size", format!("{:.2}", tuning.dot_size), Slider::new(&self.dot_size)))
-            .child(row("Spread", format!("{:.0}", tuning.spread), Slider::new(&self.spread)))
-            .child(row("Shimmer", format!("{:.1}", tuning.shimmer), Slider::new(&self.shimmer)))
-            .child(row("Glow", format!("{:.2}", tuning.glow), Slider::new(&self.glow)))
-    }
+            .child(wall("story-pixel-wall").tuning(tuning))
+            .into_any_element()
+    },
 }
