@@ -8,6 +8,7 @@ mod client;
 mod error;
 mod events;
 mod identity;
+mod local_transport;
 mod model;
 mod pairing;
 mod service;

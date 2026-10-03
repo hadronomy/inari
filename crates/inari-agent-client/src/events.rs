@@ -1,6 +1,6 @@
 use async_tungstenite::{
     WebSocketStream,
-    tokio::{ConnectStream, connect_async},
+    tokio::{ConnectStream, client_async_tls_with_config},
     tungstenite::{
         client::IntoClientRequest as _,
         http::{HeaderValue, header::AUTHORIZATION},
@@ -73,7 +73,11 @@ impl AgentEventStream {
             .headers_mut()
             .insert(AUTHORIZATION, authorization);
 
-        let (socket, _) = connect_async(request)
+        let stream =
+            tokio::net::TcpStream::connect(crate::local_transport::socket_address(endpoint)?)
+                .await
+                .map_err(|error| AgentClientError::EventStreamUnavailable(error.into()))?;
+        let (socket, _) = client_async_tls_with_config(request, stream, None)
             .await
             .map_err(AgentClientError::EventStreamUnavailable)?;
         Ok(Self { socket })
@@ -192,6 +196,55 @@ impl TryFrom<WireEvent> for AgentEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    #[allow(
+        clippy::result_large_err,
+        reason = "Tungstenite fixes the handshake callback error type."
+    )]
+    async fn event_stream_uses_loopback_and_keeps_the_endpoint_authority() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (sent, received) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.unwrap();
+            assert!(peer.ip().is_loopback());
+            let mut socket = async_tungstenite::tokio::accept_hdr_async(
+                stream,
+                move |request: &async_tungstenite::tungstenite::handshake::server::Request,
+                      response| {
+                    assert_eq!(request.uri().path(), "/events");
+                    assert_eq!(request.headers()[AUTHORIZATION], "Bearer event-fixture-token");
+                    sent.send(
+                        request.headers()["host"]
+                            .to_str()
+                            .unwrap()
+                            .to_owned(),
+                    )
+                    .unwrap();
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            socket
+                .send(async_tungstenite::tungstenite::Message::Close(None))
+                .await
+                .unwrap();
+        });
+        let endpoint = format!("http://agent.fixture.invalid:{port}/")
+            .parse()
+            .unwrap();
+        let mut events =
+            AgentEventStream::connect(&endpoint, &SecretString::from("event-fixture-token"))
+                .await
+                .unwrap();
+        assert_eq!(received.await.unwrap(), format!("agent.fixture.invalid:{port}"));
+        assert!(events.next().await.unwrap().is_none());
+        server.await.unwrap();
+    }
 
     #[test]
     fn event_fixture_maps_every_runtime_event_into_curated_domain_types() {
