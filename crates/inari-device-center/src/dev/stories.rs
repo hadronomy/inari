@@ -7,8 +7,8 @@
 
 use chrono::{Duration, Utc};
 use gpui::{
-    App, AppContext as _, BorrowAppContext as _, Entity, Global, IntoElement, ParentElement as _, Styled as _,
-    WeakEntity, Window, div, px,
+    App, AppContext as _, BorrowAppContext as _, Entity, Global, IntoElement, ParentElement as _,
+    Styled as _, WeakEntity, Window, div, px,
 };
 use gpui_component::{StyledExt as _, input::InputState};
 use inari_agent_client::{
@@ -66,9 +66,7 @@ pub fn note_center(center: &Entity<crate::app::DeviceCenter>, cx: &mut App) {
 
 /// Remember the enrollment window for the setup stories.
 pub fn note_onboarding(onboarding: &Entity<crate::onboarding::Onboarding>, cx: &mut App) {
-    cx.update_global(|sources: &mut Sources, _| {
-        sources.onboarding = Some(onboarding.downgrade())
-    });
+    cx.update_global(|sources: &mut Sources, _| sources.onboarding = Some(onboarding.downgrade()));
 }
 
 fn sources(cx: &App) -> Sources {
@@ -89,9 +87,7 @@ fn directory(window: &mut Window, cx: &mut App) -> Entity<DeviceDirectory> {
     directory.update(cx, |directory, cx| {
         directory.replace_devices(mock_devices(), cx);
     });
-    cx.update_global(|fixtures: &mut Fixtures, _| {
-        fixtures.directory = Some(directory.clone())
-    });
+    cx.update_global(|fixtures: &mut Fixtures, _| fixtures.directory = Some(directory.clone()));
     directory
 }
 
@@ -118,8 +114,7 @@ fn invitation(window: &mut Window, cx: &mut App) -> Entity<InputState> {
     {
         return existing;
     }
-    let input =
-        cx.new(|cx| InputState::new(window, cx).placeholder("Paste an invitation link"));
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder("Paste an invitation link"));
     cx.update_global(|fixtures: &mut Fixtures, _| fixtures.invitation = Some(input.clone()));
     input
 }

@@ -23,8 +23,8 @@ pub mod dial;
 pub mod element;
 pub mod frames;
 pub mod panel;
-pub mod story;
 mod stories;
+pub mod story;
 
 use gpui::{
     AnyElement, App, AppContext as _, Global, IntoElement as _, KeyBinding, Window, WindowOptions,

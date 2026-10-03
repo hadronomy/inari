@@ -53,11 +53,7 @@ impl Phase {
     /// briefly says nothing. Taking the square root holds the pair at constant
     /// strength right through the crossing.
     fn new(eased: f32) -> Self {
-        Self {
-            leaving: (1.0 - eased).sqrt(),
-            arriving: eased.sqrt(),
-            eased,
-        }
+        Self { leaving: (1.0 - eased).sqrt(), arriving: eased.sqrt(), eased }
     }
 }
 
@@ -419,10 +415,7 @@ mod tests {
         for step in 0..=100 {
             let phase = Phase::new(step as f32 / 100.0);
             let power = phase.leaving.powi(2) + phase.arriving.powi(2);
-            assert!(
-                (power - 1.0).abs() < 1e-5,
-                "power is {power} at {step}%"
-            );
+            assert!((power - 1.0).abs() < 1e-5, "power is {power} at {step}%");
         }
     }
 

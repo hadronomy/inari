@@ -162,7 +162,10 @@ pub fn marks(span: &RangeInclusive<f32>, step: f32) -> Vec<f32> {
 /// +1 past the right.
 pub fn rubber_stretch(distance_past: f32, sign: f32) -> f32 {
     let overflow = (distance_past - DEAD_ZONE).max(0.0);
-    sign * MAX_STRETCH * (overflow / MAX_CURSOR_RANGE).min(1.0).sqrt()
+    sign * MAX_STRETCH
+        * (overflow / MAX_CURSOR_RANGE)
+            .min(1.0)
+            .sqrt()
 }
 
 /// Whether the handle would sit under the label or the value.
@@ -197,10 +200,14 @@ pub fn format_value(value: f32, step: f32) -> String {
     format!("{value:.*}", decimals_for_step(step))
 }
 
-
 // ---- the elements ----
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc, time::{Duration, Instant}};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use gpui::{
     App, Bounds, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
@@ -270,7 +277,9 @@ struct Travel {
 
 impl Travel {
     fn at(&self, now: Instant) -> f32 {
-        let elapsed = now.duration_since(self.started).as_secs_f32();
+        let elapsed = now
+            .duration_since(self.started)
+            .as_secs_f32();
         let progress = (elapsed / SNAP.as_secs_f32()).clamp(0.0, 1.0);
         self.from + (self.to - self.from) * EASE_SNAP.ease(progress)
     }
@@ -380,14 +389,7 @@ impl Slider {
         step: f32,
         change: impl 'static + Fn(f32, &mut Window, &mut App),
     ) -> Self {
-        Self {
-            key: key.into(),
-            label: label.into(),
-            value,
-            span,
-            step,
-            change: Rc::new(change),
-        }
+        Self { key: key.into(), label: label.into(), value, span, step, change: Rc::new(change) }
     }
 }
 
@@ -419,7 +421,12 @@ impl RenderOnce for Slider {
         // watch it arrive.
         let resting = fraction(self.value, &self.span);
         let now = Instant::now();
-        let travelling = SNAPS.with(|snaps| snaps.borrow().get(&key).map(|t| t.at(now)));
+        let travelling = SNAPS.with(|snaps| {
+            snaps
+                .borrow()
+                .get(&key)
+                .map(|t| t.at(now))
+        });
         let filled = travelling.unwrap_or(resting);
 
         let lit = motion::fade_fraction(hover_key.clone());
@@ -463,7 +470,9 @@ impl RenderOnce for Slider {
             move |bounds: Bounds<Pixels>| {
                 TEXT.with(|text| {
                     let mut text = text.borrow_mut();
-                    let entry = text.entry(key.clone()).or_insert((0.0, 0.0));
+                    let entry = text
+                        .entry(key.clone())
+                        .or_insert((0.0, 0.0));
                     entry.0 = f32::from(bounds.size.width);
                 });
             }
@@ -473,7 +482,9 @@ impl RenderOnce for Slider {
             move |bounds: Bounds<Pixels>| {
                 TEXT.with(|text| {
                     let mut text = text.borrow_mut();
-                    let entry = text.entry(key.clone()).or_insert((0.0, 0.0));
+                    let entry = text
+                        .entry(key.clone())
+                        .or_insert((0.0, 0.0));
                     entry.1 = f32::from(bounds.size.width);
                 });
             }
@@ -604,16 +615,15 @@ impl RenderOnce for Slider {
                             .w(px(HANDLE_WIDTH))
                             .h(px(HANDLE_HEIGHT))
                             .rounded_full()
-                            .bg(Hsla {
-                                a: handle_opacity(active, dragging, dodging),
-                                ..theme.text
-                            })
+                            .bg(Hsla { a: handle_opacity(active, dragging, dodging), ..theme.text })
                             // At rest the handle is a quarter of its height, so
                             // it reads as a tick until the pointer arrives.
                             .when(!active, |handle| {
                                 handle
                                     .h(px(HANDLE_HEIGHT * HANDLE_RESTING_SCALE))
-                                    .top(px((ROW_HEIGHT - HANDLE_HEIGHT * HANDLE_RESTING_SCALE) / 2.0))
+                                    .top(px(
+                                        (ROW_HEIGHT - HANDLE_HEIGHT * HANDLE_RESTING_SCALE) / 2.0
+                                    ))
                             }),
                     )
                     .child(
@@ -737,12 +747,7 @@ impl Toggle {
         checked: bool,
         change: impl 'static + Fn(bool, &mut Window, &mut App),
     ) -> Self {
-        Self {
-            key: key.into(),
-            label: label.into(),
-            checked,
-            change: Rc::new(change),
-        }
+        Self { key: key.into(), label: label.into(), checked, change: Rc::new(change) }
     }
 }
 
@@ -829,12 +834,7 @@ impl Segmented {
         selected: usize,
         change: impl 'static + Fn(usize, &mut Window, &mut App),
     ) -> Self {
-        Self {
-            key: key.into(),
-            options,
-            selected,
-            change: Rc::new(change),
-        }
+        Self { key: key.into(), options, selected, change: Rc::new(change) }
     }
 }
 
@@ -881,7 +881,6 @@ impl RenderOnce for Segmented {
     }
 }
 
-
 /// A text field inside a row.
 ///
 /// The chrome follows `ui/field.rs`: the edge rests on the hairline and warms
@@ -925,11 +924,7 @@ pub fn field(
     let focus = motion::fade_fraction(focus_key);
     let hover = motion::fade_fraction(hover_key.clone());
 
-    let border = crate::ui::theme::mix(
-        theme.hairline,
-        Hsla { a: 0.55, ..theme.accent },
-        focus,
-    );
+    let border = crate::ui::theme::mix(theme.hairline, Hsla { a: 0.55, ..theme.accent }, focus);
     let fill = crate::ui::theme::flatten(
         Hsla { a: theme.wash_hover.a * hover, ..theme.wash_hover },
         theme.surface_raised,
@@ -1008,11 +1003,7 @@ impl Action {
         label: impl Into<SharedString>,
         press: impl 'static + Fn(&mut Window, &mut App),
     ) -> Self {
-        Self {
-            key: key.into(),
-            label: label.into(),
-            press: Rc::new(press),
-        }
+        Self { key: key.into(), label: label.into(), press: Rc::new(press) }
     }
 }
 
@@ -1124,11 +1115,7 @@ pub fn stepper(
         .flex_none()
         .items_center()
         .gap(px(2.0))
-        .child(arrow(
-            "down",
-            gpui_component::IconName::Minus,
-            (value > lo).then(|| value - 1),
-        ))
+        .child(arrow("down", gpui_component::IconName::Minus, (value > lo).then(|| value - 1)))
         .child(
             row_text(TEXT_SIZE)
                 .w(px(24.0))
@@ -1137,11 +1124,7 @@ pub fn stepper(
                 .text_color(theme.text)
                 .child(value.to_string()),
         )
-        .child(arrow(
-            "up",
-            gpui_component::IconName::Plus,
-            (value < hi).then(|| value + 1),
-        ))
+        .child(arrow("up", gpui_component::IconName::Plus, (value < hi).then(|| value + 1)))
 }
 
 /// A section heading between runs of rows.

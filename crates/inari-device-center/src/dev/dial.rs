@@ -42,10 +42,19 @@ pub enum Value {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     Flag,
-    Range { lo: f32, hi: f32, step: f32 },
-    Count { lo: usize, hi: usize },
+    Range {
+        lo: f32,
+        hi: f32,
+        step: f32,
+    },
+    Count {
+        lo: usize,
+        hi: usize,
+    },
     Text,
-    Pick { labels: Vec<&'static str> },
+    Pick {
+        labels: Vec<&'static str>,
+    },
     Press,
     /// A heading. Carries no value; splits a long panel into named runs.
     Group,
@@ -102,14 +111,21 @@ pub fn schema(cx: &App) -> Vec<Knob> {
 
 /// The story the recorded schema belongs to.
 pub fn active_story(cx: &App) -> Option<&'static str> {
-    cx.try_global::<Store>().and_then(|store| store.story)
+    cx.try_global::<Store>()
+        .and_then(|store| store.story)
 }
 
 /// Move a knob. Called by the panel; a story never writes.
 pub fn set(story: &'static str, label: &'static str, value: Value, cx: &mut App) {
     cx.update_global(|store: &mut Store, _| {
-        store.values.insert((story, label), value.clone());
-        if let Some(knob) = store.schema.iter_mut().find(|knob| knob.label == label) {
+        store
+            .values
+            .insert((story, label), value.clone());
+        if let Some(knob) = store
+            .schema
+            .iter_mut()
+            .find(|knob| knob.label == label)
+        {
             knob.value = value;
         }
     });
@@ -262,7 +278,12 @@ impl Dial {
         };
         self.record(
             label,
-            Kind::Pick { labels: T::VARIANTS.iter().map(|(_, name)| *name).collect() },
+            Kind::Pick {
+                labels: T::VARIANTS
+                    .iter()
+                    .map(|(_, name)| *name)
+                    .collect(),
+            },
             Value::Choice(current),
             Value::Choice(fallback),
         );
@@ -290,7 +311,8 @@ impl Dial {
             "story `{}` reads the knob `{label}` twice; knobs are keyed by label",
             self.story
         );
-        self.schema.push(Knob { label, kind, value, default });
+        self.schema
+            .push(Knob { label, kind, value, default });
     }
 }
 

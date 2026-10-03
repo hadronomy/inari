@@ -84,9 +84,7 @@ fn adjust_float(window_id: WindowId, cx: &mut App, change: impl FnOnce(&mut Floa
     if !cx.has_global::<Floats>() {
         cx.set_global(Floats::default());
     }
-    cx.update_global(|floats: &mut Floats, _| {
-        change(floats.0.entry(window_id).or_default())
-    });
+    cx.update_global(|floats: &mut Floats, _| change(floats.0.entry(window_id).or_default()));
 }
 
 /// A canvas that reports the bounds of whatever it is placed inside.
@@ -197,11 +195,7 @@ fn drag_listeners(window_id: WindowId) -> impl IntoElement {
 ///
 /// Dragged past an edge it would otherwise leave the window, and a launcher you
 /// cannot reach is a launcher you cannot put back.
-fn settle(
-    at: Point<Pixels>,
-    size: gpui::Size<Pixels>,
-    frame: Bounds<Pixels>,
-) -> Point<Pixels> {
+fn settle(at: Point<Pixels>, size: gpui::Size<Pixels>, frame: Bounds<Pixels>) -> Point<Pixels> {
     if frame.size.width <= px(0.0) {
         return at;
     }
@@ -233,7 +227,9 @@ fn pill(
         .absolute()
         .map(|pill| match at {
             Some(at) => pill.left(at.x).top(at.y),
-            None => pill.right(px(MARGIN)).bottom(px(MARGIN)),
+            None => pill
+                .right(px(MARGIN))
+                .bottom(px(MARGIN)),
         })
         .w(width)
         .h(px(PILL_HEIGHT))
@@ -294,20 +290,27 @@ fn grip(theme: &Theme, window_id: WindowId) -> impl IntoElement {
         .w(px(14.0))
         .h_full()
         .cursor(gpui::CursorStyle::OpenHand)
-        .child(div().w(px(1.0)).h(px(10.0)).bg(theme.text_tertiary))
-        .child(div().w(px(1.0)).h(px(10.0)).bg(theme.text_tertiary))
-        .on_mouse_down(
-            MouseButton::Left,
-            move |event, window: &mut Window, cx: &mut App| {
-                let position = event.position;
-                adjust_float(window_id, cx, |float| {
-                    let at = float.painted.origin;
-                    float.grab = Some(point(position.x - at.x, position.y - at.y));
-                    float.at = Some(at);
-                });
-                window.refresh();
-            },
+        .child(
+            div()
+                .w(px(1.0))
+                .h(px(10.0))
+                .bg(theme.text_tertiary),
         )
+        .child(
+            div()
+                .w(px(1.0))
+                .h(px(10.0))
+                .bg(theme.text_tertiary),
+        )
+        .on_mouse_down(MouseButton::Left, move |event, window: &mut Window, cx: &mut App| {
+            let position = event.position;
+            adjust_float(window_id, cx, |float| {
+                let at = float.painted.origin;
+                float.grab = Some(point(position.x - at.x, position.y - at.y));
+                float.at = Some(at);
+            });
+            window.refresh();
+        })
 }
 
 /// Bounds, border, padding and content box for the selected element.
@@ -404,13 +407,8 @@ fn box_model(theme: &Theme) -> AnyElement {
                 gpui::transparent_black(),
                 gpui::BorderStyle::default(),
             ));
-            line.paint(
-                point(plate.origin.x + px(4.0), plate.origin.y),
-                line_height,
-                window,
-                cx,
-            )
-            .ok();
+            line.paint(point(plate.origin.x + px(4.0), plate.origin.y), line_height, window, cx)
+                .ok();
         },
     )
     .absolute()
