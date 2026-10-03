@@ -175,7 +175,7 @@ merely needs a tint.
 ## 3. Competing approaches
 
 | # | Approach | Generative | Subtree | Backdrop | Animated | Cost |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | 1 | CPU render into `RenderImage` | yes | no | no | GPU→CPU→GPU each frame | none |
 | 2 | Sibling wgpu surface behind a transparent window | yes | no | no | yes | low |
 | 3 | `PaintSurface` / `CVPixelBuffer` | yes | no | no | yes | macOS only |
@@ -420,7 +420,7 @@ startup. The renderer compiles them lazily, keyed by effect and pass, and
 keeps the compiled pipeline for the process lifetime.
 
 | Backend | Path | Compiled at |
-|---|---|---|
+| --- | --- | --- |
 | Blade / wgpu | WGSL straight through | runtime, by naga inside blade |
 | Metal | naga `wgsl-in` → `msl-out` → `newLibraryWithSource` | runtime |
 | Direct3D 11 | naga `wgsl-in` → `hlsl-out` at SM 5.0 → `D3DCompile` | runtime |
@@ -493,7 +493,7 @@ Rendering work is not finished because it compiles. Each row is something to
 confirm on screen, not in a review.
 
 | Concern | Rule |
-|---|---|
+| --- | --- |
 | Colour space | Targets are BGRA8 UNORM. Convert to linear for any mixing, convert back. |
 | Alpha | Offscreen targets store premultiplied. Effects return straight. The renderer converts once. |
 | Clipping | The composite quad honours `content_mask` and `corner_radii` exactly as `Quad` does. |
