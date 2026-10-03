@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use openidconnect::IssuerUrl;
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 use crate::config::ServerConfig;
 use crate::error::ConfigError;
@@ -24,7 +24,8 @@ impl IdentityConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct OidcConfig {
     pub enabled: bool,
-    pub issuer_url: Option<Url>,
+    /// OIDC compares issuer identifiers exactly, including a root trailing slash.
+    pub issuer_url: Option<IssuerUrl>,
     pub client_id: String,
     pub client_secret_file: Option<PathBuf>,
     pub workload_audience: String,
@@ -59,7 +60,7 @@ impl OidcConfig {
             .ok_or_else(|| {
                 ConfigError::invalid("identity.oidc.issuer_url is required when OIDC is enabled.")
             })?;
-        if issuer.scheme() != "https" && server.environment.is_deployed() {
+        if issuer.url().scheme() != "https" && server.environment.is_deployed() {
             return Err(ConfigError::invalid(
                 "identity.oidc.issuer_url must use HTTPS outside development.",
             ));
@@ -96,5 +97,33 @@ impl OidcConfig {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_the_exact_oidc_issuer_for_discovery() {
+        for issuer in [
+            "https://auth.example.com",
+            "https://auth.example.com/",
+            "https://auth.example.com/realms/store",
+            "https://auth.example.com/realms/store/",
+        ] {
+            let config: OidcConfig = toml::from_str(&format!("issuer_url = {issuer:?}")).unwrap();
+            assert_eq!(
+                config
+                    .issuer_url
+                    .as_ref()
+                    .unwrap()
+                    .as_str(),
+                issuer
+            );
+            let encoded = toml::to_string(&config).unwrap();
+            let decoded: OidcConfig = toml::from_str(&encoded).unwrap();
+            assert_eq!(decoded.issuer_url.unwrap().as_str(), issuer);
+        }
     }
 }
