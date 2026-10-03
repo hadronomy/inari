@@ -52,7 +52,6 @@ impl GatewayRepository {
             jwk_thumbprint: Set(enrollment.jwk_thumbprint),
             public_jwk: Set(StoredJwk(enrollment.public_jwk.clone())),
             dispatch_key: Set(Some(StoredDispatchEncryptionKey(enrollment.dispatch_key))),
-            certificate_pem: Set(enrollment.certificate_pem),
             namespace: Set(enrollment.namespace),
             protocol_version: Set(enrollment
                 .protocol_version
@@ -70,7 +69,6 @@ impl GatewayRepository {
                 .update_column(agent::COLUMN.jwk_thumbprint)
                 .update_column(agent::COLUMN.public_jwk)
                 .update_column(agent::COLUMN.dispatch_key)
-                .update_column(agent::COLUMN.certificate_pem)
                 .update_column(agent::COLUMN.namespace)
                 .update_column(agent::COLUMN.protocol_version)
                 .update_column(agent::COLUMN.controller_actions)

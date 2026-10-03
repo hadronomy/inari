@@ -6,7 +6,6 @@ use jsonwebtoken::jwk::{
 use sha2::{Digest, Sha256};
 use x509_parser::certification_request::X509CertificationRequest;
 use x509_parser::extensions::{GeneralName, ParsedExtension};
-use x509_parser::parse_x509_certificate;
 use x509_parser::pem::parse_x509_pem;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::X509Name;
@@ -121,7 +120,6 @@ pub fn validate_identity(
     key_id: &str,
     jwk: &Jwk,
     csr_pem: &str,
-    certificate_pem: Option<&str>,
 ) -> GatewayResult<ValidatedIdentity> {
     if jwk.common.key_id.as_deref() != Some(key_id) {
         return Err(GatewayError::InvalidInput("public JWK kid must match key_id".into()));
@@ -192,32 +190,6 @@ pub fn validate_identity(
             .flatten(),
         agent_id,
     )?;
-
-    if let Some(certificate_pem) = certificate_pem {
-        let (_, pem) = parse_x509_pem(certificate_pem.as_bytes())
-            .map_err(|_| GatewayError::InvalidInput("certificate is not valid PEM".into()))?;
-        let (_, certificate) = parse_x509_certificate(&pem.contents)
-            .map_err(|_| GatewayError::InvalidInput("certificate is not valid DER".into()))?;
-        if certificate
-            .public_key()
-            .subject_public_key
-            .data
-            .as_ref()
-            != public_key
-        {
-            return Err(GatewayError::InvalidInput(
-                "certificate public key does not match public JWK".into(),
-            ));
-        }
-        validate_certificate_subject(certificate.subject(), agent_id)?;
-        validate_certificate_names(
-            certificate
-                .extensions()
-                .iter()
-                .map(|extension| extension.parsed_extension()),
-            agent_id,
-        )?;
-    }
 
     Ok(ValidatedIdentity {
         key_id: key_id.into(),
@@ -303,7 +275,7 @@ mod tests {
     #[test]
     fn validates_ed25519_csr_and_jwk_binding() {
         let (agent_id, key_id, jwk) = identity_jwk(1);
-        let identity = validate_identity(&agent_id, &key_id, &jwk, CSR, None).unwrap();
+        let identity = validate_identity(&agent_id, &key_id, &jwk, CSR).unwrap();
         assert_eq!(identity.public_key.len(), 32);
         assert!(!identity.jwk_thumbprint.is_empty());
         let (_, pem) = x509_parser::pem::parse_x509_pem(CSR.as_bytes()).unwrap();
@@ -323,7 +295,7 @@ mod tests {
         let agent_id = format!("agt_{}", &digest[..24])
             .parse()
             .unwrap();
-        let error = validate_identity(&agent_id, &key_id, &jwk, "", None).unwrap_err();
+        let error = validate_identity(&agent_id, &key_id, &jwk, "").unwrap_err();
         assert!(
             error
                 .to_string()
@@ -334,7 +306,7 @@ mod tests {
     #[test]
     fn rejects_csr_bound_to_another_key() {
         let (agent_id, key_id, jwk) = identity_jwk(2);
-        let error = validate_identity(&agent_id, &key_id, &jwk, CSR, None).unwrap_err();
+        let error = validate_identity(&agent_id, &key_id, &jwk, CSR).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -349,7 +321,7 @@ mod tests {
         for (agent, kid) in [(&other_agent, key_id.as_str()), (&agent_id, "kid_other")] {
             let mut descriptor = jwk.clone();
             descriptor.common.key_id = Some(kid.into());
-            let error = validate_identity(agent, kid, &descriptor, CSR, None).unwrap_err();
+            let error = validate_identity(agent, kid, &descriptor, CSR).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -370,32 +342,7 @@ mod tests {
             include_str!("../tests/fixtures/enrollment/extra-san.csr.pem"),
             include_str!("../tests/fixtures/enrollment/duplicate-san.csr.pem"),
         ] {
-            let error = validate_identity(&agent_id, &key_id, &jwk, request, None).unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("certificate")
-            );
-        }
-    }
-
-    #[test]
-    fn validates_existing_certificate_identity() {
-        let (agent_id, key_id, jwk) = identity_jwk(1);
-        validate_identity(
-            &agent_id,
-            &key_id,
-            &jwk,
-            CSR,
-            Some(include_str!("../tests/fixtures/enrollment/valid.cert.pem")),
-        )
-        .unwrap();
-        for certificate in [
-            include_str!("../tests/fixtures/enrollment/wrong-subject.cert.pem"),
-            include_str!("../tests/fixtures/enrollment/wrong-san.cert.pem"),
-        ] {
-            let error =
-                validate_identity(&agent_id, &key_id, &jwk, CSR, Some(certificate)).unwrap_err();
+            let error = validate_identity(&agent_id, &key_id, &jwk, request).unwrap_err();
             assert!(
                 error
                     .to_string()
@@ -408,7 +355,7 @@ mod tests {
     fn rejects_multiple_pem_requests() {
         let (agent_id, key_id, jwk) = identity_jwk(1);
         let error =
-            validate_identity(&agent_id, &key_id, &jwk, &format!("{CSR}{CSR}"), None).unwrap_err();
+            validate_identity(&agent_id, &key_id, &jwk, &format!("{CSR}{CSR}")).unwrap_err();
         assert!(
             error
                 .to_string()

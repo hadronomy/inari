@@ -4,7 +4,7 @@ use std::str::FromStr;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-pub const GATEWAY_PROTOCOL_VERSION: &str = "2026-09-06";
+pub const GATEWAY_PROTOCOL_VERSION: &str = "2026-10-03";
 const AGENT_ID_PREFIX: &str = "agt_";
 const MAX_AGENT_ID_LENGTH: usize = 64;
 
@@ -161,7 +161,7 @@ mod tests {
         let version = ProtocolVersion::current();
         let json = serde_json::to_string(&version).expect("protocol version should serialize");
 
-        assert_eq!(json, "\"2026-09-06\"");
+        assert_eq!(json, "\"2026-10-03\"");
         assert_eq!(
             serde_json::from_str::<ProtocolVersion>(&json)
                 .expect("protocol version should deserialize"),

@@ -36,7 +36,6 @@ fn enrollment(agent_id: &str, identity: Jwk, state: Jwk) -> AgentEnrollmentRecor
             public_key_base64url: URL_SAFE_NO_PAD.encode([42; 32]),
         },
         state_signing_jwk: state,
-        certificate_pem: None,
         namespace: format!("inari/org_keys/site_keys/{agent_id}"),
         protocol_version: inari_gateway::protocol::ProtocolVersion::current(),
         controller_actions: vec![],
@@ -77,8 +76,8 @@ async fn enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse() {
     let first = enrollment("agt_first", jwk(1, false), jwk(2, true));
     sqlx::query(
         "INSERT INTO agents (agent_id, organization_id, site_id, key_id, jwk_thumbprint,
-        public_jwk, namespace, protocol_version, controller_actions, enrolled_at, last_enrolled_at)
-        VALUES ('agt_first', 'org_keys', 'site_keys', $1, $2, $3, $4, '1.0', '[]', now(), now())",
+        public_jwk, namespace, protocol_version, controller_actions, enrolled_at, last_enrolled_at, certificate_pem)
+        VALUES ('agt_first', 'org_keys', 'site_keys', $1, $2, $3, $4, '1.0', '[]', now(), now(), 'obsolete certificate')",
     )
     .bind(&first.key_id)
     .bind(&first.jwk_thumbprint)
@@ -90,6 +89,15 @@ async fn enrollment_retains_key_history_and_rejects_owner_or_purpose_reuse() {
     Migrator::up(&database, None)
         .await
         .unwrap();
+    let obsolete_certificate_column: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+         WHERE table_schema = 'public' AND table_name = 'agents' \
+         AND column_name = 'certificate_pem')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!obsolete_certificate_column);
     let migrated: String =
         sqlx::query_scalar("SELECT purpose FROM agent_verification_keys WHERE key_id = $1")
             .bind(&first.key_id)

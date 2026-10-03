@@ -17,8 +17,6 @@ pub struct Model {
     pub public_jwk: StoredJwk,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub dispatch_key: Option<StoredDispatchEncryptionKey>,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub certificate_pem: Option<String>,
     #[sea_orm(unique)]
     pub namespace: String,
     pub protocol_version: String,

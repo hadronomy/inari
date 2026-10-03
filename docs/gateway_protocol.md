@@ -19,7 +19,7 @@ used as defined by [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 
 ## Version and compatibility
 
-The current draft version is `2026-09-06`.
+The current draft version is `2026-10-03`.
 
 An enrollment request contains the agent’s preferred version and the versions
 it supports. The controller MUST return one of those versions as
@@ -39,7 +39,6 @@ Each agent keeps a persistent logical and cryptographic identity:
 - `dispatch_key` — X25519 public key used to seal Managed Device Work for this
   Agent;
 - `csr_pem` — PKCS#10 request signed by that key;
-- `certificate_pem` — current managed certificate, when one exists.
 
 During enrollment the controller MUST:
 
@@ -47,13 +46,26 @@ During enrollment the controller MUST:
 2. calculate and validate the RFC 7638 thumbprint;
 3. verify the CSR signature;
 4. compare the CSR subject public key with the JWK;
-5. compare any supplied certificate with the same key;
-6. bind the enrollment credential, protocol version, invitation state, and
+5. bind the enrollment credential, protocol version, invitation state, and
    agent identity in one transaction;
-7. consume a one-use credential only when enrollment succeeds.
+6. consume a one-use credential only when enrollment succeeds.
 
 An issued certificate MUST bind to the enrolled `agent_id`. Its SANs and key
 usage MUST stay within the authorization approved by the controller.
+
+Protocol `2026-10-03` authenticates enrollment with the invitation and signed CSR.
+An installed certificate is not part of the enrollment request. A fresh invitation
+can replace an obsolete certificate without changing the protected Agent Identity.
+Upgrade the Agent and Controller together before enabling managed enrollment.
+The Controller migration removes the unused stored Agent certificate column.
+
+The Agent MUST compare the cached CA with the pinned SHA-256 fingerprint before
+accepting an installed certificate or sending a certificate request. A different
+cached CA triggers root bootstrap. The Agent MUST validate the installed client
+chain, identity, usage, and validity against that root. An invalid certificate
+requires fresh enrollment. When a fresh one-time token exists, the Agent replaces
+the certificate and retains its private key. All CA endpoints MUST use HTTPS
+without URL credentials, query, or fragment.
 
 ## Invitation bootstrap
 
@@ -96,8 +108,8 @@ Content-Type: application/json
 ```json
 {
   "protocol": {
-    "version": "2026-09-06",
-    "supported_versions": ["2026-09-06"]
+    "version": "2026-10-03",
+    "supported_versions": ["2026-10-03"]
   },
   "agent_id": "agt_123",
   "key_id": "kid_123",
@@ -122,7 +134,6 @@ Content-Type: application/json
     "kid": "agent_state_<sha256-of-raw-public-key>",
     "x": "..."
   },
-  "certificate_pem": null,
   "csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n",
   "snapshot": {
     "generated_at": "2026-07-15T10:00:00Z",
@@ -154,7 +165,7 @@ assign a registered key to another Agent or another purpose. Registration of a
 new state key preserves the previous public key. The state key must differ from
 the Agent transport identity.
 
-Protocol `2026-09-06` requires this field. Upgrade the Agent and Controller
+Protocol `2026-10-03` requires this field. Upgrade the Agent and Controller
 together, apply the Controller migrations, and enroll each Agent with a new
 invitation. Cached enrollment without the current state-key identity is invalid.
 The migration registers existing Agent transport keys before new enrollments.
@@ -166,7 +177,7 @@ details with `Content-Type: application/problem+json`.
 
 ```json
 {
-  "selected_protocol_version": "2026-09-06",
+  "selected_protocol_version": "2026-10-03",
   "controller": {
     "name": "Acme Inari Controller",
     "instance_id": "controller-01"

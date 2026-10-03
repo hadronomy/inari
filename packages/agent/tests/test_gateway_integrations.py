@@ -99,10 +99,21 @@ async def test_zitadel_auth_provider_exchanges_and_caches_token(tmp_path: Path) 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("installed_certificate", [False, True])
 async def test_enrollment_can_be_authorized_by_provider_without_controller_token(
     tmp_path: Path,
+    installed_certificate: bool,
 ) -> None:
-    identity_service = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    certificate_path = tmp_path / "upstream-client-cert.pem"
+    if installed_certificate:
+        fixture = (
+            Path(__file__).resolve().parents[3]
+            / "crates/inari-gateway/tests/fixtures/enrollment/wrong-san.cert.pem"
+        )
+        certificate_path.write_bytes(fixture.read_bytes())
+    identity_service = AgentIdentityService(
+        identity_path=tmp_path / "identity.pem", certificate_path=certificate_path
+    )
     certificate_service = CertificateLifecycleService(
         certificate_path=tmp_path / "upstream-client-cert.pem",
         private_key_path=tmp_path / "identity.pem",
@@ -146,6 +157,7 @@ async def test_enrollment_can_be_authorized_by_provider_without_controller_token
 
     record = await service.ensure_enrolled()
 
+    assert "certificate_pem" not in http_client.last_post_json
     assert record is not None
     assert record.data_plane.kind is UpstreamDataPlaneKind.ZENOH
     assert record.data_plane.namespace == "iot/v1/agents/agt_test"

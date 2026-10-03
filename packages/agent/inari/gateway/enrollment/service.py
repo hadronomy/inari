@@ -217,7 +217,6 @@ class GatewayEnrollmentService:
             public_jwk=dict(identity.public_jwk),
             dispatch_key=dispatch_key.public_descriptor(),
             state_signing_jwk=self.state_signing_keys.public_jwk(),
-            certificate_pem=identity.certificate_pem,
             csr_pem=self.identity_service.build_csr_pem(),
             snapshot=self.snapshot_provider(),
         )

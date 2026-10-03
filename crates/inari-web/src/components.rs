@@ -23,7 +23,7 @@ pub fn AppFrame(children: Children) -> impl IntoView {
             {children()}
             <footer class="app-footer">
                 <span>"Private device operations"</span>
-                <span>"Protocol 2026-09-06"</span>
+                <span>"Protocol 2026-10-03"</span>
             </footer>
         </div>
     }
