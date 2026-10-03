@@ -149,7 +149,7 @@ class ManagedCertificateLifecycleManager:
                 )
             except ReenrollmentRequiredError as exc:
                 inspection = ManagedCertificateInspection(
-                    certificate=None, error_detail=exc.message
+                    certificate=None, error_detail=str(exc.__cause__ or exc.message)
                 )
 
         if inspection.error_detail is not None:

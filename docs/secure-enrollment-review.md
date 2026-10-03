@@ -76,3 +76,12 @@ does not satisfy the Router policy gate.
 OpenBao Transit is already enabled for Odoo Pairing Assertion signatures. The
 review does not require enabling Transit again. Additional certificate and Device
 authority credentials still need their own policy and provisioning.
+
+## Upgrade boundary
+
+The Controller migration removes the unused Agent certificate column. Old
+Controller replicas cannot read Agent rows after that migration. Keep managed
+enrollment and Zenoh disabled during the upgrade, and replace all Controller
+replicas before enabling them. The deployment must use the tested Release Set.
+A binary rollback across this migration is not supported. Recovery requires the
+matching database backup and Release Set.
