@@ -1,4 +1,9 @@
-use std::{fmt, io};
+use std::{
+    fmt, io,
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 
 use service_manager::{ServiceLabel, ServiceManager, ServiceStartCtx, ServiceStopCtx};
 #[cfg(not(windows))]
@@ -9,11 +14,13 @@ use crate::ServiceState;
 #[derive(Clone, Debug)]
 pub struct LocalAgentService {
     label: ServiceLabel,
+    operation: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl LocalAgentService {
     pub fn installed() -> Self {
         Self {
+            operation: Arc::new(tokio::sync::Mutex::new(())),
             label: service_label()
                 .parse()
                 .expect("the built-in Inari service label must be valid"),
@@ -26,8 +33,7 @@ impl LocalAgentService {
     }
 
     pub async fn start(&self) -> ServiceControlResult<ServiceState> {
-        let label = self.label.clone();
-        run_blocking(move || {
+        self.control(move |label| {
             let manager = manager()?;
             manager
                 .start(ServiceStartCtx { label: label.clone() })
@@ -35,14 +41,17 @@ impl LocalAgentService {
                     operation: ServiceOperation::Start,
                     source,
                 })?;
-            inspect_with(manager.as_ref(), &label)
+            wait_for_state(
+                || inspect_with(manager.as_ref(), &label),
+                ServiceState::Running,
+                Duration::from_secs(30),
+            )
         })
         .await
     }
 
     pub async fn stop(&self) -> ServiceControlResult<ServiceState> {
-        let label = self.label.clone();
-        run_blocking(move || {
+        self.control(move |label| {
             let manager = manager()?;
             manager
                 .stop(ServiceStopCtx { label: label.clone() })
@@ -50,14 +59,17 @@ impl LocalAgentService {
                     operation: ServiceOperation::Stop,
                     source,
                 })?;
-            inspect_with(manager.as_ref(), &label)
+            wait_for_state(
+                || inspect_with(manager.as_ref(), &label),
+                ServiceState::Stopped,
+                Duration::from_secs(30),
+            )
         })
         .await
     }
 
     pub async fn restart(&self) -> ServiceControlResult<ServiceState> {
-        let label = self.label.clone();
-        run_blocking(move || {
+        self.control(move |label| {
             let manager = manager()?;
             match inspect_with(manager.as_ref(), &label)? {
                 ServiceState::Running => {
@@ -67,6 +79,11 @@ impl LocalAgentService {
                             operation: ServiceOperation::Restart,
                             source,
                         })?;
+                    wait_for_state(
+                        || inspect_with(manager.as_ref(), &label),
+                        ServiceState::Stopped,
+                        Duration::from_secs(30),
+                    )?;
                 },
                 ServiceState::Stopped => {},
                 ServiceState::NotInstalled => return Ok(ServiceState::NotInstalled),
@@ -80,7 +97,30 @@ impl LocalAgentService {
                     operation: ServiceOperation::Restart,
                     source,
                 })?;
-            inspect_with(manager.as_ref(), &label)
+            wait_for_state(
+                || inspect_with(manager.as_ref(), &label),
+                ServiceState::Running,
+                Duration::from_secs(30),
+            )
+        })
+        .await
+    }
+
+    async fn control(
+        &self,
+        operation: impl FnOnce(ServiceLabel) -> ServiceControlResult<ServiceState> + Send + 'static,
+    ) -> ServiceControlResult<ServiceState> {
+        let guard = self
+            .operation
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| ServiceControlError::InProgress)?;
+        let label = self.label.clone();
+        run_blocking(move || {
+            // Native work continues if its caller is canceled. Keep its lock
+            // until the blocking worker finishes the service transition.
+            let _guard = guard;
+            operation(label)
         })
         .await
     }
@@ -109,6 +149,8 @@ impl fmt::Display for ServiceOperation {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServiceControlError {
+    #[error("An Agent service operation is already in progress. Wait, then try again.")]
+    InProgress,
     #[error("the native service manager is unavailable")]
     ManagerUnavailable,
     #[error("could not access the native service manager")]
@@ -121,6 +163,8 @@ pub enum ServiceControlError {
     },
     #[error("the agent service changed state while the request was running")]
     UnexpectedState,
+    #[error("the Agent service did not finish its state change within 30 seconds")]
+    TimedOut,
     #[error("the service operation ended unexpectedly")]
     Worker(#[source] tokio::task::JoinError),
 }
@@ -131,6 +175,29 @@ async fn run_blocking(
     tokio::task::spawn_blocking(operation)
         .await
         .map_err(ServiceControlError::Worker)?
+}
+
+fn wait_for_state(
+    mut inspect: impl FnMut() -> ServiceControlResult<ServiceState>,
+    expected: ServiceState,
+    timeout: Duration,
+) -> ServiceControlResult<ServiceState> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let state = inspect()?;
+        if state == expected {
+            return Ok(state);
+        }
+        if matches!(state, ServiceState::NotInstalled | ServiceState::Unavailable) {
+            return Err(ServiceControlError::UnexpectedState);
+        }
+        if Instant::now() >= deadline {
+            return Err(ServiceControlError::TimedOut);
+        }
+        thread::sleep(
+            Duration::from_millis(100).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
 }
 
 fn inspect(label: &ServiceLabel) -> ServiceControlResult<ServiceState> {
@@ -214,6 +281,79 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    #[tokio::test]
+    async fn service_clones_reject_concurrent_mutations_before_native_control() {
+        let service = LocalAgentService::installed();
+        let clone = service.clone();
+        let _operation = service.operation.lock().await;
+        for result in [clone.start().await, clone.stop().await, clone.restart().await] {
+            assert!(matches!(result, Err(ServiceControlError::InProgress)));
+        }
+    }
+
+    #[tokio::test]
+    async fn canceled_call_retains_the_lock_until_native_work_finishes() {
+        let service = LocalAgentService::installed();
+        let worker_service = service.clone();
+        let (started, waiting) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let worker = tokio::spawn(async move {
+            worker_service
+                .control(move |_| {
+                    started.send(()).unwrap();
+                    held.recv().unwrap();
+                    Ok(ServiceState::Running)
+                })
+                .await
+        });
+        waiting.await.unwrap();
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+        let competing = service.control(|_| panic!("concurrent service control must not start"));
+        assert!(matches!(competing.await, Err(ServiceControlError::InProgress)));
+        release.send(()).unwrap();
+        let _guard = tokio::time::timeout(Duration::from_secs(2), service.operation.lock())
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn restart_waits_for_the_native_transition() {
+        let mut states = VecDeque::from([ServiceState::Starting, ServiceState::Running]);
+        let result = wait_for_state(
+            || Ok(states.pop_front().unwrap()),
+            ServiceState::Running,
+            Duration::from_secs(2),
+        );
+        assert_eq!(result.unwrap(), ServiceState::Running);
+        assert!(states.is_empty());
+    }
+
+    #[test]
+    fn a_pending_service_does_not_count_as_stopped() {
+        let error =
+            wait_for_state(|| Ok(ServiceState::Starting), ServiceState::Stopped, Duration::ZERO)
+                .unwrap_err();
+        assert!(matches!(error, ServiceControlError::TimedOut));
+    }
+
+    #[test]
+    fn unavailable_service_stops_the_transition() {
+        let error = wait_for_state(
+            || Ok(ServiceState::NotInstalled),
+            ServiceState::Running,
+            Duration::from_secs(30),
+        )
+        .unwrap_err();
+        assert!(matches!(error, ServiceControlError::UnexpectedState));
+    }
+}
+
 /// Reads agent service state straight from the Service Control Manager.
 ///
 /// The cross-platform manager shells out to `sc.exe` and looks for a line
@@ -281,12 +421,13 @@ mod scm {
     fn map_current_state(state: u32) -> ServiceState {
         match state {
             SERVICE_RUNNING => ServiceState::Running,
-            SERVICE_START_PENDING | SERVICE_CONTINUE_PENDING => ServiceState::Starting,
+            SERVICE_START_PENDING
+            | SERVICE_CONTINUE_PENDING
+            | SERVICE_STOP_PENDING
+            | SERVICE_PAUSE_PENDING => ServiceState::Starting,
             // A paused service does no device work, so it reads the same as a
             // stopped one and offers the same recovery.
-            SERVICE_STOPPED | SERVICE_STOP_PENDING | SERVICE_PAUSED | SERVICE_PAUSE_PENDING => {
-                ServiceState::Stopped
-            },
+            SERVICE_STOPPED | SERVICE_PAUSED => ServiceState::Stopped,
             _ => ServiceState::Unavailable,
         }
     }
@@ -308,9 +449,9 @@ mod scm {
             assert_eq!(map_current_state(SERVICE_START_PENDING), ServiceState::Starting);
             assert_eq!(map_current_state(SERVICE_CONTINUE_PENDING), ServiceState::Starting);
             assert_eq!(map_current_state(SERVICE_STOPPED), ServiceState::Stopped);
-            assert_eq!(map_current_state(SERVICE_STOP_PENDING), ServiceState::Stopped);
+            assert_eq!(map_current_state(SERVICE_STOP_PENDING), ServiceState::Starting);
             assert_eq!(map_current_state(SERVICE_PAUSED), ServiceState::Stopped);
-            assert_eq!(map_current_state(SERVICE_PAUSE_PENDING), ServiceState::Stopped);
+            assert_eq!(map_current_state(SERVICE_PAUSE_PENDING), ServiceState::Starting);
         }
 
         #[test]

@@ -4830,6 +4830,7 @@ dependencies = [
  "open",
  "raw-window-handle",
  "rust-embed",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
