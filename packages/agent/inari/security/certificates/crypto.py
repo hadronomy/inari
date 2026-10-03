@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ...core.exceptions import AgentError
 from ...gateway.models import CertificateEnrollmentSpec
 from ..identity import AgentIdentityService
 
@@ -22,10 +23,20 @@ class ManagedCertificateCryptoService:
         enrollment: CertificateEnrollmentSpec,
     ) -> ManagedCertificateRequest:
         identity = self.identity_service.get_or_create_identity()
-        subject = enrollment.subject or identity.agent_id
-        requested_sans = enrollment.authorized_sans or (
-            self.identity_service.default_uri_san(identity.agent_id),
-        )
+        subject = identity.agent_id
+        requested_sans = (self.identity_service.default_uri_san(subject),)
+        if enrollment.subject is not None and enrollment.subject != subject:
+            raise AgentError(
+                "STEP_CA_ENROLLMENT_SUBJECT_MISMATCH",
+                "The certificate subject does not match this Agent Identity.",
+                status_code=502,
+            )
+        if enrollment.authorized_sans and enrollment.authorized_sans != requested_sans:
+            raise AgentError(
+                "STEP_CA_ENROLLMENT_SAN_MISMATCH",
+                "The certificate names do not match this Agent Identity.",
+                status_code=502,
+            )
         return ManagedCertificateRequest(
             csr_pem=self.identity_service.build_csr_pem(
                 common_name=subject,

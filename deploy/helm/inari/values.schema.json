@@ -446,7 +446,7 @@
             "stepCa": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["baseUrl", "rootFingerprint", "provisioner", "keyId", "signingKey", "signingAlgorithm", "tokenTtl", "authorizedSans"],
+              "required": ["baseUrl", "rootFingerprint", "provisioner", "keyId", "signingKey", "signingAlgorithm", "tokenTtl"],
               "properties": {
                 "baseUrl": { "$ref": "#/definitions/httpsUrl" },
                 "rootFingerprint": { "type": "string", "minLength": 1 },
@@ -454,8 +454,7 @@
                 "keyId": { "type": "string", "minLength": 1 },
                 "signingKey": { "$ref": "#/definitions/secretKeyReference" },
                 "signingAlgorithm": { "enum": ["ed_dsa", "es256"] },
-                "tokenTtl": { "$ref": "#/definitions/duration" },
-                "authorizedSans": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+                "tokenTtl": { "$ref": "#/definitions/duration" }
               }
             },
             "requiresMutualTlsAfterIssuance": { "type": "boolean" }

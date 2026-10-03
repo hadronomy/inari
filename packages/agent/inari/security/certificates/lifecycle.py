@@ -243,8 +243,7 @@ class ManagedCertificateLifecycleManager:
             return current
 
         certificate = self.certificate_service.install(
-            certificate_pem=material.leaf_certificate_pem,
-            ca_certificate_pem=material.ca_bundle_pem,
+            certificate_pem=material.certificate_chain_pem,
         )
         if certificate is None:
             failure = ManagedCertificateProvisioningError(

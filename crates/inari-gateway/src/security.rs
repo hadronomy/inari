@@ -5,11 +5,13 @@ use jsonwebtoken::jwk::{
 };
 use sha2::{Digest, Sha256};
 use x509_parser::certification_request::X509CertificationRequest;
+use x509_parser::extensions::{GeneralName, ParsedExtension};
 use x509_parser::parse_x509_certificate;
 use x509_parser::pem::parse_x509_pem;
 use x509_parser::prelude::FromDer;
+use x509_parser::x509::X509Name;
 
-use crate::protocol::{DispatchEncryptionKey, DispatchKem};
+use crate::protocol::{AgentId, DispatchEncryptionKey, DispatchKem};
 use crate::{GatewayError, GatewayResult};
 
 mod state_envelopes;
@@ -115,6 +117,7 @@ pub fn validate_dispatch_key(key: &DispatchEncryptionKey) -> GatewayResult<Valid
 }
 
 pub fn validate_identity(
+    agent_id: &AgentId,
     key_id: &str,
     jwk: &Jwk,
     csr_pem: &str,
@@ -141,11 +144,28 @@ pub fn validate_identity(
     let public_key: [u8; 32] = public_key
         .try_into()
         .map_err(|_| GatewayError::InvalidInput("Ed25519 public key must be 32 bytes".into()))?;
+    let digest = hex::encode(Sha256::digest(public_key));
+    if agent_id.as_str() != format!("agt_{}", &digest[..24])
+        || key_id != format!("kid_{}", &digest[..12])
+    {
+        return Err(GatewayError::InvalidInput(
+            "Agent ID and key ID must identify the public JWK key".into(),
+        ));
+    }
 
-    let (_, pem) = parse_x509_pem(csr_pem.as_bytes())
+    let (remaining, pem) = parse_x509_pem(csr_pem.as_bytes())
         .map_err(|_| GatewayError::InvalidInput("CSR is not valid PEM".into()))?;
-    let (_, csr) = X509CertificationRequest::from_der(&pem.contents)
+    if remaining
+        .iter()
+        .any(|byte| !byte.is_ascii_whitespace())
+    {
+        return Err(GatewayError::InvalidInput("CSR must contain one PEM request".into()));
+    }
+    let (remaining, csr) = X509CertificationRequest::from_der(&pem.contents)
         .map_err(|_| GatewayError::InvalidInput("CSR is not valid PKCS#10 DER".into()))?;
+    if !remaining.is_empty() {
+        return Err(GatewayError::InvalidInput("CSR contains trailing DER data".into()));
+    }
     csr.verify_signature()
         .map_err(|_| GatewayError::InvalidInput("CSR signature is invalid".into()))?;
     let csr_key = csr
@@ -157,6 +177,16 @@ pub fn validate_identity(
     if csr_key != public_key {
         return Err(GatewayError::InvalidInput("CSR public key does not match public JWK".into()));
     }
+    validate_certificate_subject(&csr.certification_request_info.subject, agent_id)?;
+    csr.certification_request_info
+        .attributes_map()
+        .map_err(|_| GatewayError::InvalidInput("CSR contains duplicate attributes".into()))?;
+    validate_certificate_names(
+        csr.requested_extensions()
+            .into_iter()
+            .flatten(),
+        agent_id,
+    )?;
 
     if let Some(certificate_pem) = certificate_pem {
         let (_, pem) = parse_x509_pem(certificate_pem.as_bytes())
@@ -174,6 +204,14 @@ pub fn validate_identity(
                 "certificate public key does not match public JWK".into(),
             ));
         }
+        validate_certificate_subject(certificate.subject(), agent_id)?;
+        validate_certificate_names(
+            certificate
+                .extensions()
+                .iter()
+                .map(|extension| extension.parsed_extension()),
+            agent_id,
+        )?;
     }
 
     Ok(ValidatedIdentity {
@@ -182,6 +220,47 @@ pub fn validate_identity(
         public_key,
         csr_fingerprint: URL_SAFE_NO_PAD.encode(Sha256::digest(&pem.contents)),
     })
+}
+
+fn validate_certificate_subject(subject: &X509Name<'_>, agent_id: &AgentId) -> GatewayResult<()> {
+    if subject.iter_attributes().count() != 1
+        || subject
+            .iter_common_name()
+            .next()
+            .and_then(|name| name.as_str().ok())
+            != Some(agent_id.as_str())
+    {
+        return Err(GatewayError::InvalidInput(
+            "certificate subject must contain only the Agent ID common name".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_certificate_names<'a>(
+    extensions: impl IntoIterator<Item = &'a ParsedExtension<'a>>,
+    agent_id: &AgentId,
+) -> GatewayResult<()> {
+    let expected = format!("urn:inari:{agent_id}");
+    let mut sans = extensions
+        .into_iter()
+        .filter_map(|extension| {
+            if let ParsedExtension::SubjectAlternativeName(names) = extension {
+                Some(names)
+            } else {
+                None
+            }
+        });
+    let valid = sans
+        .next()
+        .is_some_and(|names| names.general_names.as_slice() == [GeneralName::URI(&expected)])
+        && sans.next().is_none();
+    if !valid {
+        return Err(GatewayError::InvalidInput(
+            "certificate names must contain only the Agent Identity URI SAN".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -197,46 +276,117 @@ mod tests {
 
     use super::{validate_dispatch_key, validate_identity, validate_state_signing_key};
 
-    const CSR: &str = "-----BEGIN CERTIFICATE REQUEST-----\nMIGSMEYCAQAwEzERMA8GA1UEAwwIYWd0X3Rlc3QwKjAFBgMrZXADIQAhvMvqGoKi\nttgqTZhDbzMb8IFPEaHQvEGR9AOkm+qecaAAMAUGAytlcANBAA8BTmcCjYiBRLuZ\nqNcH8/6K/ZYHnbHl7xksiR9pzqqi+jbcKi8gKJ62q5ApmtDm++N8z2MHzNPyxgFf\neZcf8wQ=\n-----END CERTIFICATE REQUEST-----\n";
+    const CSR: &str = include_str!("../tests/fixtures/enrollment/valid.csr.pem");
 
-    fn jwk(x: &str) -> Jwk {
-        serde_json::from_value(json!({
-            "kty": "OKP",
-            "crv": "Ed25519",
-            "alg": "EdDSA",
-            "use": "sig",
-            "kid": "kid_test",
-            "x": x,
+    fn identity_jwk(seed: u8) -> (crate::protocol::AgentId, String, Jwk) {
+        let public = SigningKey::from_bytes(&[seed; 32])
+            .verifying_key()
+            .to_bytes();
+        let digest = hex::encode(Sha256::digest(public));
+        let agent_id = format!("agt_{}", &digest[..24])
+            .parse()
+            .unwrap();
+        let key_id = format!("kid_{}", &digest[..12]);
+        let jwk = serde_json::from_value(json!({
+            "kty": "OKP", "crv": "Ed25519", "alg": "EdDSA", "use": "sig",
+            "kid": key_id, "x": URL_SAFE_NO_PAD.encode(public),
         }))
-        .expect("test JWK should deserialize")
+        .unwrap();
+        (agent_id, key_id, jwk)
     }
 
     #[test]
     fn validates_ed25519_csr_and_jwk_binding() {
-        let identity = validate_identity(
-            "kid_test",
-            &jwk("IbzL6hqCorbYKk2YQ28zG_CBTxGh0LxBkfQDpJvqnnE"),
-            CSR,
-            None,
-        )
-        .expect("valid identity should be accepted");
+        let (agent_id, key_id, jwk) = identity_jwk(1);
+        let identity = validate_identity(&agent_id, &key_id, &jwk, CSR, None).unwrap();
         assert_eq!(identity.public_key.len(), 32);
         assert!(!identity.jwk_thumbprint.is_empty());
+        let (_, pem) = x509_parser::pem::parse_x509_pem(CSR.as_bytes()).unwrap();
+        assert_eq!(identity.csr_fingerprint, URL_SAFE_NO_PAD.encode(Sha256::digest(pem.contents)));
     }
 
     #[test]
     fn rejects_csr_bound_to_another_key() {
-        let error = validate_identity(
-            "kid_test",
-            &jwk("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
-            CSR,
-            None,
-        )
-        .expect_err("mismatched key should be rejected");
+        let (agent_id, key_id, jwk) = identity_jwk(2);
+        let error = validate_identity(&agent_id, &key_id, &jwk, CSR, None).unwrap_err();
         assert!(
             error
                 .to_string()
-                .contains("does not match")
+                .contains("CSR public key does not match")
+        );
+    }
+
+    #[test]
+    fn rejects_claimed_agent_and_key_ids_for_another_identity() {
+        let (agent_id, key_id, jwk) = identity_jwk(1);
+        let other_agent = "agt_other".parse().unwrap();
+        for (agent, kid) in [(&other_agent, key_id.as_str()), (&agent_id, "kid_other")] {
+            let mut descriptor = jwk.clone();
+            descriptor.common.key_id = Some(kid.into());
+            let error = validate_identity(agent, kid, &descriptor, CSR, None).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("must identify the public JWK key")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_signed_csrs_with_other_subjects_or_names() {
+        let (agent_id, key_id, jwk) = identity_jwk(1);
+        for request in [
+            include_str!("../tests/fixtures/enrollment/wrong-subject.csr.pem"),
+            include_str!("../tests/fixtures/enrollment/extra-subject.csr.pem"),
+            include_str!("../tests/fixtures/enrollment/missing-san.csr.pem"),
+            include_str!("../tests/fixtures/enrollment/wrong-san.csr.pem"),
+            include_str!("../tests/fixtures/enrollment/dns-san.csr.pem"),
+            include_str!("../tests/fixtures/enrollment/extra-san.csr.pem"),
+            include_str!("../tests/fixtures/enrollment/duplicate-san.csr.pem"),
+        ] {
+            let error = validate_identity(&agent_id, &key_id, &jwk, request, None).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("certificate")
+            );
+        }
+    }
+
+    #[test]
+    fn validates_existing_certificate_identity() {
+        let (agent_id, key_id, jwk) = identity_jwk(1);
+        validate_identity(
+            &agent_id,
+            &key_id,
+            &jwk,
+            CSR,
+            Some(include_str!("../tests/fixtures/enrollment/valid.cert.pem")),
+        )
+        .unwrap();
+        for certificate in [
+            include_str!("../tests/fixtures/enrollment/wrong-subject.cert.pem"),
+            include_str!("../tests/fixtures/enrollment/wrong-san.cert.pem"),
+        ] {
+            let error =
+                validate_identity(&agent_id, &key_id, &jwk, CSR, Some(certificate)).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("certificate")
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_multiple_pem_requests() {
+        let (agent_id, key_id, jwk) = identity_jwk(1);
+        let error =
+            validate_identity(&agent_id, &key_id, &jwk, &format!("{CSR}{CSR}"), None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("one PEM request")
         );
     }
 

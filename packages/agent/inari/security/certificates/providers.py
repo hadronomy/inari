@@ -3,17 +3,17 @@ from __future__ import annotations
 import ssl
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable, Protocol
 
 import httpx
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519, ed448, padding, rsa
-from cryptography.x509.oid import ExtendedKeyUsageOID
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from cryptography.x509.verification import PolicyBuilder, Store, VerificationError
 
 from ...config import AgentSettings
 from ...core.exceptions import AgentError
@@ -44,8 +44,7 @@ class CertificateRenewalRequest:
 
 @dataclass(slots=True, frozen=True, kw_only=True)
 class ProvisionedCertificateMaterial:
-    leaf_certificate_pem: str
-    ca_bundle_pem: str | None = None
+    certificate_chain_pem: str
 
 
 class ClientCertificateProvider(Protocol):
@@ -327,7 +326,6 @@ class StepCaCertificateProvider:
         return _build_certificate_material(
             certificate_pem,
             ca_pem,
-            enrollment=request.enrollment,
             csr_pem=request.csr_pem,
             private_key_path=self.certificate_service.private_key_path,
             ca_path=self.certificate_service.ca_path,
@@ -383,7 +381,6 @@ class StepCaCertificateProvider:
         return _build_certificate_material(
             certificate_pem,
             ca_pem,
-            enrollment=request.enrollment,
             csr_pem=None,
             private_key_path=self.certificate_service.private_key_path,
             ca_path=self.certificate_service.ca_path,
@@ -476,22 +473,22 @@ def _build_certificate_material(
     certificate_pem: str,
     ca_pem: str | None,
     *,
-    enrollment: CertificateEnrollmentSpec | None,
     csr_pem: str | None,
     private_key_path: Path,
     ca_path: Path | None,
 ) -> ProvisionedCertificateMaterial:
-    _validate_certificate_material(
+    chain = _validate_certificate_material(
         certificate_pem,
         ca_pem,
-        enrollment=enrollment,
         csr_pem=csr_pem,
         private_key_path=private_key_path,
         ca_path=ca_path,
     )
     return ProvisionedCertificateMaterial(
-        leaf_certificate_pem=certificate_pem,
-        ca_bundle_pem=ca_pem,
+        certificate_chain_pem="".join(
+            certificate.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+            for certificate in chain[:-1]
+        ),
     )
 
 
@@ -499,12 +496,12 @@ def _validate_certificate_material(
     certificate_pem: str,
     ca_pem: str | None,
     *,
-    enrollment: CertificateEnrollmentSpec | None,
     csr_pem: str | None,
     private_key_path: Path,
     ca_path: Path | None,
-) -> None:
-    certificate = x509.load_pem_x509_certificate(certificate_pem.encode("utf-8"))
+) -> tuple[x509.Certificate, ...]:
+    certificates = x509.load_pem_x509_certificates(certificate_pem.encode("utf-8"))
+    certificate = certificates[0]
     _validate_certificate_lifetime(certificate)
     _validate_certificate_usage(certificate)
     _validate_certificate_public_key(
@@ -512,14 +509,18 @@ def _validate_certificate_material(
         csr_pem=csr_pem,
         private_key_path=private_key_path,
     )
-    _validate_certificate_sans(certificate, enrollment)
-    _validate_certificate_chain(certificate, ca_pem=ca_pem, ca_path=ca_path)
+    _validate_certificate_identity(certificate, private_key_path=private_key_path)
+    intermediates = certificates[1:]
+    if ca_pem:
+        intermediates.extend(x509.load_pem_x509_certificates(ca_pem.encode("utf-8")))
+    return _validate_certificate_chain(
+        certificate, intermediates=intermediates, ca_path=ca_path
+    )
 
 
 def _validate_certificate_lifetime(certificate: x509.Certificate) -> None:
     now = datetime.now(tz=UTC)
-    clock_skew = timedelta(minutes=5)
-    if certificate.not_valid_before_utc > now + clock_skew:
+    if certificate.not_valid_before_utc > now:
         raise AgentError(
             "STEP_CA_CERTIFICATE_NOT_YET_VALID",
             "step-ca returned a client certificate whose validity window has not started.",
@@ -580,17 +581,31 @@ def _validate_certificate_public_key(
             )
 
 
-def _validate_certificate_sans(
+def _validate_certificate_identity(
     certificate: x509.Certificate,
-    enrollment: CertificateEnrollmentSpec | None,
+    *,
+    private_key_path: Path,
 ) -> None:
-    authorized_sans = (
-        set(enrollment.authorized_sans)
-        if enrollment is not None and enrollment.authorized_sans
-        else set()
+    private_key = serialization.load_pem_private_key(
+        private_key_path.read_bytes(), password=None
     )
-    if not authorized_sans:
-        return
+    if not isinstance(private_key, ed25519.Ed25519PrivateKey):
+        raise AgentError(
+            "STEP_CA_IDENTITY_KEY_INVALID",
+            "The managed certificate requires an Ed25519 Agent Identity.",
+            status_code=502,
+        )
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    agent_id = f"agt_{sha256(public_key).hexdigest()[:24]}"
+    expected_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, agent_id)])
+    if certificate.subject != expected_subject:
+        raise AgentError(
+            "STEP_CA_CERTIFICATE_SUBJECT_MISMATCH",
+            "step-ca returned a certificate for a different Agent Identity.",
+            status_code=502,
+        )
     try:
         san_extension = certificate.extensions.get_extension_for_class(
             x509.SubjectAlternativeName
@@ -601,12 +616,11 @@ def _validate_certificate_sans(
             "step-ca returned a client certificate without a subject alternative name.",
             status_code=502,
         ) from exc
-    certificate_sans = _subject_alternative_names(san_extension)
-    unauthorized_sans = certificate_sans.difference(authorized_sans)
-    if not certificate_sans or unauthorized_sans:
+    expected_san = x509.UniformResourceIdentifier(f"urn:inari:{agent_id}")
+    if list(san_extension) != [expected_san]:
         raise AgentError(
             "STEP_CA_CERTIFICATE_SAN_UNAUTHORIZED",
-            "step-ca returned a client certificate with unauthorized subject alternative names.",
+            "step-ca returned certificate names that do not match this Agent Identity.",
             status_code=502,
         )
 
@@ -614,74 +628,25 @@ def _validate_certificate_sans(
 def _validate_certificate_chain(
     certificate: x509.Certificate,
     *,
-    ca_pem: str | None,
+    intermediates: list[x509.Certificate],
     ca_path: Path | None,
-) -> None:
-    issuers = _load_issuer_certificates(ca_pem=ca_pem, ca_path=ca_path)
-    if not issuers:
+) -> tuple[x509.Certificate, ...]:
+    if ca_path is None or not ca_path.exists():
         raise AgentError(
             "STEP_CA_CERTIFICATE_CA_MISSING",
             "No step-ca trust root was available to validate the client certificate.",
             status_code=502,
         )
-    for issuer in issuers:
-        if issuer.subject != certificate.issuer:
-            continue
-        with suppress(InvalidSignature):
-            _verify_certificate_signature(certificate, issuer)
-            return
-    raise AgentError(
-        "STEP_CA_CERTIFICATE_CHAIN_INVALID",
-        "step-ca returned a client certificate that does not chain to the configured CA.",
-        status_code=502,
-    )
-
-
-def _load_issuer_certificates(
-    *,
-    ca_pem: str | None,
-    ca_path: Path | None,
-) -> tuple[x509.Certificate, ...]:
-    source = ca_pem
-    if source is None and ca_path is not None and ca_path.exists():
-        source = ca_path.read_text(encoding="utf-8")
-    if not source:
-        return ()
-    return tuple(x509.load_pem_x509_certificates(source.encode("utf-8")))
-
-
-def _verify_certificate_signature(
-    certificate: x509.Certificate,
-    issuer: x509.Certificate,
-) -> None:
-    issuer_public_key = issuer.public_key()
-    signature_hash_algorithm = certificate.signature_hash_algorithm
-    if isinstance(issuer_public_key, rsa.RSAPublicKey):
-        if signature_hash_algorithm is None:
-            raise InvalidSignature("missing RSA signature hash algorithm")
-        issuer_public_key.verify(
-            certificate.signature,
-            certificate.tbs_certificate_bytes,
-            padding.PKCS1v15(),
-            signature_hash_algorithm,
-        )
-        return
-    if isinstance(issuer_public_key, ec.EllipticCurvePublicKey):
-        if signature_hash_algorithm is None:
-            raise InvalidSignature("missing ECDSA signature hash algorithm")
-        issuer_public_key.verify(
-            certificate.signature,
-            certificate.tbs_certificate_bytes,
-            ec.ECDSA(signature_hash_algorithm),
-        )
-        return
-    if isinstance(issuer_public_key, ed25519.Ed25519PublicKey | ed448.Ed448PublicKey):
-        issuer_public_key.verify(
-            certificate.signature,
-            certificate.tbs_certificate_bytes,
-        )
-        return
-    raise InvalidSignature("unsupported issuer key type")
+    roots = x509.load_pem_x509_certificates(ca_path.read_bytes())
+    try:
+        verifier = PolicyBuilder().store(Store(roots)).build_client_verifier()
+        return tuple(verifier.verify(certificate, intermediates).chain)
+    except VerificationError as exc:
+        raise AgentError(
+            "STEP_CA_CERTIFICATE_CHAIN_INVALID",
+            "step-ca returned a client certificate that does not chain to the pinned CA root.",
+            status_code=502,
+        ) from exc
 
 
 def _public_key_bytes(public_key) -> bytes:
@@ -689,25 +654,6 @@ def _public_key_bytes(public_key) -> bytes:
         encoding=serialization.Encoding.DER,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-
-
-def _subject_alternative_names(
-    value: x509.SubjectAlternativeName,
-) -> set[str]:
-    names: set[str] = set()
-    for name in value:
-        if isinstance(
-            name,
-            (
-                x509.DNSName,
-                x509.RFC822Name,
-                x509.UniformResourceIdentifier,
-            ),
-        ):
-            names.add(str(name.value))
-        elif isinstance(name, x509.IPAddress):
-            names.add(str(name.value))
-    return names
 
 
 def _certificate_fingerprint(certificate_pem: str) -> str:

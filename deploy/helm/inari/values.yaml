@@ -205,7 +205,6 @@ managedGateway:
         key: provisioner-key.pem
       signingAlgorithm: ed_dsa
       tokenTtl: 5m
-      authorizedSans: []
     requiresMutualTlsAfterIssuance: true
 
 migrations:

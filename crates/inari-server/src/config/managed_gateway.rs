@@ -436,7 +436,6 @@ pub struct ManagedGatewayCertificateConfig {
     pub step_ca_signing_algorithm: StepCaSigningAlgorithm,
     #[serde(with = "humantime_serde")]
     pub step_ca_token_ttl: Duration,
-    pub step_ca_authorized_sans: Vec<String>,
     pub requires_mutual_tls_after_issuance: bool,
 }
 
@@ -451,7 +450,6 @@ impl Default for ManagedGatewayCertificateConfig {
             step_ca_signing_key_file: None,
             step_ca_signing_algorithm: StepCaSigningAlgorithm::EdDsa,
             step_ca_token_ttl: Duration::from_secs(5 * 60),
-            step_ca_authorized_sans: Vec::new(),
             requires_mutual_tls_after_issuance: true,
         }
     }
