@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 
 use gpui::{
-    AbsoluteLength, App, Bounds, BorrowAppContext as _, Corners, DefiniteLength, DivInspectorState,
+    AbsoluteLength, App, BorrowAppContext as _, Bounds, Corners, DefiniteLength, DivInspectorState,
     Edges, Entity, Global, InspectorElementId, InteractiveElement as _, IntoElement, Length,
     ParentElement as _, Pixels, SharedString, Size, StatefulInteractiveElement as _, Styled as _,
     Window, WindowId, div, px,
@@ -147,10 +147,11 @@ pub fn remember(state: &DivInspectorState, window: &Window, cx: &mut App) {
         cx.set_global(Selections::default());
     }
     cx.update_global(|selections: &mut Selections, _| {
-        selections.0.insert(window_id, selection)
+        selections
+            .0
+            .insert(window_id, selection)
     });
 }
-
 
 fn definite(value: Option<DefiniteLength>, base: AbsoluteLength, rem: Pixels) -> Pixels {
     value
@@ -211,23 +212,31 @@ pub fn tool(
         let size = selection.bounds.size;
         let content = selection.content_box().size;
         report = report
-            .child(measure(theme, "Bounds", &format!(
-                "{:.0} × {:.0}  at  {:.0}, {:.0}",
-                f32::from(size.width),
-                f32::from(size.height),
-                f32::from(selection.bounds.origin.x),
-                f32::from(selection.bounds.origin.y),
-            )))
-            .child(measure(theme, "Content box", &format!(
-                "{:.0} × {:.0}",
-                f32::from(content.width),
-                f32::from(content.height)
-            )))
-            .child(measure(theme, "Children measure", &format!(
-                "{:.0} × {:.0}",
-                f32::from(selection.content_size.width),
-                f32::from(selection.content_size.height)
-            )))
+            .child(measure(
+                theme,
+                "Bounds",
+                &format!(
+                    "{:.0} × {:.0}  at  {:.0}, {:.0}",
+                    f32::from(size.width),
+                    f32::from(size.height),
+                    f32::from(selection.bounds.origin.x),
+                    f32::from(selection.bounds.origin.y),
+                ),
+            ))
+            .child(measure(
+                theme,
+                "Content box",
+                &format!("{:.0} × {:.0}", f32::from(content.width), f32::from(content.height)),
+            ))
+            .child(measure(
+                theme,
+                "Children measure",
+                &format!(
+                    "{:.0} × {:.0}",
+                    f32::from(selection.content_size.width),
+                    f32::from(selection.content_size.height)
+                ),
+            ))
             .child(measure(theme, "Padding", &edges(selection.padding)))
             .child(measure(theme, "Border", &edges(selection.border)))
             .child(measure(theme, "Margin", &edges(selection.margin)))
@@ -361,6 +370,9 @@ mod tests {
 
     #[test]
     fn an_auto_margin_reports_as_zero_rather_than_as_a_guess() {
-        assert_eq!(length(Some(Length::Auto), AbsoluteLength::Pixels(px(200.0)), px(16.0)), px(0.0));
+        assert_eq!(
+            length(Some(Length::Auto), AbsoluteLength::Pixels(px(200.0)), px(16.0)),
+            px(0.0)
+        );
     }
 }

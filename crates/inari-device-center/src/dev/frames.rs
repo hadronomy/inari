@@ -85,7 +85,6 @@ pub fn cadence(cx: &App) -> Cadence {
         .unwrap_or_default()
 }
 
-
 fn measure(gaps: impl Iterator<Item = Duration>) -> Cadence {
     let gaps: Vec<Duration> = gaps.collect();
     let mut total = Duration::ZERO;
@@ -102,7 +101,11 @@ fn measure(gaps: impl Iterator<Item = Duration>) -> Cadence {
     Cadence {
         rate,
         last: gaps.last().copied().unwrap_or_default(),
-        longest: gaps.iter().copied().max().unwrap_or_default(),
+        longest: gaps
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or_default(),
     }
 }
 

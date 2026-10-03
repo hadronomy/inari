@@ -15,33 +15,29 @@
 
 use std::{cell::RefCell, collections::HashMap, collections::HashSet, time::Duration};
 
-
 use gpui::{
     AnyElement, App, AppContext as _, BorrowAppContext as _, Context, DivInspectorState, Entity,
-    Hsla,
-    Global, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
+    Global, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, WindowId, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     IconName, Selectable as _, Sizable as _, StyledExt as _,
-    chart::{AreaChart, BarChart},
     button::{Button, ButtonVariants as _},
+    chart::{AreaChart, BarChart},
     input::{InputEvent, InputState},
     switch::Switch,
 };
 
 use crate::{
     dev::{
-        chart,
-        control,
+        chart, control,
         dial::{self, Kind, Knob, Value},
         element, frames,
     },
     ui::{
         content::Typography as _,
-        material,
-        motion,
+        material, motion,
         theme::{ActiveTheme as _, Appearance, Theme},
     },
 };
@@ -409,11 +405,12 @@ impl Panel {
                     .gap(px(4.0))
                     .w_full()
                     .pt(px(Theme::SPACE_SM))
-                    .children(
-                        footer
-                            .into_iter()
-                            .map(|action| div().flex_1().min_w(px(0.0)).child(action)),
-                    )
+                    .children(footer.into_iter().map(|action| {
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(action)
+                    }))
                     .child(
                         div()
                             .flex_1()
@@ -541,9 +538,8 @@ impl Panel {
         };
         let state = cx.new(|cx| InputState::new(window, cx).default_value(initial));
         let focus_key = SharedString::from(format!("{story}/{label}-focus"));
-        self.subscriptions.push(cx.subscribe(
-            &state,
-            move |_, state, event: &InputEvent, cx| match event {
+        self.subscriptions
+            .push(cx.subscribe(&state, move |_, state, event: &InputEvent, cx| match event {
                 InputEvent::Change => {
                     let text = state.read(cx).value().to_string();
                     dial::set(story, label, Value::Text(text.into()), cx);
@@ -553,16 +549,12 @@ impl Panel {
                 // owner reports the flip and the chrome eases off the same
                 // clock as every other wash.
                 InputEvent::Focus | InputEvent::Blur
-                    if motion::hover_set(
-                        focus_key.clone(),
-                        matches!(event, InputEvent::Focus),
-                    ) =>
+                    if motion::hover_set(focus_key.clone(), matches!(event, InputEvent::Focus)) =>
                 {
                     cx.refresh_windows();
                 },
                 _ => {},
-            },
-        ));
+            }));
         self.fields.insert(label, state.clone());
         state
     }
@@ -638,11 +630,9 @@ fn chrome(
                         .small()
                         .selected(picking)
                         .tooltip("Pick an element — scroll to walk up its ancestors")
-                        .on_click(cx.listener(
-                            |inspector: &mut gpui::Inspector, _, window, cx| {
-                                pick(inspector, window, cx);
-                            },
-                        )),
+                        .on_click(cx.listener(|inspector: &mut gpui::Inspector, _, window, cx| {
+                            pick(inspector, window, cx);
+                        })),
                 )
                 .child(
                     Button::new("dev-close")
@@ -723,7 +713,10 @@ fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
     let cadence = frames::cadence(cx);
     let samples = frames::samples(cx);
     let stats = window.frame_stats();
-    let latest = samples.last().copied().unwrap_or_default();
+    let latest = samples
+        .last()
+        .copied()
+        .unwrap_or_default();
     let missed = chart::over_budget(&samples);
 
     let last = samples.len().saturating_sub(1);
@@ -733,11 +726,7 @@ fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
         .map(|(index, sample)| {
             let (total, upper, lower) = sample.bands();
             Plotted {
-                age: if index == last {
-                    "now".into()
-                } else {
-                    format!("-{}", last - index).into()
-                },
+                age: if index == last { "now".into() } else { format!("-{}", last - index).into() },
                 total,
                 upper,
                 lower,
@@ -766,11 +755,7 @@ fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
         .w_full()
         .child(group(theme, "Keeping up"))
         .child(reading(theme, "Renders per second", &cadence.rate.to_string()))
-        .child(reading(
-            theme,
-            "Missed 60Hz",
-            &format!("{missed} of {}", samples.len().max(1)),
-        ))
+        .child(reading(theme, "Missed 60Hz", &format!("{missed} of {}", samples.len().max(1))))
         .child(reading(theme, "Median frame", &millis(chart::percentile(&samples, 0.5))))
         .child(reading(theme, "Worst in 95", &millis(chart::percentile(&samples, 0.95))))
         .child(
@@ -781,21 +766,23 @@ fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
             // body it had neither, so it laid out at its content size — nothing
             // — and drew itself into the corner. A grown flex item gives it a
             // real width, and the row's height gives it a real height.
-            div().flex().w_full().child(plot(px(170.0)).child(
-                AreaChart::new(plotted)
-                    .x(|frame: &Plotted| frame.age.clone())
-                    .y(|frame: &Plotted| frame.total)
-                    .stroke(theme.text_tertiary)
-                    .fill(Hsla { a: 0.18, ..theme.text_tertiary })
-                    .y(|frame: &Plotted| frame.upper)
-                    .stroke(theme.info)
-                    .fill(Hsla { a: 0.35, ..theme.info })
-                    .y(|frame: &Plotted| frame.lower)
-                    .stroke(theme.accent)
-                    .fill(Hsla { a: 0.45, ..theme.accent })
-                    .linear()
-                    .tick_margin(20),
-            )),
+            div().flex().w_full().child(
+                plot(px(170.0)).child(
+                    AreaChart::new(plotted)
+                        .x(|frame: &Plotted| frame.age.clone())
+                        .y(|frame: &Plotted| frame.total)
+                        .stroke(theme.text_tertiary)
+                        .fill(Hsla { a: 0.18, ..theme.text_tertiary })
+                        .y(|frame: &Plotted| frame.upper)
+                        .stroke(theme.info)
+                        .fill(Hsla { a: 0.35, ..theme.info })
+                        .y(|frame: &Plotted| frame.lower)
+                        .stroke(theme.accent)
+                        .fill(Hsla { a: 0.45, ..theme.accent })
+                        .linear()
+                        .tick_margin(20),
+                ),
+            ),
         )
         .child(
             div()
@@ -814,14 +801,19 @@ fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
         .child(phase(theme, "Paint", latest.paint, latest.total, theme.info))
         .child(phase(theme, "Everything else", latest.rest(), latest.total, theme.text_tertiary))
         .child(group(theme, "What the frame is made of"))
-        .child(div().flex().w_full().child(plot(px(170.0)).child({
-            let ink = theme.accent;
-            BarChart::new(counted)
-                .x(|part: &Counted| part.kind)
-                .y(|part: &Counted| part.count)
-                .fill(move |_: &Counted| ink)
-                .label(|part: &Counted| format!("{}", part.count as usize))
-        })))
+        .child(
+            div()
+                .flex()
+                .w_full()
+                .child(plot(px(170.0)).child({
+                    let ink = theme.accent;
+                    BarChart::new(counted)
+                        .x(|part: &Counted| part.kind)
+                        .y(|part: &Counted| part.count)
+                        .fill(move |_: &Counted| ink)
+                        .label(|part: &Counted| format!("{}", part.count as usize))
+                })),
+        )
         .child(reading(theme, "Draw operations", &stats.operations.to_string()))
         .child(group(theme, "Held between frames"))
         .child(reading(theme, "Hitboxes", &stats.hitboxes.to_string()))
@@ -898,7 +890,10 @@ fn stage_tool(theme: &Theme, deck: Deck, cx: &App) -> AnyElement {
             .justify_center()
             .rounded(px(Theme::RADIUS_CONTROL - 2.0))
             .text_size(px(11.0))
-            .when(selected, |chip| chip.bg(theme.surface_overlay).text_color(theme.text))
+            .when(selected, |chip| {
+                chip.bg(theme.surface_overlay)
+                    .text_color(theme.text)
+            })
             .when(!selected, |chip| {
                 chip.text_color(theme.text_tertiary)
                     .hover(|style| style.bg(theme.wash_hover))

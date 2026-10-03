@@ -383,11 +383,8 @@ mod tests {
 
 #[cfg(debug_assertions)]
 impl crate::dev::Choice for Emphasis {
-    const VARIANTS: &'static [(Self, &'static str)] = &[
-        (Self::Primary, "Primary"),
-        (Self::Outline, "Outline"),
-        (Self::Ghost, "Ghost"),
-    ];
+    const VARIANTS: &'static [(Self, &'static str)] =
+        &[(Self::Primary, "Primary"), (Self::Outline, "Outline"), (Self::Ghost, "Ghost")];
 }
 
 crate::story! {

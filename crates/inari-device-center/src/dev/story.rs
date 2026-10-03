@@ -135,7 +135,10 @@ mod tests {
 
     #[test]
     fn story_ids_are_unique() {
-        let mut ids: Vec<&str> = catalog().iter().map(|story| story.id).collect();
+        let mut ids: Vec<&str> = catalog()
+            .iter()
+            .map(|story| story.id)
+            .collect();
         ids.sort_unstable();
         let count = ids.len();
         ids.dedup();
@@ -144,7 +147,10 @@ mod tests {
 
     #[test]
     fn the_catalog_runs_from_pieces_to_screens() {
-        let scopes: Vec<Scope> = catalog().iter().map(|story| story.scope).collect();
+        let scopes: Vec<Scope> = catalog()
+            .iter()
+            .map(|story| story.scope)
+            .collect();
         let mut sorted = scopes.clone();
         sorted.sort();
         assert_eq!(scopes, sorted);
