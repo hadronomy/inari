@@ -315,12 +315,15 @@ do not use proxy settings or the hostname’s LAN or overlay address.
 
 ## Building the Device Center here
 
-Pin the toolchain for every Cargo invocation:
+Pin the toolchain for every Rust build:
 
 ```powershell
 $env:RUSTUP_TOOLCHAIN = "stable"
-cargo build -p inari-device-center
+mbx build -p inari-device-center
 ```
+
+mbx manages Cargo storage and build output through its own configuration.
+Run the command without manual `CARGO_HOME` or `CARGO_TARGET_DIR` overrides.
 
 Without it the build fails with `E0514: found crate ... compiled by an
 incompatible version of rustc`, and a full `cargo clean` does not help.
