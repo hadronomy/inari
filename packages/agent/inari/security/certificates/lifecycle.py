@@ -22,6 +22,7 @@ from .providers import (
     ClientCertificateProvider,
     ManagedCertificateProvisioningError,
     ProvisionedCertificateMaterial,
+    ReenrollmentRequiredError,
     RetryableProvisioningError,
     TrustBootstrapRequest,
 )
@@ -118,7 +119,38 @@ class ManagedCertificateLifecycleManager:
                 bootstrap_pending=False,
                 last_checked_at=now,
             )
-            return inspection.certificate
+            return None
+
+        if inspection.certificate is not None or bootstrap_pending:
+            try:
+                if record.certificate_enrollment is None:
+                    raise ReenrollmentRequiredError(
+                        "STEP_CA_ENROLLMENT_MISSING",
+                        "Fresh enrollment is required to establish managed certificate trust.",
+                        operation=ManagedCertificateOperation.BOOTSTRAP_ROOT,
+                        failure_reason=ManagedCertificateFailureReason.BOOTSTRAP_REQUIRED,
+                    )
+                await self.certificate_provider.bootstrap_trust(
+                    TrustBootstrapRequest(enrollment=record.certificate_enrollment)
+                )
+            except ManagedCertificateProvisioningError as exc:
+                self._status = self._status_for_failure(
+                    inspection=inspection,
+                    now=now,
+                    bootstrap_pending=bootstrap_pending,
+                    error=exc,
+                )
+                return None
+
+        if inspection.certificate is not None:
+            try:
+                self.certificate_provider.validate_current(
+                    CertificateRenewalRequest(enrollment=record.certificate_enrollment)
+                )
+            except ReenrollmentRequiredError as exc:
+                inspection = ManagedCertificateInspection(
+                    certificate=None, error_detail=exc.message
+                )
 
         if inspection.error_detail is not None:
             if bootstrap_pending:
@@ -304,9 +336,6 @@ class ManagedCertificateLifecycleManager:
         if current is None:
             if enrollment_spec is None:
                 return None
-            await self.certificate_provider.bootstrap_trust(
-                TrustBootstrapRequest(enrollment=enrollment_spec)
-            )
             request = self.certificate_crypto_service.build_request(enrollment_spec)
             return await self.certificate_provider.enroll(
                 CertificateEnrollmentRequest(

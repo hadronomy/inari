@@ -245,7 +245,6 @@ class EnrollmentRequestPayload(GatewayProtocolModel):
     public_jwk: Ed25519PublicJwk
     dispatch_key: DispatchEncryptionKeyPayload
     state_signing_jwk: Ed25519PublicJwk
-    certificate_pem: str | None = None
     csr_pem: str
     snapshot: GatewaySnapshotPayload
 

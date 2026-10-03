@@ -177,7 +177,7 @@ Keep the Dispatch Epoch consistent across Controller replicas. Recovery must
 advance it through the coordinated recovery procedure. Changing the signing key
 or its identifier also requires updated Agent enrollment trust.
 
-The chart uses gateway protocol `2026-09-06` and a 16 MiB HTTP body limit.
+The chart uses gateway protocol `2026-10-03` and a 16 MiB HTTP body limit.
 The limit fits a 10 MiB Report PDF after base64 encoding. Set the ingress body
 limit to at least 16 MiB as well. Enabling dispatch rejects smaller Controller
 body limits. Report Bindings and tested Device Capabilities remain required.

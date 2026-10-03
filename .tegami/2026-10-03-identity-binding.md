@@ -23,3 +23,12 @@ Certificate names now come from the Agent Identity. Remove
 `managedGateway.certificate.stepCa.authorizedSans` from Helm values and
 `step_ca_authorized_sans` from a Controller configuration before upgrading an
 existing step-ca deployment.
+
+Installed certificates now receive the same trust and identity checks before use.
+The Agent repairs a cached CA against its pin and replaces obsolete certificate
+names when fresh enrollment provides a one-time token. The protected key stays
+unchanged. All CA endpoints require HTTPS.
+
+Upgrade the Agent and Controller together for gateway protocol `2026-10-03`
+before enabling enrollment. Enrollment no longer sends an installed certificate,
+and the Controller migration removes its unused stored certificate column.

@@ -155,7 +155,7 @@ managedGateway:
   controllerName: Inari Controller
   controllerInstanceId: controller-production
   supportedProtocolVersions:
-    - "2026-09-06"
+    - "2026-10-03"
   controllerActions:
     - system:read
     - devices:read

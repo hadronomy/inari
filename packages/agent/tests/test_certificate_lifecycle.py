@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -37,6 +38,7 @@ from inari.security.certificates.providers import (
     StepCaCertificateProvider,
     TrustBootstrapError,
     TrustBootstrapRequest,
+    _verify_context,
 )
 from inari.security.certificates import CertificateLifecycleService, ManagedCertificate
 from inari.security.identity import AgentIdentityService
@@ -344,7 +346,10 @@ async def test_step_ca_chain_ends_at_the_pinned_root(tmp_path: Path, case: str) 
         ),
     )
     request = CertificateEnrollmentRequest(
-        enrollment=_certificate_enrollment(token="test-ott"), csr_pem=csr_pem
+        enrollment=_certificate_enrollment(
+            token="test-ott", root_fingerprint=_fingerprint(root)
+        ),
+        csr_pem=csr_pem,
     )
     if case == "valid":
         material = await provider.enroll(request)
@@ -411,12 +416,12 @@ async def test_root_bootstrap_rejects_extra_trust_anchors(
         with pytest.raises(TrustBootstrapError, match="exactly one CA"):
             await provider.bootstrap_trust(request)
         with pytest.raises(TrustBootstrapError, match="exactly one CA"):
-            provider._verify_context()
+            _verify_context(provider._pinned_root(request.enrollment))
     else:
         await provider.bootstrap_trust(request)
         assert service.ca_path is not None
         assert service.ca_path.read_text() == pinned_pem
-        context = provider._verify_context()
+        context = _verify_context(provider._pinned_root(request.enrollment))
         assert context.check_hostname
         assert context.get_ca_certs(binary_form=True) == [
             roots[0].public_bytes(serialization.Encoding.DER)
@@ -455,7 +460,10 @@ async def test_missing_root_pin_or_root_stops_before_the_http_request(
     with pytest.raises(TrustBootstrapError, match="No pinned step-ca root"):
         await provider.enroll(
             CertificateEnrollmentRequest(
-                enrollment=_certificate_enrollment(token="test-ott"), csr_pem="unused"
+                enrollment=_certificate_enrollment(
+                    token="test-ott", root_fingerprint="a" * 64
+                ),
+                csr_pem="unused",
             )
         )
     assert calls == 0
@@ -516,12 +524,18 @@ async def test_client_certificate_must_permit_tls_signatures(
     with pytest.raises(AgentError, match="cannot sign a TLS handshake"):
         if renew:
             await provider.renew(
-                CertificateRenewalRequest(enrollment=_certificate_enrollment())
+                CertificateRenewalRequest(
+                    enrollment=_certificate_enrollment(
+                        root_fingerprint=_fingerprint(root)
+                    )
+                )
             )
         else:
             await provider.enroll(
                 CertificateEnrollmentRequest(
-                    enrollment=_certificate_enrollment(token="test-ott"),
+                    enrollment=_certificate_enrollment(
+                        token="test-ott", root_fingerprint=_fingerprint(root)
+                    ),
                     csr_pem=csr_pem,
                 )
             )
@@ -615,6 +629,7 @@ async def test_step_ca_validates_identity_before_returning_material(
         http_client_factory=client_factory,
     )
     enrollment = _certificate_enrollment(
+        root_fingerprint=_fingerprint(ca_cert),
         subject=identity.get_or_create_identity().agent_id,
         authorized_sans=(expected_uri,),
         token="test-one-time-token",
@@ -728,6 +743,9 @@ class StubEnrollmentService:
 
 class PendingProvider:
     manages_client_certificate = True
+
+    def validate_current(self, request) -> None:
+        del request
 
     async def bootstrap_trust(self, request) -> None:
         del request
@@ -956,3 +974,246 @@ def _fingerprint(certificate: x509.Certificate) -> str:
 
 def _http_client_factory(client: object) -> Callable[..., httpx.AsyncClient]:
     return cast(Callable[..., httpx.AsyncClient], lambda **kwargs: client)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("installed", "fresh_bootstrap"),
+    [
+        ("intermediate", False),
+        ("rogue_root", False),
+        ("old_san", False),
+        ("old_san", True),
+    ],
+)
+async def test_lifecycle_checks_installed_trust_and_identity_before_use(
+    tmp_path: Path, installed: str, fresh_bootstrap: bool
+) -> None:
+    root_key = ec.generate_private_key(ec.SECP256R1())
+    root = _issue_certificate(
+        subject_name="Example Step CA",
+        issuer_name="Example Step CA",
+        subject_key=root_key.public_key(),
+        issuer_key=root_key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    root_pem = root.public_bytes(serialization.Encoding.PEM).decode()
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    csr_pem = identity.build_csr_pem()
+    identity_bytes = identity.identity_path.read_bytes()
+    issuer_key = root_key
+    issuer_name = "Example Step CA"
+    cached_ca = root
+    intermediate_pem = ""
+    if installed in {"intermediate", "rogue_root"}:
+        issuer_key = ec.generate_private_key(ec.SECP256R1())
+        issuer_name = "Intermediate" if installed == "intermediate" else "Rogue root"
+        cached_ca = _issue_certificate(
+            subject_name=issuer_name,
+            issuer_name="Example Step CA"
+            if installed == "intermediate"
+            else issuer_name,
+            subject_key=issuer_key.public_key(),
+            issuer_key=root_key if installed == "intermediate" else issuer_key,
+            not_valid_after=datetime.now(UTC) + timedelta(days=30),
+            is_ca=True,
+        )
+        intermediate_pem = cached_ca.public_bytes(serialization.Encoding.PEM).decode()
+    old_csr = (
+        identity.build_csr_pem(uri_sans=("urn:old:shared",))
+        if installed == "old_san"
+        else csr_pem
+    )
+    leaf = _issue_certificate_from_csr(
+        x509.load_pem_x509_csr(old_csr.encode()), issuer_key, issuer_name=issuer_name
+    )
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=identity.identity_path,
+        ca_path=tmp_path / "ca.pem",
+    )
+    service.install(
+        certificate_pem=leaf.public_bytes(serialization.Encoding.PEM).decode()
+        + intermediate_pem,
+        ca_certificate_pem=cached_ca.public_bytes(serialization.Encoding.PEM).decode(),
+    )
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            assert request.url.path.endswith(_fingerprint(root))
+            return httpx.Response(200, text=root_pem)
+        assert fresh_bootstrap and installed == "old_san"
+        assert request.url.path.endswith("/sign")
+
+        signed_csr = x509.load_pem_x509_csr(json.loads(request.content)["csr"].encode())
+        replacement = _issue_certificate_from_csr(signed_csr, root_key)
+        return httpx.Response(
+            200,
+            json={"crt": replacement.public_bytes(serialization.Encoding.PEM).decode()},
+        )
+
+    settings = AgentSettings(upstream_certificate_mode=UpstreamCertificateMode.STEP_CA)
+    provider = StepCaCertificateProvider(
+        settings=settings,
+        certificate_service=service,
+        http_client_factory=lambda **kwargs: httpx.AsyncClient(
+            transport=httpx.MockTransport(respond), **kwargs
+        ),
+    )
+    enrollment = StubEnrollmentService(
+        _enrollment_record(
+            certificate_enrollment=_certificate_enrollment(
+                root_fingerprint=_fingerprint(root),
+                token="fresh-ott" if fresh_bootstrap else None,
+                subject=identity.get_or_create_identity().agent_id,
+                authorized_sans=(
+                    identity.default_uri_san(
+                        identity.get_or_create_identity().agent_id
+                    ),
+                ),
+            )
+        )
+    )
+    lifecycle = ManagedCertificateLifecycleManager(
+        settings=settings,
+        enrollment_service=cast(GatewayEnrollmentService, enrollment),
+        certificate_service=service,
+        certificate_provider=provider,
+        certificate_crypto_service=ManagedCertificateCryptoService(
+            identity_service=identity
+        ),
+    )
+    current = await lifecycle.ensure_current()
+    assert service.ca_path is not None and service.ca_path.read_text() == root_pem
+    assert identity.identity_path.read_bytes() == identity_bytes
+    if installed == "intermediate" or fresh_bootstrap:
+        assert current is not None
+        assert lifecycle.current_status().state is ManagedCertificateState.VALID
+        provider.validate_current(
+            CertificateRenewalRequest(
+                enrollment=enrollment.record.certificate_enrollment
+            )
+        )
+        assert sum(request.method == "POST" for request in requests) == int(
+            fresh_bootstrap
+        )
+    else:
+        assert current is None
+        assert (
+            lifecycle.current_status().state
+            is ManagedCertificateState.REBOOTSTRAP_REQUIRED
+        )
+        assert all(request.method == "GET" for request in requests)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("fingerprint", [None, "a" * 64])
+async def test_renewal_rejects_unpinned_cached_ca_before_http(
+    tmp_path: Path, fingerprint: str | None
+) -> None:
+    key = ec.generate_private_key(ec.SECP256R1())
+    root = _issue_certificate(
+        subject_name="Example Step CA",
+        issuer_name="Example Step CA",
+        subject_key=key.public_key(),
+        issuer_key=key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    leaf = _issue_certificate_from_csr(
+        x509.load_pem_x509_csr(identity.build_csr_pem().encode()), key
+    )
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=identity.identity_path,
+        ca_path=tmp_path / "ca.pem",
+    )
+    service.install(
+        certificate_pem=leaf.public_bytes(serialization.Encoding.PEM).decode(),
+        ca_certificate_pem=root.public_bytes(serialization.Encoding.PEM).decode(),
+    )
+
+    def unexpected_http(**kwargs):
+        raise AssertionError("unverified trust must not reach the CA")
+
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
+            step_ca_renew_url="https://ca.example.com/renew",
+            step_ca_root_fingerprint=fingerprint,
+        ),
+        certificate_service=service,
+        http_client_factory=unexpected_http,
+    )
+    with pytest.raises(TrustBootstrapError):
+        await provider.renew(CertificateRenewalRequest())
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("operation", ["root", "sign", "renew"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://ca.example.com",
+        "https://user:pass@ca.example.com",
+        "https://ca.example.com?token=x",
+        "https://ca.example.com#fragment",
+    ],
+)
+async def test_ca_endpoints_reject_unsafe_urls_before_http(
+    tmp_path: Path, operation: str, url: str
+) -> None:
+    key = ec.generate_private_key(ec.SECP256R1())
+    root = _issue_certificate(
+        subject_name="Example Step CA",
+        issuer_name="Example Step CA",
+        subject_key=key.public_key(),
+        issuer_key=key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=tmp_path / "key.pem",
+        ca_path=tmp_path / "ca.pem",
+    )
+    identity = AgentIdentityService(identity_path=service.private_key_path)
+    csr_pem = identity.build_csr_pem()
+    service.install(
+        certificate_pem=_issue_certificate_from_csr(
+            x509.load_pem_x509_csr(csr_pem.encode()), key
+        )
+        .public_bytes(serialization.Encoding.PEM)
+        .decode(),
+        ca_certificate_pem=root.public_bytes(serialization.Encoding.PEM).decode(),
+    )
+
+    def unexpected_http(**kwargs):
+        raise AssertionError("unsafe URL must not receive credentials")
+
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA,
+            step_ca_sign_url=url if operation == "sign" else None,
+            step_ca_renew_url=url if operation == "renew" else None,
+        ),
+        certificate_service=service,
+        http_client_factory=unexpected_http,
+    )
+    enrollment = replace(
+        _certificate_enrollment(root_fingerprint=_fingerprint(root), token="ott"),
+        base_url=url if operation == "root" else "https://ca.example.com",
+    )
+    with pytest.raises(TrustBootstrapError, match="requires HTTPS"):
+        if operation == "root":
+            await provider.bootstrap_trust(TrustBootstrapRequest(enrollment=enrollment))
+        elif operation == "sign":
+            await provider.enroll(
+                CertificateEnrollmentRequest(enrollment=enrollment, csr_pem=csr_pem)
+            )
+        else:
+            await provider.renew(CertificateRenewalRequest(enrollment=enrollment))

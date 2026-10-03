@@ -25,6 +25,15 @@ SAN, client authentication usage, and `digitalSignature` key usage.
 Root bootstrap requires a valid SHA-256 pin and exactly one CA certificate.
 Enrollment and renewal TLS trust only that root. A CA response cannot add another
 root, and operating-system trust roots cannot authorize certificate requests.
+The Agent checks the configured pin before using an installed certificate,
+including when renewal is not due. It replaces a cached intermediate or old CA
+with the pinned root, then validates the installed client chain and identity.
+CA endpoints require HTTPS.
+
+Enrollment protocol `2026-10-03` carries the signed CSR and invitation, with no
+installed certificate. Fresh enrollment can replace obsolete certificate names
+without changing the protected key. The Controller migration removes the unused
+Agent certificate column. Upgrade both boundaries before enabling enrollment.
 
 Source: [cryptography certificate verification](https://cryptography.io/en/latest/x509/verification/).
 

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Callable, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from cryptography import x509
@@ -51,6 +52,8 @@ class ClientCertificateProvider(Protocol):
     manages_client_certificate: bool
 
     async def bootstrap_trust(self, request: TrustBootstrapRequest) -> None: ...
+
+    def validate_current(self, request: CertificateRenewalRequest) -> None: ...
 
     async def enroll(
         self, request: CertificateEnrollmentRequest
@@ -178,6 +181,9 @@ class DisabledCertificateProvider:
         del request
         return None
 
+    def validate_current(self, request: CertificateRenewalRequest) -> None:
+        del request
+
     async def enroll(
         self, request: CertificateEnrollmentRequest
     ) -> ProvisionedCertificateMaterial | None:
@@ -197,6 +203,9 @@ class ControllerCertificateProvider:
     async def bootstrap_trust(self, request: TrustBootstrapRequest) -> None:
         del request
         return None
+
+    def validate_current(self, request: CertificateRenewalRequest) -> None:
+        del request
 
     async def enroll(
         self, request: CertificateEnrollmentRequest
@@ -227,24 +236,8 @@ class StepCaCertificateProvider:
 
     async def bootstrap_trust(self, request: TrustBootstrapRequest) -> None:
         enrollment = request.enrollment
-        root_fingerprint = (
-            enrollment.trust.root_fingerprint if enrollment.trust is not None else None
-        )
-        if not root_fingerprint:
-            raise TrustBootstrapError(
-                "STEP_CA_ROOT_FINGERPRINT_MISSING",
-                "The Controller did not provide a step-ca root fingerprint.",
-                rebootstrap_required=True,
-            )
-        root_fingerprint = _normalize_fingerprint(root_fingerprint)
-        if len(root_fingerprint) != 64 or any(
-            character not in "0123456789abcdef" for character in root_fingerprint
-        ):
-            raise TrustBootstrapError(
-                "STEP_CA_ROOT_FINGERPRINT_INVALID",
-                "The Controller step-ca root fingerprint is not a SHA-256 digest.",
-                rebootstrap_required=True,
-            )
+        root_fingerprint = self._root_fingerprint(enrollment)
+        _require_https(enrollment.base_url)
 
         ca_path = self.certificate_service.ca_path
         if ca_path is not None and ca_path.exists():
@@ -297,19 +290,40 @@ class StepCaCertificateProvider:
             root.public_bytes(serialization.Encoding.PEM).decode("utf-8")
         )
 
+    def validate_current(self, request: CertificateRenewalRequest) -> None:
+        root = self._pinned_root(request.enrollment)
+        try:
+            _validate_certificate_material(
+                self.certificate_service.certificate_path.read_text(encoding="utf-8"),
+                None,
+                csr_pem=None,
+                private_key_path=self.certificate_service.private_key_path,
+                root=root,
+            )
+        except (AgentError, ValueError, OSError) as exc:
+            raise ReenrollmentRequiredError(
+                "STEP_CA_LOCAL_CERTIFICATE_INVALID",
+                f"The installed managed client certificate is invalid: {exc}",
+                operation=ManagedCertificateOperation.INSPECT,
+                failure_reason=ManagedCertificateFailureReason.LOCAL_CERTIFICATE_INVALID,
+            ) from exc
+
     async def enroll(
         self, request: CertificateEnrollmentRequest
     ) -> ProvisionedCertificateMaterial | None:
         bootstrap_auth = request.enrollment.bootstrap_auth
         if bootstrap_auth is None or not bootstrap_auth.token:
             return None
+        root = self._pinned_root(request.enrollment)
+        sign_url = self._sign_url(request.enrollment)
+        _require_https(sign_url)
         try:
             async with self._http_client_factory(
-                verify=self._verify_context(),
+                verify=_verify_context(root),
                 timeout=self.settings.gateway_reconnect_delay_seconds,
             ) as client:
                 response = await client.post(
-                    self._sign_url(request.enrollment),
+                    sign_url,
                     json={"csr": request.csr_pem, "ott": bootstrap_auth.token},
                     headers={"Content-Type": "application/json"},
                 )
@@ -342,7 +356,7 @@ class StepCaCertificateProvider:
             ca_pem,
             csr_pem=request.csr_pem,
             private_key_path=self.certificate_service.private_key_path,
-            ca_path=self.certificate_service.ca_path,
+            root=root,
         )
 
     async def renew(
@@ -361,9 +375,12 @@ class StepCaCertificateProvider:
             raise RenewalUnsupportedProvisioningError(
                 "No step-ca renewal endpoint is configured."
             )
+        _require_https(renew_url)
+        self.validate_current(request)
+        root = self._pinned_root(request.enrollment)
         try:
             async with self._http_client_factory(
-                verify=self._verify_context(),
+                verify=_verify_context(root),
                 cert=(str(certificate_path), str(key_path)),
                 timeout=self.settings.gateway_reconnect_delay_seconds,
             ) as client:
@@ -397,7 +414,7 @@ class StepCaCertificateProvider:
             ca_pem,
             csr_pem=None,
             private_key_path=self.certificate_service.private_key_path,
-            ca_path=self.certificate_service.ca_path,
+            root=root,
         )
 
     def _sign_url(self, enrollment: CertificateEnrollmentSpec) -> str:
@@ -412,7 +429,33 @@ class StepCaCertificateProvider:
             return f"{enrollment.base_url.rstrip('/')}/1.0/renew"
         return None
 
-    def _verify_context(self) -> ssl.SSLContext:
+    def _root_fingerprint(self, enrollment: CertificateEnrollmentSpec | None) -> str:
+        fingerprint = (
+            enrollment.trust.root_fingerprint
+            if enrollment is not None and enrollment.trust is not None
+            else self.settings.step_ca_root_fingerprint
+        )
+        if not fingerprint:
+            raise TrustBootstrapError(
+                "STEP_CA_ROOT_FINGERPRINT_MISSING",
+                "No step-ca root fingerprint is available for the certificate request.",
+                rebootstrap_required=True,
+            )
+        fingerprint = _normalize_fingerprint(fingerprint)
+        if len(fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in fingerprint
+        ):
+            raise TrustBootstrapError(
+                "STEP_CA_ROOT_FINGERPRINT_INVALID",
+                "The step-ca root fingerprint is not a SHA-256 digest.",
+                rebootstrap_required=True,
+            )
+        return fingerprint
+
+    def _pinned_root(
+        self, enrollment: CertificateEnrollmentSpec | None
+    ) -> x509.Certificate:
+        fingerprint = self._root_fingerprint(enrollment)
         ca_path = self.certificate_service.ca_path
         if ca_path is None or not ca_path.exists():
             raise TrustBootstrapError(
@@ -421,11 +464,13 @@ class StepCaCertificateProvider:
                 rebootstrap_required=True,
             )
         root = _load_single_ca(ca_path.read_bytes())
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.load_verify_locations(
-            cadata=root.public_bytes(serialization.Encoding.PEM).decode("utf-8")
-        )
-        return context
+        if _certificate_fingerprint(root) != fingerprint:
+            raise TrustBootstrapError(
+                "STEP_CA_ROOT_FINGERPRINT_MISMATCH",
+                "The cached step-ca root does not match the pinned fingerprint.",
+                rebootstrap_required=True,
+            )
+        return root
 
 
 def build_certificate_provider(
@@ -495,14 +540,14 @@ def _build_certificate_material(
     *,
     csr_pem: str | None,
     private_key_path: Path,
-    ca_path: Path | None,
+    root: x509.Certificate,
 ) -> ProvisionedCertificateMaterial:
     chain = _validate_certificate_material(
         certificate_pem,
         ca_pem,
         csr_pem=csr_pem,
         private_key_path=private_key_path,
-        ca_path=ca_path,
+        root=root,
     )
     return ProvisionedCertificateMaterial(
         certificate_chain_pem="".join(
@@ -518,7 +563,7 @@ def _validate_certificate_material(
     *,
     csr_pem: str | None,
     private_key_path: Path,
-    ca_path: Path | None,
+    root: x509.Certificate,
 ) -> tuple[x509.Certificate, ...]:
     certificates = x509.load_pem_x509_certificates(certificate_pem.encode("utf-8"))
     certificate = certificates[0]
@@ -534,7 +579,7 @@ def _validate_certificate_material(
     if ca_pem:
         intermediates.extend(x509.load_pem_x509_certificates(ca_pem.encode("utf-8")))
     return _validate_certificate_chain(
-        certificate, intermediates=intermediates, ca_path=ca_path
+        certificate, intermediates=intermediates, root=root
     )
 
 
@@ -663,15 +708,8 @@ def _validate_certificate_chain(
     certificate: x509.Certificate,
     *,
     intermediates: list[x509.Certificate],
-    ca_path: Path | None,
+    root: x509.Certificate,
 ) -> tuple[x509.Certificate, ...]:
-    if ca_path is None or not ca_path.exists():
-        raise AgentError(
-            "STEP_CA_CERTIFICATE_CA_MISSING",
-            "No step-ca trust root was available to validate the client certificate.",
-            status_code=502,
-        )
-    root = _load_single_ca(ca_path.read_bytes())
     try:
         verifier = PolicyBuilder().store(Store([root])).build_client_verifier()
         return tuple(verifier.verify(certificate, intermediates).chain)
@@ -715,3 +753,28 @@ def _certificate_fingerprint(certificate: x509.Certificate) -> str:
 
 def _normalize_fingerprint(value: str) -> str:
     return value.replace(":", "").replace(" ", "").casefold()
+
+
+def _verify_context(root: x509.Certificate) -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(
+        cadata=root.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    )
+    return context
+
+
+def _require_https(url: str) -> None:
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise TrustBootstrapError(
+            "STEP_CA_HTTPS_REQUIRED",
+            "The step-ca endpoint requires HTTPS without credentials, query, or fragment.",
+            rebootstrap_required=True,
+        )

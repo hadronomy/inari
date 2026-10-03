@@ -33,7 +33,6 @@ impl ManagedGatewayController {
             &request.key_id,
             &request.public_jwk,
             &request.csr_pem,
-            request.certificate_pem.as_deref(),
         )?;
         validate_dispatch_key(&request.dispatch_key)?;
         validate_state_signing_key(&request.state_signing_jwk, &identity.public_key)?;
@@ -65,7 +64,6 @@ impl ManagedGatewayController {
             public_jwk: request.public_jwk.clone(),
             dispatch_key: request.dispatch_key.clone(),
             state_signing_jwk: request.state_signing_jwk.clone(),
-            certificate_pem: request.certificate_pem.clone(),
             namespace: namespace.clone(),
             protocol_version: selected_protocol_version.clone(),
             controller_actions: self

@@ -119,7 +119,15 @@ impl ManagedGatewayConfig {
             if self
                 .certificate
                 .step_ca_base_url
-                .is_none()
+                .as_ref()
+                .is_none_or(|url| {
+                    url.scheme() != "https"
+                        || url.host_str().is_none()
+                        || !url.username().is_empty()
+                        || url.password().is_some()
+                        || url.query().is_some()
+                        || url.fragment().is_some()
+                })
                 || self
                     .certificate
                     .step_ca_root_fingerprint
@@ -146,7 +154,7 @@ impl ManagedGatewayConfig {
                     .is_none()
             {
                 return Err(ConfigError::invalid(
-                    "step-ca mode requires base_url, a SHA-256 root_fingerprint, provisioner, key_id, and signing_key_file.",
+                    "step-ca mode requires an HTTPS base_url without credentials, query, or fragment, a SHA-256 root_fingerprint, provisioner, key_id, and signing_key_file.",
                 ));
             }
             if !(Duration::from_secs(10)..=Duration::from_secs(60 * 60))
@@ -516,5 +524,14 @@ mod tests {
             .certificate
             .step_ca_root_fingerprint = Some("a".repeat(64));
         config.validate().unwrap();
+        for url in [
+            "http://ca.example.com",
+            "https://user:password@ca.example.com",
+            "https://ca.example.com?token=value",
+            "https://ca.example.com#fragment",
+        ] {
+            config.certificate.step_ca_base_url = Some(url.parse().unwrap());
+            assert!(config.validate().is_err());
+        }
     }
 }
