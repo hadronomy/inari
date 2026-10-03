@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime
@@ -82,17 +83,30 @@ class GatewayEnrollmentService:
         self.metadata_path = metadata_path
         self.snapshot_provider = snapshot_provider
         self._http_client_factory = http_client_factory or httpx.AsyncClient
+        self._lock = asyncio.Lock()
 
     async def ensure_enrolled(self) -> GatewayEnrollmentRecord | None:
-        existing = self.load_enrollment()
-        if existing is not None:
-            return existing
-        return await self._enroll()
+        async with self._lock:
+            existing = self.load_enrollment()
+            if existing is not None:
+                return existing
+            return await self._enroll()
 
     def load_enrollment(self) -> GatewayEnrollmentRecord | None:
+        """Return the cached enrollment that still governs the managed data plane.
+
+        A stored invitation supersedes the cache until enrollment or cancellation.
+        Unsupported protocol versions require fresh enrollment. Neither condition
+        changes the protected Agent Identity or local Device Work.
+        """
+        if self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY) is not None:
+            return None
         if not self.metadata_path.exists():
             return None
         payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
+        protocol_version = payload.get("protocol_version")
+        if protocol_version not in SUPPORTED_GATEWAY_PROTOCOL_VERSIONS:
+            return None
         dispatch_key = self.dispatch_keys.get_or_create()
         if payload.get("dispatch_key_id") != dispatch_key.key_id:
             return None
@@ -170,9 +184,7 @@ class GatewayEnrollmentService:
                 ),
             ),
             controller_actions=controller_actions,
-            protocol_version=str(payload["protocol_version"])
-            if payload.get("protocol_version")
-            else None,
+            protocol_version=protocol_version,
             controller_name=str(payload["controller_name"])
             if payload.get("controller_name")
             else None,
@@ -205,6 +217,7 @@ class GatewayEnrollmentService:
 
     async def _enroll(self) -> GatewayEnrollmentRecord | None:
         enrollment_url = self._enrollment_url()
+        invitation = self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
         headers = await self._enrollment_headers()
         if enrollment_url is None or not headers:
             return None
@@ -228,6 +241,12 @@ class GatewayEnrollmentService:
             )
             response.raise_for_status()
             body = EnrollmentResponsePayload.model_validate(response.json())
+        if self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY) != invitation:
+            raise AgentError(
+                "ENROLLMENT_SUPERSEDED",
+                "A new invitation replaced this enrollment. Retry with the current invitation.",
+                status_code=409,
+            )
         return self._persist_record(body, fallback_agent_id=identity.agent_id)
 
     def _persist_record(
@@ -419,17 +438,19 @@ class GatewayEnrollmentService:
 
     def _client(self) -> httpx.AsyncClient:
         return self._http_client_factory(
-            verify=self.tls_context_factory.create_outbound_context(),
+            verify=self.tls_context_factory.create_controller_context(),
             timeout=self.settings.gateway_reconnect_delay_seconds,
         )
 
     async def _enrollment_headers(self) -> dict[str, str]:
+        invitation = self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
+        if invitation is not None:
+            return {"Authorization": f"Bearer {invitation}"}
         provider_headers = await self.auth_provider.headers_for_enrollment()
         if provider_headers:
             return provider_headers
         enrollment_token = (
             self.settings.upstream_enrollment_token
-            or self.secret_store.get_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
             or self.secret_store.get_secret(LEGACY_UPSTREAM_BOOTSTRAP_TOKEN_KEY)
         )
         if enrollment_token is None:

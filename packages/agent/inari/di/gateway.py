@@ -144,6 +144,7 @@ class GatewayProvider(Provider):
             gateway_service=gateway_service,
             device_catalog=device_catalog,
             status_path=settings.resolved_security_state_dir / "onboarding.json",
+            tls_context_factory=tls_context_factory,
         )
         gateway_supervisor = GatewaySupervisor(
             settings=settings,

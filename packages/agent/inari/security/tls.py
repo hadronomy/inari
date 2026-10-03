@@ -4,40 +4,22 @@ import ssl
 from pathlib import Path
 
 from ..config import AgentSettings
-from .certificates.store import CertificateLifecycleService
 
 
 class TlsContextFactory:
-    def __init__(
-        self,
-        settings: AgentSettings,
-        *,
-        certificate_service: CertificateLifecycleService | None = None,
-    ) -> None:
+    def __init__(self, settings: AgentSettings) -> None:
         self.settings = settings
-        self.certificate_service = certificate_service
 
-    def create_outbound_context(self) -> ssl.SSLContext:
+    def create_controller_context(self) -> ssl.SSLContext:
+        """TLS client context for Controller HTTPS: invitation preview and enrollment.
+
+        Uses system trust and the explicit Controller CA bundle. Managed CA trust
+        and client credentials belong to the data plane, after enrollment.
+        """
         context = ssl.create_default_context()
         cafile = _path_string(self.settings.tls_ca_path)
         if cafile is not None:
             context.load_verify_locations(cafile=cafile)
-        if (
-            self.certificate_service is not None
-            and self.settings.upstream_trust_client_ca
-        ):
-            _, _, managed_ca_path = self.certificate_service.current_cert_chain()
-            if managed_ca_path is not None:
-                context.load_verify_locations(cafile=str(managed_ca_path))
-        if self.certificate_service is not None:
-            certificate_path, key_path, _ = (
-                self.certificate_service.current_cert_chain()
-            )
-            if certificate_path is not None and key_path is not None:
-                context.load_cert_chain(
-                    certfile=str(certificate_path),
-                    keyfile=str(key_path),
-                )
         return context
 
     def server_options(self) -> dict[str, str]:

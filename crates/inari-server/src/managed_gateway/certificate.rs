@@ -160,7 +160,7 @@ fn signing_audience(mut base_url: Url) -> AppResult<String> {
         base_url.set_path(&format!("{}/", base_url.path()));
     }
     base_url
-        .join("1.0/sign")
+        .join("sign")
         .map(|url| url.to_string())
         .map_err(|source| {
             AppError::internal("step_ca_configuration", "step-ca signing URL is invalid.")
@@ -197,7 +197,7 @@ mod tests {
             .to_pkcs8_der()
             .expect("test key should encode");
         let issuer = StepCaIssuer {
-            audience: "https://ca.example.com/1.0/sign".into(),
+            audience: "https://ca.example.com/sign".into(),
             provisioner: "inari-agents".into(),
             key_id: "provisioner-kid".into(),
             algorithm: Algorithm::EdDSA,
@@ -226,7 +226,7 @@ mod tests {
         );
         assert_eq!(claims["iss"], "inari-agents");
         assert_eq!(claims["sub"], "agt_test");
-        assert_eq!(claims["aud"], "https://ca.example.com/1.0/sign");
+        assert_eq!(claims["aud"], "https://ca.example.com/sign");
         assert_eq!(claims["sans"][0], "urn:inari:agt_test");
         assert_eq!(claims["cnf"]["x5rt#S256"], "csr-fingerprint");
         assert!(claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap() <= 300);

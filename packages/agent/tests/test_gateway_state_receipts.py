@@ -5,6 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -19,9 +20,14 @@ from inari.gateway.data_plane.zenoh import ZenohGatewayTransport
 from inari.gateway.protocol import AgentRuntimeEventMessage
 from inari.gateway.repositories import GatewayRepository
 from inari.runtime.store import RuntimeStore
+from inari.security.certificates.lifecycle import ManagedCertificateLifecycleManager
 from inari.security.certificates.store import CertificateLifecycleService
 from inari.security.models import GatewayMode
-from tests.factories import enrollment_record
+from tests.factories import (
+    StaticCertificateLifecycle,
+    enrollment_record,
+    managed_certificate,
+)
 
 
 def observation() -> AgentRuntimeEventMessage:
@@ -164,7 +170,10 @@ async def test_lost_receipt_keeps_the_same_observation_pending_until_retry(
     connector = GatewayConnector(
         settings=AgentSettings(gateway_mode=GatewayMode.MANAGED),
         enrollment_service=enrollment_service,
-        certificate_lifecycle_manager=None,
+        certificate_lifecycle_manager=cast(
+            ManagedCertificateLifecycleManager,
+            StaticCertificateLifecycle(managed_certificate(tmp_path / "certificate.pem")),
+        ),
         snapshot_provider=Mock(),
         gateway_repository=repository,
         command_dispatcher=Mock(),

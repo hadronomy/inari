@@ -30,6 +30,21 @@ including when renewal is not due. It replaces a cached intermediate or old CA
 with the pinned root, then validates the installed client chain and identity.
 CA endpoints require HTTPS.
 
+Smallstep 0.30.2 returns its root as a JSON `ca` PEM string from
+`GET /root/{fingerprint}`. The Agent uses `POST /sign` and mTLS `POST /renew`.
+An isolated Smallstep 0.30.2 test passed pinned root bootstrap, CSR-bound issuance,
+complete chain validation, and mTLS renewal with the same protected Agent key.
+A different CSR with the same key, common name, and SAN failed with the original
+token. Each signing attempt used a fresh JWT ID.
+
+Source: [Smallstep 0.30.2 API](https://github.com/smallstep/certificates/blob/v0.30.2/api/api.go).
+
+Controller HTTPS uses its own trust boundary before managed certificate issuance.
+It does not load cached managed roots or client certificates. Data-plane admission
+requires a current lifecycle result for status, outbox, and command execution.
+Rejected trust closes the session. A fresh invitation replaces cached enrollment
+without changing the Agent key or local Device Work.
+
 Enrollment protocol `2026-10-03` carries the signed CSR and invitation, with no
 installed certificate. Fresh enrollment can replace obsolete certificate names
 without changing the protected key. The Controller migration removes the unused

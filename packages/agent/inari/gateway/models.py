@@ -279,8 +279,8 @@ class ManagedDispatchEnrollment:
 class GatewayEnrollmentRecord:
     enrolled_at: datetime
     data_plane: ZenohDataPlaneConfig
+    protocol_version: str
     controller_actions: tuple[ControllerAction, ...] = ()
-    protocol_version: str | None = None
     controller_name: str | None = None
     controller_instance_id: str | None = None
     certificate_expires_at: datetime | None = None

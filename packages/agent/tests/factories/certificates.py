@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+from inari.core.version import GATEWAY_PROTOCOL_VERSION
 from inari.gateway.models import (
     CertificateBootstrapAuth,
     CertificateBootstrapAuthType,
     CertificateEnrollmentSpec,
     CertificateTrustSpec,
     GatewayEnrollmentRecord,
+    ManagedCertificateState,
+    ManagedCertificateStatus,
     UpstreamDataPlaneKind,
     ZenohDataPlaneAuthKind,
     ZenohDataPlaneConfig,
     ZenohSerialization,
     ZenohSessionMode,
 )
+from inari.security.certificates.store import ManagedCertificate
 
 
 def certificate_enrollment(
@@ -45,7 +50,7 @@ def certificate_enrollment(
 def enrollment_record(
     *,
     certificate_enrollment: CertificateEnrollmentSpec | None = None,
-    protocol_version: str | None = None,
+    protocol_version: str = GATEWAY_PROTOCOL_VERSION,
 ) -> GatewayEnrollmentRecord:
     return GatewayEnrollmentRecord(
         enrolled_at=datetime.now(tz=UTC),
@@ -60,4 +65,54 @@ def enrollment_record(
         ),
         protocol_version=protocol_version,
         certificate_enrollment=certificate_enrollment,
+    )
+
+
+class StaticCertificateLifecycle:
+    """Certificate lifecycle stand-in with a fixed admission outcome."""
+
+    def __init__(
+        self,
+        certificate: ManagedCertificate | None,
+        *,
+        status: ManagedCertificateStatus | None = None,
+    ) -> None:
+        self.certificate = certificate
+        self.status = status or ManagedCertificateStatus(
+            state=(
+                ManagedCertificateState.VALID
+                if certificate is not None
+                else ManagedCertificateState.REBOOTSTRAP_REQUIRED
+            ),
+            detail=(
+                "Managed client certificate is healthy."
+                if certificate is not None
+                else "Fresh enrollment is required."
+            ),
+            certificate_present=certificate is not None,
+        )
+        self.triggers: list[str] = []
+
+    async def ensure_current(
+        self,
+        *,
+        enrollment: GatewayEnrollmentRecord | None = None,
+        trigger: str = "manual",
+    ) -> ManagedCertificate | None:
+        del enrollment
+        self.triggers.append(trigger)
+        return self.certificate
+
+    def current_status(self) -> ManagedCertificateStatus:
+        return self.status
+
+
+def managed_certificate(path: Path) -> ManagedCertificate:
+    return ManagedCertificate(
+        certificate_path=path,
+        ca_path=None,
+        not_valid_after=datetime.now(tz=UTC) + timedelta(days=1),
+        subject="CN=agt_test",
+        issuer="CN=Example Step CA",
+        serial_number="1",
     )

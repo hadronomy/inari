@@ -14,8 +14,8 @@ from .data_plane.base import GatewayDataPlaneTransport
 from .enrollment import GatewayEnrollmentService
 from .models import (
     GatewayEnrollmentRecord,
+    ManagedCertificateState,
     MutualTlsPolicy,
-    UpstreamCertificateMode,
     UpstreamConnectionState,
     UpstreamStatus,
     resolve_mutual_tls_policy,
@@ -41,7 +41,7 @@ class GatewayConnector:
         *,
         settings: AgentSettings,
         enrollment_service: GatewayEnrollmentService,
-        certificate_lifecycle_manager: ManagedCertificateLifecycleManager | None,
+        certificate_lifecycle_manager: ManagedCertificateLifecycleManager,
         snapshot_provider: Callable[[], GatewaySnapshotPayload],
         gateway_repository: GatewayRepository,
         command_dispatcher: GatewayCommandDispatcher,
@@ -95,19 +95,11 @@ class GatewayConnector:
                 last_error="No upstream enrollment credentials are configured.",
             )
             return
-        await self._ensure_certificate_current(enrollment, trigger="status_publish")
+        if not await self._admit_transport(enrollment, trigger="status_publish"):
+            return
         snapshot_message = AgentStatusSnapshotMessage(
             message_id=_message_id("gstatus"),
             snapshot=self.snapshot_provider(),
-        )
-        client_certificate_present = self._client_certificate_present()
-        certificate_bootstrap_pending = self._certificate_bootstrap_pending(
-            enrollment,
-            client_certificate_present=client_certificate_present,
-        )
-        mutual_tls_policy = self._mutual_tls_policy(
-            enrollment,
-            client_certificate_present=client_certificate_present,
         )
         try:
             await self._transport().publish_status(
@@ -137,9 +129,7 @@ class GatewayConnector:
             protocol_version=enrollment.protocol_version,
             controller_name=enrollment.controller_name,
             controller_instance_id=enrollment.controller_instance_id,
-            client_certificate_present=client_certificate_present,
-            certificate_bootstrap_pending=certificate_bootstrap_pending,
-            mutual_tls_mode=mutual_tls_policy.effective_mode,
+            **self._admitted_certificate_status(enrollment),
             successful_status_publication_count=self._status.successful_status_publication_count
             + 1,
             last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
@@ -154,16 +144,9 @@ class GatewayConnector:
         enrollment = await self.enrollment_service.ensure_enrolled()
         if enrollment is None:
             return
-        await self._ensure_certificate_current(enrollment, trigger="data_plane")
-        client_certificate_present = self._client_certificate_present()
-        certificate_bootstrap_pending = self._certificate_bootstrap_pending(
-            enrollment,
-            client_certificate_present=client_certificate_present,
-        )
-        mutual_tls_policy = self._mutual_tls_policy(
-            enrollment,
-            client_certificate_present=client_certificate_present,
-        )
+        if not await self._admit_transport(enrollment, trigger="data_plane"):
+            return
+        enrollment = self.enrollment_service.load_enrollment() or enrollment
         await self._update_status(
             state=UpstreamConnectionState.CONNECTING,
             detail="Connecting to the managed Zenoh data plane.",
@@ -171,9 +154,7 @@ class GatewayConnector:
             protocol_version=enrollment.protocol_version,
             controller_name=enrollment.controller_name,
             controller_instance_id=enrollment.controller_instance_id,
-            client_certificate_present=client_certificate_present,
-            certificate_bootstrap_pending=certificate_bootstrap_pending,
-            mutual_tls_mode=mutual_tls_policy.effective_mode,
+            **self._admitted_certificate_status(enrollment),
             last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
             data_plane_kind=enrollment.data_plane.kind,
             data_plane_namespace=enrollment.data_plane.namespace,
@@ -184,7 +165,9 @@ class GatewayConnector:
                 enrollment=enrollment,
                 last_applied_controller_sequence=self.gateway_repository.last_applied_controller_sequence(),
                 on_connected=lambda: self._handle_transport_connected(enrollment),
-                on_command=self._handle_command,
+                on_command=lambda message: self._handle_command(
+                    message, session_enrollment=enrollment
+                ),
             )
         except Exception as exc:
             await self._update_status(
@@ -221,6 +204,8 @@ class GatewayConnector:
         )
         if not pending:
             return
+        if not await self._admit_transport(enrollment, trigger="outbox"):
+            return
         transport = self._transport()
         for record in pending:
             message = AGENT_PUBLICATION_ADAPTER.validate_python(record.payload)
@@ -248,16 +233,23 @@ class GatewayConnector:
 
     def current_status(self, *, certificate_lifecycle=None) -> UpstreamStatus:
         if certificate_lifecycle is None:
-            certificate_lifecycle = (
-                self.certificate_lifecycle_manager.current_status()
-                if self.certificate_lifecycle_manager is not None
-                else None
-            )
+            certificate_lifecycle = self.certificate_lifecycle_manager.current_status()
         return replace(self._status, certificate_lifecycle=certificate_lifecycle)
 
-    async def _handle_command(self, message) -> None:
-        enrollment = await self.enrollment_service.ensure_enrolled()
-        if enrollment is None:
+    async def _handle_command(
+        self, message, *, session_enrollment: GatewayEnrollmentRecord
+    ) -> None:
+        # An open session can outlive its admission, so each command is
+        # admitted again. Only the cached enrollment is read: a superseded
+        # enrollment closes the session instead of enrolling mid-session.
+        enrollment = self.enrollment_service.load_enrollment()
+        if enrollment is None or enrollment != session_enrollment:
+            await self._close_transport(
+                None,
+                detail="The managed enrollment is no longer current.",
+            )
+            return
+        if not await self._admit_transport(enrollment, trigger="command"):
             return
         if isinstance(message, ControllerExecuteDeviceCommandMessage):
             await self.command_dispatcher.handle_execute_device_command(
@@ -281,15 +273,6 @@ class GatewayConnector:
     async def _handle_transport_connected(
         self, enrollment: GatewayEnrollmentRecord
     ) -> None:
-        client_certificate_present = self._client_certificate_present()
-        certificate_bootstrap_pending = self._certificate_bootstrap_pending(
-            enrollment,
-            client_certificate_present=client_certificate_present,
-        )
-        mutual_tls_policy = self._mutual_tls_policy(
-            enrollment,
-            client_certificate_present=client_certificate_present,
-        )
         await self._update_status(
             state=UpstreamConnectionState.ONLINE,
             detail="Connected to the managed Zenoh data plane.",
@@ -297,9 +280,7 @@ class GatewayConnector:
             protocol_version=enrollment.protocol_version,
             controller_name=enrollment.controller_name,
             controller_instance_id=enrollment.controller_instance_id,
-            client_certificate_present=client_certificate_present,
-            certificate_bootstrap_pending=certificate_bootstrap_pending,
-            mutual_tls_mode=mutual_tls_policy.effective_mode,
+            **self._admitted_certificate_status(enrollment),
             last_error=None,
             last_data_plane_activity_at=utc_now(),
             successful_data_plane_connection_count=self._status.successful_data_plane_connection_count
@@ -309,38 +290,58 @@ class GatewayConnector:
             data_plane_session_mode=enrollment.data_plane.session_mode,
         )
 
-    async def _ensure_certificate_current(
+    async def _admit_transport(
         self, enrollment: GatewayEnrollmentRecord, *, trigger: str
-    ) -> None:
-        if self.certificate_lifecycle_manager is None:
-            return
-        await self.certificate_lifecycle_manager.ensure_current(
+    ) -> bool:
+        """Return whether the managed data plane may run for this enrollment.
+
+        Cached certificate files can remain after validation fails. The lifecycle
+        result governs admission, including commands from an existing session.
+        """
+        certificate = await self.certificate_lifecycle_manager.ensure_current(
             enrollment=enrollment,
             trigger=trigger,
         )
+        if certificate is not None:
+            return True
+        lifecycle = self.certificate_lifecycle_manager.current_status()
+        detail = lifecycle.detail
+        if lifecycle.state is ManagedCertificateState.DISABLED or detail is None:
+            detail = "The managed data plane requires a valid client certificate."
+        await self._close_transport(enrollment, detail=detail)
+        return False
 
-    def _client_certificate_present(self) -> bool:
-        certificate_service = self.enrollment_service.certificate_service
-        return certificate_service.current_certificate() is not None
+    async def _close_transport(
+        self, enrollment: GatewayEnrollmentRecord | None, *, detail: str
+    ) -> None:
+        await self.close()
+        lifecycle = self.certificate_lifecycle_manager.current_status()
+        await self._update_status(
+            state=UpstreamConnectionState.DISCONNECTED,
+            detail=detail,
+            last_error=detail,
+            client_certificate_present=lifecycle.certificate_present,
+            certificate_bootstrap_pending=lifecycle.bootstrap_pending,
+            mutual_tls_mode=self._mutual_tls_policy(
+                enrollment,
+                client_certificate_present=lifecycle.certificate_present,
+            ).effective_mode,
+        )
+
+    def _admitted_certificate_status(
+        self, enrollment: GatewayEnrollmentRecord
+    ) -> dict[str, object]:
+        return {
+            "client_certificate_present": True,
+            "certificate_bootstrap_pending": False,
+            "mutual_tls_mode": self._mutual_tls_policy(
+                enrollment, client_certificate_present=True
+            ).effective_mode,
+        }
 
     async def _update_status(self, **changes: object) -> None:
         async with self._lock:
             self._status = replace(self._status, **changes)
-
-    def _certificate_bootstrap_pending(
-        self,
-        enrollment: GatewayEnrollmentRecord | None,
-        *,
-        client_certificate_present: bool,
-    ) -> bool:
-        if (
-            self.settings.upstream_certificate_mode
-            is not UpstreamCertificateMode.STEP_CA
-        ):
-            return False
-        if client_certificate_present:
-            return False
-        return bool(enrollment is not None and enrollment.bootstrap_pending)
 
     def _mutual_tls_policy(
         self,

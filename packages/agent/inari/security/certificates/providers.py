@@ -247,7 +247,7 @@ class StepCaCertificateProvider:
             if root is not None and _certificate_fingerprint(root) == root_fingerprint:
                 return None
 
-        root_url = f"{enrollment.base_url.rstrip('/')}/1.0/root/{root_fingerprint}"
+        root_url = f"{enrollment.base_url.rstrip('/')}/root/{root_fingerprint}"
         try:
             async with self._http_client_factory(
                 verify=False,
@@ -255,7 +255,16 @@ class StepCaCertificateProvider:
             ) as client:
                 response = await client.get(root_url)
                 response.raise_for_status()
-                root_pem = response.text
+                try:
+                    root_pem = response.json()["ca"]
+                    if not isinstance(root_pem, str):
+                        raise ValueError("expected a PEM string")
+                except (ValueError, KeyError, TypeError) as exc:
+                    raise TrustBootstrapError(
+                        "STEP_CA_ROOT_RESPONSE_INVALID",
+                        "step-ca did not return a root certificate in its JSON response.",
+                        rebootstrap_required=True,
+                    ) from exc
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {401, 403}:
                 raise ReenrollmentRequiredError(
@@ -420,13 +429,13 @@ class StepCaCertificateProvider:
     def _sign_url(self, enrollment: CertificateEnrollmentSpec) -> str:
         if self.settings.step_ca_sign_url:
             return self.settings.step_ca_sign_url
-        return f"{enrollment.base_url.rstrip('/')}/1.0/sign"
+        return f"{enrollment.base_url.rstrip('/')}/sign"
 
     def _renew_url(self, enrollment: CertificateEnrollmentSpec | None) -> str | None:
         if self.settings.step_ca_renew_url:
             return self.settings.step_ca_renew_url
         if enrollment is not None:
-            return f"{enrollment.base_url.rstrip('/')}/1.0/renew"
+            return f"{enrollment.base_url.rstrip('/')}/renew"
         return None
 
     def _root_fingerprint(self, enrollment: CertificateEnrollmentSpec | None) -> str:

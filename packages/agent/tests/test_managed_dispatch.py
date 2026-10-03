@@ -16,6 +16,7 @@ from inari_print_contracts.fingerprint import (
     fingerprint_device_work,
 )
 from inari.gateway.managed_dispatch import ManagedDispatchVerifier
+from inari.core.version import GATEWAY_PROTOCOL_VERSION
 from inari.gateway.models import (
     AgentManagedScope,
     ControllerAction,
@@ -292,6 +293,7 @@ def _dispatch_fixture(
             serialization=ZenohSerialization.JSON,
             auth_kind=ZenohDataPlaneAuthKind.MTLS,
         ),
+        protocol_version=GATEWAY_PROTOCOL_VERSION,
         controller_actions=(ControllerAction.MANAGED_WORK_DISPATCH,),
         controller_instance_id="controller-primary",
         managed_dispatch=ManagedDispatchEnrollment(
