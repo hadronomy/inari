@@ -27,6 +27,8 @@ pub struct OidcConfig {
     /// OIDC compares issuer identifiers exactly, including a root trailing slash.
     pub issuer_url: Option<IssuerUrl>,
     pub client_id: String,
+    /// Additional trusted ID token audiences; the client ID is always required.
+    pub additional_id_token_audiences: Vec<String>,
     pub client_secret_file: Option<PathBuf>,
     pub workload_audience: String,
     pub scopes: Vec<String>,
@@ -40,6 +42,7 @@ impl Default for OidcConfig {
             enabled: false,
             issuer_url: None,
             client_id: String::new(),
+            additional_id_token_audiences: Vec::new(),
             client_secret_file: None,
             workload_audience: "urn:inari:managed-workload".into(),
             scopes: vec!["openid".into(), "profile".into(), "email".into()],
@@ -68,6 +71,15 @@ impl OidcConfig {
         if self.client_id.trim().is_empty() {
             return Err(ConfigError::invalid(
                 "identity.oidc.client_id is required when OIDC is enabled.",
+            ));
+        }
+        if self
+            .additional_id_token_audiences
+            .iter()
+            .any(|audience| audience.is_empty() || audience.trim() != audience)
+        {
+            return Err(ConfigError::invalid(
+                "identity.oidc.additional_id_token_audiences must contain non-empty identifiers without surrounding whitespace.",
             ));
         }
         if self.workload_audience.trim().is_empty() {
@@ -103,6 +115,37 @@ impl OidcConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn additional_id_token_audiences_require_exact_identifiers() {
+        let server = ServerConfig {
+            public_url: Some(
+                "https://controller.example.com"
+                    .parse()
+                    .unwrap(),
+            ),
+            ..ServerConfig::default()
+        };
+        let mut config = OidcConfig {
+            enabled: true,
+            issuer_url: Some(IssuerUrl::new("https://identity.example.com".into()).unwrap()),
+            client_id: "controller".into(),
+            role_mapping: BTreeMap::from([("admin".into(), AccessRole::Administrator)]),
+            ..OidcConfig::default()
+        };
+        assert!(
+            config
+                .additional_id_token_audiences
+                .is_empty()
+        );
+        assert!(config.validate(&server).is_ok());
+        for audience in ["", " ", " project", "project "] {
+            config.additional_id_token_audiences = vec![audience.into()];
+            assert!(config.validate(&server).is_err());
+        }
+        config.additional_id_token_audiences = vec!["project".into()];
+        assert!(config.validate(&server).is_ok());
+    }
 
     #[test]
     fn preserves_the_exact_oidc_issuer_for_discovery() {

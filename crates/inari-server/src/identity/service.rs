@@ -6,7 +6,10 @@ use chrono::{DateTime, Utc};
 use inari_gateway::protocol::OrganizationId;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
-use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
+use openidconnect::core::{
+    CoreAuthenticationFlow, CoreClient, CoreIdToken, CoreIdTokenClaims, CoreIdTokenVerifier,
+    CoreProviderMetadata,
+};
 use openidconnect::reqwest;
 use openidconnect::{
     AccessTokenHash, AuthorizationCode, ClientId, ClientSecret, CsrfToken, Nonce,
@@ -28,6 +31,7 @@ pub struct IdentityService {
 struct IdentityServiceInner {
     metadata: CoreProviderMetadata,
     client_id: ClientId,
+    additional_id_token_audiences: Vec<String>,
     client_secret: Option<SecretString>,
     workload_audience: String,
     workload_jwks: JwkSet,
@@ -164,6 +168,9 @@ impl IdentityService {
             inner: Arc::new(IdentityServiceInner {
                 metadata,
                 client_id: ClientId::new(config.client_id.clone()),
+                additional_id_token_audiences: config
+                    .additional_id_token_audiences
+                    .clone(),
                 client_secret,
                 workload_audience: config.workload_audience.clone(),
                 workload_jwks,
@@ -228,13 +235,9 @@ impl IdentityService {
             .extra_fields()
             .id_token()
             .ok_or_else(|| AppError::unauthorized("OIDC provider did not return an ID token."))?;
-        let verifier = client.id_token_verifier();
+        let verifier = self.trust_id_token_audiences(client.id_token_verifier());
         let nonce = Nonce::new(pending.nonce.clone());
-        let claims = id_token
-            .claims(&verifier, &nonce)
-            .map_err(|source| {
-                AppError::unauthorized(format!("OIDC ID token validation failed: {source}"))
-            })?;
+        let claims = verified_id_token_claims(id_token, &verifier, &nonce, &self.inner.client_id)?;
         if let Some(expected_hash) = claims.access_token_hash() {
             let actual_hash = AccessTokenHash::from_token(
                 response.access_token(),
@@ -285,6 +288,18 @@ impl IdentityService {
         )
     }
 
+    fn trust_id_token_audiences<'a>(
+        &'a self,
+        verifier: CoreIdTokenVerifier<'a>,
+    ) -> CoreIdTokenVerifier<'a> {
+        verifier.set_other_audience_verifier_fn(|audience| {
+            self.inner
+                .additional_id_token_audiences
+                .iter()
+                .any(|trusted| trusted == audience.as_str())
+        })
+    }
+
     fn client(
         &self,
     ) -> CoreClient<
@@ -306,6 +321,30 @@ impl IdentityService {
         .set_token_uri(self.inner.token_url.clone())
         .set_redirect_uri(self.inner.redirect_url.clone())
     }
+}
+
+fn verified_id_token_claims<'a>(
+    token: &'a CoreIdToken,
+    verifier: &CoreIdTokenVerifier<'_>,
+    nonce: &Nonce,
+    client_id: &ClientId,
+) -> AppResult<&'a CoreIdTokenClaims> {
+    let claims = token
+        .claims(verifier, nonce)
+        .map_err(|source| {
+            AppError::unauthorized(format!("OIDC ID token validation failed: {source}"))
+        })?;
+    // openidconnect verifies audiences but leaves authorized-party validation to the client.
+    if let Some(authorized_party) = claims.authorized_party() {
+        if authorized_party != client_id {
+            return Err(AppError::unauthorized("OIDC authorized party did not match this client."));
+        }
+    } else if claims.audiences().len() > 1 {
+        return Err(AppError::unauthorized(
+            "OIDC ID token with multiple audiences requires an authorized party.",
+        ));
+    }
+    Ok(claims)
 }
 
 fn authenticate_workload_token(
@@ -402,7 +441,152 @@ mod tests {
     use rand_core::OsRng;
     use serde_json::json;
 
-    use super::{ActorId, authenticate_workload_token};
+    use super::*;
+
+    fn identity_service(signing_key: &SigningKey) -> IdentityService {
+        let public_key = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(signing_key.verifying_key().to_bytes());
+        let metadata: CoreProviderMetadata = serde_json::from_value(json!({
+            "issuer": "https://identity.example.com",
+            "authorization_endpoint": "https://identity.example.com/authorize",
+            "token_endpoint": "https://identity.example.com/token",
+            "jwks_uri": "https://identity.example.com/keys",
+            "response_types_supported": ["code"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["EdDSA"]
+        }))
+        .unwrap();
+        let jwks = serde_json::from_value(json!({
+            "keys": [{
+                "kty": "OKP", "crv": "Ed25519", "x": public_key,
+                "kid": "identity-key", "alg": "EdDSA", "use": "sig"
+            }]
+        }))
+        .unwrap();
+        IdentityService {
+            inner: Arc::new(IdentityServiceInner {
+                metadata: metadata.set_jwks(jwks),
+                client_id: ClientId::new("inari-controller".into()),
+                additional_id_token_audiences: vec!["inari-project".into()],
+                client_secret: None,
+                workload_audience: "urn:inari:managed-workload".into(),
+                workload_jwks: JwkSet { keys: vec![] },
+                redirect_url: RedirectUrl::new(
+                    "https://controller.example.com/auth/callback".into(),
+                )
+                .unwrap(),
+                token_url: TokenUrl::new("https://identity.example.com/token".into()).unwrap(),
+                scopes: vec![],
+                role_claim: "roles".into(),
+                role_mapping: BTreeMap::new(),
+                http_client: reqwest::Client::new(),
+            }),
+        }
+    }
+
+    fn id_token(signing_key: &SigningKey, overrides: Value) -> CoreIdToken {
+        let mut claims = json!({
+            "sub": "operator",
+            "iss": "https://identity.example.com",
+            "aud": ["inari-controller", "inari-project"],
+            "azp": "inari-controller",
+            "iat": Utc::now().timestamp(),
+            "exp": Utc::now().timestamp() + 300,
+            "nonce": "login-nonce"
+        });
+        claims
+            .as_object_mut()
+            .unwrap()
+            .extend(overrides.as_object().unwrap().clone());
+        let private_key = signing_key.to_pkcs8_der().unwrap();
+        let mut header = Header::new(Algorithm::EdDSA);
+        header.kid = Some("identity-key".into());
+        let encoded =
+            encode(&header, &claims, &EncodingKey::from_ed_der(private_key.as_bytes())).unwrap();
+        serde_json::from_value(json!(encoded)).unwrap()
+    }
+
+    #[test]
+    fn trusted_project_audience_is_accepted() {
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let identity = identity_service(&signing_key);
+        let client = identity.client();
+        let token = id_token(&signing_key, json!({}));
+        verified_id_token_claims(
+            &token,
+            &identity.trust_id_token_audiences(client.id_token_verifier()),
+            &Nonce::new("login-nonce".into()),
+            &identity.inner.client_id,
+        )
+        .expect("the client and its trusted project audience must authenticate");
+    }
+
+    #[test]
+    fn id_token_rejects_untrusted_identity_claims() {
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let identity = identity_service(&signing_key);
+        let client = identity.client();
+        let verifier = identity.trust_id_token_audiences(client.id_token_verifier());
+        let nonce = Nonce::new("login-nonce".into());
+        for overrides in [
+            json!({"aud": ["inari-controller", "other-project"]}),
+            json!({"aud": ["other-controller", "inari-project"], "azp": "other-controller"}),
+            json!({"azp": "other-controller"}),
+            json!({"azp": null}),
+            json!({"iss": "https://other-identity.example.com"}),
+            json!({"nonce": "other-login"}),
+            json!({"exp": Utc::now().timestamp() - 300}),
+        ] {
+            let token = id_token(&signing_key, overrides.clone());
+            assert!(
+                verified_id_token_claims(&token, &verifier, &nonce, &identity.inner.client_id)
+                    .is_err(),
+                "accepted {overrides}"
+            );
+        }
+        let other_key = SigningKey::generate(&mut OsRng);
+        let forged_token = id_token(&other_key, json!({}));
+        assert!(
+            verified_id_token_claims(&forged_token, &verifier, &nonce, &identity.inner.client_id)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn id_token_accepts_one_client_audience_without_authorized_party() {
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let identity = identity_service(&signing_key);
+        let client = identity.client();
+        let token = id_token(&signing_key, json!({"aud": "inari-controller", "azp": null}));
+        verified_id_token_claims(
+            &token,
+            &identity.trust_id_token_audiences(client.id_token_verifier()),
+            &Nonce::new("login-nonce".into()),
+            &identity.inner.client_id,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn id_token_requires_explicit_trust_for_additional_audiences() {
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let mut identity = identity_service(&signing_key);
+        Arc::get_mut(&mut identity.inner)
+            .unwrap()
+            .additional_id_token_audiences
+            .clear();
+        let client = identity.client();
+        let token = id_token(&signing_key, json!({}));
+        assert!(
+            verified_id_token_claims(
+                &token,
+                &identity.trust_id_token_audiences(client.id_token_verifier()),
+                &Nonce::new("login-nonce".into()),
+                &identity.inner.client_id
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn workload_token_is_bound_to_audience_and_organization_scope() {
