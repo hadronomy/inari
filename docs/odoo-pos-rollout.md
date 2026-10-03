@@ -190,15 +190,24 @@ shows the required organization invitation step. Operations-window and Client
 Pairing acceptance still require enrollment.
 
 The Controller runs the signed image from main source
-`4141b9629f2a5c07f392f7bb59cf1a3109cd6ce3`. Its image digest is
-`sha256:735b475e5428197860c98b75466137a0cbf87e82d144f78ef56188af75a49e47`.
+`d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d`. Its image digest is
+`sha256:97f67d01db31381354f5cbc8cf896311eacde57788c6e68384618e7da103f21e`.
 The keyless signature passed verification for `controller-image.yaml` on
-`refs/heads/main` and the GitHub Actions OIDC issuer. Infrastructure PR 34 is
-merged at `a269d65218a04ef86dc8d855aa1ed58f315a3420`. Flux and Helm report Ready.
+`refs/heads/main` and the GitHub Actions OIDC issuer. Infrastructure PR 35 is
+merged at `4d5bb161198c02314734f6d1ae41f7bdd40c108c`. Flux and Helm report Ready.
 Trusted HTTPS health and readiness checks passed. PostgreSQL and OIDC are ready.
 
-The Controller redirects to ZITADEL with `hadronomy@mizonaecologica.es`.
-The browser is at the password step. Human sign-in and administrator,
-Organization, and Site verification remain incomplete. Certificate issuance,
-enrollment, and Zenoh remain disabled. No receipt Binding Revision was activated
-and no physical receipt passed the full Inari path.
+Chart `controller-chart@0.3.2` uses OCI digest
+`sha256:b524cc4da6fc8b699f36aaa741f5e6a39ae341d3e58898a41299aa784464eb5b`.
+Cosign and Flux verified its `release.yaml` signature on `refs/heads/main`.
+The runtime explicitly trusts ZITADEL project `393403791438774388` alongside
+client `393403793837981812` and verifies the authorized party for multiple audiences.
+
+The Controller opened in the shared preview after a fresh ZITADEL sign-in.
+Its persisted session has the administrator role. Its subject matches the
+active ZITADEL account `hadronomy@mizonaecologica.es`. The ID token contains no
+email claim; account verification uses the provider's user record.
+Organization and Site database records remain absent until the supported
+enrollment bootstrap runs. Certificate issuance, enrollment, and Zenoh remain
+disabled. No receipt Binding Revision was activated and no physical receipt
+passed the full Inari path.
