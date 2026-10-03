@@ -529,7 +529,7 @@ def _parse_certificate_response(response: httpx.Response) -> tuple[str, str | No
         or payload.get("ca_certificate")
         or payload.get("ca_certificate_pem")
     )
-    if not ca_pem and isinstance(cert_chain, list) and len(cert_chain) > 1:
+    if isinstance(cert_chain, list) and len(cert_chain) > 1:
         ca_pem = "\n".join(str(item).strip() for item in cert_chain[1:] if item)
     return str(certificate_pem), str(ca_pem) if ca_pem else None
 

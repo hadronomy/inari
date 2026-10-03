@@ -1217,3 +1217,86 @@ async def test_ca_endpoints_reject_unsafe_urls_before_http(
             )
         else:
             await provider.renew(CertificateRenewalRequest(enrollment=enrollment))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("renew", [False, True])
+async def test_step_ca_preserves_all_intermediates_when_ca_and_chain_are_present(
+    tmp_path: Path, renew: bool
+) -> None:
+    root_key = ec.generate_private_key(ec.SECP256R1())
+    root = _issue_certificate(
+        subject_name="Root",
+        issuer_name="Root",
+        subject_key=root_key.public_key(),
+        issuer_key=root_key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=365),
+        is_ca=True,
+    )
+    upper_key = ec.generate_private_key(ec.SECP256R1())
+    upper = _issue_certificate(
+        subject_name="Upper CA",
+        issuer_name="Root",
+        subject_key=upper_key.public_key(),
+        issuer_key=root_key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=30),
+        is_ca=True,
+    )
+    lower_key = ec.generate_private_key(ec.SECP256R1())
+    lower = _issue_certificate(
+        subject_name="Lower CA",
+        issuer_name="Upper CA",
+        subject_key=lower_key.public_key(),
+        issuer_key=upper_key,
+        not_valid_after=datetime.now(UTC) + timedelta(days=7),
+        is_ca=True,
+    )
+    identity = AgentIdentityService(identity_path=tmp_path / "identity.pem")
+    csr_pem = identity.build_csr_pem()
+    leaf = _issue_certificate_from_csr(
+        x509.load_pem_x509_csr(csr_pem.encode()), lower_key, issuer_name="Lower CA"
+    )
+    chain = [
+        cert.public_bytes(serialization.Encoding.PEM).decode()
+        for cert in (leaf, lower, upper)
+    ]
+    service = CertificateLifecycleService(
+        certificate_path=tmp_path / "client.pem",
+        private_key_path=identity.identity_path,
+        ca_path=tmp_path / "ca.pem",
+    )
+    service.install_certificate_authority(
+        root.public_bytes(serialization.Encoding.PEM).decode()
+    )
+    if renew:
+        service.install(certificate_pem="".join(chain))
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, json={"crt": chain[0], "ca": chain[1], "certChain": chain}
+        )
+    )
+    provider = StepCaCertificateProvider(
+        settings=AgentSettings(
+            upstream_certificate_mode=UpstreamCertificateMode.STEP_CA
+        ),
+        certificate_service=service,
+        http_client_factory=lambda **kwargs: httpx.AsyncClient(
+            transport=transport, **kwargs
+        ),
+    )
+    enrollment = _certificate_enrollment(
+        root_fingerprint=_fingerprint(root), token="ott"
+    )
+    material = (
+        await provider.renew(CertificateRenewalRequest(enrollment=enrollment))
+        if renew
+        else await provider.enroll(
+            CertificateEnrollmentRequest(enrollment=enrollment, csr_pem=csr_pem)
+        )
+    )
+    assert material is not None
+    assert x509.load_pem_x509_certificates(material.certificate_chain_pem.encode()) == [
+        leaf,
+        lower,
+        upper,
+    ]

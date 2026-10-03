@@ -26,7 +26,7 @@ assert compatibility["odoo_version_range"] == ">=19.0,<20.0"
 assert compatibility["local_agent_contract_major"] == 1
 assert compatibility["managed_workload_contract_major"] == 1
 assert compatibility["device_authority_contract"] == "inari.device-authority.v1"
-assert compatibility["gateway_protocol_version"] == "2026-09-06"
+assert compatibility["gateway_protocol_version"] == "2026-10-03"
 assert compatibility["agent_version_range"].startswith("=")
 assert compatibility["controller_version_range"].startswith("=")
 assert metadata.version("rfc8785")

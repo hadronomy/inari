@@ -32,3 +32,8 @@ unchanged. All CA endpoints require HTTPS.
 Upgrade the Agent and Controller together for gateway protocol `2026-10-03`
 before enabling enrollment. Enrollment no longer sends an installed certificate,
 and the Controller migration removes its unused stored certificate column.
+
+The Controller migration removes an Agent column that old replicas still select.
+Keep managed enrollment and Zenoh disabled until all Controller replicas use the
+new release. A binary rollback across this migration is not supported. Recover
+with the matching database backup and Release Set.
