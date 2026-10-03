@@ -20,6 +20,9 @@ config_version = 1
 # host = "127.0.0.1"
 # Bind port for the local HTTP API.
 # port = 7310
+# Agent Endpoint advertised to the packaged Device Center. Required when the listener uses TLS.
+# Use the certificate hostname and listener port, without a path or credentials.
+# endpoint = "https://agent.example.com:7310/"
 # Allowed Host headers for incoming requests.
 # allowed_hosts = ["127.0.0.1", "localhost"]
 # Expose the API only on loopback or to the LAN.

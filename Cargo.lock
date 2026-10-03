@@ -823,7 +823,10 @@ dependencies = [
  "futures-task",
  "log",
  "pin-project-lite",
+ "rustls-pki-types",
+ "rustls-platform-verifier",
  "tokio",
+ "tokio-rustls",
  "tungstenite 0.29.0",
 ]
 
@@ -11270,6 +11273,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.4",
+ "rustls",
+ "rustls-pki-types",
  "sha1 0.10.6",
  "thiserror 2.0.18",
  "url",

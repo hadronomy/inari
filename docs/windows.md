@@ -178,6 +178,32 @@ then completes the normal signed client-attestation flow. Credentials for the
 tray live in Windows Credential Manager; service credentials use machine-scope
 DPAPI and a restricted file under ProgramData.
 
+### Agent Endpoint discovery
+
+Before its first network request, the packaged Device Center reads the Agent
+Endpoint through `\\.\pipe\Inari.Agent.Pairing`. The service checks the caller's
+package family for endpoint discovery and pairing. Request byte `0x02` returns
+`{"agent_endpoint":"https://agent.example.com:7310/"}`. This request does not
+create or rotate pairing material. Request byte `0x01` returns the one-use
+pairing secret and its expiry.
+
+For a TLS listener, set `[api].endpoint` in the protected Agent config. Use the
+certificate hostname and the actual listener port:
+
+```toml
+[api]
+endpoint = "https://agent.example.com:7310/"
+```
+
+The endpoint must name an allowed host. Credentials, paths, queries, and
+fragments are invalid. The HTTP client and the event stream use the operating
+system's certificate trust. Device Center never disables certificate checks.
+For a listener without TLS, discovery permits only loopback HTTP and uses the
+configured port. Restart Device Center after an endpoint change.
+
+Before upgrading a packaged Agent with TLS, add this config field. Without it,
+the new service refuses startup because it cannot advertise a valid HTTPS name.
+
 ## Troubleshooting
 
 ### App Installer still says “Publisher: Unknown”
