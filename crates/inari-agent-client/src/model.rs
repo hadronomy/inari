@@ -40,6 +40,7 @@ macro_rules! identifier {
 
 identifier!(DeviceId, "device");
 identifier!(JobId, "job");
+identifier!(PairingRequestId, "Pairing Request");
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 #[error("invalid {kind} identifier")]
