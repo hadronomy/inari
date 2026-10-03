@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -66,7 +67,8 @@ def test_stops_impersonating_when_the_token_cannot_be_read(pywin32, mocker):
     pywin32.token.Close.assert_called_once_with()
 
 
-def test_reads_the_request_before_impersonating_the_caller(pywin32, mocker):
+@pytest.mark.parametrize("request_bytes", [b"\x01", b"\x02"])
+def test_reads_the_request_before_impersonating_the_caller(pywin32, mocker, request_bytes):
     """Impersonation borrows the context of the last message read from the pipe.
 
     A message-mode pipe with nothing read yet has no context to borrow, so
@@ -82,7 +84,7 @@ def test_reads_the_request_before_impersonating_the_caller(pywin32, mocker):
 
     def read(*_):
         order.append("read")
-        return 0, b"\x01"
+        return 0, request_bytes
 
     mocker.patch.dict(
         sys.modules,
@@ -102,22 +104,34 @@ def test_reads_the_request_before_impersonating_the_caller(pywin32, mocker):
         secret="pairing-secret", expires_at=datetime(2026, 8, 26, tzinfo=timezone.utc)
     )
     server = windows_pairing.WindowsPairingBootstrapServer(
-        trust, package_family="Inari.DeviceCenter_x"
+        trust,
+        package_family="Inari.DeviceCenter_x",
+        agent_endpoint="https://agent.example.com:7310",
     )
 
     server._serve_client("pipe")
 
     assert order == ["read", "impersonate"]
-    trust.start_native_pairing.assert_called_once_with()
+    if request_bytes == b"\x01":
+        trust.start_native_pairing.assert_called_once_with()
+    else:
+        trust.start_native_pairing.assert_not_called()
+        payload = sys.modules["win32file"].WriteFile.call_args.args[1]
+        assert json.loads(payload) == {
+            "agent_endpoint": "https://agent.example.com:7310"
+        }
 
 
-def test_refuses_a_caller_outside_the_package_without_minting_a_secret(pywin32, mocker):
+@pytest.mark.parametrize("request_bytes", [b"\x01", b"\x02"])
+def test_refuses_a_caller_outside_the_package_without_minting_a_secret(
+    pywin32, mocker, request_bytes
+):
     mocker.patch.object(windows_pairing.sys, "platform", "win32")
     mocker.patch.dict(
         sys.modules,
         {
             "win32file": SimpleNamespace(
-                ReadFile=mocker.Mock(return_value=(0, b"\x01")),
+                ReadFile=mocker.Mock(return_value=(0, request_bytes)),
                 WriteFile=mocker.Mock(),
                 FlushFileBuffers=mocker.Mock(),
             )
@@ -128,10 +142,13 @@ def test_refuses_a_caller_outside_the_package_without_minting_a_secret(pywin32, 
     )
     trust = mocker.Mock()
     server = windows_pairing.WindowsPairingBootstrapServer(
-        trust, package_family="Inari.DeviceCenter_x"
+        trust,
+        package_family="Inari.DeviceCenter_x",
+        agent_endpoint="https://agent.example.com:7310",
     )
 
     with pytest.raises(PermissionError):
         server._serve_client("pipe")
 
     trust.start_native_pairing.assert_not_called()
+    sys.modules["win32file"].WriteFile.assert_not_called()
