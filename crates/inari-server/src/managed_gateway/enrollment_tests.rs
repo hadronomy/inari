@@ -8,7 +8,9 @@ use ed25519_dalek::SigningKey;
 use inari_gateway::audit::AuditContext;
 use inari_gateway::identity::ActorId;
 use inari_gateway::onboarding::InvitationCode;
-use inari_gateway::protocol::{DispatchEncryptionKey, DispatchKem, GatewaySnapshot};
+use inari_gateway::protocol::{
+    AgentPublication, DispatchEncryptionKey, DispatchKem, GatewaySnapshot,
+};
 use inari_gateway::{
     AgentEnrollmentRecord, GatewayError, GatewayRepository, GatewayResult, InvitationAttemptLimit,
     PreparedEnrollment,
@@ -451,6 +453,61 @@ async fn enrollment_consumes_invitations_atomically() {
         Err(GatewayError::Forbidden(_))
     ));
     assert_eq!(prepared.get(), 2);
+
+    let reconnect = live_invitation(&repository).await;
+    let online = enrollment("agt_reconnected", jwk(15, false), jwk(16, true));
+    enroll(&repository, &reconnect, online.clone(), &prepared)
+        .await
+        .unwrap();
+    repository
+        .record_publication(
+            online.agent_id.as_str(),
+            "status/first",
+            &AgentPublication::StatusSnapshot {
+                message_id: "status_first".into(),
+                snapshot: Box::new(snapshot()),
+            },
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invitation_state(&pool, &reconnect).await, "online");
+    let current = live_invitation(&repository).await;
+    enroll(&repository, &current, online.clone(), &prepared)
+        .await
+        .unwrap();
+    let old_online_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT online_at FROM invitations WHERE invitation_id = $1")
+            .bind(reconnect.id().as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    repository
+        .record_publication(
+            online.agent_id.as_str(),
+            "status/current",
+            &AgentPublication::StatusSnapshot {
+                message_id: "status_current".into(),
+                snapshot: Box::new(snapshot()),
+            },
+            Utc::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invitation_state(&pool, &current).await, "online");
+    let retained_online_at: DateTime<Utc> =
+        sqlx::query_scalar("SELECT online_at FROM invitations WHERE invitation_id = $1")
+            .bind(reconnect.id().as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(retained_online_at, old_online_at);
+    let before_replay = prepared.get();
+    assert!(matches!(
+        enroll(&repository, &current, online, &prepared).await,
+        Err(GatewayError::Forbidden(_))
+    ));
+    assert_eq!(prepared.get(), before_replay);
 
     // An issuer failure rolls back before the invitation is consumed.
     let code = live_invitation(&repository).await;
