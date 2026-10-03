@@ -1,3 +1,5 @@
+import type { PackageDraft } from "tegami";
+
 import { release } from "./config.ts";
 
 export function candidateVersion(
@@ -15,13 +17,17 @@ export function candidateVersion(
   return `${match[1]}-alpha.${Number(sequence)}`;
 }
 
+export function setCandidateSequence(draft: PackageDraft, sequence: string): void {
+  const bumpVersion = draft.bumpVersion.bind(draft);
+  draft.bumpVersion = (pkg) => candidateVersion(bumpVersion(pkg), sequence);
+}
+
 export async function prepareWindowsCandidate(sequence = ""): Promise<void> {
   const draft = await release.draft();
   if (!draft.hasPending()) throw new Error("A candidate needs pending release changes.");
   if (sequence) {
     for (const entry of draft.getPackageDrafts().values()) {
-      const bumpVersion = entry.bumpVersion;
-      entry.bumpVersion = (pkg) => candidateVersion(bumpVersion(pkg), sequence);
+      setCandidateSequence(entry, sequence);
     }
   }
   await draft.apply();
