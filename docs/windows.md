@@ -93,6 +93,20 @@ if ($ActualHash -ne $ExpectedHash) {
 
 Stop if either value differs.
 
+## Build a branch candidate
+
+Run the Release workflow on the intended branch with `windows_candidate=true`.
+The protected `windows-release` environment still controls access to the signing key.
+
+The workflow applies pending Tegami versions inside its temporary checkout.
+It builds the same signed MSIX, checksums, SBOM, and provenance as a release.
+Download the `inari-windows-release` artifact from that workflow run.
+Check its provenance, package signature, and checksum before installation.
+
+Candidate mode does not publish packages or create a Version Packages PR.
+The attestation identifies the selected branch and source commit.
+The candidate needs pending release changes so its package version advances.
+
 ## Trust the publisher
 
 Inari’s alpha releases use a private code-signing hierarchy. Windows needs the
