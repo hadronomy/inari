@@ -14,7 +14,7 @@ the workstation's 80-VII-UL USB printer.
 - Odoo shared contracts: `1.20.0a11`
 - Windows candidate source: `01bad52b83ba977fe88b60f03ac5e060cb57f7f0`
 - Windows candidate: `1.20.0-alpha.13`, MSIX `1.20.0.1013`
-- Controller source: `4141b9629f2a5c07f392f7bb59cf1a3109cd6ce3`
+- Controller source: `d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d`
 
 Status: **in progress**. Odoo and the Windows Agent are installed. The receipt
 Binding Revision is inactive. No physical receipt passed the full Inari path.
@@ -98,10 +98,11 @@ evidence, not a passed Inari Device Test.
 The operator authorized ZITADEL for the Controller's production OIDC provider.
 Infrastructure PRs 29 and 30 deploy it at
 `https://auth.eden.mizonaecologica.es` and permit its exact OpenBao secret path.
-The Helm release, database, API, and OIDC discovery are ready. The configured
-client redirects to ZITADEL with `hadronomy@mizonaecologica.es`. Human sign-in
-and administrator, Organization, and Site verification remain incomplete.
-Certificate issuance, enrollment, and Zenoh remain disabled.
+The Helm release, database, API, and OIDC discovery are ready. The Controller
+opened through ZITADEL with `hadronomy@mizonaecologica.es`. Its persisted
+administrator session matches that active ZITADEL account by subject.
+Organization and Site database records remain absent until the supported
+enrollment bootstrap runs. Certificate issuance, enrollment, and Zenoh remain disabled.
 
 The signed alpha.13 package runs on WORKSTATION. Device Center discovers the
 protected Agent Endpoint and authenticates through trusted HTTPS over loopback.
