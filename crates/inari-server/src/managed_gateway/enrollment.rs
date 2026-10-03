@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
 use inari_gateway::certificate::CertificateRequest;
+use inari_gateway::onboarding::InvitationCode;
 use inari_gateway::protocol::{
     AgentId, AgentManagedScope, CertificateProvisioning, CertificateTrust, ControllerInfo,
     DataPlane, DataPlaneAuth, DataPlaneAuthKind, DataPlaneKind, DataPlaneTls,
@@ -12,8 +12,11 @@ use inari_gateway::protocol::{
 use inari_gateway::security::{
     validate_dispatch_key, validate_identity, validate_state_signing_key,
 };
+use inari_gateway::{
+    AgentEnrollmentRecord, GatewayError, GatewayResult, InvitationAttemptLimit, PreparedEnrollment,
+};
 
-use super::{ManagedGatewayController, StoredAgentEnrollment};
+use super::ManagedGatewayController;
 use crate::config::ManagedGatewayCertificateMode;
 use crate::error::{AppError, AppResult};
 use crate::zenoh::KeyExpression;
@@ -40,18 +43,9 @@ impl ManagedGatewayController {
         let selected_protocol_version = self.select_protocol_version(&request)?;
         let namespace = self.namespace_for_agent(request.agent_id.as_str())?;
         let connect_endpoints = self.data_plane_connect_endpoints()?;
-        let now = Utc::now();
-        let invitation_id = self
-            .authenticate_enrollment_credential(
-                bearer_token,
-                request.agent_id.as_str(),
-                &request.key_id,
-                now,
-            )
-            .await?;
-        let certificate = self.certificate_payload(&request.agent_id, &identity.csr_fingerprint)?;
-
-        let enrollment = StoredAgentEnrollment {
+        let code = self.invitation_code(bearer_token)?;
+        let csr_fingerprint = identity.csr_fingerprint.clone();
+        let enrollment = AgentEnrollmentRecord {
             agent_id: request.agent_id.clone(),
             organization_id: self.inner.organization.id.clone(),
             site_id: self
@@ -60,7 +54,7 @@ impl ManagedGatewayController {
                 .default_site_id
                 .clone(),
             key_id: request.key_id.clone(),
-            public_jwk_fingerprint: identity.jwk_thumbprint,
+            jwk_thumbprint: identity.jwk_thumbprint,
             public_jwk: request.public_jwk.clone(),
             dispatch_key: request.dispatch_key.clone(),
             state_signing_jwk: request.state_signing_jwk.clone(),
@@ -71,12 +65,23 @@ impl ManagedGatewayController {
                 .config
                 .controller_actions
                 .clone(),
-            enrolled_at: now,
+            csr_fingerprint: identity.csr_fingerprint,
         };
-
-        self.inner
+        let onboarding = &self.inner.config.onboarding;
+        let PreparedEnrollment { value: certificate, enrolled_at } = self
+            .inner
             .store
-            .enroll(enrollment, invitation_id, request.snapshot.clone())
+            .repository()?
+            .enroll_agent(
+                &code,
+                enrollment,
+                &request.snapshot,
+                InvitationAttemptLimit {
+                    window: onboarding.failed_attempt_window,
+                    max_failures: onboarding.max_failed_attempts,
+                },
+                || self.certificate_payload(&request.agent_id, &csr_fingerprint),
+            )
             .await?;
 
         Ok(EnrollmentResponse {
@@ -133,17 +138,11 @@ impl ManagedGatewayController {
                             agent_id: request.agent_id.clone(),
                         })
                 }),
-            enrolled_at: now,
+            enrolled_at,
         })
     }
 
-    async fn authenticate_enrollment_credential(
-        &self,
-        bearer_token: Option<&str>,
-        agent_id: &str,
-        key_id: &str,
-        now: DateTime<Utc>,
-    ) -> AppResult<String> {
+    fn invitation_code(&self, bearer_token: Option<&str>) -> AppResult<InvitationCode> {
         let Some(token) = bearer_token else {
             return Err(AppError::forbidden("Enrollment requires an invitation credential."));
         };
@@ -152,27 +151,7 @@ impl ManagedGatewayController {
                 "Invitation enrollment is not enabled on this controller.",
             ));
         }
-        let code = token.parse::<inari_gateway::onboarding::InvitationCode>()?;
-        let invitation_id = code.id().to_string();
-        self.inner
-            .store
-            .repository()?
-            .claim_invitation(
-                &code,
-                agent_id,
-                key_id,
-                now,
-                self.inner
-                    .config
-                    .onboarding
-                    .failed_attempt_window,
-                self.inner
-                    .config
-                    .onboarding
-                    .max_failed_attempts,
-            )
-            .await?;
-        Ok(invitation_id)
+        Ok(token.parse()?)
     }
 
     fn select_protocol_version(&self, request: &EnrollmentRequest) -> AppResult<ProtocolVersion> {
@@ -234,7 +213,7 @@ impl ManagedGatewayController {
         &self,
         agent_id: &AgentId,
         csr_fingerprint: &str,
-    ) -> AppResult<Option<CertificateProvisioning>> {
+    ) -> GatewayResult<Option<CertificateProvisioning>> {
         let certificate = &self.inner.config.certificate;
         match certificate.mode {
             ManagedGatewayCertificateMode::None => Ok(None),
@@ -243,7 +222,7 @@ impl ManagedGatewayController {
                     .step_ca_base_url
                     .as_ref()
                     .ok_or_else(|| {
-                        AppError::service_unavailable("step-ca base URL is not configured.")
+                        GatewayError::Unavailable("step-ca base URL is not configured.".into())
                     })?
                     .to_string();
                 let authorized_sans = vec![format!("urn:inari:{agent_id}")];
@@ -252,7 +231,7 @@ impl ManagedGatewayController {
                     .certificate_issuer
                     .as_ref()
                     .ok_or_else(|| {
-                        AppError::service_unavailable("step-ca token issuer is unavailable.")
+                        GatewayError::Unavailable("step-ca token issuer is unavailable.".into())
                     })?
                     .issue(&CertificateRequest {
                         agent_id: agent_id.clone(),

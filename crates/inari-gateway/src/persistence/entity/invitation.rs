@@ -16,7 +16,6 @@ pub struct Model {
     pub state: InvitationState,
     pub created_at: DateTimeWithTimeZone,
     pub expires_at: DateTimeWithTimeZone,
-    pub claimed_at: Option<DateTimeWithTimeZone>,
     pub enrolled_at: Option<DateTimeWithTimeZone>,
     pub online_at: Option<DateTimeWithTimeZone>,
     pub revoked_at: Option<DateTimeWithTimeZone>,
@@ -29,6 +28,7 @@ pub struct Model {
     pub bound_key_id: Option<String>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub latest_snapshot: Option<StoredSnapshot>,
+    pub enrollment_fingerprint: Option<Vec<u8>>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

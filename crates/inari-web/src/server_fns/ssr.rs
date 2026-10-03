@@ -125,7 +125,6 @@ impl From<inari_gateway::onboarding::InvitationState> for InvitationState {
     fn from(state: inari_gateway::onboarding::InvitationState) -> Self {
         match state {
             inari_gateway::onboarding::InvitationState::Created => Self::Created,
-            inari_gateway::onboarding::InvitationState::Claimed => Self::Claimed,
             inari_gateway::onboarding::InvitationState::Enrolled => Self::Enrolled,
             inari_gateway::onboarding::InvitationState::Online => Self::Online,
             inari_gateway::onboarding::InvitationState::Expired => Self::Expired,

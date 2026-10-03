@@ -8,6 +8,8 @@ mod onboarding;
 mod publications;
 mod state_observations;
 
+pub use self::enrollment::InvitationAttemptLimit;
+
 use chrono::{DateTime, FixedOffset, Utc};
 use jsonwebtoken::jwk::Jwk;
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait};
@@ -44,6 +46,15 @@ pub struct AgentEnrollmentRecord {
     pub namespace: String,
     pub protocol_version: ProtocolVersion,
     pub controller_actions: Vec<String>,
+    pub csr_fingerprint: String,
+}
+
+/// The result of an enrollment that committed or replayed.
+///
+/// `enrolled_at` is the time of the first enrollment, also for a replay.
+#[derive(Debug, Clone)]
+pub struct PreparedEnrollment<T> {
+    pub value: T,
     pub enrolled_at: DateTime<Utc>,
 }
 

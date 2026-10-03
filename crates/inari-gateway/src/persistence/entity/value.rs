@@ -55,8 +55,6 @@ pub struct StoredAuditDetail(pub StructuredFields);
 pub enum InvitationState {
     #[sea_orm(string_value = "created")]
     Created,
-    #[sea_orm(string_value = "claimed")]
-    Claimed,
     #[sea_orm(string_value = "enrolled")]
     Enrolled,
     #[sea_orm(string_value = "online")]

@@ -71,11 +71,11 @@ impl GatewayRepository {
                         .bound_agent_id
                         .eq(agent_id),
                 )
-                .filter(invitation::COLUMN.state.is_in([
-                    InvitationState::Claimed,
-                    InvitationState::Enrolled,
-                    InvitationState::Online,
-                ]))
+                .filter(
+                    invitation::COLUMN
+                        .state
+                        .is_in([InvitationState::Enrolled, InvitationState::Online]),
+                )
                 .one(&transaction)
                 .await?
         {

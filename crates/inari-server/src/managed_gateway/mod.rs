@@ -25,8 +25,8 @@ pub use self::certificate::StepCaIssuer;
 pub use self::dispatch::ManagedDispatchSigner;
 pub use self::payload::{ManagedPayloadProtector, OpenBaoTransitKeyWrapper};
 
+use self::models::StoredControllerCommand;
 pub use self::models::{AgentPublicationList, CommandHistory, JobList, JobReceipt, JobRequest};
-use self::models::{StoredAgentEnrollment, StoredControllerCommand};
 use self::store::ManagedGatewayStore;
 
 pub struct ManagedWorkSecurity {

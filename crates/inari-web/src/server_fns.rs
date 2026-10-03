@@ -268,7 +268,6 @@ pub struct SiteOverview {
 #[serde(rename_all = "snake_case")]
 pub enum InvitationState {
     Created,
-    Claimed,
     Enrolled,
     Online,
     Expired,
@@ -280,7 +279,6 @@ impl InvitationState {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Created => "Ready",
-            Self::Claimed => "Claimed",
             Self::Enrolled => "Enrolled",
             Self::Online => "Online",
             Self::Expired => "Expired",
@@ -291,7 +289,7 @@ impl InvitationState {
 
     pub const fn badge_class(self) -> &'static str {
         match self {
-            Self::Created | Self::Claimed => "badge badge-pending",
+            Self::Created => "badge badge-pending",
             Self::Enrolled | Self::Online => "badge badge-positive",
             Self::Expired | Self::Revoked => "badge badge-muted",
             Self::Failed => "badge badge-negative",
@@ -299,7 +297,7 @@ impl InvitationState {
     }
 
     pub const fn is_revocable(self) -> bool {
-        matches!(self, Self::Created | Self::Claimed)
+        matches!(self, Self::Created)
     }
 }
 

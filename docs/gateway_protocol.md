@@ -232,6 +232,56 @@ The response rules are:
 - `bootstrap_auth.token` is a short-lived secret. The agent stores it only in
   protected secret storage and removes it after use or expiry.
 
+### Invitation consumption and retry
+
+The Controller consumes an invitation in the database transaction that stores
+the Agent. The transaction locks the invitation row and reads the current time
+after it gets the lock. An invitation that expires while a request waits for
+the lock rejects that request. The transaction then does these steps in
+sequence:
+
+1. It rejects the request when the failed-attempt limit is reached.
+2. It compares the invitation secret. A wrong secret records a failed attempt,
+   commits that record, and returns `403`.
+3. It rejects an expired invitation and an invitation for a different
+   Organization or Site.
+4. It mints the one-time CA token. It does not use the network while it holds
+   the lock.
+5. It stores the Agent, its verification keys, the invitation state, the
+   snapshot, the enrollment fingerprint, and one `agent.enrolled` audit event.
+   Then it commits.
+
+If token creation or a write fails, the transaction rolls back. The invitation
+stays `created`, and the Agent can send the same request again.
+
+The enrollment fingerprint is the SHA-256 digest of the
+[RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) form of the validated facts:
+Agent ID, key ID, CSR fingerprint, transport and state key thumbprints, dispatch
+key, Organization, Site, protocol version, namespace, and Controller actions.
+The enrollment time and the snapshot are not part of the fingerprint.
+
+When the Agent does not receive the response, it can send the same request
+with the same invitation code. The Controller accepts this retry only when all
+these conditions are true:
+
+- the invitation is `enrolled` and has not expired;
+- the request comes from the bound Agent and key;
+- the enrollment fingerprint is the same;
+- no later enrollment changed the Agent.
+
+An accepted retry returns a new one-time token and the original `enrolled_at`.
+It does not write the Agent, its keys, or the audit event again. The retry
+holds a shared lock on the Agent until it commits. An enrollment through another
+invitation that changes the Agent waits for that lock. A changed
+request from the bound Agent returns `409`. A request from another Agent returns
+`403`. An `online`, `revoked`, `expired`, or `failed` invitation returns `403`.
+Revocation of an `enrolled` invitation stops all later retries.
+
+Invitations have no `claimed` state. The migration changes a `claimed`
+invitation to `failed`, so that Agent needs a new invitation. An `enrolled`
+invitation from before the migration has no fingerprint. A retry with that
+invitation returns `409`.
+
 ### step-ca exchange
 
 For `step_ca` enrollment:
@@ -275,7 +325,7 @@ The Agent Identity uses an Ed25519 key. Let `digest` be the lowercase hexadecima
 SHA-256 digest of the raw 32-byte public key. `agent_id` MUST equal `agt_` followed
 by the first 24 digest characters. `key_id` MUST equal `kid_` followed by the first
 12 digest characters. The Controller rejects different identifiers before it
-claims an invitation or issues a CA token.
+reads the invitation or issues a CA token.
 
 The CSR subject MUST contain exactly one common name equal to `agent_id`. Its
 SAN extension MUST contain exactly one URI, `urn:inari:<agent_id>`. The Controller

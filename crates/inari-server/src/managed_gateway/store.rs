@@ -1,17 +1,13 @@
 use chrono::Utc;
-use inari_gateway::protocol::{
-    AgentId, AgentStatus, GatewaySnapshot, JobId, JobRecord, ManagedWorkId,
-};
+use inari_gateway::protocol::{AgentId, AgentStatus, JobId, JobRecord, ManagedWorkId};
 use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
 use inari_gateway::{
-    AgentEnrollmentRecord, GatewayRepository, ManagedWorkAdmission, ManagedWorkTargetRecord,
-    NewManagedWorkPreflight, PersistedManagedWork, PersistedManagedWorkDispatch,
+    GatewayRepository, ManagedWorkAdmission, ManagedWorkTargetRecord, NewManagedWorkPreflight,
+    PersistedManagedWork, PersistedManagedWorkDispatch,
 };
 use sha2::{Digest, Sha256};
 
-use super::models::{
-    AgentPublicationList, JobList, JobRequest, StoredAgentEnrollment, StoredControllerCommand,
-};
+use super::models::{AgentPublicationList, JobList, JobRequest, StoredControllerCommand};
 use crate::error::{AppError, AppResult};
 
 pub(super) struct ManagedGatewayStore {
@@ -59,35 +55,6 @@ impl ManagedGatewayStore {
             .devices(agent_id)
             .await
             .map_err(Into::into)
-    }
-
-    pub(super) async fn enroll(
-        &self,
-        enrollment: StoredAgentEnrollment,
-        invitation_id: String,
-        snapshot: GatewaySnapshot,
-    ) -> AppResult<()> {
-        self.repository()?
-            .enroll_agent(
-                AgentEnrollmentRecord {
-                    agent_id: enrollment.agent_id,
-                    organization_id: enrollment.organization_id,
-                    site_id: enrollment.site_id,
-                    key_id: enrollment.key_id,
-                    jwk_thumbprint: enrollment.public_jwk_fingerprint,
-                    public_jwk: enrollment.public_jwk,
-                    dispatch_key: enrollment.dispatch_key,
-                    state_signing_jwk: enrollment.state_signing_jwk,
-                    namespace: enrollment.namespace,
-                    protocol_version: enrollment.protocol_version,
-                    controller_actions: enrollment.controller_actions,
-                    enrolled_at: enrollment.enrolled_at,
-                },
-                &invitation_id,
-                &snapshot,
-            )
-            .await
-            .map_err(AppError::from)
     }
 
     pub(super) async fn enqueue_command(
