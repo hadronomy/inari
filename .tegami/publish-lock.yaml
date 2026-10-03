@@ -1,36 +1,37 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve the configured OIDC issuer\n\nThe Controller keeps the exact OIDC issuer during configuration and discovery. Identity providers whose issuer omits a root trailing slash can start and authenticate without an issuer mismatch.\n"
-    filename: 2026-10-03-e9360a12.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n  group:controller-chart:\n    type: patch\n---\n\n### Bind enrollment certificates to the Agent Identity\n\nEnrollment rejects Agent identifiers and certificate requests that do not match\nthe protected Ed25519 identity. Certificate issuance and renewal reject incorrect\nsubjects, missing SANs, additional names, and duplicate names.\nThe Agent validates the full certificate chain against its pinned CA root and\nstores the verified intermediate chain for mutual TLS. A CA response cannot\nreplace the pinned root.\nRoot bootstrap accepts exactly one pinned CA. Certificate requests trust only\nthat CA and require client key usage for TLS signatures. The Controller requires\na SHA-256 CA pin in step-ca mode.\n\nThe chart now keeps enrollment and Zenoh disabled by default. Provision the CA\nand exact per-Agent Router policy before enabling them.\n\nCertificate names now come from the Agent Identity. Remove\n`managedGateway.certificate.stepCa.authorizedSans` from Helm values and\n`step_ca_authorized_sans` from a Controller configuration before upgrading an\nexisting step-ca deployment.\n\nInstalled certificates now receive the same trust and identity checks before use.\nThe Agent repairs a cached CA against its pin and replaces obsolete certificate\nnames when fresh enrollment provides a one-time token. The protected key stays\nunchanged. All CA endpoints require HTTPS.\n\nManaged publication and Device Work now stop when certificate validation fails.\nThe Agent closes an existing session and reports the certificate error in setup.\nController HTTPS uses separate trust before enrollment. A new invitation replaces\ncached enrollment and old configured credentials without replacing the Agent key.\nConcurrent enrollment calls share one request and preserve newer invitations.\n\nRoot bootstrap reads Smallstep's JSON response. Issuance and renewal use the\ncanonical Smallstep endpoints and retain the complete intermediate chain.\n\nUpgrade the Agent and Controller together for gateway protocol `2026-10-03`\nbefore enabling enrollment. Enrollment no longer sends an installed certificate,\nand the Controller migration removes its unused stored certificate column.\n\nThe Controller migration removes an Agent column that old replicas still select.\nKeep managed enrollment and Zenoh disabled until all Controller replicas use the\nnew release. A binary rollback across this migration is not supported. Recover\nwith the matching database backup and Release Set.\n\n### Keep concurrent Controller documents responsive\n\nThe Controller discovers its fixed web routes once before it serves documents.\nConcurrent Router construction can no longer interrupt Resource loading in an\nactive document stream.\n"
+    filename: 2026-10-03-identity-binding.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Configure trusted OIDC ID token audiences\n\nSet `identity.oidc.additionalIdTokenAudiences` when your identity provider\nincludes a trusted project identifier in ID tokens. The Controller still\nrequires its client ID and checks the authorized party for multiple audiences.\n\nThe chart pins a compatible Controller image by digest. Custom image selections\nmust use an explicit digest or tag; the chart rejects an empty selection.\n"
-    filename: 2026-10-03-0a9b2f71.md
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Consume enrollment invitations atomically\n\nThe Controller now verifies an invitation, mints the one-time CA token, stores\nthe Agent, and consumes the invitation in one database transaction. A token or\nstorage failure leaves the invitation ready for the same Agent to try again.\n\nWhen an Agent does not receive its enrollment response, it can send the same\nrequest again with the same invitation. The Controller returns a new one-time\ntoken and the original enrollment time. It does not create a second enrollment.\nA changed request returns a conflict, and another Agent cannot use the\ninvitation.\n\nThe migration marks each `claimed` invitation as `failed`. Create a new\ninvitation for each of those Agents after you upgrade. Enrollment and Zenoh stay\ndisabled by default.\n\nStatus updates mark the current enrollment invitation online. An older invitation\ncannot keep the current invitation available for certificate-token retries.\n"
+    filename: 2026-10-03-49d11a2b.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-10-03-e9360a12.md
+      - 2026-10-03-identity-binding.md
     id: cargo:inari-agent-client
     updated: true
   - changelogIds:
-      - 2026-10-03-e9360a12.md
+      - 2026-10-03-identity-binding.md
     id: cargo:inari-device-center
     updated: true
   - changelogIds:
-      - 2026-10-03-e9360a12.md
-    id: pip:inari-brand
-    updated: true
-  - changelogIds:
-      - 2026-10-03-e9360a12.md
+      - 2026-10-03-identity-binding.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-10-03-e9360a12.md
+      - 2026-10-03-identity-binding.md
+    id: pip:inari-brand
+    updated: true
+  - changelogIds:
+      - 2026-10-03-identity-binding.md
     id: pip:inari-print-contracts
     updated: true
   - changelogIds:
-      - 2026-10-03-0a9b2f71.md
+      - 2026-10-03-49d11a2b.md
+      - 2026-10-03-identity-binding.md
     id: helm:inari
     updated: true
   - changelogIds:
-      - 2026-10-03-e9360a12.md
+      - 2026-10-03-identity-binding.md
     id: msix:inari-device-center
     updated: true
