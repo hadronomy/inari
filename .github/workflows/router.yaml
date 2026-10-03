@@ -64,7 +64,8 @@ jobs:
           echo 'f18081184b089e79e605f2c0cb3f7790fbf101ae94942988f716e19e1810a46e  zenoh.zip' \
             | (cd "${router_tools}" && sha256sum --check)
           unzip -q "${router_tools}/zenoh.zip" -d "${router_tools}"
-          echo "INARI_TEST_ZENOHD=${router_tools}/bin/zenohd" >> "${GITHUB_ENV}"
+          test -x "${router_tools}/zenohd"
+          echo "INARI_TEST_ZENOHD=${router_tools}/zenohd" >> "${GITHUB_ENV}"
 
       - name: Test isolation, live revocation, expiry, and restart
         run: >-
