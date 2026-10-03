@@ -1,6 +1,8 @@
 pub mod routes;
 mod ssr_render;
 
+use std::sync::OnceLock;
+
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::DefaultBodyLimit;
@@ -160,8 +162,15 @@ fn controller_component<C: Component>(
 }
 
 fn discover_web_routes() -> Vec<AxumRouteListing> {
-    let _non_reactive = SpecialNonReactiveZone::enter();
-    generate_route_list(inari_web::App)
+    static ROUTES: OnceLock<Vec<AxumRouteListing>> = OnceLock::new();
+    ROUTES
+        .get_or_init(|| {
+            // Route discovery suppresses Resource loading across the process.
+            // Finish it before any Router can serve a document.
+            let _non_reactive = SpecialNonReactiveZone::enter();
+            generate_route_list(inari_web::App)
+        })
+        .clone()
 }
 
 async fn handle_middleware_error(error: BoxError) -> impl IntoResponse {
@@ -421,6 +430,38 @@ mod tests {
         let html = String::from_utf8(body.to_vec()).expect("response body should be UTF-8");
         assert!(html.contains("This connection cannot be started."));
         assert!(html.contains("Managed onboarding is not enabled"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_router_construction_preserves_document_streams() {
+        let mut requests = tokio::task::JoinSet::new();
+        for _ in 0..64 {
+            requests.spawn(async move {
+                let app = test_app();
+                let response = app
+                    .oneshot(
+                        Request::builder()
+                            .uri("/")
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+                let bytes = to_bytes(response.into_body(), 1024 * 1024)
+                    .await
+                    .unwrap();
+                let html = String::from_utf8(bytes.to_vec()).unwrap();
+                assert!(html.contains("</html>"));
+            });
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(result) = requests.join_next().await {
+                result.unwrap();
+            }
+        })
+        .await
+        .expect("concurrent document streams must finish");
     }
 
     #[tokio::test]

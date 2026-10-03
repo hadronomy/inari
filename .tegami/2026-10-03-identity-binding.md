@@ -46,3 +46,9 @@ The Controller migration removes an Agent column that old replicas still select.
 Keep managed enrollment and Zenoh disabled until all Controller replicas use the
 new release. A binary rollback across this migration is not supported. Recover
 with the matching database backup and Release Set.
+
+### Keep concurrent Controller documents responsive
+
+The Controller discovers its fixed web routes once before it serves documents.
+Concurrent Router construction can no longer interrupt Resource loading in an
+active document stream.
