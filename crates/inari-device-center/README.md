@@ -10,7 +10,8 @@ quitting Device Center does not stop device work.
 
 ## Run it locally
 
-Start the Python agent first, then launch the GPUI client:
+Start the Python agent first, then launch the GPUI client. `mbx` owns the build
+storage and cache paths:
 
 ```sh
 uv run --directory packages/agent inari serve
@@ -31,12 +32,34 @@ Regenerate and verify the contract after changing a local API route or schema:
 just check-contracts
 ```
 
+## Approve an Odoo browser
+
+Client Pairing grants one Odoo browser access to this Agent. It is separate
+from Enrollment, which connects the Agent to its Controller.
+
+1. Create a Pairing Request in Odoo.
+2. Open its `inari://pairing/` link in Device Center to read the request.
+3. If the link does not open, select **Client Pairing** and paste the link or request ID.
+   Then select **Review request**.
+4. Compare every word of the phrase with Odoo.
+5. Check the Odoo origin, Agent Endpoint, business scope, and requested permissions.
+6. If the request matches, select **Approve browser**.
+7. Return to Odoo to complete Client Pairing before the request expires.
+
+Select **Deny request** to reject access. Expired requests need a new request
+from Odoo. A link opens the review screen; approval always requires an explicit
+decision. Changing the input disables the previous review's decision buttons.
+
+Device Center reads requests and saves decisions through the authenticated
+native Agent client. On Windows, it discovers the configured Agent Endpoint
+through the protected MSIX bootstrap pipe. A link contains only the request ID.
+
 ## Architecture
 
 The crate is organized by product feature:
 
 - `app.rs` owns navigation, application-level actions, and the window shell;
-- `features/` owns setup, overview, devices, activity, and support views;
+- `features/` owns setup, overview, devices, activity, Client Pairing, and support views;
 - `infrastructure/` owns the supervised client runtime, tray, activation, and
   platform integration;
 - `ui/` is the Inari design system over GPUI Component;
