@@ -199,7 +199,13 @@ The endpoint must name an allowed host. Credentials, paths, queries, and
 fragments are invalid. The HTTP client and the event stream use the operating
 system's certificate trust. Device Center never disables certificate checks.
 For a listener without TLS, discovery permits only loopback HTTP and uses the
-configured port. Restart Device Center after an endpoint change.
+configured host and port. IPv6 loopback addresses use bracket notation.
+Restart Device Center after an endpoint change.
+
+Unpackaged Windows runs use loopback bootstrap, including the development
+workflow that starts the Agent with `inari serve`. Packaged Device Center uses
+the authenticated named pipe. A failed package lookup or pipe request never
+switches an installed application to loopback bootstrap.
 
 Before upgrading a packaged Agent with TLS, add this config field. Without it,
 the new service refuses startup because it cannot advertise a valid HTTPS name.

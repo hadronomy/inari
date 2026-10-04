@@ -9,14 +9,30 @@ use url::Url;
 use crate::{AgentClientError, AgentClientResult};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(not(windows), derive(Default))]
 pub enum PairingMode {
     Native,
+    #[cfg_attr(not(windows), default)]
     Loopback,
 }
 
+#[cfg(windows)]
 impl Default for PairingMode {
     fn default() -> Self {
-        if cfg!(windows) { Self::Native } else { Self::Loopback }
+        let mut length = 0;
+        // SAFETY: length is writable and the optional buffer is null with zero capacity.
+        let status = unsafe {
+            windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName(
+                &mut length,
+                std::ptr::null_mut(),
+            )
+        };
+        if status == windows_sys::Win32::Foundation::APPMODEL_ERROR_NO_PACKAGE {
+            Self::Loopback
+        } else {
+            // An uncertain package lookup must retain the native authentication boundary.
+            Self::Native
+        }
     }
 }
 
@@ -116,7 +132,12 @@ fn decode_agent_endpoint(payload: &str) -> AgentClientResult<Url> {
     let response: NativeEndpointResponse =
         serde_json::from_str(payload).map_err(AgentClientError::invalid_response)?;
     let endpoint = response.agent_endpoint;
-    let loopback = matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    let loopback = match endpoint.host() {
+        Some(url::Host::Domain("localhost")) => true,
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        _ => false,
+    };
     if endpoint.host_str().is_none()
         || !(endpoint.scheme() == "https" || (endpoint.scheme() == "http" && loopback))
         || !endpoint.username().is_empty()
@@ -164,5 +185,26 @@ mod tests {
         let endpoint = decode_agent_endpoint(r#"{"agent_endpoint":"http://127.0.0.1:7410/"}"#)
             .expect("valid fixture");
         assert_eq!(endpoint.port(), Some(7410));
+    }
+
+    #[test]
+    fn accepts_literal_loopback_addresses_without_tls() {
+        for endpoint in ["http://[::1]:7410/", "http://127.0.0.2:7410/"] {
+            let payload = serde_json::json!({"agent_endpoint": endpoint}).to_string();
+            assert_eq!(
+                decode_agent_endpoint(&payload)
+                    .unwrap()
+                    .as_str(),
+                endpoint
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_loopback_addresses_without_tls() {
+        for endpoint in ["http://[::]:7410/", "http://192.168.1.1:7410/"] {
+            let payload = serde_json::json!({"agent_endpoint": endpoint}).to_string();
+            assert!(decode_agent_endpoint(&payload).is_err(), "{endpoint}");
+        }
     }
 }

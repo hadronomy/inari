@@ -56,6 +56,22 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn unpackaged_windows_runs_resolve_loopback_without_a_native_pipe() {
+        let options = AgentClientOptions::default();
+        assert_eq!(options.pairing_mode, PairingMode::Loopback);
+        let client = AgentClient::new(options, crate::LocalIdentityStore).unwrap();
+        assert_eq!(
+            client
+                .endpoint()
+                .await
+                .unwrap()
+                .as_str(),
+            DEFAULT_AGENT_ENDPOINT
+        );
+    }
+
     #[test]
     fn generated_transport_base_has_no_trailing_slash() {
         let endpoint = Url::parse(DEFAULT_AGENT_ENDPOINT).expect("valid fixture");
