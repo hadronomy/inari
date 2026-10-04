@@ -89,6 +89,16 @@ impl VerifiedPolicy {
         &self.digest
     }
 
+    pub(crate) fn has_same_authority(&self, other: &Self) -> bool {
+        let policy = self.policy();
+        let other = other.policy();
+        policy.version == other.version
+            && policy.fleet_id == other.fleet_id
+            && policy.namespace_prefix == other.namespace_prefix
+            && policy.trusted_peer_common_names == other.trusted_peer_common_names
+            && policy.agents == other.agents
+    }
+
     pub fn require_current(&self, now: DateTime<Utc>) -> RouterResult<()> {
         if self.policy().not_before > now || self.policy().expires_at <= now {
             return Err(RouterError::NotCurrent);
