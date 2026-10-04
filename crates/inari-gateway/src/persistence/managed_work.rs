@@ -225,6 +225,7 @@ impl GatewayRepository {
         F: FnOnce(ManagedDispatchAllocation<'_>) -> GatewayResult<NewManagedPayload>,
     {
         let ManagedWorkAdmission {
+            router_admission,
             managed_work_id,
             idempotency_key,
             submission,
@@ -233,7 +234,24 @@ impl GatewayRepository {
             payload_bytes,
             admitted_at: now,
         } = admission;
+        if router_admission.organization_id()
+            != submission
+                .work
+                .scope
+                .organization_id
+                .as_str()
+        {
+            return Err(GatewayError::Forbidden(
+                "Router admission belongs to another Organization".into(),
+            ));
+        }
         let transaction = self.database.begin().await?;
+        super::router_policy::require_admission_in(
+            &transaction,
+            router_admission,
+            submission.work.scope.agent_id.as_str(),
+        )
+        .await?;
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Postgres,

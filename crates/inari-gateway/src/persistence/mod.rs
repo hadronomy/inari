@@ -6,9 +6,14 @@ mod fleet;
 mod managed_work;
 mod onboarding;
 mod publications;
+mod retirement;
+mod router_policy;
 mod state_observations;
 
 pub use self::enrollment::InvitationAttemptLimit;
+pub use self::router_policy::{
+    NewRouterPolicy, PersistedRouterPolicy, RouterAdmission, RouterAgent,
+};
 
 use chrono::{DateTime, FixedOffset, Utc};
 use jsonwebtoken::jwk::Jwk;
@@ -176,6 +181,7 @@ pub struct ManagedDispatchAllocation<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ManagedWorkAdmission<'a> {
+    pub router_admission: &'a RouterAdmission,
     pub managed_work_id: &'a ManagedWorkId,
     pub idempotency_key: &'a str,
     pub submission: &'a ManagedWorkSubmission,

@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use inari_gateway::certificate::CertificateIssuerHandle;
 use inari_gateway::onboarding::OnboardingService;
 use leptos::prelude::LeptosOptions;
 use serde::Serialize;
@@ -18,7 +17,7 @@ use crate::coordination::{
 use crate::error::AppError;
 use crate::identity::IdentityRuntime;
 use crate::managed_gateway::ManagedGatewayController;
-use crate::managed_gateway::ManagedWorkSecurity;
+use crate::managed_gateway::ManagedGatewaySecurity;
 use crate::zenoh::{ZenohConnectionState, ZenohHandle, ZenohStatus};
 
 pub type ReadinessSummary = Arc<str>;
@@ -69,8 +68,7 @@ impl AppState {
                 .build(),
             None,
             None,
-            None,
-            None,
+            ManagedGatewaySecurity::default(),
         )
     }
 
@@ -80,8 +78,7 @@ impl AppState {
         leptos_options: LeptosOptions,
         onboarding: Option<OnboardingService>,
         identity: Option<IdentityRuntime>,
-        certificate_issuer: Option<CertificateIssuerHandle>,
-        security: Option<Arc<ManagedWorkSecurity>>,
+        security: ManagedGatewaySecurity,
     ) -> Self {
         let database_readiness = if onboarding.is_some() || identity.is_some() {
             DatabaseReadiness::ready("PostgreSQL connection pool is available.")
@@ -93,7 +90,7 @@ impl AppState {
         } else {
             IdentityReadiness::disabled("Organization identity is disabled.")
         };
-        let certificate_readiness = if certificate_issuer.is_some() {
+        let certificate_readiness = if security.certificate_issuer.is_some() {
             CertificateReadiness::ready("Agent certificate issuer is available.")
         } else {
             CertificateReadiness::disabled("Managed certificate issuance is disabled.")
@@ -125,7 +122,6 @@ impl AppState {
             loaded.settings.zenoh.clone(),
             zenoh.clone(),
             gateway_repository,
-            certificate_issuer,
             security,
         );
 
@@ -200,12 +196,35 @@ impl AppState {
 
     #[must_use]
     pub fn readiness_snapshot(&self) -> ReadinessSnapshot {
-        self.inner.readiness.snapshot()
+        let mut snapshot = self.inner.readiness.snapshot();
+        snapshot.set_component(
+            self.inner
+                .managed_gateway
+                .router_policy_readiness(),
+        );
+        snapshot
     }
 
     #[must_use]
     pub fn subscribe_readiness(&self) -> watch::Receiver<ReadinessSnapshot> {
         self.inner.readiness.subscribe()
+    }
+
+    pub(crate) fn update_router_policy_readiness(&self) {
+        let readiness = self
+            .inner
+            .managed_gateway
+            .router_policy_readiness();
+        self.inner
+            .readiness
+            .sender
+            .send_if_modified(|snapshot| {
+                if snapshot.component::<RouterPolicy>() == &readiness {
+                    return false;
+                }
+                snapshot.set_component(readiness.clone());
+                true
+            });
     }
 
     pub fn update_zenoh_readiness(&self, status: &ZenohStatus) {
@@ -317,6 +336,7 @@ readiness_component!(Database, DatabaseReadiness, "database");
 readiness_component!(Identity, IdentityReadiness, "identity");
 readiness_component!(Certificate, CertificateReadiness, "certificate");
 readiness_component!(Enrollment, EnrollmentReadiness, "enrollment");
+readiness_component!(RouterPolicy, RouterPolicyReadiness, "router_policy");
 
 pub type HttpReadiness = ComponentReadiness<Http>;
 pub type ZenohReadiness = ComponentReadiness<Zenoh>;
@@ -530,6 +550,7 @@ pub struct ReadinessComponents {
     identity: IdentityReadiness,
     certificate: CertificateReadiness,
     enrollment: EnrollmentReadiness,
+    router_policy: RouterPolicyReadiness,
     zenoh: ZenohReadiness,
 }
 
@@ -543,7 +564,15 @@ impl ReadinessComponents {
         enrollment: EnrollmentReadiness,
         zenoh: ZenohReadiness,
     ) -> Self {
-        Self { http, database, identity, certificate, enrollment, zenoh }
+        Self {
+            http,
+            database,
+            identity,
+            certificate,
+            enrollment,
+            zenoh,
+            router_policy: RouterPolicyReadiness::disabled("Managed Router policy is disabled."),
+        }
     }
 
     #[must_use]
@@ -586,6 +615,7 @@ impl ReadinessComponents {
             ReadinessEntry::new(&self.identity),
             ReadinessEntry::new(&self.certificate),
             ReadinessEntry::new(&self.enrollment),
+            ReadinessEntry::new(&self.router_policy),
             ReadinessEntry::new(&self.zenoh),
         ]
         .into_iter()
@@ -635,6 +665,7 @@ component_slot!(Database, database, DatabaseReadiness);
 component_slot!(Identity, identity, IdentityReadiness);
 component_slot!(Certificate, certificate, CertificateReadiness);
 component_slot!(Enrollment, enrollment, EnrollmentReadiness);
+component_slot!(RouterPolicy, router_policy, RouterPolicyReadiness);
 
 #[derive(Debug, Clone, Copy)]
 pub struct ReadinessEntry<'a> {

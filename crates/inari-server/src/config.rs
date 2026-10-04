@@ -15,6 +15,7 @@ use crate::error::ConfigError;
 mod identity;
 mod managed_gateway;
 mod platform;
+mod router_policy;
 
 pub use self::identity::{IdentityConfig, OidcConfig};
 pub use self::managed_gateway::{
@@ -23,6 +24,7 @@ pub use self::managed_gateway::{
     ManagedGatewayPayloadProtectionConfig, StepCaSigningAlgorithm,
 };
 pub use self::platform::{DatabaseConfig, OrganizationConfig};
+pub use self::router_policy::{RouterManagementConfig, RouterPolicyConfig};
 
 const CONFIG_PATH_ENV: &str = "INARI_SERVER_CONFIG";
 pub const CONFIG_VERSION: u32 = 1;
@@ -41,6 +43,7 @@ const ENV_LIST_KEYS: &[&str] = &[
     "managed_gateway.controller_actions",
     "managed_gateway.supported_protocol_versions",
     "managed_gateway.data_plane.connect_endpoints",
+    "managed_gateway.router_policy.trusted_peer_common_names",
     "zenoh.access_control.managed_gateway_cert_common_names",
     "zenoh.connect_endpoints",
     "zenoh.listen_endpoints",

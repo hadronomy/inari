@@ -11,5 +11,6 @@ pub mod managed_work;
 pub mod managed_work_preflight;
 pub mod organization;
 pub mod publication;
+pub mod router_policy;
 pub mod site;
 pub mod value;

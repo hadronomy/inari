@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use zenoh::key_expr::OwnedKeyExpr;
 
+use super::RouterPolicyConfig;
 use crate::error::ConfigError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +19,7 @@ pub struct ManagedGatewayConfig {
     pub controller_actions: Vec<String>,
     pub onboarding: ManagedGatewayOnboardingConfig,
     pub data_plane: ManagedGatewayDataPlaneConfig,
+    pub router_policy: RouterPolicyConfig,
     pub certificate: ManagedGatewayCertificateConfig,
     pub dispatch: ManagedGatewayDispatchConfig,
     pub payload_protection: ManagedGatewayPayloadProtectionConfig,
@@ -42,6 +44,7 @@ impl Default for ManagedGatewayConfig {
             .to_vec(),
             onboarding: ManagedGatewayOnboardingConfig::default(),
             data_plane: ManagedGatewayDataPlaneConfig::default(),
+            router_policy: RouterPolicyConfig::default(),
             certificate: ManagedGatewayCertificateConfig::default(),
             dispatch: ManagedGatewayDispatchConfig::default(),
             payload_protection: ManagedGatewayPayloadProtectionConfig::default(),
@@ -54,6 +57,7 @@ impl ManagedGatewayConfig {
         if !self.enabled {
             return Ok(());
         }
+        self.router_policy.validate()?;
         if self
             .supported_protocol_versions
             .is_empty()
@@ -157,11 +161,11 @@ impl ManagedGatewayConfig {
                     "step-ca mode requires an HTTPS base_url without credentials, query, or fragment, a SHA-256 root_fingerprint, provisioner, key_id, and signing_key_file.",
                 ));
             }
-            if !(Duration::from_secs(10)..=Duration::from_secs(60 * 60))
+            if !(Duration::from_secs(60)..=Duration::from_secs(60 * 60))
                 .contains(&self.certificate.step_ca_token_ttl)
             {
                 return Err(ConfigError::invalid(
-                    "managed_gateway.certificate.step_ca_token_ttl must be between 10 seconds and 1 hour.",
+                    "managed_gateway.certificate.step_ca_token_ttl must be between 1 minute and 1 hour.",
                 ));
             }
         }
@@ -281,6 +285,7 @@ mod payload_tests {
     fn config() -> ManagedGatewayConfig {
         let mut config = ManagedGatewayConfig {
             enabled: true,
+            router_policy: super::super::RouterPolicyConfig::test_config(),
             payload_protection: ManagedGatewayPayloadProtectionConfig {
                 enabled: true,
                 address: Some(
@@ -495,7 +500,11 @@ mod tests {
 
     #[test]
     fn step_ca_requires_a_valid_root_pin_before_enrollment() {
-        let mut config = ManagedGatewayConfig { enabled: true, ..ManagedGatewayConfig::default() };
+        let mut config = ManagedGatewayConfig {
+            enabled: true,
+            router_policy: super::super::RouterPolicyConfig::test_config(),
+            ..ManagedGatewayConfig::default()
+        };
         config.data_plane.connect_endpoints = vec!["tls/router.example.com:7447".into()];
         config.certificate.mode = ManagedGatewayCertificateMode::StepCa;
         config.certificate.step_ca_base_url = Some(

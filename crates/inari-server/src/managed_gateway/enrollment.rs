@@ -84,6 +84,8 @@ impl ManagedGatewayController {
             )
             .await?;
 
+        self.router_admission(request.agent_id.as_str())
+            .await?;
         Ok(EnrollmentResponse {
             selected_protocol_version,
             controller: ControllerInfo {

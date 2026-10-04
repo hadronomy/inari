@@ -69,6 +69,8 @@ jobs:
           sudo -u postgres createdb --owner=inari_test inari_enrollment_contract_test
           sudo -u postgres createdb --owner=inari_test inari_enrollment_http_test
           sudo -u postgres createdb --owner=inari_test inari_state_test
+          sudo -u postgres createdb --owner=inari_test inari_router_policy_test
+          sudo -u postgres createdb --owner=inari_test inari_payload_test
 
       - name: Test enrollment migrations and key history
         run: >-
@@ -98,3 +100,17 @@ jobs:
           -- --ignored
         env:
           INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_state_test
+
+      - name: Test Router policy generations and credential retirement
+        run: >-
+          mbx test --locked --package inari-server --lib
+          -- --ignored --exact managed_gateway::router_policy_tests::router_policy_generations_and_acknowledgments_are_transactional
+        env:
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_router_policy_test
+
+      - name: Test Managed Payload admission and replay
+        run: >-
+          mbx test --locked --package inari-server --lib
+          -- --ignored --exact managed_gateway::managed_work::persistence_tests::managed_payload_admission_replay_and_deletion
+        env:
+          INARI_TEST_DATABASE_URL: postgres://inari_test:inari_test@127.0.0.1:5432/inari_payload_test
