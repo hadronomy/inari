@@ -143,7 +143,7 @@ async fn controller_management_uses_dedicated_mutual_tls_and_bounded_responses()
             generation: 1,
             issued_at: now,
             not_before: now,
-            expires_at: now + POLICY_LIFETIME,
+            expires_at: now + POLICY_EXPIRY,
             namespace_prefix: "iot/v1/agents".into(),
             trusted_peer_common_names: vec!["controller_test".into()],
             agents: vec![],
@@ -190,15 +190,41 @@ async fn controller_management_uses_dedicated_mutual_tls_and_bounded_responses()
     std::fs::write(path("client.pem"), agent_cert).unwrap();
     std::fs::write(path("client.key"), agent_key).unwrap();
     assert!(
-        HttpsManagement::load(&config)
-            .await
-            .unwrap()
+        client
             .apply(&router, &signed)
             .await
             .is_err(),
         "an Agent cannot manage a Router"
     );
     assert_eq!(endpoint.requests.load(Ordering::SeqCst), 1, "TLS failures never reach HTTP");
+    let (renewed_cert, renewed_key) =
+        certificate(&root, "controller-policy", ExtendedKeyUsagePurpose::ClientAuth);
+    std::fs::write(path("client.pem"), &renewed_cert).unwrap();
+    std::fs::write(path("client.key"), &renewed_key).unwrap();
+    assert!(
+        client
+            .apply(&router, &signed)
+            .await
+            .unwrap()
+            .is_current()
+    );
+    assert_eq!(endpoint.requests.load(Ordering::SeqCst), 2);
+    std::fs::write(path("client.key"), "invalid replacement").unwrap();
+    assert!(
+        client
+            .apply(&router, &signed)
+            .await
+            .is_err(),
+        "an invalid replacement must discard the cached client"
+    );
+    std::fs::write(path("client.key"), renewed_key).unwrap();
+    assert!(
+        client
+            .apply(&router, &signed)
+            .await
+            .unwrap()
+            .is_current()
+    );
     endpoint.mode.store(1, Ordering::SeqCst);
     assert!(
         client
@@ -221,8 +247,110 @@ async fn controller_management_uses_dedicated_mutual_tls_and_bounded_responses()
             .is_err(),
         "an oversized response must be rejected"
     );
+    endpoint.mode.store(0, Ordering::SeqCst);
+    let renewed_root = issuer("renewed-management-root");
+    let (server_cert, server_key) =
+        certificate(&renewed_root, "router-management", ExtendedKeyUsagePurpose::ServerAuth);
+    let (client_cert, client_key) =
+        certificate(&renewed_root, "controller-policy", ExtendedKeyUsagePurpose::ClientAuth);
+    for (name, contents) in [
+        ("root.pem", renewed_root.pem()),
+        ("server.pem", server_cert),
+        ("server.key", server_key),
+        ("client.pem", client_cert),
+        ("client.key", client_key),
+    ] {
+        std::fs::write(path(name), contents).unwrap();
+    }
+    let acceptor = ManagementAcceptor::from_files(
+        &path("server.pem"),
+        &path("server.key"),
+        &path("root.pem"),
+        "controller-policy",
+    )
+    .await
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let renewed_router = RouterManagementConfig {
+        address: format!("https://localhost:{}/", listener.local_addr().unwrap().port())
+            .parse()
+            .unwrap(),
+        ..router.clone()
+    };
+    let renewed_shutdown = axum_server::Handle::new();
+    let renewed_server = axum_server::from_tcp(listener)
+        .unwrap()
+        .acceptor(acceptor)
+        .handle(renewed_shutdown.clone());
+    let renewed_task = tokio::spawn(
+        renewed_server.serve(
+            Router::new()
+                .route("/policy", put(apply))
+                .with_state(endpoint)
+                .into_make_service(),
+        ),
+    );
+    assert!(
+        client
+            .apply(&renewed_router, &signed)
+            .await
+            .unwrap()
+            .is_current(),
+        "the same management client must use the renewed root and identity"
+    );
+    std::fs::write(path("root.pem"), data_root.pem()).unwrap();
+    assert!(
+        client
+            .apply(&renewed_router, &signed)
+            .await
+            .is_err(),
+        "root rotation must discard pooled connections with old trust"
+    );
+    std::fs::write(path("root.pem"), renewed_root.pem()).unwrap();
+    assert!(
+        client
+            .apply(&renewed_router, &signed)
+            .await
+            .unwrap()
+            .is_current()
+    );
+    renewed_shutdown.shutdown();
+    renewed_task.await.unwrap().unwrap();
     shutdown.shutdown();
     task.await.unwrap().unwrap();
+}
+
+#[test]
+fn signed_policy_accepts_five_seconds_of_router_clock_lag() {
+    let now = Utc::now().trunc_subsecs(6);
+    let policy = router_policy(
+        &super::super::router_policy_tests::config(),
+        "iot/v1/agents",
+        1,
+        vec![],
+        now,
+    );
+    assert_eq!(policy.expires_at, now + POLICY_EXPIRY);
+    assert_eq!(policy.expires_at - policy.issued_at, TimeDelta::seconds(50));
+    let key = SigningKey::from_bytes(&[71; 32]);
+    let signed = SignedPolicy::sign(policy, &key).unwrap();
+    let verified = signed
+        .verify(&key.verifying_key(), "test_fleet")
+        .unwrap();
+    verified
+        .require_current(now - CLOCK_SKEW)
+        .unwrap();
+    assert!(
+        verified
+            .require_current(now - CLOCK_SKEW - TimeDelta::microseconds(1))
+            .is_err()
+    );
+    assert!(
+        verified
+            .require_current(now + POLICY_EXPIRY)
+            .is_err()
+    );
 }
 
 #[tokio::test]

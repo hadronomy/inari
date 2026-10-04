@@ -3,7 +3,7 @@ use inari_gateway::protocol::{AgentId, AgentStatus, JobId, JobRecord, ManagedWor
 use inari_gateway::protocol::{AgentSummary, DeviceSummary, OrganizationId, SiteId, SiteSummary};
 use inari_gateway::{
     GatewayRepository, ManagedWorkAdmission, ManagedWorkTargetRecord, NewManagedWorkPreflight,
-    PersistedManagedWork, PersistedManagedWorkDispatch,
+    PersistedManagedWork, PersistedManagedWorkDispatch, RouterAdmission,
 };
 use sha2::{Digest, Sha256};
 
@@ -59,6 +59,7 @@ impl ManagedGatewayStore {
 
     pub(super) async fn enqueue_command(
         &self,
+        router_admission: &RouterAdmission,
         agent_id: &AgentId,
         job_id: &inari_gateway::protocol::JobId,
         request: JobRequest,
@@ -77,6 +78,7 @@ impl ManagedGatewayStore {
         let persisted = self
             .repository()?
             .enqueue_command(
+                router_admission,
                 agent_id.as_str(),
                 Some(job_id.as_str()),
                 &request_fingerprint,

@@ -115,7 +115,8 @@ active Agent State key. Retired keys cannot authorize admission.
 PostgreSQL serializes generation allocation across Controller replicas. A policy
 binds its authority revision and a digest of the fleet, Router management
 origins, trusted peers, namespace prefix, and signing key. Replicas with the same
-config reuse the exact signed document. A policy expires after 45 seconds. The
+config reuse the exact signed document. Activation is backdated by five seconds
+for clock skew. Expiry stays 45 seconds after the Controller creates the policy. The
 Controller reconciles every five seconds and refreshes when fewer than 15 seconds
 remain.
 
@@ -129,7 +130,8 @@ Enrollment returns its certificate bootstrap data only after Router admission.
 A lost response uses the exact invitation retry contract. Managed Work preflight,
 admission, and dispatch also require current admission. The admission transaction
 holds a shared policy lock and rechecks the authority, Agent keys, policy expiry,
-and acknowledgment age. An admission proof expires within ten seconds.
+and acknowledgment age. An admission proof expires within ten seconds. Command
+enqueue and replay hold the same shared lock and recheck the proof before commit.
 
 The `router_policy` readiness component starts unavailable, becomes ready after
 complete acknowledgment, and becomes degraded after a failure or proof expiry.
@@ -143,7 +145,9 @@ all Routers acknowledged the removal. HTTP 503 leaves retirement committed and
 requires an idempotent retry. Key history remains available for signed evidence.
 
 The Controller uses only the configured management CA, client certificate, and
-private key. It verifies the Router hostname, disables proxies and redirects,
+private key. Each request reads those files. Content changes replace the HTTP
+client and discard its connection pool. Invalid or unreadable replacements close
+admission until the files recover. It verifies the Router hostname, disables proxies and redirects,
 and limits acknowledgment bodies to 64 KiB. The policy signing key is a separate
 Ed25519 PKCS#8 PEM file. All Controller replicas must use the same policy config.
 

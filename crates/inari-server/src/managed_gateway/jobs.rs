@@ -21,12 +21,19 @@ impl ManagedGatewayController {
         request: JobRequest,
     ) -> AppResult<JobReceipt> {
         self.ensure_enabled()?;
-        self.router_admission(agent_id.as_str())
+        let admission = self
+            .router_admission(agent_id.as_str())
             .await?;
         let command = self
             .inner
             .store
-            .enqueue_command(agent_id, &job_id, request, &self.inner.config.controller_actions)
+            .enqueue_command(
+                &admission,
+                agent_id,
+                &job_id,
+                request,
+                &self.inner.config.controller_actions,
+            )
             .await?;
 
         let publish_result = self
