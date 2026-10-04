@@ -78,6 +78,24 @@ connect_endpoints = ["tls/controller.example.com:7447"]
 namespace_prefix = "iot/v1/agents"
 close_link_on_expiration = true
 
+[managed_gateway.router_policy]
+# Every Router must acknowledge one complete policy before enrollment or managed
+# admission returns success. Mount these keys and certificates from a Secret.
+fleet_id = "production"
+trusted_peer_common_names = ["controller-production", "router-production-1", "router-production-2"]
+signing_key_file = "/var/run/secrets/inari/router-policy-key.pem"
+management_ca_file = "/var/run/secrets/inari/router-management-ca.pem"
+management_certificate_file = "/var/run/secrets/inari/router-management-client.pem"
+management_private_key_file = "/var/run/secrets/inari/router-management-client-key.pem"
+
+[[managed_gateway.router_policy.routers]]
+router_id = "router-production-1"
+address = "https://inari-router-1:8443/"
+
+[[managed_gateway.router_policy.routers]]
+router_id = "router-production-2"
+address = "https://inari-router-2:8443/"
+
 [managed_gateway.certificate]
 # `step_ca` mints a fresh CSR-bound token only after controller enrollment has
 # authenticated the agent. Mount the provisioner signing key from a Secret.
@@ -88,6 +106,8 @@ step_ca_provisioner = "inari-agents"
 step_ca_key_id = "replace-with-provisioner-jwk-kid"
 step_ca_signing_key_file = "/var/run/secrets/inari/step-ca-provisioner-key.pem"
 step_ca_signing_algorithm = "ed_dsa"
+# The minimum is one minute. Router acknowledgment can take twenty seconds
+# after the Controller prepares this token.
 step_ca_token_ttl = "5m"
 requires_mutual_tls_after_issuance = true
 

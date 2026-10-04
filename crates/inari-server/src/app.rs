@@ -23,8 +23,8 @@ use crate::error::{AppError, AppResult};
 use crate::http;
 use crate::identity::{IdentityRuntime, IdentityService};
 use crate::managed_gateway::{
-    ManagedDispatchSigner, ManagedPayloadProtector, ManagedWorkSecurity, OpenBaoTransitKeyWrapper,
-    StepCaIssuer,
+    ManagedDispatchSigner, ManagedGatewaySecurity, ManagedPayloadProtector, ManagedWorkSecurity,
+    OpenBaoTransitKeyWrapper, RouterAdmissionController, StepCaIssuer,
 };
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
@@ -104,14 +104,48 @@ impl ServerBuilder<WithConfig> {
         let identity = initialize_identity(&loaded, database.as_ref()).await?;
         let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
         let security = initialize_managed_work_security(&loaded).await?;
+        let router_admission = if loaded.settings.managed_gateway.enabled {
+            let repository = onboarding
+                .as_ref()
+                .ok_or_else(|| {
+                    AppError::service_unavailable(
+                        "Router admission requires Controller persistence and onboarding.",
+                    )
+                })?
+                .repository()
+                .clone();
+            Some(Arc::new(
+                RouterAdmissionController::load(
+                    repository,
+                    loaded
+                        .settings
+                        .organization
+                        .id
+                        .to_string(),
+                    loaded
+                        .settings
+                        .managed_gateway
+                        .router_policy
+                        .clone(),
+                    loaded
+                        .settings
+                        .managed_gateway
+                        .data_plane
+                        .namespace_prefix
+                        .clone(),
+                )
+                .await?,
+            ))
+        } else {
+            None
+        };
         let state = AppState::new_with_onboarding(
             loaded,
             zenoh_handle,
             leptos_options,
             onboarding,
             identity,
-            certificate_issuer,
-            security,
+            ManagedGatewaySecurity { certificate_issuer, managed_work: security, router_admission },
         );
         let router = http::router(&state)?.with_state(state.clone());
 
@@ -633,10 +667,15 @@ async fn sync_readiness(state: AppState, shutdown: ShutdownCoordinator) {
     let mut zenoh = state.zenoh().subscribe_status();
 
     state.update_zenoh_readiness(&zenoh.borrow().clone());
+    let mut router_ticks = tokio::time::interval(Duration::from_secs(1));
+    router_ticks.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    state.update_router_policy_readiness();
 
     loop {
         tokio::select! {
             _ = shutdown.wait_for_shutdown() => return,
+
+            _ = router_ticks.tick() => state.update_router_policy_readiness(),
 
             changed = zenoh.changed() => {
                 if changed.is_err() {

@@ -49,7 +49,28 @@ fn environment_overrides_cover_every_nested_field() {
         ),
         ("INARI_SERVER_IDENTITY__OIDC__ROLE_CLAIM".into(), "roles".into()),
         ("INARI_SERVER_IDENTITY__OIDC__ROLE_MAPPING__ADMIN".into(), "administrator".into()),
-        ("INARI_SERVER_MANAGED_GATEWAY__ENABLED".into(), "true".into()),
+        ("INARI_SERVER_MANAGED_GATEWAY__ENABLED".into(), "false".into()),
+        ("INARI_SERVER_MANAGED_GATEWAY__ROUTER_POLICY__FLEET_ID".into(), "test_fleet".into()),
+        (
+            "INARI_SERVER_MANAGED_GATEWAY__ROUTER_POLICY__TRUSTED_PEER_COMMON_NAMES".into(),
+            "controller_test,router_test".into(),
+        ),
+        (
+            "INARI_SERVER_MANAGED_GATEWAY__ROUTER_POLICY__SIGNING_KEY_FILE".into(),
+            "/test/policy-key.pem".into(),
+        ),
+        (
+            "INARI_SERVER_MANAGED_GATEWAY__ROUTER_POLICY__MANAGEMENT_CA_FILE".into(),
+            "/test/management-ca.pem".into(),
+        ),
+        (
+            "INARI_SERVER_MANAGED_GATEWAY__ROUTER_POLICY__MANAGEMENT_CERTIFICATE_FILE".into(),
+            "/test/management-client.pem".into(),
+        ),
+        (
+            "INARI_SERVER_MANAGED_GATEWAY__ROUTER_POLICY__MANAGEMENT_PRIVATE_KEY_FILE".into(),
+            "/test/management-key.pem".into(),
+        ),
         (
             "INARI_SERVER_MANAGED_GATEWAY__DATA_PLANE__CONNECT_ENDPOINTS".into(),
             "tls/controller.test:7447".into(),
@@ -81,6 +102,23 @@ fn environment_overrides_cover_every_nested_field() {
     .expect("environment overrides should deserialize");
 
     assert!(loaded.origin.includes_environment);
+    let policy = &loaded
+        .settings
+        .managed_gateway
+        .router_policy;
+    assert_eq!(policy.fleet_id, "test_fleet");
+    assert_eq!(policy.trusted_peer_common_names, ["controller_test", "router_test"]);
+    assert_eq!(policy.signing_key_file, std::path::Path::new("/test/policy-key.pem"));
+    assert_eq!(policy.management_ca_file, std::path::Path::new("/test/management-ca.pem"));
+    assert_eq!(
+        policy.management_certificate_file,
+        std::path::Path::new("/test/management-client.pem")
+    );
+    assert_eq!(
+        policy.management_private_key_file,
+        std::path::Path::new("/test/management-key.pem")
+    );
+
     assert_eq!(
         loaded
             .settings

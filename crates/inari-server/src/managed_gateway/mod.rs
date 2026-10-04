@@ -18,12 +18,14 @@ mod keyspace;
 mod managed_work;
 mod models;
 mod payload;
+mod router_policy;
 mod runtime;
 mod store;
 
 pub use self::certificate::StepCaIssuer;
 pub use self::dispatch::ManagedDispatchSigner;
 pub use self::payload::{ManagedPayloadProtector, OpenBaoTransitKeyWrapper};
+pub use self::router_policy::{RouterAdmissionController, RouterManagement};
 
 use self::models::StoredControllerCommand;
 pub use self::models::{AgentPublicationList, CommandHistory, JobList, JobReceipt, JobRequest};
@@ -32,6 +34,13 @@ use self::store::ManagedGatewayStore;
 pub struct ManagedWorkSecurity {
     dispatch_signer: ManagedDispatchSigner,
     payload_protector: ManagedPayloadProtector,
+}
+
+#[derive(Default)]
+pub struct ManagedGatewaySecurity {
+    pub certificate_issuer: Option<CertificateIssuerHandle>,
+    pub managed_work: Option<Arc<ManagedWorkSecurity>>,
+    pub router_admission: Option<Arc<RouterAdmissionController>>,
 }
 
 impl ManagedWorkSecurity {
@@ -56,6 +65,7 @@ struct ManagedGatewayControllerInner {
     organization: OrganizationConfig,
     certificate_issuer: Option<CertificateIssuerHandle>,
     security: Option<Arc<ManagedWorkSecurity>>,
+    router_admission: Option<Arc<RouterAdmissionController>>,
 }
 
 impl ManagedGatewayController {
@@ -66,8 +76,7 @@ impl ManagedGatewayController {
         zenoh_config: ZenohConfig,
         zenoh: ZenohHandle,
         repository: Option<GatewayRepository>,
-        certificate_issuer: Option<CertificateIssuerHandle>,
-        security: Option<Arc<ManagedWorkSecurity>>,
+        security: ManagedGatewaySecurity,
     ) -> Self {
         let store = ManagedGatewayStore::new(repository);
         Self {
@@ -77,10 +86,30 @@ impl ManagedGatewayController {
                 zenoh,
                 store,
                 organization,
-                certificate_issuer,
-                security,
+                certificate_issuer: security.certificate_issuer,
+                security: security.managed_work,
+                router_admission: security.router_admission,
             }),
         }
+    }
+
+    pub(crate) fn router_policy_readiness(&self) -> crate::state::RouterPolicyReadiness {
+        if !self.is_enabled() {
+            return crate::state::RouterPolicyReadiness::disabled(
+                "Managed Router policy is disabled.",
+            );
+        }
+        self.inner
+            .router_admission
+            .as_ref()
+            .map_or_else(
+                || {
+                    crate::state::RouterPolicyReadiness::degraded(
+                        "Router admission is not configured.",
+                    )
+                },
+                |admission| admission.readiness(),
+            )
     }
 
     #[must_use]
@@ -104,6 +133,15 @@ impl ManagedGatewayController {
             .ok_or_else(|| AppError::service_unavailable("Managed Work dispatch is not enabled."))
     }
 
+    async fn router_admission(&self, agent_id: &str) -> AppResult<inari_gateway::RouterAdmission> {
+        self.inner
+            .router_admission
+            .as_ref()
+            .ok_or_else(|| AppError::service_unavailable("Router admission is not configured."))?
+            .admit(agent_id)
+            .await
+    }
+
     fn payload_protector(&self) -> AppResult<&ManagedPayloadProtector> {
         self.inner
             .security
@@ -114,3 +152,6 @@ impl ManagedGatewayController {
             })
     }
 }
+
+#[cfg(test)]
+mod router_policy_tests;
