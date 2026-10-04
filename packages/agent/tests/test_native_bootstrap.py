@@ -28,6 +28,25 @@ def test_loopback_endpoint_uses_the_actual_listener_port() -> None:
 
 
 @pytest.mark.parametrize(
+    ("host", "endpoint"),
+    [
+        ("::1", "http://[::1]:7410/"),
+        ("127.0.0.2", "http://127.0.0.2:7410/"),
+        ("localhost", "http://localhost:7410/"),
+    ],
+)
+def test_loopback_endpoint_uses_the_actual_listener_host(host: str, endpoint: str) -> None:
+    settings = AgentSettings(host=host, port=7410, trusted_hosts=[host])
+    assert native_agent_endpoint(settings) == endpoint
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.1", "agent.example.com"])
+def test_native_endpoint_rejects_non_loopback_http_listeners(host: str) -> None:
+    with pytest.raises(ValueError, match="api.endpoint"):
+        native_agent_endpoint(AgentSettings(host=host, trusted_hosts=[host]))
+
+
+@pytest.mark.parametrize(
     "endpoint",
     [
         "http://agent.example.com:7310/",

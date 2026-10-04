@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from ipaddress import ip_address
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
@@ -33,7 +34,9 @@ def native_agent_endpoint(settings: AgentSettings) -> str:
             raise ValueError(
                 "Set api.endpoint to the HTTPS certificate hostname and listener port."
             )
-        endpoint = f"http://127.0.0.1:{settings.port}/"
+        host = settings.host
+        endpoint_host = f"[{host}]" if ":" in host else host
+        endpoint = f"http://{endpoint_host}:{settings.port}/"
     parsed = urlsplit(endpoint)
     if (
         parsed.scheme != ("https" if tls_enabled else "http")
@@ -46,10 +49,19 @@ def native_agent_endpoint(settings: AgentSettings) -> str:
         or (parsed.port or (443 if tls_enabled else 80)) != settings.port
         or parsed.hostname not in settings.trusted_hosts
         or (
-            not tls_enabled and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+            not tls_enabled and not _is_loopback_endpoint(parsed.hostname)
         )
     ):
         raise ValueError(
             "api.endpoint must name the trusted local listener without credentials, a path, query, or fragment."
         )
     return endpoint.rstrip("/") + "/"
+
+
+def _is_loopback_endpoint(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
