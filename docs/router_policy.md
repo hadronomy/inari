@@ -214,3 +214,10 @@ Controller CI also runs a real management mTLS contract and isolated PostgreSQL
 contracts. These cover concurrent generation allocation, partial or incorrect
 acknowledgments, a key mutation during management I/O, credential retirement,
 atomic enrollment, and Managed Work replay.
+
+The [Router image contract](../deploy/router/README.md) runs the packaged
+Supervisor and stock Router together. It uses separate management and data-plane
+CAs and verifies exact acknowledgment, mTLS connection, expiry, rollback
+rejection, and recovery. A local invocation requires Docker and the built Linux
+image in `INARI_TEST_ROUTER_IMAGE`; the image workflow runs this contract before
+publication.
