@@ -139,11 +139,12 @@ chart's configuration. A custom Controller image must use an explicit digest or
 tag. To select a tag, clear `image.digest` and set `image.tag`. The chart rejects
 an empty selection.
 
-Before enabling Routers, select a signed `ghcr.io/hadronomy/inari-router` image
-with `zenoh.image.digest` or an explicit `zenoh.image.tag`. Empty selection is
-rejected. Stock `eclipse/zenoh` images cannot run the Supervisor configuration.
-Production Release Sets pin the published digest. Test fixtures use an explicit
-verification tag and do not identify a published artifact.
+The default `zenoh.image.digest` selects a signed Router Supervisor from the
+same source as the Controller. To select a custom tag, clear
+`zenoh.image.digest` and set `zenoh.image.tag`. Empty selection is rejected.
+Stock `eclipse/zenoh` images cannot run the Supervisor configuration.
+Production Release Sets pin the published digest. Test fixtures clear the
+digest and use a verification tag that does not identify a published artifact.
 
 ## Upgrades and removal
 
