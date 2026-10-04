@@ -61,6 +61,30 @@ pub(crate) async fn native_agent_endpoint() -> AgentClientResult<Url> {
 }
 
 #[cfg(windows)]
+pub(crate) async fn native_setup_restart() -> AgentClientResult<()> {
+    tokio::task::spawn_blocking(|| decode_setup_restart(&read_native_response([3])?))
+        .await
+        .map_err(AgentClientError::pairing_unavailable)?
+}
+
+#[cfg(any(windows, test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeSetupRestartResponse {
+    restart_requested: bool,
+}
+
+#[cfg(any(windows, test))]
+fn decode_setup_restart(payload: &str) -> AgentClientResult<()> {
+    let response: NativeSetupRestartResponse =
+        serde_json::from_str(payload).map_err(AgentClientError::invalid_response)?;
+    if !response.restart_requested {
+        return Err(AgentClientError::Rejected);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
 fn read_native_response(request: [u8; 1]) -> AgentClientResult<String> {
     use std::{
         fs::OpenOptions,
@@ -181,6 +205,18 @@ fn decode_agent_endpoint(payload: &str) -> AgentClientResult<Url> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_restart_requires_an_explicit_acknowledgment() {
+        assert!(decode_setup_restart(r#"{"restart_requested":true}"#).is_ok());
+        for payload in [
+            r#"{"restart_requested":false}"#,
+            r#"{}"#,
+            r#"{"restart_requested":true,"service_state":"running"}"#,
+        ] {
+            assert!(decode_setup_restart(payload).is_err(), "{payload}");
+        }
+    }
 
     #[test]
     fn accepts_the_configured_https_agent_endpoint() {

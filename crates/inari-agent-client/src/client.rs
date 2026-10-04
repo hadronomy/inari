@@ -281,6 +281,13 @@ impl AgentClient {
         super::model::SetupSnapshot::try_from(response.into_inner())
     }
 
+    /// Request a runtime restart from the packaged Windows service host.
+    /// The host accepts this only when saved setup requires a restart.
+    #[cfg(windows)]
+    pub async fn restart_setup(&self) -> AgentClientResult<()> {
+        crate::pairing::native_setup_restart().await
+    }
+
     pub async fn api_reference(&self) -> AgentClientResult<Url> {
         self.endpoint()
             .await?

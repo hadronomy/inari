@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from ipaddress import ip_address
+from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
@@ -22,6 +23,12 @@ class NativeEndpointResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_endpoint: str
+
+
+class NativeSetupRestartResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    restart_requested: Literal[True] = True
 
 
 def native_agent_endpoint(settings: AgentSettings) -> str:
@@ -48,9 +55,7 @@ def native_agent_endpoint(settings: AgentSettings) -> str:
         or parsed.fragment
         or (parsed.port or (443 if tls_enabled else 80)) != settings.port
         or parsed.hostname not in settings.trusted_hosts
-        or (
-            not tls_enabled and not _is_loopback_endpoint(parsed.hostname)
-        )
+        or (not tls_enabled and not _is_loopback_endpoint(parsed.hostname))
     ):
         raise ValueError(
             "api.endpoint must name the trusted local listener without credentials, a path, query, or fragment."

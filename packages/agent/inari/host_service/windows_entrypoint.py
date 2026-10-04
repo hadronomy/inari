@@ -6,6 +6,7 @@ import importlib
 import logging
 import socket
 import sys
+import threading
 import traceback
 from pathlib import Path
 from typing import Any, Callable
@@ -70,13 +71,78 @@ def create_windows_service_class(
             self._controller: AgentServerController | None = None
             self._pairing_bootstrap = None
             self._stop_requested = False
+            self._restart_requested = False
+            self._runtime_lock = threading.Lock()
 
         def SvcStop(self) -> None:
-            self._stop_requested = True
-            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-            if self._controller is not None:
-                self._controller.request_shutdown()
+            with self._runtime_lock:
+                self._stop_requested = True
+                self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+                if self._controller is not None:
+                    self._controller.request_shutdown()
             win32event.SetEvent(self.hWaitStop)
+
+        def _request_setup_restart(self) -> None:
+            with self._runtime_lock:
+                if (
+                    self._stop_requested
+                    or self._restart_requested
+                    or self._controller is None
+                ):
+                    raise PermissionError("The Agent is already changing state.")
+                onboarding = self._controller.container.onboarding_service
+                if onboarding is None or not onboarding.status().restart_required:
+                    raise PermissionError("The Agent does not require a setup restart.")
+                self._restart_requested = True
+                self._controller.request_shutdown()
+
+        def _run_runtime(self) -> None:
+            _write_bootstrap_log("Loading service settings.")
+            settings = settings_loader()
+            _write_bootstrap_log(
+                f"Resolved config path: {get_windows_service_config_path() or 'production defaults'}"
+            )
+            _write_bootstrap_log("Building server controller.")
+            controller = AgentServerController.from_settings(settings)
+            with self._runtime_lock:
+                if self._stop_requested:
+                    return
+                self._controller = controller
+                self._restart_requested = False
+            try:
+                trust_service = controller.container.standalone_trust_service
+                if trust_service is not None:
+                    from .windows_pairing import WindowsPairingBootstrapServer
+
+                    self._pairing_bootstrap = (
+                        WindowsPairingBootstrapServer.for_current_package(
+                            trust_service,
+                            settings=settings,
+                            request_setup_restart=self._request_setup_restart,
+                        )
+                    )
+                    if self._pairing_bootstrap is not None:
+                        self._pairing_bootstrap.start()
+
+                def report_ready() -> None:
+                    with self._runtime_lock:
+                        if not self._stop_requested:
+                            self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+                            _write_bootstrap_log("Service host is ready.")
+
+                controller.run(on_started=report_ready)
+                if not self._stop_requested and not self._restart_requested:
+                    raise RuntimeError(
+                        "Agent server stopped without a service stop request. "
+                        "See agent.log for the startup failure."
+                    )
+            finally:
+                # Finish the pipe reply before another runtime can own the listener.
+                if self._pairing_bootstrap is not None:
+                    self._pairing_bootstrap.stop()
+                    self._pairing_bootstrap = None
+                with self._runtime_lock:
+                    self._controller = None
 
         def SvcDoRun(self) -> None:
             servicemanager, _, _, _ = _import_pywin32_service_modules()
@@ -86,36 +152,8 @@ def create_windows_service_class(
                 self.ReportServiceStatus(
                     win32service.SERVICE_START_PENDING, waitHint=20_000
                 )
-                _write_bootstrap_log("Loading service settings.")
-                settings = settings_loader()
-                _write_bootstrap_log(
-                    f"Resolved config path: {get_windows_service_config_path() or 'production defaults'}"
-                )
-                _write_bootstrap_log("Building server controller.")
-                self._controller = AgentServerController.from_settings(settings)
-                trust_service = self._controller.container.standalone_trust_service
-                if trust_service is not None:
-                    from .windows_pairing import WindowsPairingBootstrapServer
-
-                    self._pairing_bootstrap = (
-                        WindowsPairingBootstrapServer.for_current_package(
-                            trust_service,
-                            settings=settings,
-                        )
-                    )
-                    if self._pairing_bootstrap is not None:
-                        self._pairing_bootstrap.start()
-
-                def report_ready() -> None:
-                    self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-                    _write_bootstrap_log("Service host is ready.")
-
-                self._controller.run(on_started=report_ready)
-                if not self._stop_requested:
-                    raise RuntimeError(
-                        "Agent server stopped without a service stop request. "
-                        "See agent.log for the startup failure."
-                    )
+                while not self._stop_requested:
+                    self._run_runtime()
             # Uvicorn uses SystemExit when the API socket cannot bind.
             except (Exception, SystemExit) as exc:
                 _write_bootstrap_log(
@@ -132,8 +170,6 @@ def create_windows_service_class(
                 )
                 raise
             finally:
-                if self._pairing_bootstrap is not None:
-                    self._pairing_bootstrap.stop()
                 _write_bootstrap_log("Service host has stopped.")
                 servicemanager.LogInfoMsg(
                     f"{WINDOWS_SERVICE_DISPLAY_NAME} has stopped."
