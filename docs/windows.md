@@ -105,7 +105,8 @@ Check its provenance, package signature, and checksum before installation.
 
 Candidate mode does not publish packages or create a Version Packages PR.
 The attestation identifies the selected branch and source commit.
-The candidate needs pending release changes so its package version advances.
+The candidate needs a pending Device Center version change.
+A chart-only draft cannot create a Windows candidate.
 For an upgrade of an installed candidate, set `windows_candidate_sequence` to
 an alpha sequence greater than the installed sequence. The value cannot precede
 the pending Tegami version. Stable packages keep their independent versions.

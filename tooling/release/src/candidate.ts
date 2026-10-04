@@ -1,4 +1,4 @@
-import type { PackageDraft } from "tegami";
+import type { PackageDraft, PackageGraph } from "tegami";
 
 import { release } from "./config.ts";
 
@@ -22,13 +22,28 @@ export function setCandidateSequence(draft: PackageDraft, sequence: string): voi
   draft.bumpVersion = (pkg) => candidateVersion(bumpVersion(pkg), sequence);
 }
 
-export async function prepareWindowsCandidate(sequence = ""): Promise<void> {
-  const draft = await release.draft();
-  if (!draft.hasPending()) throw new Error("A candidate needs pending release changes.");
+export function configureWindowsCandidate(
+  graph: PackageGraph,
+  drafts: ReadonlyMap<string, PackageDraft>,
+  sequence: string,
+): void {
+  const id = "msix:inari-device-center";
+  const pkg = graph.get(id);
+  const pending = pkg && drafts.get(id)?.bumpVersion(pkg);
+  if (!pkg?.version || !pending || pending === pkg.version) {
+    throw new Error("A Windows candidate needs a pending Device Center version change.");
+  }
   if (sequence) {
-    for (const entry of draft.getPackageDrafts().values()) {
+    for (const entry of drafts.values()) {
       setCandidateSequence(entry, sequence);
     }
   }
+}
+
+export async function prepareWindowsCandidate(sequence = ""): Promise<void> {
+  // oxlint-disable-next-line no-underscore-dangle -- Tegami exposes the resolved package graph through this handle.
+  const { graph } = await release._internal.context();
+  const draft = await release.draft();
+  configureWindowsCandidate(graph, draft.getPackageDrafts(), sequence);
   await draft.apply();
 }
