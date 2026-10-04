@@ -67,6 +67,23 @@ impl Container {
 
 impl Drop for Container {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            for arguments in [
+                vec!["inspect", "--format", "{{json .State}}", &self.0],
+                vec!["logs", "--tail", "100", &self.0],
+            ] {
+                if let Ok(output) = Command::new("docker")
+                    .args(arguments)
+                    .output()
+                {
+                    eprintln!(
+                        "{}{}",
+                        String::from_utf8_lossy(&output.stdout),
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+            }
+        }
         let _ = Command::new("docker")
             .args(["rm", "--force", &self.0])
             .stdout(Stdio::null())
@@ -202,21 +219,23 @@ probe_private_key_file = "/etc/inari-router/probe.key"
         .build()
         .unwrap();
     let origin = format!("https://localhost:{}", management.port());
-    tokio::time::timeout(Duration::from_secs(15), async {
+    let mut last_error = String::new();
+    let startup = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
-            if client
+            match client
                 .get(format!("{origin}/status"))
                 .send()
                 .await
-                .is_ok()
             {
-                break;
+                Ok(response) if response.status().is_success() => break,
+                Ok(response) => last_error = format!("management returned {}", response.status()),
+                Err(error) => last_error = format!("{error:?}"),
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     })
-    .await
-    .expect("the packaged management server must start");
+    .await;
+    assert!(startup.is_ok(), "the packaged management server must start: {last_error}");
     assert!(
         data_session(directory.path(), data.port())
             .await
