@@ -48,6 +48,8 @@ jobs:
     name: Windows frozen Agent
     runs-on: windows-2025
     timeout-minutes: 20
+    env:
+      MISE_AUTO_INSTALL: "false"
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
