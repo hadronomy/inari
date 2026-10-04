@@ -4,6 +4,7 @@ import importlib
 import logging
 import sys
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from ..config import AgentSettings
@@ -12,6 +13,7 @@ from ..security.local_trust.native_bootstrap import (
     WINDOWS_PAIRING_PIPE,
     NativeEndpointResponse,
     NativePairingResponse,
+    NativeSetupRestartResponse,
     native_agent_endpoint,
 )
 from ..windows_identity import current_package_family_name, package_family_for_token
@@ -23,7 +25,7 @@ _PIPE_SDDL = "D:P(A;;GA;;;SY)(A;;GA;;;LS)(A;;GRGW;;;AU)"
 
 
 class WindowsPairingBootstrapServer:
-    """Issue one-use pairing material only to the sibling packaged tray."""
+    """Serve local bootstrap and setup requests from the sibling packaged UI."""
 
     def __init__(
         self,
@@ -31,10 +33,12 @@ class WindowsPairingBootstrapServer:
         *,
         package_family: str,
         agent_endpoint: str,
+        request_setup_restart: Callable[[], None] | None = None,
     ) -> None:
         self._trust_service = trust_service
         self._package_family = package_family
         self._agent_endpoint = agent_endpoint
+        self._request_setup_restart = request_setup_restart
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         if sys.platform != "win32":
@@ -46,6 +50,7 @@ class WindowsPairingBootstrapServer:
         trust_service: StandaloneTrustService,
         *,
         settings: AgentSettings,
+        request_setup_restart: Callable[[], None],
     ) -> WindowsPairingBootstrapServer | None:
         package_family = current_package_family_name()
         if package_family is None:
@@ -54,6 +59,7 @@ class WindowsPairingBootstrapServer:
             trust_service,
             package_family=package_family,
             agent_endpoint=native_agent_endpoint(settings),
+            request_setup_restart=request_setup_restart,
         )
 
     def start(self) -> None:
@@ -96,14 +102,21 @@ class WindowsPairingBootstrapServer:
         # Reading first concedes nothing, since the pairing secret is minted
         # only after the package family matches.
         _, request = win32file.ReadFile(pipe, 1)
-        if bytes(request) not in (b"\x01", b"\x02"):
+        if bytes(request) not in (b"\x01", b"\x02", b"\x03"):
             raise ValueError("The native pairing request is invalid.")
         if _client_package_family(pipe) != self._package_family:
             raise PermissionError(
                 "The pairing client is not part of the Inari MSIX package."
             )
-        response: NativeEndpointResponse | NativePairingResponse
-        if bytes(request) == b"\x02":
+        response: (
+            NativeEndpointResponse | NativePairingResponse | NativeSetupRestartResponse
+        )
+        if bytes(request) == b"\x03":
+            if self._request_setup_restart is None:
+                raise PermissionError("Setup restart is not available in this host.")
+            self._request_setup_restart()
+            response = NativeSetupRestartResponse()
+        elif bytes(request) == b"\x02":
             response = NativeEndpointResponse(agent_endpoint=self._agent_endpoint)
         else:
             pairing = self._trust_service.start_native_pairing()

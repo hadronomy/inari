@@ -10,6 +10,9 @@ use tokio::{
 pub enum SetupProgressError {
     #[error(transparent)]
     Agent(#[from] AgentClientError),
+    #[cfg(not(windows))]
+    #[error(transparent)]
+    Service(#[from] inari_agent_client::ServiceControlError),
     #[error("Inari did not finish connecting. Select Check again to read its state.")]
     TimedOut,
 }

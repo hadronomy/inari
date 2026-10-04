@@ -205,6 +205,14 @@ package family for endpoint discovery and pairing. Request byte `0x02` returns
 create or rotate pairing material. Request byte `0x01` returns the one-use
 pairing secret and its expiry.
 
+Request byte `0x03` asks the service host to apply a saved setup restart.
+The service checks the caller's package family and its pending setup state.
+An accepted request returns `{"restart_requested":true}`. The host completes
+the pipe reply and stops the old runtime before it builds the next runtime.
+This acknowledgment proves that the host accepted the restart request.
+Device Center still requires an authoritative setup completion response before
+it opens the operations window.
+
 For a TLS listener, set `[api].endpoint` in the protected Agent config. Use the
 certificate hostname and the actual listener port:
 
@@ -234,13 +242,18 @@ the new service refuses startup because it cannot advertise a valid HTTPS name.
 
 After you accept an invitation, Device Center can show **Restart Inari to
 continue**. The Agent saved the connection. Select **Restart Agent** to apply it.
-Device Center remains open during the service restart.
+Device Center remains open during the Agent runtime restart.
 
-Device Center waits for the native service to stop and start. It then reads
-setup progress until the Agent requests Device selection or reports an error.
-Each native service transition has a 30-second limit. The connection check has
-a 90-second limit. If the connection check stops, select **Check again**.
-If the service restart fails, the restart action remains available.
+The packaged UI requests this restart through the package-verified local pipe.
+The service host accepts it only when saved setup requires a restart.
+It stops the current runtime, reloads the protected settings, and starts a fresh
+runtime under the same service account. Standard users need no service-control
+permission for this setup action. General service controls retain their Windows
+permissions.
+
+Device Center reads setup progress until the Agent requests Device selection or
+reports an error. The connection check has a 90-second limit. If the connection
+check stops, select **Check again**. If the restart fails, its action remains available.
 If the Agent still requires a restart after the connection check, select
 **Restart Agent** again.
 

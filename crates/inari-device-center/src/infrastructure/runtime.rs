@@ -169,6 +169,29 @@ impl AgentRuntime {
         self.spawn_future(async move { service.restart().await })
     }
 
+    pub fn restart_setup(&self) -> oneshot::Receiver<Result<(), super::SetupProgressError>> {
+        #[cfg(windows)]
+        {
+            self.spawn(|client| async move {
+                client
+                    .restart_setup()
+                    .await
+                    .map_err(Into::into)
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let service = self.service.clone();
+            self.spawn_future(async move {
+                let state = service.restart().await?;
+                if state != ServiceState::Running {
+                    return Err(inari_agent_client::ServiceControlError::UnexpectedState.into());
+                }
+                Ok(())
+            })
+        }
+    }
+
     pub fn follow_setup(
         &self,
         mode: super::SetupProgressMode,

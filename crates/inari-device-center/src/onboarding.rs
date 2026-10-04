@@ -24,8 +24,7 @@ use gpui_component::{
     scroll::ScrollableElement as _,
 };
 use inari_agent_client::{
-    DeviceId, EnrollmentPreview, InvitationLink, ServiceState, SetupAccess, SetupSnapshot,
-    SetupStage,
+    DeviceId, EnrollmentPreview, InvitationLink, SetupAccess, SetupSnapshot, SetupStage,
 };
 
 use crate::{
@@ -491,14 +490,14 @@ impl Onboarding {
         }
         self.working = true;
         self.error = None;
-        let response = self.runtime.restart_service();
+        let response = self.runtime.restart_setup();
         self._setup_task = cx.spawn(async move |onboarding, cx| {
             let result = response.await;
             if let Some(onboarding) = onboarding.upgrade() {
                 onboarding
                     .update(cx, |onboarding, cx| {
                         match result {
-                            Ok(Ok(ServiceState::Running)) => {
+                            Ok(Ok(())) => {
                                 onboarding._setup_task = Self::follow_setup(
                                     onboarding.runtime.clone(),
                                     SetupProgressMode::AfterRestart,

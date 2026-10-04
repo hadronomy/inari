@@ -35,7 +35,9 @@ def test_loopback_endpoint_uses_the_actual_listener_port() -> None:
         ("localhost", "http://localhost:7410/"),
     ],
 )
-def test_loopback_endpoint_uses_the_actual_listener_host(host: str, endpoint: str) -> None:
+def test_loopback_endpoint_uses_the_actual_listener_host(
+    host: str, endpoint: str
+) -> None:
     settings = AgentSettings(host=host, port=7410, trusted_hosts=[host])
     assert native_agent_endpoint(settings) == endpoint
 
@@ -121,5 +123,69 @@ def test_endpoint_discovery_rejects_an_unrelated_package(mocker) -> None:
     )
 
     with pytest.raises(PermissionError):
+        server._serve_client("pipe")
+    file_api.WriteFile.assert_not_called()
+
+
+@pytest.mark.parametrize("package", ["Inari.Test", "Other.Package", None])
+def test_setup_restart_requires_the_sibling_package(mocker, package) -> None:
+    mocker.patch("inari.host_service.windows_pairing.sys.platform", "win32")
+    mocker.patch(
+        "inari.host_service.windows_pairing._client_package_family",
+        return_value=package,
+    )
+    file_api = SimpleNamespace(
+        ReadFile=mocker.Mock(return_value=(0, b"\x03")),
+        WriteFile=mocker.Mock(),
+        FlushFileBuffers=mocker.Mock(),
+    )
+    mocker.patch(
+        "inari.host_service.windows_pairing.importlib.import_module",
+        return_value=file_api,
+    )
+    restart = mocker.Mock()
+    trust = mocker.Mock()
+    server = WindowsPairingBootstrapServer(
+        trust,
+        package_family="Inari.Test",
+        agent_endpoint="https://agent.example.com:7310/",
+        request_setup_restart=restart,
+    )
+    if package == "Inari.Test":
+        server._serve_client("pipe")
+        restart.assert_called_once_with()
+        file_api.WriteFile.assert_called_once_with(
+            "pipe", b'{"restart_requested":true}'
+        )
+        file_api.FlushFileBuffers.assert_called_once_with("pipe")
+    else:
+        with pytest.raises(PermissionError):
+            server._serve_client("pipe")
+        restart.assert_not_called()
+        file_api.WriteFile.assert_not_called()
+    trust.start_native_pairing.assert_not_called()
+
+
+def test_rejected_setup_restart_has_no_success_reply(mocker) -> None:
+    mocker.patch("inari.host_service.windows_pairing.sys.platform", "win32")
+    mocker.patch(
+        "inari.host_service.windows_pairing._client_package_family",
+        return_value="Inari.Test",
+    )
+    file_api = SimpleNamespace(
+        ReadFile=mocker.Mock(return_value=(0, b"\x03")),
+        WriteFile=mocker.Mock(),
+    )
+    mocker.patch(
+        "inari.host_service.windows_pairing.importlib.import_module",
+        return_value=file_api,
+    )
+    server = WindowsPairingBootstrapServer(
+        mocker.Mock(),
+        package_family="Inari.Test",
+        agent_endpoint="https://agent.example.com:7310/",
+        request_setup_restart=mocker.Mock(side_effect=PermissionError("not required")),
+    )
+    with pytest.raises(PermissionError, match="not required"):
         server._serve_client("pipe")
     file_api.WriteFile.assert_not_called()

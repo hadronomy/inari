@@ -7,6 +7,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 from inari.config import AgentSettings
 
 
@@ -518,3 +520,197 @@ def test_module_entrypoint_invokes_main_when_run_as_script(
     runpy.run_module("inari.host_service.windows_entrypoint", run_name="__main__")
 
     cast(Any, fake_win32serviceutil).HandleCommandLine.assert_called_once()
+
+
+@pytest.fixture
+def restart_host(mocker):
+    class ServiceFramework:
+        def __init__(self, args):
+            self.statuses = []
+
+        def ReportServiceStatus(self, status, **kwargs):
+            self.statuses.append(status)
+
+    mocker.patch(
+        "inari.host_service.windows_entrypoint._import_pywin32_service_modules",
+        return_value=(
+            SimpleNamespace(LogInfoMsg=mocker.Mock(), LogErrorMsg=mocker.Mock()),
+            SimpleNamespace(CreateEvent=mocker.Mock(), SetEvent=mocker.Mock()),
+            SimpleNamespace(
+                SERVICE_START_PENDING=2,
+                SERVICE_RUNNING=4,
+                SERVICE_STOP_PENDING=3,
+                SERVICE_STOPPED=1,
+            ),
+            SimpleNamespace(ServiceFramework=ServiceFramework),
+        ),
+    )
+    mocker.patch("inari.host_service.windows_entrypoint._write_bootstrap_log")
+    mocker.patch(
+        "inari.host_service.windows_entrypoint.get_windows_service_config_path",
+        return_value=None,
+    )
+    from inari.host_service.windows_entrypoint import create_windows_service_class
+
+    return create_windows_service_class(settings=AgentSettings())(["InariAgent"])
+
+
+def test_setup_restart_reloads_settings_after_runtime_and_pipe_stop(
+    mocker, restart_host
+) -> None:
+    host = restart_host
+    order = []
+    settings = [AgentSettings(port=7310), AgentSettings(port=7410)]
+    loader = mocker.patch(
+        "inari.host_service.windows_entrypoint._build_settings_loader",
+        return_value=mocker.Mock(side_effect=settings),
+    )
+    # The service class captures its loader when SCM constructs the host.
+    from inari.host_service.windows_entrypoint import create_windows_service_class
+
+    host = create_windows_service_class()(["InariAgent"])
+    controllers = [
+        SimpleNamespace(
+            container=SimpleNamespace(
+                standalone_trust_service=mocker.Mock(),
+                onboarding_service=SimpleNamespace(
+                    status=mocker.Mock(
+                        return_value=SimpleNamespace(restart_required=required)
+                    )
+                ),
+            ),
+            request_shutdown=mocker.Mock(),
+            run=mocker.Mock(),
+        )
+        for required in [True, False]
+    ]
+
+    def build_controller(loaded):
+        index = settings.index(loaded)
+        order.append(f"build:{index}")
+        return controllers[index]
+
+    factory = mocker.patch(
+        "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
+        side_effect=build_controller,
+    )
+    pipes = [
+        SimpleNamespace(
+            start=mocker.Mock(),
+            stop=mocker.Mock(side_effect=lambda i=i: order.append(f"pipe-stop:{i}")),
+        )
+        for i in range(2)
+    ]
+    pairing = mocker.patch(
+        "inari.host_service.windows_pairing.WindowsPairingBootstrapServer.for_current_package",
+        side_effect=pipes,
+    )
+
+    def first_run(*, on_started):
+        on_started()
+        pairing.call_args.kwargs["request_setup_restart"]()
+        controllers[0].request_shutdown.assert_called_once_with()
+        order.append("runtime-stop:0")
+
+    def second_run(*, on_started):
+        on_started()
+        host.SvcStop()
+        order.append("runtime-stop:1")
+
+    controllers[0].run.side_effect = first_run
+    controllers[1].run.side_effect = second_run
+    host.SvcDoRun()
+
+    assert order == [
+        "build:0",
+        "runtime-stop:0",
+        "pipe-stop:0",
+        "build:1",
+        "runtime-stop:1",
+        "pipe-stop:1",
+    ]
+    assert [call.args[0] for call in factory.call_args_list] == settings
+    assert loader.return_value.call_count == 2
+    assert host.statuses == [2, 4, 4, 3]
+    assert host._controller is None
+    assert host._pairing_bootstrap is None
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_setup_restart_accepts_only_a_pending_saved_setup(
+    mocker, restart_host, required
+) -> None:
+    host = restart_host
+    controller = SimpleNamespace(
+        container=SimpleNamespace(
+            onboarding_service=SimpleNamespace(
+                status=mocker.Mock(
+                    return_value=SimpleNamespace(restart_required=required)
+                )
+            )
+        ),
+        request_shutdown=mocker.Mock(),
+    )
+    host._controller = controller
+    if required:
+        host._request_setup_restart()
+        assert host._restart_requested
+        with pytest.raises(PermissionError, match="already changing state"):
+            host._request_setup_restart()
+        controller.request_shutdown.assert_called_once_with()
+    else:
+        with pytest.raises(PermissionError, match="does not require"):
+            host._request_setup_restart()
+        controller.request_shutdown.assert_not_called()
+        assert not host._restart_requested
+
+
+def test_service_stop_wins_over_an_accepted_setup_restart(mocker, restart_host):
+    host = restart_host
+    controller = SimpleNamespace(
+        container=SimpleNamespace(
+            standalone_trust_service=None,
+            onboarding_service=SimpleNamespace(
+                status=lambda: SimpleNamespace(restart_required=True)
+            ),
+        ),
+        run=mocker.Mock(),
+        request_shutdown=mocker.Mock(),
+    )
+    factory = mocker.patch(
+        "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
+        return_value=controller,
+    )
+
+    def run(*, on_started):
+        on_started()
+        host._request_setup_restart()
+        host.SvcStop()
+
+    controller.run.side_effect = run
+    host.SvcDoRun()
+
+    factory.assert_called_once()
+    assert host.statuses == [2, 4, 3]
+    with pytest.raises(PermissionError, match="already changing state"):
+        host._request_setup_restart()
+
+
+def test_service_stop_during_settings_reload_never_starts_a_runtime(
+    mocker, restart_host
+):
+    host = restart_host
+
+    def build(_settings):
+        host.SvcStop()
+        return SimpleNamespace(run=mocker.Mock())
+
+    factory = mocker.patch(
+        "inari.host_service.windows_entrypoint.AgentServerController.from_settings",
+        side_effect=build,
+    )
+    host.SvcDoRun()
+
+    factory.assert_called_once()
+    assert host.statuses == [2, 3]
+    assert host._controller is None
