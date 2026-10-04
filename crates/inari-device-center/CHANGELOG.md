@@ -1,3 +1,264 @@
+## inari-device-center@1.20.0-alpha.13
+
+### Restore pairing between Device Center and the agent
+
+Device Center identifies itself to the agent over the pairing pipe by the token the pipe hands back, rather than by opening its own process. The agent runs as LocalService and holds no rights over a process owned by the signed-in user, so the old check was refused before it could be answered and every installation reported the agent as unreachable while it was running normally.
+
+### Report the real Windows service state
+
+The agent service state now comes from the Service Control Manager instead of the English words in `sc.exe` output. On a Windows installed in another language a running service read as stopped, and Support offered to start a service that had never stopped.
+
+### Build the Windows release on any signed host
+
+The release build resolves the HLSL shader compiler from the installed Windows kits rather than depending on one hardcoded SDK version, freezes the agent against a system Python, and rejects payload binaries whose signature table points past the end of the file. Windows rejects such a package as a whole and names no file, so the build now names it first.
+
+### Polish the shell: hover, alerts, and the titlebar
+
+Hovering now eases instead of snapping. Every wash the Device Center paints —
+rail items, device rows, attention rows, the health chip, and the window
+caption buttons — fades over 150 ms, the duration the web and the desktops
+around it have trained everyone to expect. Moving the pointer fast across the
+interface leaves no chunky trail: each wash is a pure function of the clock,
+so a dropped frame lands on the exact right position instead of losing
+motion, and reversing mid-fade continues from wherever the pointer left it.
+
+The alert's pixel cascade now meets the card's rounded corners the way the
+card's own background does. The wall used to drop whole cells around the arc,
+which cut a second, coarser corner into the surface; it now fades each cell by
+how much of it the corner covers, and the end rows of a full-bleed list carry
+the card's curve so a hovered or selected row can no longer square the corners
+off the card holding it.
+
+The brand mark in the titlebar starts on the rail's own inset on Windows and
+Linux, so it sits on the same vertical line as the navigation below it instead
+of pressing against the window edge.
+
+### Dragging no longer crashes the application
+
+Dragging any window could take the whole application down. The caption press
+was answered with a synchronous system call that started the move loop inside
+the event dispatch; the loop then delivered a pending task into an app that
+was mid-borrow, and the borrow won. The press is now queued for the next
+turn of the event loop, so the move starts on a clean stack. Panics also
+reach the log file now, with their message and location, instead of
+vanishing into a windowless process.
+
+### Scrollbars you can see and grab
+
+Every scrolling surface — the five screens, the dev previews, and the
+enrollment window — now carries an overlay scrollbar: a thumb-only bar inset
+from the panel edge, shown while scrolling or hovering and faded after idle,
+draggable, widening on hover, and honouring the OS auto-hide preference. The
+scroll position also survives re-renders, where before a page reset could
+lose it.
+
+### The gate: the path carries its state
+
+The Overview gate's connectors are live wires now. While traffic passes,
+discrete packets of light travel the line from this computer, through the
+agent, out to the devices, flanked above and below by pixel sine traces at
+different frequencies and amplitudes — an information field rippling around
+the path, in the same staggered phase language as the alert's cascade. On
+a caution tone the traffic corrupts: travelling tears cross the wire —
+cells drop into dead air, packets lurch, the flanking traces jump out of
+phase and flash the danger tone — a link that needs attention, not a
+broken one. When the path fails, the wire goes still, the
+cross speaks the danger tone, and one last packet leaves the source and dies
+at the break: the attempt the wire made before it went down. With motion
+off, the wire reads as the same path at rest.
+
+### The credential field
+
+The invitation field is a purpose-built instrument now, not a bordered
+rectangle. Its edge rests on the hairline, warms to the vermilion while the
+field holds focus, and a soft accent ring arrives over the same 150 ms every
+other wash uses. A link that parses earns a quiet check on the trailing edge
+— positive feedback only, never a scolding mid-type. A submitted link that
+fails on the text hands the edge and the fill to the danger tone, eased in
+like every other state, while the banner above carries the words; a network
+failure with a well-formed link leaves the field alone. Enter submits from
+the field, and the review action stays disabled while the field is empty.
+
+### Support hands over the facts instead of displaying them
+
+Support exists for a moment that is going badly, and the question is always
+the same: what version, what address, what did it actually say. The screen
+used to answer those and stop there, leaving the operator to retype an
+endpoint and three lines of error text into a ticket out of a window they
+could not select from.
+
+Technical details is now a readout where every fact is one press from the
+clipboard, and the whole set is one more. Pointing at a row lights it and
+offers a copy; pressing it copies that value and marks the row with a tick
+that leaves on its own. "Copy all details" puts the lot on the clipboard as
+aligned plain text, stamped with the moment it was collected, so it pastes
+into a ticket or a chat window already readable. The wrap points that keep a
+long URL inside its card are painted and never copied — a link pasted into a
+browser resolves.
+
+Two facts joined the ones already there. Support reports the operating system
+and architecture the build is running on, and the full path to the log folder:
+the button beside it is the faster route for the person at the keyboard, and
+the path is the only route for the administrator who is not.
+
+The card itself reads as an instrument now. Labels sit in a fixed column so
+every value starts on one edge, labels stay in the reading face while values
+are set in the technical one, and nothing is ruled between the rows — the
+pointer marks the row instead.
+
+### A new technical face: Departure Mono
+
+Every monospaced string in the application — identifiers, endpoints, paths,
+and diagnostics — is now set in Departure Mono, embedded in the application
+rather than borrowed from the system. The readouts look the same on Windows,
+macOS, and Linux instead of inheriting three different faces.
+
+It is a pixel face, so its size is not a free choice: the outlines sit on a
+grid that lands on whole device pixels only at multiples of 11px, where the
+advance measures exactly 7px and the cap exactly 8px. At that size it reads at
+the same optical scale as the system mono it replaces, so the readouts got
+sharper rather than smaller.
+
+### Buttons that answer the pointer
+
+Buttons are the application's own now. Their fill eases over the same 150 ms
+as every other surface in the window instead of snapping in one frame, they
+carry the pointer cursor, and their label warms as the pointer arrives. The
+material matches the credential field's — a fill, an edge, and a pixel of
+light along the top lip — and the fill is the only thing that moves: no lift,
+no scale, and no shadow that a translucent window would show through as an
+inner glow.
+
+### Buttons that change their mind, in front of you
+
+A copy button that answers with a tick was landing that tick in a single
+frame — the change was over before the eye that caused it arrived. The glyph
+and the label now cross over: the mark being replaced shrinks and fades while
+the one arriving grows into its place, and the words leave upward and come back
+from below.
+
+The control never changes size doing it. The resting label holds the width, so
+"Copy all details" becoming "Copied" leaves the two buttons beside it exactly
+where they were, and the glyph stays beside its own word rather than stranded
+across the gap the shorter label would open.
+
+Both halves run on one duration, so the button reads as one thing changing its
+mind rather than a mark and a word on separate clocks. Reversing halfway —
+a second copy landing while the tick is still leaving — continues from where it
+had got to instead of starting over.
+
+### Connect Device Center to the Agent's HTTPS listener
+
+Windows Device Center now reads the protected Agent Endpoint before it connects.
+HTTPS requests and event subscriptions use the operating system's certificate
+trust. Pairing secrets retain their separate, authenticated bootstrap operation.
+
+Unpackaged Windows development runs use loopback bootstrap. Non-TLS discovery
+uses the configured loopback host and port, including IPv6 listeners.
+
+Before upgrading a Windows Agent with TLS, set `[api].endpoint` to its
+certificate hostname and listener port. See the Windows installation guide.
+
+### Approve Odoo browser access in Device Center
+
+Open an Odoo Pairing Request link or paste its ID in Client Pairing. Review the
+matching phrase, Odoo origin, Agent Endpoint, business scope, and requested
+permissions before approving or denying access. The screen keeps the request
+visible while it saves a decision and explains expired and completed requests.
+
+Enrollment links continue to open the separate Enrollment window. Windows
+activation sends Client Pairing links to the review screen in the existing app.
+
+### Connect Device Center to the local HTTPS Agent
+
+Device Center uses loopback for local authentication and event streams. It keeps the Agent Endpoint hostname for TLS verification. LAN and overlay DNS no longer cause local authentication failures.
+
+### Keep Linux controls visible during transitions
+
+Linux draws control labels and icons without blur. The pinned renderer cannot
+draw captured content, so these controls now keep their original content.
+
+### Build signed Windows candidates before release
+
+The release workflow can build a Windows candidate from a selected branch.
+The candidate uses the protected signing environment and includes provenance,
+checksums, and an SBOM. It does not publish packages or change release branches.
+
+### Upgrade installed Windows candidates
+
+Signed branch candidates can use a higher alpha sequence for an installed candidate upgrade. The sequence cannot precede the pending release version. Stable packages keep their independent versions.
+
+### Bind enrollment certificates to the Agent Identity
+
+Enrollment rejects Agent identifiers and certificate requests that do not match
+the protected Ed25519 identity. Certificate issuance and renewal reject incorrect
+subjects, missing SANs, additional names, and duplicate names.
+The Agent validates the full certificate chain against its pinned CA root and
+stores the verified intermediate chain for mutual TLS. A CA response cannot
+replace the pinned root.
+Root bootstrap accepts exactly one pinned CA. Certificate requests trust only
+that CA and require client key usage for TLS signatures. The Controller requires
+a SHA-256 CA pin in step-ca mode.
+
+The chart now keeps enrollment and Zenoh disabled by default. Provision the CA
+and exact per-Agent Router policy before enabling them.
+
+Certificate names now come from the Agent Identity. Remove
+`managedGateway.certificate.stepCa.authorizedSans` from Helm values and
+`step_ca_authorized_sans` from a Controller configuration before upgrading an
+existing step-ca deployment.
+
+Installed certificates now receive the same trust and identity checks before use.
+The Agent repairs a cached CA against its pin and replaces obsolete certificate
+names when fresh enrollment provides a one-time token. The protected key stays
+unchanged. All CA endpoints require HTTPS.
+
+Managed publication and Device Work now stop when certificate validation fails.
+The Agent closes an existing session and reports the certificate error in setup.
+Controller HTTPS uses separate trust before enrollment. A new invitation replaces
+cached enrollment and old configured credentials without replacing the Agent key.
+Concurrent enrollment calls share one request and preserve newer invitations.
+
+Root bootstrap reads Smallstep's JSON response. Issuance and renewal use the
+canonical Smallstep endpoints and retain the complete intermediate chain.
+
+Upgrade the Agent and Controller together for gateway protocol `2026-10-03`
+before enabling enrollment. Enrollment no longer sends an installed certificate,
+and the Controller migration removes its unused stored certificate column.
+
+The Controller migration removes an Agent column that old replicas still select.
+Keep managed enrollment and Zenoh disabled until all Controller replicas use the
+new release. A binary rollback across this migration is not supported. Recover
+with the matching database backup and Release Set.
+
+### Keep concurrent Controller documents responsive
+
+The Controller discovers its fixed web routes once before it serves documents.
+Concurrent Router construction can no longer interrupt Resource loading in an
+active document stream.
+
+### Continue setup after an Agent restart
+
+Device Center now provides a Restart Agent action when an invitation needs a
+runtime restart. On Windows, the service host applies the saved setup through a
+package-verified local request. Standard users need no service-control permission
+for this action. Device Center then shows connection progress and Device selection.
+Failed restarts remain available for retry. A connection check that stops offers
+Check again.
+Native service requests stop after ten seconds if the service does not reply.
+
+Setup keeps Device access blocked until the Agent reports completion.
+Setup completion refreshes the operations window and tray. Closing setup hides
+the window, and the tray restores it with its current progress. Service actions
+wait for completion and reject concurrent requests from another window.
+
+### Explore components and inspect each window
+
+Device Center includes the updated interface and brand assets. Debug builds
+provide the component Bench and four inspector screens. Frame histories belong
+to each window. Story controls stay in the Bench, and the outline preference
+applies to all windows.
+
 ## inari-device-center@1.20.0-alpha.12
 
 ### Preserve the configured OIDC issuer
