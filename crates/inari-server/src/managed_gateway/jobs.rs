@@ -21,6 +21,8 @@ impl ManagedGatewayController {
         request: JobRequest,
     ) -> AppResult<JobReceipt> {
         self.ensure_enabled()?;
+        self.router_admission(agent_id.as_str())
+            .await?;
         let command = self
             .inner
             .store
@@ -84,6 +86,9 @@ impl ManagedGatewayController {
         &self,
         command: &StoredControllerCommand,
     ) -> AppResult<ControllerCommand> {
+        let admission = self
+            .router_admission(command.agent_id.as_str())
+            .await?;
         let managed_work_id = match &command.command {
             CommandContent::Inline(message) => return Ok((**message).clone()),
             CommandContent::ManagedWork { managed_work_id } => managed_work_id,
@@ -114,6 +119,11 @@ impl ManagedGatewayController {
                 "Managed Payload does not match its dispatch metadata or deadline.",
             ));
         }
+        self.inner
+            .store
+            .repository()?
+            .require_router_admission(&admission, command.agent_id.as_str())
+            .await?;
         Ok(message)
     }
 

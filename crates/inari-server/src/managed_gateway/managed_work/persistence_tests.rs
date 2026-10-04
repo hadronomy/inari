@@ -24,7 +24,8 @@ use crate::config::{ManagedGatewayConfig, OrganizationConfig, ZenohConfig};
 use crate::error::{AppError, AppResult};
 use crate::managed_gateway::payload::{ManagedPayloadKeyWrapper, TransitWrappedKey};
 use crate::managed_gateway::{
-    ManagedDispatchSigner, ManagedGatewayController, ManagedPayloadProtector, ManagedWorkSecurity,
+    ManagedDispatchSigner, ManagedGatewayController, ManagedGatewaySecurity,
+    ManagedPayloadProtector, ManagedWorkSecurity,
 };
 use crate::zenoh::ZenohSupervisor;
 
@@ -119,17 +120,25 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
         .await
         .unwrap();
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
+    seed_router_keys(&pool).await;
     let controller = ManagedGatewayController::new(
         config,
         OrganizationConfig { id: "org_example".parse().unwrap(), ..Default::default() },
         ZenohConfig::default(),
         zenoh,
         Some(repository.clone()),
-        None,
-        Some(Arc::new(ManagedWorkSecurity::new(
-            signer,
-            ManagedPayloadProtector::new(Arc::new(TestKeyWrapper::default())),
-        ))),
+        ManagedGatewaySecurity {
+            router_admission: Some(super::super::router_policy_tests::admission_controller(
+                repository.clone(),
+                "org_example",
+                "inari/org_example/site_example",
+            )),
+            managed_work: Some(Arc::new(ManagedWorkSecurity::new(
+                signer,
+                ManagedPayloadProtector::new(Arc::new(TestKeyWrapper::default())),
+            ))),
+            ..Default::default()
+        },
     );
     let mut submission = submission();
     prepare_submission(&controller, &mut submission).await;
@@ -156,7 +165,11 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     ))
     .unwrap();
     let key = &fixture["public_jwk"];
-    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_example', 'transport_identity', 'state-test', $2, now())")
+    sqlx::query("UPDATE agent_verification_keys SET retired_at = now() WHERE key_id = 'key_test'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', 'transport_identity', 'state-test', $2, now())")
         .bind(key["kid"].as_str().unwrap()).bind(key).execute(&pool).await.unwrap();
     let mut observation: AgentStateObservation =
         serde_json::from_value(fixture["claims"].clone()).unwrap();
@@ -202,11 +215,17 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     let terminal = state_publication(&observation, &command_id);
     assert!(
         repository
-            .record_publication("agt_example", "test", &terminal, now)
+            .record_publication("agt_000000000000000000000001", "test", &terminal, now)
             .await
             .is_err(),
         "transport identity cannot sign Agent State"
     );
+    sqlx::query(
+        "UPDATE agent_verification_keys SET retired_at = now() WHERE key_id = 'placeholder_state'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query("UPDATE agent_verification_keys SET purpose = 'agent_state' WHERE key_id = $1")
         .bind(key["kid"].as_str().unwrap())
         .execute(&pool)
@@ -224,7 +243,7 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
         assert!(
             repository
                 .record_publication(
-                    "agt_example",
+                    "agt_000000000000000000000001",
                     "test",
                     &state_publication(&wrong, &command_id),
                     now
@@ -256,11 +275,11 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     );
     sqlx::query("UPDATE managed_work SET state = 'recovery_uncertain' WHERE managed_work_id = 'mw_observation'")
         .execute(&pool).await.unwrap();
-    let commit_key = "iot/v1/agents/agt_example/state/commit";
+    let commit_key = "iot/v1/agents/agt_000000000000000000000001/state/commit";
     let commit_payload = serde_json::to_vec(&terminal).unwrap();
     for key in [
         "iot/v1/agents/agt_unknown/state/commit",
-        "iot/v1/agents/agt_example/extra/state/commit",
+        "iot/v1/agents/agt_000000000000000000000001/extra/state/commit",
         "iot/v1/agents/*/state/commit",
     ] {
         assert!(
@@ -312,7 +331,12 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
         0
     );
     repository
-        .record_publication("agt_example", "test", &state_publication(&accepted, &command_id), now)
+        .record_publication(
+            "agt_000000000000000000000001",
+            "test",
+            &state_publication(&accepted, &command_id),
+            now,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -331,7 +355,7 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     assert!(
         repository
             .record_publication(
-                "agt_example",
+                "agt_000000000000000000000001",
                 "test",
                 &state_publication(&conflicting, &command_id),
                 now
@@ -347,7 +371,7 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     assert!(
         repository
             .record_publication(
-                "agt_example",
+                "agt_000000000000000000000001",
                 "test",
                 &state_publication(&conflicting, &command_id),
                 now
@@ -370,7 +394,7 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
         .await
         .unwrap();
     repository
-        .record_publication("agt_example", "test", &terminal, retired_at)
+        .record_publication("agt_000000000000000000000001", "test", &terminal, retired_at)
         .await
         .unwrap();
     let mut fresh = accepted.clone();
@@ -379,7 +403,7 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     fresh.issued_at = fresh.observed_at;
     let error = repository
         .record_publication(
-            "agt_example",
+            "agt_000000000000000000000001",
             "test",
             &state_publication(&fresh, &command_id),
             fresh.observed_at,
@@ -395,7 +419,7 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     fresh.issued_at = now;
     let error = repository
         .record_publication(
-            "agt_example",
+            "agt_000000000000000000000001",
             "test",
             &state_publication(&fresh, &command_id),
             retired_at,
@@ -446,12 +470,12 @@ async fn seed_database(pool: &PgPool) {
          INSERT INTO sites (site_id, organization_id, name) VALUES ('site_example', 'org_example', 'Test site');
          INSERT INTO agents (agent_id, organization_id, site_id, key_id, jwk_thumbprint, public_jwk,
              namespace, protocol_version, controller_actions, enrolled_at, last_enrolled_at)
-         VALUES ('agt_example', 'org_example', 'site_example', 'key_test', 'test',
+         VALUES ('agt_000000000000000000000001', 'org_example', 'site_example', 'key_test', 'test',
              '{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"x\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}',
-             'inari/org_example/site_example/agt_example', '1.0', '[\"managed_work:dispatch\"]', now(), now());
+             'inari/org_example/site_example/agt_000000000000000000000001', '1.0', '[\"managed_work:dispatch\"]', now(), now());
          INSERT INTO devices (device_id, agent_id, site_id, kind, display_name, state, transport,
              hardware_fingerprint, capabilities, first_seen_at, last_seen_at)
-         VALUES ('dev_printer', 'agt_example', 'site_example', 'printer', 'Test printer', 'online',
+         VALUES ('dev_printer', 'agt_000000000000000000000001', 'site_example', 'printer', 'Test printer', 'online',
              'usb', 'printer_test', '[\"print\"]', now(), now());",
     )
     .execute(pool)
@@ -459,7 +483,7 @@ async fn seed_database(pool: &PgPool) {
     .unwrap();
     let (_, public_key) = X25519HkdfSha256::derive_keypair(&[42; 32]);
     sqlx::query(
-        "UPDATE agents SET dispatch_key = $1, protocol_version = $2 WHERE agent_id = 'agt_example'",
+        "UPDATE agents SET dispatch_key = $1, protocol_version = $2 WHERE agent_id = 'agt_000000000000000000000001'",
     )
     .bind(serde_json::json!({
         "key_id": "dispatch_test",
@@ -470,6 +494,20 @@ async fn seed_database(pool: &PgPool) {
     .execute(pool)
     .await
     .unwrap();
+}
+
+async fn seed_router_keys(pool: &PgPool) {
+    for (purpose, key_id, seed) in
+        [("transport_identity", "key_test", 11), ("agent_state", "placeholder_state", 41)]
+    {
+        let public = SigningKey::from_bytes(&[seed; 32])
+            .verifying_key()
+            .to_bytes();
+        sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', $2, $3, $4, now()) ON CONFLICT (key_id) DO NOTHING")
+            .bind(key_id).bind(purpose).bind(format!("test-key-{seed}"))
+            .bind(serde_json::json!({"kty": "OKP", "crv": "Ed25519", "x": URL_SAFE_NO_PAD.encode(public), "kid": key_id}))
+            .execute(pool).await.unwrap();
+    }
 }
 
 async fn seed_legacy_dispatch(pool: &PgPool, signer: &ManagedDispatchSigner) {
@@ -488,11 +526,12 @@ async fn seed_legacy_dispatch(pool: &PgPool, signer: &ManagedDispatchSigner) {
         VALUES ('mpf_legacy', $1, 'dispatch_test', 'test', now() + interval '5 minutes',
         now() + interval '90 days', now() + interval '2 minutes', now())")
         .bind(serde_json::to_value(&preflight).unwrap()).execute(pool).await.unwrap();
-    let key: serde_json::Value =
-        sqlx::query_scalar("SELECT dispatch_key FROM agents WHERE agent_id = 'agt_example'")
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let key: serde_json::Value = sqlx::query_scalar(
+        "SELECT dispatch_key FROM agents WHERE agent_id = 'agt_000000000000000000000001'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
     let recipient_key: DispatchEncryptionKey = serde_json::from_value(key).unwrap();
     let legacy_id = "mw_legacy".parse().unwrap();
     let now = Utc::now();
@@ -515,14 +554,14 @@ async fn seed_legacy_dispatch(pool: &PgPool, signer: &ManagedDispatchSigner) {
     )
     .unwrap();
     sqlx::query("INSERT INTO commands (command_id, agent_id, message_id, sequence, state, command,
-        request_fingerprint, issued_at, updated_at) VALUES ('job_legacy', 'agt_example', 'msg_legacy', 1,
+        request_fingerprint, issued_at, updated_at) VALUES ('job_legacy', 'agt_000000000000000000000001', 'msg_legacy', 1,
         'published', $1, $2, now(), now())")
         .bind(&legacy_dispatch).bind(vec![2u8; 32]).execute(pool).await.unwrap();
     sqlx::query("INSERT INTO managed_work (managed_work_id, preflight_id, organization_id, database_name,
         company_id, site_id, agent_id, device_id, print_intent_id, operation, media_type, state,
         binding_claim, payload_fingerprint, request_fingerprint, sealed_document, payload_bytes,
         message_key, expires_at, idempotency_expires_at, admitted_at, updated_at)
-        VALUES ('mw_legacy', 'mpf_legacy', 'org_example', 'production', '7', 'site_example', 'agt_example',
+        VALUES ('mw_legacy', 'mpf_legacy', 'org_example', 'production', '7', 'site_example', 'agt_000000000000000000000001',
         'dev_printer', 'pi_v1_legacy', 'report_pdf', 'application/pdf', 'dispatching', $1, $2, $3, $4, 8,
         'managed_work.dispatching', now() + interval '5 minutes', now() + interval '90 days', now(), now())")
         .bind(serde_json::to_value(submission.work.origin.binding).unwrap())
@@ -654,17 +693,25 @@ async fn managed_payload_admission_replay_and_deletion() {
 
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
     let wrapper = Arc::new(TestKeyWrapper::default());
+    seed_router_keys(&pool).await;
     let controller = ManagedGatewayController::new(
         config,
         OrganizationConfig { id: "org_example".parse().unwrap(), ..Default::default() },
         ZenohConfig::default(),
         zenoh,
         Some(repository.clone()),
-        None,
-        Some(Arc::new(ManagedWorkSecurity::new(
-            signer,
-            ManagedPayloadProtector::new(wrapper.clone()),
-        ))),
+        ManagedGatewaySecurity {
+            router_admission: Some(super::super::router_policy_tests::admission_controller(
+                repository.clone(),
+                "org_example",
+                "inari/org_example/site_example",
+            )),
+            managed_work: Some(Arc::new(ManagedWorkSecurity::new(
+                signer,
+                ManagedPayloadProtector::new(wrapper.clone()),
+            ))),
+            ..Default::default()
+        },
     );
     let mut submission = submission();
     prepare_submission(&controller, &mut submission).await;
@@ -690,7 +737,7 @@ async fn managed_payload_admission_replay_and_deletion() {
     let (_, history) = controller
         .inner
         .store
-        .command_history("agt_example", 2)
+        .command_history("agt_000000000000000000000001", 2)
         .await
         .unwrap();
     let dispatch = controller
@@ -759,7 +806,7 @@ async fn managed_payload_admission_replay_and_deletion() {
             .unwrap();
     for publication in [&accepted, &rejected] {
         repository
-            .record_publication("agt_example", "test", publication, Utc::now())
+            .record_publication("agt_000000000000000000000001", "test", publication, Utc::now())
             .await
             .unwrap();
         let retained: i64 = sqlx::query_scalar(
@@ -790,7 +837,13 @@ async fn managed_payload_admission_replay_and_deletion() {
     ))
     .unwrap();
     let key = &fixture["public_jwk"];
-    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_example', 'agent_state', 'state-test', $2, now())")
+    sqlx::query(
+        "UPDATE agent_verification_keys SET retired_at = now() WHERE key_id = 'placeholder_state'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', 'agent_state', 'state-test', $2, now())")
         .bind(key["kid"].as_str().unwrap()).bind(key).execute(&pool).await.unwrap();
     let mut observation: AgentStateObservation =
         serde_json::from_value(fixture["claims"].clone()).unwrap();
@@ -830,7 +883,7 @@ async fn managed_payload_admission_replay_and_deletion() {
         .clone();
     repository
         .record_publication(
-            "agt_example",
+            "agt_000000000000000000000001",
             "test",
             &state_publication(&observation, &command_id),
             now,
@@ -862,7 +915,7 @@ async fn managed_payload_admission_replay_and_deletion() {
             .is_err()
     );
     repository
-        .mark_command_published("agt_example", &command_id, Utc::now())
+        .mark_command_published("agt_000000000000000000000001", &command_id, Utc::now())
         .await
         .unwrap();
     let command_state: String =
@@ -877,7 +930,7 @@ async fn managed_payload_admission_replay_and_deletion() {
         "rejected_at": Utc::now(), "code": "invalid_work", "detail": "rejected",
     })).unwrap();
     repository
-        .record_publication("agt_example", "test", &rejected, Utc::now())
+        .record_publication("agt_000000000000000000000001", "test", &rejected, Utc::now())
         .await
         .unwrap();
     assert_eq!(

@@ -3,9 +3,9 @@
 The Router Supervisor owns one stock Zenoh Router process and its exact Agent
 ACL. It is distinct from the Controller API and the Controller's Zenoh session.
 This document specifies the Supervisor boundary implemented by `inari-router`.
-Controller reconciliation, database generation allocation, and Helm deployment
-are separate rollout requirements. This component alone does not enable managed
-enrollment or Device Work.
+The Controller allocates generations in PostgreSQL and reconciles every configured
+Supervisor over dedicated management mTLS. Helm deployment and credential
+provisioning remain rollout requirements.
 
 ## Policy authority
 
@@ -106,6 +106,47 @@ An expired stored policy starts no Router and still rejects an older generation.
 Clock synchronization is an operating requirement for the Controller and every
 Router Supervisor. The Controller must refresh policies before their expiry.
 
+## Controller admission
+
+The Controller derives a complete policy from its Organization's Agent records.
+An Agent requires a dispatch key, its current transport identity key, and an
+active Agent State key. Retired keys cannot authorize admission.
+
+PostgreSQL serializes generation allocation across Controller replicas. A policy
+binds its authority revision and a digest of the fleet, Router management
+origins, trusted peers, namespace prefix, and signing key. Replicas with the same
+config reuse the exact signed document. A policy expires after 45 seconds. The
+Controller reconciles every five seconds and refreshes when fewer than 15 seconds
+remain.
+
+Agent and key mutations invalidate the acknowledgment in the same transaction.
+The Controller commits generation allocation before it sends management requests.
+Every configured Router must return the exact generation, digest, expiry, and
+current readiness within twenty seconds. Partial acknowledgment closes admission.
+A mutation during those requests prevents the old policy from being acknowledged.
+
+Enrollment returns its certificate bootstrap data only after Router admission.
+A lost response uses the exact invitation retry contract. Managed Work preflight,
+admission, and dispatch also require current admission. The admission transaction
+holds a shared policy lock and rechecks the authority, Agent keys, policy expiry,
+and acknowledgment age. An admission proof expires within ten seconds.
+
+The `router_policy` readiness component starts unavailable, becomes ready after
+complete acknowledgment, and becomes degraded after a failure or proof expiry.
+Managed admission remains closed while this component is unavailable.
+
+`PUT /api/inari/v1/agents/{agent_id}/credential-retirement` requires enrollment
+management permission in the configured Organization. It retires the Agent's
+active verification keys, revokes its enrolled invitations, and records one audit
+event. It then applies the complete policy to every Router. HTTP 204 proves that
+all Routers acknowledged the removal. HTTP 503 leaves retirement committed and
+requires an idempotent retry. Key history remains available for signed evidence.
+
+The Controller uses only the configured management CA, client certificate, and
+private key. It verifies the Router hostname, disables proxies and redirects,
+and limits acknowledgment bodies to 64 KiB. The policy signing key is a separate
+Ed25519 PKCS#8 PEM file. All Controller replicas must use the same policy config.
+
 ## Data-plane ACL
 
 Every allowed subject requires TLS and an exact certificate common name.
@@ -164,3 +205,8 @@ durable rollback rejection, and recovery with a higher generation. A second
 contract verifies certificate rotation, rejection of an invalid replacement,
 recovery, and certificate expiry. The CI job
 verifies the official executable's SHA-256 digest before this contract runs.
+
+Controller CI also runs a real management mTLS contract and isolated PostgreSQL
+contracts. These cover concurrent generation allocation, partial or incorrect
+acknowledgments, a key mutation during management I/O, credential retirement,
+atomic enrollment, and Managed Work replay.

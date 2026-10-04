@@ -13,8 +13,21 @@ use crate::zenoh::CurrentSession;
 
 impl ManagedGatewayController {
     pub async fn run_data_plane(self, shutdown: ShutdownCoordinator) -> AppResult<()> {
-        tokio::try_join!(self.run_transport(shutdown.clone()), self.run_payload_cleanup(shutdown),)?;
+        tokio::try_join!(
+            self.run_transport(shutdown.clone()),
+            self.run_payload_cleanup(shutdown.clone()),
+            self.run_router_policy(shutdown)
+        )?;
         Ok(())
+    }
+
+    async fn run_router_policy(&self, shutdown: ShutdownCoordinator) -> AppResult<()> {
+        if let Some(admission) = &self.inner.router_admission {
+            admission.run(shutdown).await
+        } else {
+            shutdown.wait_for_shutdown().await;
+            Ok(())
+        }
     }
 
     async fn run_payload_cleanup(&self, shutdown: ShutdownCoordinator) -> AppResult<()> {

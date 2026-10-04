@@ -31,6 +31,7 @@ http-body.workspace          = true
 human-panic.workspace        = true
 humantime-serde.workspace    = true
 inari-gateway = { path = "../inari-gateway" }
+inari-router = { path = "../inari-router" }
 inari-migration = { path = "../inari-migration" }
 inari-web = { path = "../inari-web", default-features = false, features = ["ssr"] }
 jsonwebtoken.workspace        = true
@@ -65,5 +66,7 @@ zeroize.workspace            = true
 zenoh.workspace              = true
 
 [dev-dependencies]
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rcgen = "0.14"
 rand_core = { version = "0.6", features = ["getrandom"] }
 tempfile = "3"

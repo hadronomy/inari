@@ -1,6 +1,6 @@
 # Secure enrollment review
 
-Reviewed on 2026-10-03 against the current Agent, Controller, and deployed
+Reviewed on 2026-10-04 against the current Agent, Controller, and deployed
 infrastructure. Controller sign-in is verified. Production enrollment and Zenoh
 remain disabled until the remaining gates pass.
 
@@ -72,13 +72,18 @@ Sources: [Zenoh ACL documentation](https://zenoh.io/docs/manual/access-control/)
 [Zenoh 1.9 authorization source](https://github.com/eclipse-zenoh/zenoh/blob/1.9.0/zenoh/src/net/routing/interceptor/authorization.rs),
 [Zenoh 1.9 ACL interceptor](https://github.com/eclipse-zenoh/zenoh/blob/1.9.0/zenoh/src/net/routing/interceptor/access_control.rs).
 
-The chart's broad TLS subject grants wildcard Agent namespaces. It does not bind
-each Agent to its own namespace. Production requires an automatic policy path
-that applies exact Agent common-name subjects and exact namespaces to every
-router replica. Enrollment must wait for admission. Revocation must remove access
-from existing sessions within the required limit. Stock ACL changes require
-router restart, so the policy path must include controlled session shutdown and
-reconnection.
+The Controller now stores complete signed policies with durable generations.
+Enrollment and Managed Work wait for acknowledgment from every configured
+Router. Agent and key mutations invalidate admission in their database
+transaction. Credential retirement commits before policy reconciliation and
+returns success only after every Router acknowledges the removal.
+
+The [Router policy contract](router_policy.md) defines the dedicated management
+mTLS boundary, admission proofs, policy expiry, and verification contracts.
+The chart still uses a broad TLS subject that grants wildcard Agent namespaces.
+Production requires deployment of the Supervisor, exact subjects, protected
+management credentials, and bounded policy refresh. Stock ACL changes require
+Router restart and close existing sessions before acknowledgment.
 The chart disables enrollment and Zenoh by default. Enabling mutual TLS alone
 does not satisfy the Router policy gate.
 

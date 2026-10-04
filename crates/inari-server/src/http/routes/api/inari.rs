@@ -7,7 +7,9 @@ use axum::{Json, Router};
 use axum_extra::TypedHeader;
 use axum_extra::headers::Authorization;
 use axum_extra::headers::authorization::Bearer;
-use inari_gateway::audit::{AuditAction, AuditEvent, AuditEventDraft, AuditOutcome, AuditResource};
+use inari_gateway::audit::{
+    AuditAction, AuditContext, AuditEvent, AuditEventDraft, AuditOutcome, AuditResource,
+};
 use inari_gateway::onboarding::InvitationId;
 use inari_gateway::protocol::{
     AgentDetail, AgentId, AgentSummary, DeviceSummary, EnrollmentRequest, EnrollmentResponse,
@@ -31,6 +33,7 @@ pub(super) fn router() -> Router<AppState> {
         .route("/sites", get(list_sites))
         .route("/agents", get(list_agents))
         .route("/agents/{agent_id}", get(get_agent))
+        .route("/agents/{agent_id}/credential-retirement", put(retire_agent_credentials))
         .route("/agents/{agent_id}/devices", get(list_devices))
         .route("/agents/{agent_id}/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{job_id}", get(get_job))
@@ -43,6 +46,23 @@ pub(super) fn router() -> Router<AppState> {
         .route("/managed-work/{managed_work_id}", get(get_managed_work))
         .route("/managed-work/by-idempotency-key", get(find_managed_work))
         .route("/audit-events", get(list_audit_events))
+}
+
+async fn retire_agent_credentials(
+    principal: Principal,
+    State(state): State<AppState>,
+    ApiPath(agent_id): ApiPath<AgentId>,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, AppError> {
+    principal.require(Permission::EnrollmentManage)?;
+    let _permit = state.acquire_inari_api_permit().await?;
+    let audit =
+        AuditContext::new(principal.identity().actor_id.clone(), request_id_value(request_id));
+    state
+        .managed_gateway()
+        .retire_agent_credentials(&agent_id, &audit)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn preflight_managed_work(
