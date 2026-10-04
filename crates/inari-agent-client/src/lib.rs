@@ -11,6 +11,8 @@ mod events;
 mod identity;
 mod local_transport;
 mod model;
+#[cfg(windows)]
+mod native_pipe;
 mod pairing;
 mod service;
 mod transport;

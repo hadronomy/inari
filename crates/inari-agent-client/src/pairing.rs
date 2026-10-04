@@ -43,28 +43,17 @@ pub(crate) struct PairingGrant {
 
 #[cfg(windows)]
 pub(crate) async fn native_pairing_grant() -> AgentClientResult<PairingGrant> {
-    tokio::task::spawn_blocking(read_native_pairing_grant)
-        .await
-        .map_err(AgentClientError::pairing_unavailable)?
-}
-
-#[cfg(windows)]
-fn read_native_pairing_grant() -> AgentClientResult<PairingGrant> {
-    decode_pairing_grant(&read_native_response([1])?)
+    decode_pairing_grant(&crate::native_pipe::request(1).await?)
 }
 
 #[cfg(windows)]
 pub(crate) async fn native_agent_endpoint() -> AgentClientResult<Url> {
-    tokio::task::spawn_blocking(|| decode_agent_endpoint(&read_native_response([2])?))
-        .await
-        .map_err(AgentClientError::pairing_unavailable)?
+    decode_agent_endpoint(&crate::native_pipe::request(2).await?)
 }
 
 #[cfg(windows)]
 pub(crate) async fn native_setup_restart() -> AgentClientResult<()> {
-    tokio::task::spawn_blocking(|| decode_setup_restart(&read_native_response([3])?))
-        .await
-        .map_err(AgentClientError::pairing_unavailable)?
+    decode_setup_restart(&crate::native_pipe::request(3).await?)
 }
 
 #[cfg(any(windows, test))]
@@ -82,70 +71,6 @@ fn decode_setup_restart(payload: &str) -> AgentClientResult<()> {
         return Err(AgentClientError::Rejected);
     }
     Ok(())
-}
-
-#[cfg(windows)]
-fn read_native_response(request: [u8; 1]) -> AgentClientResult<String> {
-    use std::{
-        fs::OpenOptions,
-        io::{Read as _, Write as _},
-        thread,
-        time::{Duration, Instant},
-    };
-
-    const PIPE: &str = r"\\.\pipe\Inari.Agent.Pairing";
-    const RESPONSE_LIMIT: u64 = 4_096;
-    const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-
-    let started = Instant::now();
-    let mut pipe = loop {
-        match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(PIPE)
-        {
-            Ok(pipe) => break pipe,
-            Err(error) if started.elapsed() < CONNECT_TIMEOUT => {
-                thread::sleep(Duration::from_millis(40));
-                drop(error);
-            },
-            Err(error) => return Err(AgentClientError::pairing_unavailable(error)),
-        }
-    };
-    pipe.write_all(&request)
-        .and_then(|()| pipe.flush())
-        .map_err(AgentClientError::pairing_unavailable)?;
-
-    // Read the reply message rather than draining to end of stream. The server
-    // disconnects as soon as it has flushed, and a disconnect turns a still
-    // pending read into ERROR_PIPE_NOT_CONNECTED instead of a clean end. Once
-    // the reply is in hand that disconnect is the expected close, so only an
-    // empty payload counts as having lost the answer.
-    let mut payload = Vec::new();
-    let mut chunk = [0u8; 512];
-    loop {
-        match pipe.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(read) => {
-                payload.extend_from_slice(&chunk[..read]);
-                if payload.len() as u64 > RESPONSE_LIMIT {
-                    return Err(AgentClientError::MalformedIdentity);
-                }
-            },
-            Err(error) if is_peer_closed(&error) && !payload.is_empty() => break,
-            Err(error) => return Err(AgentClientError::pairing_unavailable(error)),
-        }
-    }
-    let payload = String::from_utf8(payload).map_err(AgentClientError::invalid_response)?;
-    Ok(payload)
-}
-
-/// Whether the server hung up, by either of the two codes Windows uses.
-#[cfg(windows)]
-fn is_peer_closed(error: &std::io::Error) -> bool {
-    const ERROR_BROKEN_PIPE: i32 = 109;
-    const ERROR_PIPE_NOT_CONNECTED: i32 = 233;
-    matches!(error.raw_os_error(), Some(ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED))
 }
 
 #[cfg(windows)]

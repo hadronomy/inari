@@ -205,6 +205,10 @@ package family for endpoint discovery and pairing. Request byte `0x02` returns
 create or rotate pairing material. Request byte `0x01` returns the one-use
 pairing secret and its expiry.
 
+Each native request has a ten-second deadline, including a two-second limit
+for pipe connection. A timeout or cancellation closes the client pipe.
+Replies cannot exceed 4 KiB. A failed request returns an error and permits retry.
+
 Request byte `0x03` asks the service host to apply a saved setup restart.
 The service checks the caller's package family and its pending setup state.
 An accepted request returns `{"restart_requested":true}`. The host completes
