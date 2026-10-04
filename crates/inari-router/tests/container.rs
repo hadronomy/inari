@@ -135,7 +135,7 @@ async fn data_session(directory: &Path, port: u16) -> Option<zenoh::Session> {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires Docker and INARI_TEST_ROUTER_IMAGE with the built Linux image"]
 async fn packaged_router_acknowledges_policy_and_stops_on_expiry() {
     let image = std::env::var("INARI_TEST_ROUTER_IMAGE").unwrap();
