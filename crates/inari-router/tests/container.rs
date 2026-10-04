@@ -111,10 +111,10 @@ fn policy(generation: u64, lifetime: chrono::Duration) -> SignedPolicy {
     .unwrap()
 }
 
-async fn data_session(directory: &Path, port: u16) -> Option<zenoh::Session> {
+async fn data_session(directory: &Path, address: SocketAddr) -> Result<zenoh::Session, String> {
     let config = serde_json::json!({
         "mode": "client",
-        "connect": {"endpoints": [format!("tls/localhost:{port}")], "timeout_ms": 1000},
+        "connect": {"endpoints": [format!("tls/{address}")], "timeout_ms": 1000},
         "listen": {"endpoints": []},
         "scouting": {"multicast": {"enabled": false}, "gossip": {"enabled": false}},
         "transport": {"link": {"tls": {
@@ -124,15 +124,13 @@ async fn data_session(directory: &Path, port: u16) -> Option<zenoh::Session> {
             "enable_mtls": true, "verify_name_on_connect": true,
         }}},
     });
-    match tokio::time::timeout(
+    tokio::time::timeout(
         Duration::from_secs(3),
         zenoh::open(zenoh::Config::from_json5(&config.to_string()).unwrap()),
     )
     .await
-    {
-        Ok(Ok(session)) => Some(session),
-        _ => None,
-    }
+    .map_err(|error| format!("data-plane connection timed out: {error}"))?
+    .map_err(|error| error.to_string())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -237,9 +235,9 @@ probe_private_key_file = "/etc/inari-router/probe.key"
     .await;
     assert!(startup.is_ok(), "the packaged management server must start: {last_error}");
     assert!(
-        data_session(directory.path(), data.port())
+        data_session(directory.path(), data)
             .await
-            .is_none(),
+            .is_err(),
         "no signed policy means no data plane"
     );
     let initial = policy(1, chrono::Duration::seconds(30));
@@ -261,7 +259,7 @@ probe_private_key_file = "/etc/inari-router/probe.key"
     assert_eq!(status.generation, Some(1));
     assert_eq!(status.digest.as_deref(), Some(expected.digest()));
     assert_eq!(status.expires_at, Some(initial.policy.expires_at));
-    data_session(directory.path(), data.port())
+    data_session(directory.path(), data)
         .await
         .expect("the packaged stock Router must accept mTLS")
         .close()
@@ -308,9 +306,9 @@ probe_private_key_file = "/etc/inari-router/probe.key"
                 .await
                 .unwrap();
             if !status.ready
-                && data_session(directory.path(), data.port())
+                && data_session(directory.path(), data)
                     .await
-                    .is_none()
+                    .is_err()
             {
                 break;
             }
