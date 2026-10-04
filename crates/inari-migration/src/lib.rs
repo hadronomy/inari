@@ -14,6 +14,7 @@ mod m20260906_223031_store_agent_state_observations;
 mod m20261002_223032_retire_agent_verification_keys;
 mod m20261003_223033_remove_agent_certificate;
 mod m20261003_223034_atomic_enrollment;
+mod m20261003_223035_router_admission;
 
 pub struct Migrator;
 
@@ -32,6 +33,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261002_223032_retire_agent_verification_keys::Migration),
             Box::new(m20261003_223033_remove_agent_certificate::Migration),
             Box::new(m20261003_223034_atomic_enrollment::Migration),
+            Box::new(m20261003_223035_router_admission::Migration),
         ]
     }
 }

@@ -7,6 +7,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
+use futures_util::future::BoxFuture;
 use inari_gateway::audit::AuditContext;
 use inari_gateway::certificate::{CertificateIssuer, CertificateRequest};
 use inari_gateway::identity::ActorId;
@@ -20,8 +21,17 @@ use inari_gateway::protocol::{
 };
 use inari_gateway::{GatewayError, GatewayResult};
 use inari_migration::{Migrator, MigratorTrait};
-use inari_server::config::{LoadedConfig, ManagedGatewayCertificateMode, ZenohConfig};
+use inari_router::SignedPolicy;
+use inari_router::supervisor::RouterStatus;
+use inari_server::config::{
+    LoadedConfig, ManagedGatewayCertificateMode, RouterManagementConfig, RouterPolicyConfig,
+    ZenohConfig,
+};
+use inari_server::error::AppResult;
 use inari_server::http;
+use inari_server::managed_gateway::{
+    ManagedGatewaySecurity, RouterAdmissionController, RouterManagement,
+};
 use inari_server::state::AppState;
 use inari_server::zenoh::ZenohSupervisor;
 use leptos::prelude::LeptosOptions;
@@ -32,6 +42,29 @@ use tower::ServiceExt;
 
 /// The fixture CSR is signed by the Ed25519 key with seed 1.
 const CSR: &str = include_str!("../../inari-gateway/tests/fixtures/enrollment/valid.csr.pem");
+
+struct TestRouter;
+
+impl RouterManagement for TestRouter {
+    fn apply<'a>(
+        &'a self,
+        _router: &'a RouterManagementConfig,
+        policy: &'a SignedPolicy,
+    ) -> BoxFuture<'a, AppResult<RouterStatus>> {
+        Box::pin(async move {
+            let verified = policy
+                .verify(&SigningKey::from_bytes(&[71; 32]).verifying_key(), "test_fleet")
+                .unwrap();
+            Ok(RouterStatus {
+                generation: Some(policy.policy.generation),
+                digest: Some(verified.digest().into()),
+                expires_at: Some(policy.policy.expires_at),
+                ready: true,
+                message: "Test Router.".into(),
+            })
+        })
+    }
+}
 
 /// Stands in for step-ca token signing and records each call.
 #[derive(Default)]
@@ -133,6 +166,35 @@ async fn test_app(issuer: Arc<RecordingIssuer>) -> (axum::Router, OnboardingServ
         .onboarding
         .public_base_url = Some("https://controller.example.com/".into());
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
+    let admission = Arc::new(
+        RouterAdmissionController::new(
+            onboarding.repository().clone(),
+            "org_test".into(),
+            RouterPolicyConfig {
+                fleet_id: "test_fleet".into(),
+                routers: vec![RouterManagementConfig {
+                    router_id: "test_router".into(),
+                    address: "https://router.example/"
+                        .parse()
+                        .unwrap(),
+                }],
+                trusted_peer_common_names: vec!["controller_test".into()],
+                signing_key_file: "/test/policy-key".into(),
+                management_ca_file: "/test/management-ca".into(),
+                management_certificate_file: "/test/management-cert".into(),
+                management_private_key_file: "/test/management-key".into(),
+            },
+            loaded
+                .settings
+                .managed_gateway
+                .data_plane
+                .namespace_prefix
+                .clone(),
+            SigningKey::from_bytes(&[71; 32]),
+            Arc::new(TestRouter),
+        )
+        .unwrap(),
+    );
     let state = AppState::new_with_onboarding(
         loaded,
         zenoh,
@@ -142,8 +204,11 @@ async fn test_app(issuer: Arc<RecordingIssuer>) -> (axum::Router, OnboardingServ
             .build(),
         Some(onboarding.clone()),
         None,
-        Some(issuer),
-        None,
+        ManagedGatewaySecurity {
+            certificate_issuer: Some(issuer),
+            router_admission: Some(admission),
+            ..Default::default()
+        },
     );
     let app = http::router(&state)
         .expect("router should build")

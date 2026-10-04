@@ -35,6 +35,8 @@ impl ManagedGatewayController {
                 "Managed Work Organization does not match this Controller.",
             ));
         }
+        self.router_admission(request.scope.agent_id.as_str())
+            .await?;
         let target = self
             .inner
             .store
@@ -156,11 +158,15 @@ impl ManagedGatewayController {
             .await?;
         let dispatch_submission = submission.clone();
         let dispatch_idempotency_key = idempotency_key.clone();
+        let router_admission = self
+            .router_admission(submission.work.scope.agent_id.as_str())
+            .await?;
         let (persisted, command) = self
             .inner
             .store
             .admit_managed_work(
                 ManagedWorkAdmission {
+                    router_admission: &router_admission,
                     managed_work_id: &managed_work_id,
                     idempotency_key: &idempotency_key,
                     submission: &submission,
@@ -435,7 +441,9 @@ mod tests {
                     company_id: "7".into(),
                     organization_id: "org_example".parse().unwrap(),
                     site_id: "site_example".parse().unwrap(),
-                    agent_id: "agt_example".parse().unwrap(),
+                    agent_id: "agt_000000000000000000000001"
+                        .parse()
+                        .unwrap(),
                 },
                 print_intent_id: "pi_v1_test".parse().unwrap(),
                 device_id: "dev_printer".parse().unwrap(),

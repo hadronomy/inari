@@ -1,4 +1,4 @@
-use inari_gateway::audit::{AuditEvent, AuditEventDraft};
+use inari_gateway::audit::{AuditContext, AuditEvent, AuditEventDraft};
 use inari_gateway::protocol::{
     AgentDetail, AgentId, AgentStatus, AgentSummary, DeviceSummary, SiteId, SiteSummary,
 };
@@ -7,6 +7,26 @@ use super::{AgentPublicationList, ManagedGatewayController};
 use crate::error::{AppError, AppResult};
 
 impl ManagedGatewayController {
+    pub async fn retire_agent_credentials(
+        &self,
+        agent_id: &AgentId,
+        audit: &AuditContext,
+    ) -> AppResult<()> {
+        self.ensure_enabled()?;
+        self.inner
+            .store
+            .repository()?
+            .retire_agent_credentials(&self.inner.organization.id, agent_id, audit)
+            .await?;
+        self.inner
+            .router_admission
+            .as_ref()
+            .ok_or_else(|| AppError::service_unavailable("Router admission is not configured."))?
+            .reconcile()
+            .await?;
+        Ok(())
+    }
+
     pub async fn sites(&self) -> AppResult<Vec<SiteSummary>> {
         self.ensure_enabled()?;
         self.inner

@@ -86,6 +86,7 @@ fn parse_action(value: &str) -> GatewayResult<AuditAction> {
         "invitation.created" => Ok(AuditAction::InvitationCreated),
         "invitation.revoked" => Ok(AuditAction::InvitationRevoked),
         "agent.enrolled" => Ok(AuditAction::AgentEnrolled),
+        "agent.credentials_retired" => Ok(AuditAction::AgentCredentialsRetired),
         "zenoh.read" => Ok(AuditAction::ZenohRead),
         "zenoh.write" => Ok(AuditAction::ZenohWrite),
         other => Err(GatewayError::CorruptState(format!("unknown audit action {other:?}"))),

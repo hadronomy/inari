@@ -14,6 +14,7 @@ pub enum AuditAction {
     InvitationCreated,
     InvitationRevoked,
     AgentEnrolled,
+    AgentCredentialsRetired,
     ZenohRead,
     ZenohWrite,
 }
@@ -28,6 +29,7 @@ impl AuditAction {
             Self::InvitationCreated => "invitation.created",
             Self::InvitationRevoked => "invitation.revoked",
             Self::AgentEnrolled => "agent.enrolled",
+            Self::AgentCredentialsRetired => "agent.credentials_retired",
             Self::ZenohRead => "zenoh.read",
             Self::ZenohWrite => "zenoh.write",
         }

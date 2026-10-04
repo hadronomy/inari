@@ -8,7 +8,8 @@ use sea_orm::{
 use super::entity::value::{CommandState, StoredCommand};
 use super::entity::{agent, command};
 use super::{
-    CommandContent, GatewayRepository, PersistedCommand, require_agent, stored_time, utc_time,
+    CommandContent, GatewayRepository, PersistedCommand, RouterAdmission, require_agent,
+    stored_time, utc_time,
 };
 use crate::protocol::{ControllerCommand, JobId, JobState};
 use crate::{GatewayError, GatewayResult};
@@ -19,8 +20,10 @@ struct NextSequence {
 }
 
 impl GatewayRepository {
+    /// Queues a command under the policy lock, so retirement cannot supersede admission.
     pub async fn enqueue_command<F>(
         &self,
+        router_admission: &RouterAdmission,
         agent_id: &str,
         requested_command_id: Option<&str>,
         request_fingerprint: &[u8; 32],
@@ -30,6 +33,8 @@ impl GatewayRepository {
         F: FnOnce(u64, &str, &str, DateTime<Utc>) -> GatewayResult<ControllerCommand>,
     {
         let transaction = self.database.begin().await?;
+        super::router_policy::require_admission_in(&transaction, router_admission, agent_id)
+            .await?;
         transaction
             .execute_raw(Statement::from_sql_and_values(
                 DbBackend::Postgres,
@@ -53,6 +58,8 @@ impl GatewayRepository {
                     "the idempotency key was already used for another request".into(),
                 ));
             }
+            super::router_policy::require_admission_in(&transaction, router_admission, agent_id)
+                .await?;
             transaction.commit().await?;
             return persisted_command(existing, managed_agent.namespace);
         }
@@ -85,6 +92,8 @@ impl GatewayRepository {
         }
         .insert(&transaction)
         .await?;
+        super::router_policy::require_admission_in(&transaction, router_admission, agent_id)
+            .await?;
         transaction.commit().await?;
         persisted_command(model, managed_agent.namespace)
     }
