@@ -214,11 +214,24 @@ async fn stock_router_isolates_agents_closes_old_links_and_expires_policy() {
             .await
             .unwrap();
     });
-    let replies = a
-        .get(format!("iot/v1/agents/{AGENT_A}/commands/history"))
+    let querier = a
+        .declare_querier(format!("iot/v1/agents/{AGENT_A}/commands/history"))
         .timeout(Duration::from_secs(2))
         .await
         .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !querier
+            .matching_status()
+            .await
+            .unwrap()
+            .matching()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the allowed history queryable must reach the Agent");
+    let replies = querier.get().await.unwrap();
     let response = replies.recv_async().await.unwrap();
     assert_eq!(
         response
@@ -245,10 +258,27 @@ async fn stock_router_isolates_agents_closes_old_links_and_expires_policy() {
             .is_err()
     );
     assert!(denied.recv_async().await.is_err());
+
+    let before = closed.load(Ordering::SeqCst);
+    current(&handle, &key, 2, &[AGENT_A, AGENT_B]).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        closed.load(Ordering::SeqCst),
+        before,
+        "a lifetime refresh must preserve established links"
+    );
+    a.put(format!("iot/v1/agents/{AGENT_A}/status/latest"), "after-refresh")
+        .await
+        .unwrap();
+    let sample = tokio::time::timeout(Duration::from_secs(2), subscriber.recv_async())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(sample.payload().to_bytes().as_ref(), b"after-refresh");
     drop(subscriber);
 
     let before = closed.load(Ordering::SeqCst);
-    current(&handle, &key, 2, &[AGENT_B]).await;
+    current(&handle, &key, 3, &[AGENT_B]).await;
     tokio::time::timeout(Duration::from_secs(3), async {
         while closed.load(Ordering::SeqCst) == before {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -271,7 +301,7 @@ async fn stock_router_isolates_agents_closes_old_links_and_expires_policy() {
             .await
             .is_err()
     );
-    let mut expiring = policy(3, &[AGENT_B]);
+    let mut expiring = policy(4, &[AGENT_B]);
     expiring.expires_at = Utc::now() + chrono::Duration::seconds(3);
     assert!(
         handle
@@ -311,15 +341,15 @@ async fn stock_router_isolates_agents_closes_old_links_and_expires_policy() {
     .unwrap();
     let (shutdown, receiver) = watch::channel(false);
     let task = tokio::spawn(supervisor.run(receiver));
-    assert_eq!(recovered.status().generation, Some(3));
+    assert_eq!(recovered.status().generation, Some(4));
     assert!(!recovered.status().ready);
     assert!(matches!(
         recovered
-            .apply(SignedPolicy::sign(policy(2, &[AGENT_A, AGENT_B]), &key).unwrap())
+            .apply(SignedPolicy::sign(policy(3, &[AGENT_A, AGENT_B]), &key).unwrap())
             .await,
         Err(RouterError::GenerationConflict)
     ));
-    current(&recovered, &key, 4, &[AGENT_B]).await;
+    current(&recovered, &key, 5, &[AGENT_B]).await;
     shutdown.send(true).unwrap();
     task.await.unwrap().unwrap();
 }

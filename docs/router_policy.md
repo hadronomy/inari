@@ -70,6 +70,13 @@ For an update that needs activation, the Supervisor:
 5. Opens a real mTLS Zenoh session and verifies the expected Router ID.
 6. Returns the exact generation, digest, expiry, and `ready: true`.
 
+A higher generation with the same fleet, namespace, trusted peers, and Agent
+permissions refreshes the signed lifetime without restarting a ready Router.
+The Supervisor persists that generation before acknowledgment and keeps existing
+links open. The previous policy remains the authority during the durable write.
+If that policy expires while storage is slow, the Supervisor stops the Router.
+A failed durable write also closes admission and stops the Router.
+
 The Supervisor cannot acknowledge a policy after its expiry. A failed start
 leaves readiness false and retains the durable generation. Policy expiry stops
 the Router. An unexpected child exit also removes readiness. The Controller
@@ -136,6 +143,7 @@ mbx test -p inari-router --test stock_router -- --ignored --exact stock_router_i
 ```
 
 The contract verifies allowed Agent publications and queries, cross-Agent
-denial, closure of an established TCP connection after revocation, policy expiry,
+denial, preservation of a TCP connection across a lifetime refresh, closure of
+that connection after revocation, policy expiry,
 durable rollback rejection, and recovery with a higher generation. The CI job
 verifies the official executable's SHA-256 digest before this contract runs.

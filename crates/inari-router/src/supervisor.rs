@@ -169,8 +169,76 @@ impl RouterSupervisor {
                 return Ok(self.status.borrow().clone());
             }
         }
-        self.activate(verified).await?;
+        self.observe().await?;
+        if self.status.borrow().ready
+            && self
+                .policy
+                .as_ref()
+                .is_some_and(|previous| verified.has_same_authority(previous))
+        {
+            self.refresh(verified).await?;
+        } else {
+            self.activate(verified).await?;
+        }
         Ok(self.status.borrow().clone())
+    }
+
+    async fn refresh(&mut self, policy: VerifiedPolicy) -> RouterResult<()> {
+        let previous = self
+            .policy
+            .clone()
+            .ok_or(RouterError::Unavailable)?;
+        let store = self.store.clone();
+        let durable = policy.clone();
+        // Retain the higher generation even if storage fails after its rename.
+        self.policy = Some(policy.clone());
+        let mut write = tokio::task::spawn_blocking(move || store.persist(&durable));
+        let mut stop_failure = None;
+        let mut ticks = tokio::time::interval(Duration::from_millis(250));
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let result = loop {
+            tokio::select! {
+                biased;
+                _ = ticks.tick() => {
+                    // Slow storage cannot extend the authority of the running Router.
+                    if previous.require_current(Utc::now()).is_err() {
+                        self.not_ready("Router policy expired during refresh.".into());
+                        if let Err(error) = self.stop().await {
+                            stop_failure = Some(error);
+                        }
+                    }
+                },
+                result = &mut write => break result,
+            }
+        };
+        if let Some(error) = stop_failure {
+            return Err(error);
+        }
+        let result = result
+            .map_err(|error| RouterError::NotReady(error.to_string()))
+            .and_then(|result| result);
+        if let Err(error) = result {
+            self.not_ready(error.to_string());
+            self.stop().await?;
+            return Err(error);
+        }
+        self.observe().await?;
+        if previous
+            .require_current(Utc::now())
+            .is_err()
+            || !self.status.borrow().ready
+        {
+            return self.activate(policy).await;
+        }
+        policy.require_current(Utc::now())?;
+        self.status.send_modify(|status| {
+            status.generation = Some(policy.policy().generation);
+            status.digest = Some(policy.digest().to_owned());
+            status.expires_at = Some(policy.policy().expires_at);
+            status.message =
+                "Router refreshed the acknowledged policy without closing links.".into();
+        });
+        Ok(())
     }
 
     async fn activate(&mut self, policy: VerifiedPolicy) -> RouterResult<()> {
