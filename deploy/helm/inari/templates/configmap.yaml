@@ -111,6 +111,22 @@ data:
     namespace_prefix = {{ .Values.managedGateway.dataPlane.namespacePrefix | quote }}
     close_link_on_expiration = {{ .Values.managedGateway.dataPlane.closeLinkOnExpiration }}
 
+    {{- if .Values.managedGateway.enabled }}
+    [managed_gateway.router_policy]
+    fleet_id = {{ .Values.managedGateway.routerPolicy.fleetId | quote }}
+    trusted_peer_common_names = {{ .Values.managedGateway.routerPolicy.trustedPeerCommonNames | toJson }}
+    signing_key_file = "/var/run/secrets/inari/router-policy/signing-key.pem"
+    management_ca_file = "/var/run/secrets/inari/router-management/ca.crt"
+    management_certificate_file = "/var/run/secrets/inari/router-management/tls.crt"
+    management_private_key_file = "/var/run/secrets/inari/router-management/tls.key"
+    {{- range $ordinal := until (int .Values.zenoh.replicas) }}
+
+    [[managed_gateway.router_policy.routers]]
+    router_id = {{ printf "%s%02x" (include "inari.zenohIdPrefix" $) $ordinal | quote }}
+    address = {{ printf "https://%s-zenoh-%d.%s-zenoh-headless.%s.svc.cluster.local:%d/" (include "inari.fullname" $) $ordinal (include "inari.fullname" $) $.Release.Namespace (int $.Values.zenoh.management.port) | quote }}
+    {{- end }}
+    {{- end }}
+
     [managed_gateway.certificate]
     mode = {{ .Values.managedGateway.certificate.mode | quote }}
     {{- if eq .Values.managedGateway.certificate.mode "step_ca" }}

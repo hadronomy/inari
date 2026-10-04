@@ -15,10 +15,14 @@ spec:
   {{- end }}
   revisionHistoryLimit: {{ .Values.controller.revisionHistoryLimit }}
   strategy:
+    {{- if .Values.managedGateway.enabled }}
+    type: Recreate
+    {{- else }}
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
+    {{- end }}
   selector:
     matchLabels:
       {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 6 }}
@@ -107,6 +111,12 @@ spec:
             - name: zenoh-tls
               mountPath: /var/run/secrets/inari/zenoh
               readOnly: true
+            - name: router-management
+              mountPath: /var/run/secrets/inari/router-management
+              readOnly: true
+            - name: router-policy
+              mountPath: /var/run/secrets/inari/router-policy
+              readOnly: true
             {{- end }}
             - name: tmp
               mountPath: /tmp
@@ -168,6 +178,22 @@ spec:
                 path: tls.crt
               - key: {{ .Values.zenoh.tls.controllerSecret.privateKeyKey }}
                 path: tls.key
+        - name: router-management
+          secret:
+            secretName: {{ .Values.zenoh.management.controllerSecret.name }}
+            items:
+              - key: {{ .Values.zenoh.management.controllerSecret.caKey }}
+                path: ca.crt
+              - key: {{ .Values.zenoh.management.controllerSecret.certificateKey }}
+                path: tls.crt
+              - key: {{ .Values.zenoh.management.controllerSecret.privateKeyKey }}
+                path: tls.key
+        - name: router-policy
+          secret:
+            secretName: {{ .Values.managedGateway.routerPolicy.signingKey.name }}
+            items:
+              - key: {{ .Values.managedGateway.routerPolicy.signingKey.key }}
+                path: signing-key.pem
         {{- end }}
         - name: tmp
           emptyDir:

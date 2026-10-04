@@ -72,7 +72,7 @@ app.kubernetes.io/component: {{ .component }}
 
 {{/* Zenoh image reference. */}}
 {{- define "inari.zenohImage" -}}
-{{- include "inari.image" (dict "repository" .Values.zenoh.image.repository "tag" .Values.zenoh.image.tag "digest" .Values.zenoh.image.digest "defaultTag" .Chart.AppVersion) -}}
+{{- include "inari.image" (dict "repository" .Values.zenoh.image.repository "tag" .Values.zenoh.image.tag "digest" .Values.zenoh.image.digest "defaultTag" "") -}}
 {{- end }}
 
 {{/* Helm-test image reference. */}}
@@ -82,7 +82,7 @@ app.kubernetes.io/component: {{ .component }}
 
 {{/* Name of the Zenoh configuration ConfigMap. */}}
 {{- define "inari.zenohConfigMapName" -}}
-{{- default (printf "%s-zenoh" (include "inari.fullname" .)) .Values.zenoh.config.existingConfigMap -}}
+{{- printf "%s-zenoh" (include "inari.fullname" .) -}}
 {{- end }}
 
 {{/* Stable, release-specific prefix for router IDs. */}}
@@ -130,10 +130,25 @@ app.kubernetes.io/component: {{ .component }}
 {{- if and .Values.zenoh.service.loadBalancerSourceRanges (ne .Values.zenoh.service.type "LoadBalancer") -}}
 {{- fail "zenoh.service.loadBalancerSourceRanges requires zenoh.service.type=LoadBalancer" -}}
 {{- end -}}
-{{- if and .Values.zenoh.enabled (not .Values.zenoh.config.existingConfigMap) (not .Values.zenoh.config.accessControl.enabled) -}}
-{{- fail "generated Zenoh configuration requires accessControl.enabled=true" -}}
+{{- if .Values.zenoh.enabled -}}
+{{- if not .Values.managedGateway.enabled -}}
+{{- fail "zenoh.enabled requires managedGateway.enabled=true for signed Router admission" -}}
 {{- end -}}
-{{- if and .Values.zenoh.enabled (not .Values.zenoh.config.existingConfigMap) (ne .Values.zenoh.config.accessControl.defaultPermission "deny") -}}
-{{- fail "generated Zenoh configuration requires accessControl.defaultPermission=deny" -}}
+{{- if not (or .Values.zenoh.image.digest .Values.zenoh.image.tag) -}}
+{{- fail "zenoh.image.digest or zenoh.image.tag must select an Inari Router image" -}}
+{{- end -}}
+{{- if not .Values.zenoh.persistence.enabled -}}
+{{- fail "zenoh.persistence.enabled must retain the Router policy generation" -}}
+{{- end -}}
+{{- if eq (int .Values.zenoh.management.port) (int .Values.zenoh.service.port) -}}
+{{- fail "Router management and data-plane ports must be distinct" -}}
+{{- end -}}
+{{- if has .Values.zenoh.management.controllerCommonName .Values.managedGateway.routerPolicy.trustedPeerCommonNames -}}
+{{- fail "Router management Controller common name must be separate from data-plane peers" -}}
+{{- end -}}
+{{- $secrets := list .Values.managedGateway.routerPolicy.signingKey.name .Values.zenoh.signingPublicKey.name .Values.zenoh.management.controllerSecret.name .Values.zenoh.management.routerSecret.name .Values.zenoh.tls.controllerSecret.name .Values.zenoh.tls.routerSecret.name -}}
+{{- if ne (len $secrets) (len (uniq $secrets)) -}}
+{{- fail "Router signing and TLS identities require separate Secrets" -}}
+{{- end -}}
 {{- end -}}
 {{- end }}

@@ -1,9 +1,4 @@
-{{- if and .Values.zenoh.enabled (not .Values.zenoh.config.existingConfigMap) }}
-{{- $routerEndpoints := list }}
-{{- range $ordinal := until (int .Values.zenoh.replicas) }}
-{{- $endpoint := printf "tls/%s-zenoh-%d.%s-zenoh-headless.%s.svc.cluster.local:%d" (include "inari.fullname" $) $ordinal (include "inari.fullname" $) $.Release.Namespace (int $.Values.zenoh.service.port) }}
-{{- $routerEndpoints = append $routerEndpoints $endpoint }}
-{{- end }}
+{{- if .Values.zenoh.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,135 +11,35 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 data:
-  {{ .Values.zenoh.config.key }}: |
-    {
-      "mode": "router",
-      "listen": {
-        "endpoints": ["tls/[::]:{{ .Values.zenoh.service.port }}"]
-      },
-      "connect": {
-        "endpoints": {{ $routerEndpoints | toJson }},
-        "exit_on_failure": false
-      },
-      "scouting": {
-        "multicast": {
-          "enabled": false
-        }
-      },
-      "adminspace": {
-        "enabled": {{ .Values.zenoh.config.adminSpace.enabled }},
-        "permissions": {
-          "read": {{ .Values.zenoh.config.adminSpace.read }},
-          "write": {{ .Values.zenoh.config.adminSpace.write }}
-        }
-      },
-      "timestamping": {
-        "enabled": true,
-        "drop_future_timestamp": false
-      },
-      "transport": {
-        "link": {
-          "tls": {
-            "root_ca_certificate": "/etc/zenoh/tls/ca.crt",
-            "listen_private_key": "/etc/zenoh/tls/tls.key",
-            "listen_certificate": "/etc/zenoh/tls/tls.crt",
-            "connect_private_key": "/etc/zenoh/tls/tls.key",
-            "connect_certificate": "/etc/zenoh/tls/tls.crt",
-            "enable_mtls": true,
-            "verify_name_on_connect": true,
-            "close_link_on_expiration": true
-          }
-        }
-      },
-      "access_control": {
-        "enabled": {{ .Values.zenoh.config.accessControl.enabled }},
-        "default_permission": {{ .Values.zenoh.config.accessControl.defaultPermission | quote }},
-        "rules": [
-          {
-            "id": "controller-authority",
-            "messages": ["put", "delete", "declare_subscriber", "query", "reply", "declare_queryable", "liveliness_token", "liveliness_query", "declare_liveliness_subscriber"],
-            "flows": ["ingress", "egress"],
-            "permission": "allow",
-            "key_exprs": [{{ printf "%s/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
-          },
-          {
-            "id": "agent-publications",
-            "messages": ["put"],
-            "flows": ["ingress"],
-            "permission": "allow",
-            "key_exprs": [
-              {{ printf "%s/*/presence/agent" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
-              {{ printf "%s/*/status/latest" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
-              {{ printf "%s/*/results/*" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
-              {{ printf "%s/*/events/*" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
-              {{ printf "%s/*/errors/*" .Values.managedGateway.dataPlane.namespacePrefix | quote }}
-            ]
-          },
-          {
-            "id": "agent-presence",
-            "messages": ["liveliness_token"],
-            "flows": ["ingress"],
-            "permission": "allow",
-            "key_exprs": [{{ printf "%s/*/presence/agent" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
-          },
-          {
-            "id": "agent-command-subscription",
-            "messages": ["declare_subscriber"],
-            "flows": ["ingress"],
-            "permission": "allow",
-            "key_exprs": [{{ printf "%s/*/commands/live/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
-          },
-          {
-            "id": "controller-command-delivery",
-            "messages": ["put"],
-            "flows": ["egress"],
-            "permission": "allow",
-            "key_exprs": [{{ printf "%s/*/commands/live/**" .Values.managedGateway.dataPlane.namespacePrefix | quote }}]
-          },
-          {
-            "id": "agent-query",
-            "messages": ["query"],
-            "flows": ["ingress"],
-            "permission": "allow",
-            "key_exprs": [
-              {{ printf "%s/*/commands/history" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
-              {{ printf "%s/*/state/commit" .Values.managedGateway.dataPlane.namespacePrefix | quote }}
-            ]
-          },
-          {
-            "id": "controller-query-reply",
-            "messages": ["reply", "declare_queryable"],
-            "flows": ["egress"],
-            "permission": "allow",
-            "key_exprs": [
-              {{ printf "%s/*/commands/history" .Values.managedGateway.dataPlane.namespacePrefix | quote }},
-              {{ printf "%s/*/state/commit" .Values.managedGateway.dataPlane.namespacePrefix | quote }}
-            ]
-          }
-        ],
-        "subjects": [
-          {
-            "id": "controller-peers",
-            "link_protocols": ["tls"],
-            "cert_common_names": {{ .Values.zenoh.config.accessControl.trustedPeerCommonNames | toJson }}
-          },
-          {
-            "id": "mutually-authenticated-tls",
-            "link_protocols": ["tls"]
-          }
-        ],
-        "policies": [
-          {
-            "id": "controller-authority-over-mtls",
-            "rules": ["controller-authority"],
-            "subjects": ["controller-peers"]
-          },
-          {
-            "id": "agent-traffic-over-mtls",
-            "rules": ["agent-publications", "agent-presence", "agent-command-subscription", "controller-command-delivery", "agent-query", "controller-query-reply"],
-            "subjects": ["mutually-authenticated-tls"]
-          }
-        ]
-      }
-    }
+  {{- range $ordinal := until (int .Values.zenoh.replicas) }}
+  {{- $peers := list }}
+  {{- range $peer := until (int $.Values.zenoh.replicas) }}
+  {{- if ne $peer $ordinal }}
+  {{- $peers = append $peers (printf "tls/%s-zenoh-%d.%s-zenoh-headless.%s.svc.cluster.local:%d" (include "inari.fullname" $) $peer (include "inari.fullname" $) $.Release.Namespace (int $.Values.zenoh.service.port)) }}
+  {{- end }}
+  {{- end }}
+  router-{{ $ordinal }}.toml: |
+    fleet_id = {{ $.Values.managedGateway.routerPolicy.fleetId | quote }}
+    state_directory = "/var/lib/inari-router/policy"
+    signing_public_key_file = "/etc/inari-router/policy/signing-key.hex"
+    zenoh_executable = "/usr/local/bin/zenohd"
+
+    [management]
+    address = "0.0.0.0:{{ $.Values.zenoh.management.port }}"
+    certificate_file = "/etc/inari-router/management/tls.crt"
+    private_key_file = "/etc/inari-router/management/tls.key"
+    client_ca_file = "/etc/inari-router/management/ca.crt"
+    controller_common_name = {{ $.Values.zenoh.management.controllerCommonName | quote }}
+
+    [router]
+    id = {{ printf "%s%02x" (include "inari.zenohIdPrefix" $) $ordinal | quote }}
+    listen_endpoint = "tls/[::]:{{ $.Values.zenoh.service.port }}"
+    probe_endpoint = "tls/{{ include "inari.fullname" $ }}-zenoh-{{ $ordinal }}.{{ include "inari.fullname" $ }}-zenoh-headless.{{ $.Release.Namespace }}.svc.cluster.local:{{ $.Values.zenoh.service.port }}"
+    peer_endpoints = {{ $peers | toJson }}
+    root_ca_file = "/etc/inari-router/tls/ca.crt"
+    certificate_file = "/etc/inari-router/tls/tls.crt"
+    private_key_file = "/etc/inari-router/tls/tls.key"
+    probe_certificate_file = "/etc/inari-router/tls/tls.crt"
+    probe_private_key_file = "/etc/inari-router/tls/tls.key"
+  {{- end }}
 {{- end }}

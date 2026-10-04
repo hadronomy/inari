@@ -7,7 +7,7 @@ and secret delivery already have clear operators.
 The chart installs two workloads:
 
 - `inari-server`, a stateless Axum/Leptos controller;
-- `zenohd`, a StatefulSet of routers with stable mesh identities.
+- `inari-router`, a StatefulSet of Supervisors that own stock Zenoh processes.
 
 They have separate Services, certificates, probes, rollout policies, and
 NetworkPolicies. The controller connects to Zenoh as a client.
@@ -34,10 +34,12 @@ Prepare these services and credentials before installing the chart:
 3. A step-ca JWK provisioner and its encrypted signing key. The controller uses
    it only to mint short-lived, CSR-bound agent tokens.
 4. A controller client certificate for Zenoh.
-5. A separate router certificate that covers the client Service, every
+5. A separate Router certificate with server and client usage that covers the client Service, every
    StatefulSet pod DNS name, and any external name used by agents.
-6. An HTTP ingress and a separate TCP path for Zenoh TLS.
-7. A CNI that enforces NetworkPolicy if policy is enabled.
+6. A dedicated management CA, separate Router server and Controller client
+   certificates, and an Ed25519 policy key pair.
+7. An HTTP ingress and a separate TCP path for Zenoh TLS.
+8. A CNI that enforces NetworkPolicy if policy is enabled.
 
 For a three-router release named `inari` in namespace `inari`, the router
 certificate normally covers:
@@ -68,7 +70,11 @@ variables.
 | `identity.oidc.clientSecret` | `client-secret` | OIDC confidential-client secret |
 | `managedGateway.certificate.stepCa.signingKey` | `provisioner-key.pem` | Encrypted step-ca provisioner key |
 | `zenoh.tls.controllerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Controller Zenoh client identity |
-| `zenoh.tls.routerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Router server and mesh identity |
+| `zenoh.tls.routerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Router server, mesh, and probe identity |
+| `zenoh.management.controllerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Dedicated Controller management client identity |
+| `zenoh.management.routerSecret` | `ca.crt`, `tls.crt`, `tls.key` | Dedicated Router management server identity |
+| `managedGateway.routerPolicy.signingKey` | `signing-key.pem` | Ed25519 PKCS#8 PEM policy signing key |
+| `zenoh.signingPublicKey` | `signing-key.hex` | Matching public key, 64 hexadecimal characters |
 | `managedGateway.dispatch.signingKey` | `signing-key.der` | Ed25519 PKCS#8 DER key for Dispatch Envelopes |
 | `managedGateway.payloadProtection.caCertificateSecret` | configured key | Optional PEM CA bundle for OpenBao |
 
@@ -81,7 +87,7 @@ key.
 
 The generated Zenoh policy reserves certificate common names `inari-controller`
 and `inari-router` for these principals. Set
-`zenoh.config.accessControl.trustedPeerCommonNames` to the exact common names
+`managedGateway.routerPolicy.trustedPeerCommonNames` to the exact common names
 in your certificates. The router SANs still need to cover its DNS endpoints.
 The CA must never issue these reserved common names to an Agent.
 
@@ -256,35 +262,75 @@ over manually inflating the chart.
 
 ## Zenoh routing
 
-The generated router configuration gives every StatefulSet pod a deterministic
-ID and connects it to the stable pod DNS names. Multicast discovery is disabled.
+The chart generates one Supervisor TOML file per StatefulSet ordinal. Each file
+has a distinct 32-digit hexadecimal Router ID and excludes its own mesh address.
+The Controller receives the same IDs and each pod's HTTPS management origin.
+The shared `managedGateway.routerPolicy.fleetId` stays fixed across upgrades.
 
-`<release>-zenoh` serves controller and agent clients.
-`<release>-zenoh-headless` exists only for router identity and mesh traffic.
+`<release>-zenoh` carries Controller and Agent data-plane traffic.
+`<release>-zenoh-headless` carries mesh traffic and management requests.
+It publishes unready pod addresses so the first policy can arrive before data
+readiness. Management startup and liveness probes do not depend on a policy.
+Readiness requires the data-plane listener.
 
-`ClusterIP` is the safe default. Agents outside the cluster need a private
-`LoadBalancer`, TCP proxy, or routed endpoint. Add source ranges and matching
-NetworkPolicy rules before exposing the Service.
+`ClusterIP` is the default. Agents outside the cluster need a private TCP path.
+Add source ranges and matching NetworkPolicy rules before exposing the Service.
+The public Service never exposes management.
 
-Set `zenoh.config.existingConfigMap` when another system owns the router JSON5.
-The named ConfigMap must contain `zenoh.config.key`. Because the chart cannot
-checksum external content, that owner must also trigger router rollouts.
+Routers accept complete signed policy over dedicated management mTLS. Each
+Agent certificate receives only its own namespace. Permission changes close
+established links before acknowledgment. A signed lifetime refresh preserves
+links when authority and TLS material stay unchanged. Invalid TLS material,
+certificate expiry, or policy expiry closes the data plane.
+Signed Agent State Envelopes authenticate Print Job observations separately.
 
-The generated access rules allow only trusted Controller and router certificates
-to publish commands or answer command-history and state-commit queries. Agent
-certificates can publish observations, subscribe to commands, and send queries.
-A state-commit reply proves durable storage, so an Agent must never be able to
-provide one. Custom router configuration must enforce the same boundary.
+The chart requires an Inari Router image and persistent policy storage.
+Custom static ACL ConfigMaps and ephemeral policy storage are unavailable.
+Every Router keeps its highest accepted generation in a private `policy`
+directory below its PVC mount. The generated runtime file includes private TLS
+material. Protect PVC backups as credentials, and retain the PVCs across Pod
+replacement. PostgreSQL generations must never move behind this stored state.
 
-These static rules separate Controller authority from Agent traffic. They do
-not bind each Agent certificate to its own key-expression namespace. Signed
-Agent State Envelopes remain necessary to authenticate Print Job observations.
+The dedicated management CA is separate from the data-plane CA. The management
+Controller certificate uses the exact `zenoh.management.controllerCommonName`
+and client certificate usage. This name cannot be a data-plane peer or Agent.
+Router management certificates cover every headless pod DNS name.
+Router data-plane certificates require server and client usage for mesh and
+readiness connections. No Router mounts a Controller private key.
+
+### Rotate the policy signing key
+
+Managed Controller deployments use `Recreate` to stop old replicas before new
+replicas allocate generations. This creates an API outage during an upgrade.
+Local Device Work can continue.
+
+The Router verifier accepts one public key. Its persisted policy is signed by
+that key. Changing the key in place makes startup fail signature validation.
+A rolling key rotation cannot use overlapping signing keys.
+
+Rotation uses a replacement fleet with a new `fleetId`, new workload names,
+and fresh Router PVCs. Stop all old Controller and Router pods first. Keep the
+same Organization and PostgreSQL database so generation allocation continues.
+Retain the old PVCs offline for audit and recovery. Never mount them in the new
+fleet or restore an older PostgreSQL generation.
+
+Provision the matching private and public key Secrets for the replacement
+fleet. Its management and data-plane certificates must cover the new pod DNS
+names. The new Controller config includes every replacement Router origin.
+It allocates a higher signed generation before managed admission can resume.
+Move the public TCP path and HTTP ingress only after all Routers and the
+Controller become ready. Keep the old fleet stopped after this transfer.
+
+This operation requires a coordinated maintenance window and a reviewed
+Release Set. Routine TLS certificate rotation uses the mounted certificate
+files and does not replace the policy signing key or fleet.
 
 ## Network policy
 
 Default policy allows same-namespace access to the controller and router,
-controller egress to DNS, HTTPS, PostgreSQL, and Zenoh, router mesh traffic,
-and migration egress to DNS and PostgreSQL.
+Controller egress to DNS, HTTPS, PostgreSQL, Zenoh, and Router management, mesh traffic,
+and migration egress to DNS and PostgreSQL. Only Controller pods can reach
+Router management under the default policy.
 
 It cannot guess the ingress-controller namespace, edge-agent CIDRs, or an
 organization’s egress gateway. Add those paths through:
@@ -363,14 +409,15 @@ egress. The application never prints the URL.
 ### Controller is healthy but not ready
 
 Read `/readyz` and structured logs. Pending migrations, OIDC discovery, and
-required Zenoh connectivity are the usual dependencies. Readiness is already
+required Zenoh connectivity, and complete Router acknowledgment are dependencies. Readiness is already
 the correct place for them; do not weaken liveness.
 
 ### Routers do not become ready
 
-Check Secret keys, certificate SANs, the CA chain, mesh DNS, ConfigMap key, and
-NetworkPolicy. With generated configuration, confirm every StatefulSet ordinal
-appears in the rendered connect endpoints.
+Check Secret keys, certificate usage and SANs, both CA chains, pod DNS, policy
+signing keys, and NetworkPolicy. Every ordinal must appear in the Controller
+management origins. Each Router excludes itself from mesh endpoints. An open
+management listener does not prove current data-plane authority.
 
 ### The UI works but agents cannot connect
 
