@@ -1,8 +1,7 @@
-use std::net::TcpListener;
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
-use inari_router::management::ManagementAcceptor;
+use inari_router::management::{ManagementAcceptor, serve};
 use inari_router::supervisor::RouterSupervisor;
 use inari_router::{PolicyStore, RouterConfig};
 use rcgen::ExtendedKeyUsagePurpose;
@@ -57,16 +56,17 @@ async fn management_requires_the_dedicated_controller_certificate() {
         },
     )
     .unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let endpoint = format!("https://localhost:{}/status", listener.local_addr().unwrap().port());
     let shutdown = axum_server::Handle::new();
-    let server = axum_server::from_tcp(listener)
-        .unwrap()
-        .acceptor(acceptor)
-        .handle(shutdown.clone());
     let task =
-        tokio::spawn(server.serve(inari_router::management::routes(handle).into_make_service()));
+        tokio::spawn(serve("127.0.0.1:0".parse().unwrap(), acceptor, handle, shutdown.clone()));
+    let endpoint = format!(
+        "https://localhost:{}/status",
+        shutdown
+            .listening()
+            .await
+            .unwrap()
+            .port()
+    );
 
     let valid = client(
         &root.pem(),

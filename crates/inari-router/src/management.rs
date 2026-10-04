@@ -14,6 +14,7 @@ use axum::{Extension, Json, Router};
 use axum_server::accept::Accept;
 use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
 use chrono::{DateTime, Utc};
+use hyper_util::rt::TokioTimer;
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -204,6 +205,7 @@ pub async fn serve(
     server
         .http_builder()
         .http1()
+        .timer(TokioTimer::new())
         .header_read_timeout(Duration::from_secs(5));
     server
         .serve(routes(handle).into_make_service())

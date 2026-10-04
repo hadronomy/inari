@@ -4960,6 +4960,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "hex",
+ "hyper-util",
  "nix 0.31.3",
  "rcgen",
  "reqwest 0.13.4",
