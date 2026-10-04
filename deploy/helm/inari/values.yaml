@@ -4,8 +4,8 @@
 image:
   repository: ghcr.io/hadronomy/inari-server
   tag: ""
-  # Signed Controller source d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d.
-  digest: sha256:97f67d01db31381354f5cbc8cf896311eacde57788c6e68384618e7da103f21e
+  # Signed Controller source aef9b678ca594a654d44205983dbfa7b764818c9.
+  digest: sha256:495f4c44af8e12275ada12afa6a09441093d853e40053da93e33353e35841436
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -237,9 +237,9 @@ zenoh:
   enabled: false
   image:
     repository: ghcr.io/hadronomy/inari-router
-    # Select a signed Router image before enabling this workload.
+    # Signed Router source aef9b678ca594a654d44205983dbfa7b764818c9.
     tag: ""
-    digest: ""
+    digest: sha256:de6e3ab55bb07ea249b909cbef03a8d54617a596c31d71cd59e965136924f823
     pullPolicy: IfNotPresent
   replicas: 3
   revisionHistoryLimit: 3
