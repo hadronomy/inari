@@ -1,4 +1,4 @@
-//! The floating layer: a launcher, and the overlay the Layout tool draws.
+//! The floating layer: a launcher and the selected element's box model.
 //!
 //! GPUI has shipped a working element inspector all along — picking, ancestor
 //! walking, live style editing — and `gpui_component::init` binds it to
