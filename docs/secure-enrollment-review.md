@@ -80,9 +80,10 @@ returns success only after every Router acknowledges the removal.
 
 The [Router policy contract](router_policy.md) defines the dedicated management
 mTLS boundary, admission proofs, policy expiry, and verification contracts.
-The chart still uses a broad TLS subject that grants wildcard Agent namespaces.
-Production requires deployment of the Supervisor, exact subjects, protected
-management credentials, and bounded policy refresh. Stock ACL changes require
+The chart now deploys the Supervisor with exact subjects, protected management
+credentials, persistent generations, and bounded policy refresh. The installed
+production chart still uses the older disabled Router path. Production requires
+the tested chart and signed image digests before managed admission opens. Stock ACL changes require
 Router restart and close existing sessions before acknowledgment.
 The chart disables enrollment and Zenoh by default. Enabling mutual TLS alone
 does not satisfy the Router policy gate.
