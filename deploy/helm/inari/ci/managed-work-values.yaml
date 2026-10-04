@@ -1,5 +1,7 @@
 managedGateway:
   enabled: true
+  routerPolicy:
+    fleetId: inari-ci
   certificate:
     mode: step_ca
     stepCa:
@@ -13,3 +15,5 @@ managedGateway:
 
 zenoh:
   enabled: true
+  image:
+    tag: verification

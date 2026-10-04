@@ -10,6 +10,7 @@ on:
       - justfile
       - mise.toml
       - scripts/validate-kubernetes*.sh
+      - scripts/check-router-chart.py
   push:
     branches:
       - main
@@ -20,6 +21,7 @@ on:
       - justfile
       - mise.toml
       - scripts/validate-kubernetes*.sh
+      - scripts/check-router-chart.py
 
 permissions: {}
 
@@ -28,6 +30,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  controller-config:
+    name: Rendered Controller configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install render tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install_args: helm yq
+          cache: true
+
+      - name: Set up mbx
+        uses: jdx/mr-boxington-action@2bbb8f141e40e388b509cc68fe0bfbe7bc4b6818 # v1
+        with:
+          version: 0.4.0
+
+      - name: Validate rendered config with the Controller
+        run: |
+          for config in controller-only managed-work; do
+            helm template inari deploy/helm/inari --namespace inari \
+              --values "deploy/helm/inari/ci/${config}-values.yaml" \
+              --show-only templates/configmap.yaml \
+              | yq --unwrapScalar '.data["inari-server.toml"]' \
+              >"${RUNNER_TEMP}/inari-server.toml"
+            export INARI_SERVER_CONFIG="${RUNNER_TEMP}/inari-server.toml"
+            mbx run --locked --package inari-server -- config validate
+          done
+
   validate:
     name: Lint, render, and validate
     runs-on: ubuntu-24.04

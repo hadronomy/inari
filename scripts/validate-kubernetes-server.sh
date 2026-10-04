@@ -52,6 +52,17 @@ kubectl apply \
   --dry-run=server \
   --filename "${workspace}/helm.yaml"
 
+helm template inari "${CHART}" \
+  --namespace inari \
+  --values "${CHART}/ci/managed-work-values.yaml" \
+  --kube-version 1.36.1 \
+  >"${workspace}/managed-work.yaml"
+kubectl apply \
+  --namespace inari \
+  --server-side \
+  --dry-run=server \
+  --filename "${workspace}/managed-work.yaml"
+
 kustomize build --enable-helm "${KUSTOMIZATION}" >"${workspace}/kustomize.yaml"
 kubectl apply \
   --namespace inari \

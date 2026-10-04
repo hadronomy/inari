@@ -34,7 +34,7 @@ yamllint --config-file "${ROOT}/deploy/helm/yamllint.yaml" \
 for helm_version in 3.21.3 4.2.3; do
   mise exec "helm@${helm_version}" -- helm lint --strict "${CHART}"
   mise exec "helm@${helm_version}" -- helm lint --strict "${CHART}" \
-    --values "${CHART}/ci/external-config-values.yaml"
+    --values "${CHART}/ci/ingress-autoscaling-values.yaml"
 done
 ct lint --config "${ROOT}/deploy/helm/ct.yaml" --charts "${CHART}"
 
@@ -80,21 +80,27 @@ if helm template inari "${CHART}" \
   exit 1
 fi
 
-if helm template inari "${CHART}" \
-  --set zenoh.enabled=true \
-  --set zenoh.config.accessControl.enabled=false \
-  >"${workspace}/invalid-zenoh-acl.log" 2>&1; then
-  printf 'chart accepted generated Zenoh configuration without access control\n' >&2
-  exit 1
-fi
+reject_managed_values() {
+  local case_name="$1"
+  shift
+  if helm template inari "${CHART}" \
+    --values "${CHART}/ci/managed-work-values.yaml" \
+    "$@" >"${workspace}/invalid-${case_name}.log" 2>&1; then
+    printf 'chart accepted invalid managed values: %s\n' "${case_name}" >&2
+    exit 1
+  fi
+}
 
-if helm template inari "${CHART}" \
-  --set zenoh.enabled=true \
-  --set-json 'zenoh.config.accessControl.trustedPeerCommonNames=[]' \
-  >"${workspace}/invalid-zenoh-principals.log" 2>&1; then
-  printf 'chart accepted generated Zenoh configuration without trusted principals\n' >&2
-  exit 1
-fi
+reject_managed_values obsolete-router-config --set zenoh.config.existingConfigMap=unsafe
+reject_managed_values no-trusted-peers --set-json 'managedGateway.routerPolicy.trustedPeerCommonNames=[]'
+reject_managed_values agent-as-trusted-peer --set-json 'managedGateway.routerPolicy.trustedPeerCommonNames=["agt_0123456789abcdef01234567"]'
+reject_managed_values no-persistence --set zenoh.persistence.enabled=false
+reject_managed_values no-router-image --set-string zenoh.image.tag= --set-string zenoh.image.digest=
+reject_managed_values shared-management-identity --set zenoh.management.controllerSecret.name=inari-controller-zenoh-tls
+reject_managed_values shared-management-common-name --set zenoh.management.controllerCommonName=inari-controller
+reject_managed_values colliding-ports --set zenoh.management.port=7447
+reject_managed_values no-signing-secret --set-string managedGateway.routerPolicy.signingKey.name=
+reject_managed_values too-many-routers --set zenoh.replicas=33
 
 if helm template inari "${CHART}" \
   --values "${CHART}/ci/managed-work-values.yaml" \
@@ -188,13 +194,19 @@ for path, enabled in zip(sys.argv[1:], (False, True), strict=True):
         assert managed["certificate"]["mode"] == "none"
 PYTHON
 
-helm template inari "${CHART}" \
-  --namespace inari \
-  --set zenoh.enabled=true \
-  --show-only templates/zenoh-configmap.yaml \
-  | yq --unwrapScalar '.data["config.json5"]' \
-  >"${workspace}/zenoh.json"
-jq empty "${workspace}/zenoh.json"
+yq --output-format json --no-doc '.' "${workspace}/managed-work.yaml" \
+  | jq --slurp '.' >"${workspace}/managed-work.json"
+python3 "${ROOT}/scripts/check-router-chart.py" "${workspace}/managed-work.json" inari
+
+for router_count in 1 12 32; do
+  helm template contract "${CHART}" --namespace router-contract \
+    --values "${CHART}/ci/managed-work-values.yaml" \
+    --set zenoh.replicas="${router_count}" \
+    | yq --output-format json --no-doc '.' \
+    | jq --slurp '.' >"${workspace}/router-count-${router_count}.json"
+  python3 "${ROOT}/scripts/check-router-chart.py" \
+    "${workspace}/router-count-${router_count}.json" router-contract
+done
 
 kustomize build --enable-helm "${KUSTOMIZATION}" >"${workspace}/kustomize.yaml"
 kubeconform \

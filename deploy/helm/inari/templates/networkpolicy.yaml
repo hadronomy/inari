@@ -44,6 +44,8 @@ spec:
       ports:
         - port: {{ .Values.zenoh.service.port }}
           protocol: TCP
+        - port: {{ .Values.zenoh.management.port }}
+          protocol: TCP
     {{- end }}
     {{- with .Values.networkPolicy.controller.additionalEgress }}
     {{- toYaml . | nindent 4 }}
@@ -65,6 +67,13 @@ spec:
     - Ingress
     - Egress
   ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "inari.componentSelectorLabels" (dict "root" . "component" "controller") | nindent 14 }}
+      ports:
+        - port: {{ .Values.zenoh.management.port }}
+          protocol: TCP
     - from:
         - namespaceSelector:
             matchLabels:

@@ -46,6 +46,7 @@ metadata:
   {{- end }}
 spec:
   clusterIP: None
+  # The Controller must reach management before the first policy opens data traffic.
   publishNotReadyAddresses: true
   selector:
     {{- include "inari.componentSelectorLabels" (dict "root" . "component" "zenoh") | nindent 4 }}
@@ -53,5 +54,9 @@ spec:
     - name: zenoh-tls
       port: {{ .Values.zenoh.service.port }}
       targetPort: zenoh-tls
+      protocol: TCP
+    - name: management
+      port: {{ .Values.zenoh.management.port }}
+      targetPort: management
       protocol: TCP
 {{- end }}

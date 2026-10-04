@@ -162,6 +162,16 @@ managedGateway:
     - events:read
     - jobs:cancel
     - commands:execute
+  routerPolicy:
+    # This identity stays fixed across restarts and upgrades.
+    fleetId: inari-production
+    # Exact data-plane certificate common names. Reserve them for these principals.
+    trustedPeerCommonNames:
+      - inari-controller
+      - inari-router
+    signingKey:
+      name: inari-router-policy-signing
+      key: signing-key.pem
   dispatch:
     # Enable after provisioning the signing key and OpenBao Transit policy.
     enabled: false
@@ -226,8 +236,9 @@ migrations:
 zenoh:
   enabled: false
   image:
-    repository: eclipse/zenoh
-    tag: 1.9.0
+    repository: ghcr.io/hadronomy/inari-router
+    # Select a signed Router image before enabling this workload.
+    tag: ""
     digest: ""
     pullPolicy: IfNotPresent
   replicas: 3
@@ -237,9 +248,9 @@ zenoh:
   podLabels: {}
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
     fsGroupChangePolicy: OnRootMismatch
     seccompProfile:
       type: RuntimeDefault
@@ -249,21 +260,23 @@ zenoh:
       drop:
         - ALL
     readOnlyRootFilesystem: true
-  config:
-    existingConfigMap: ""
-    key: config.json5
-    adminSpace:
-      enabled: false
-      read: true
-      write: false
-    accessControl:
-      enabled: true
-      defaultPermission: deny
-      # Exact certificate common names reserved for the Controller and routers.
-      # Issue their TLS certificates with these names; never issue them to Agents.
-      trustedPeerCommonNames:
-        - inari-controller
-        - inari-router
+  signingPublicKey:
+    name: inari-router-policy-public
+    key: signing-key.hex
+  management:
+    port: 8443
+    # This dedicated identity is separate from Controller data-plane authority.
+    controllerCommonName: inari-controller-management
+    controllerSecret:
+      name: inari-controller-router-management
+      caKey: ca.crt
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
+    routerSecret:
+      name: inari-router-management
+      caKey: ca.crt
+      certificateKey: tls.crt
+      privateKeyKey: tls.key
   tls:
     controllerSecret:
       name: inari-controller-zenoh-tls
@@ -286,7 +299,8 @@ zenoh:
     annotations: {}
     labels: {}
   persistence:
-    enabled: false
+    # Each Router retains the highest accepted generation, including expired policy.
+    enabled: true
     storageClass: ""
     accessModes:
       - ReadWriteOnce

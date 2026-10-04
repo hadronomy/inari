@@ -301,7 +301,7 @@
     "managedGateway": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "controllerName", "controllerInstanceId", "supportedProtocolVersions", "controllerActions", "dispatch", "payloadProtection", "onboarding", "dataPlane", "certificate"],
+      "required": ["enabled", "controllerName", "controllerInstanceId", "supportedProtocolVersions", "controllerActions", "dispatch", "payloadProtection", "onboarding", "dataPlane", "certificate", "routerPolicy"],
       "properties": {
         "enabled": { "type": "boolean" },
         "controllerName": { "type": "string", "minLength": 1 },
@@ -317,6 +317,37 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
+        },
+        "routerPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fleetId",
+            "trustedPeerCommonNames",
+            "signingKey"
+          ],
+          "properties": {
+            "fleetId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$"
+            },
+            "trustedPeerCommonNames": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+                "not": {
+                  "pattern": "^agt_"
+                }
+              }
+            },
+            "signingKey": {
+              "$ref": "#/definitions/secretKeyReference"
+            }
+          }
         },
         "dispatch": {
           "type": "object",
@@ -504,7 +535,6 @@
         "podLabels",
         "podSecurityContext",
         "containerSecurityContext",
-        "config",
         "tls",
         "service",
         "headlessService",
@@ -522,49 +552,46 @@
         "podAntiAffinity",
         "affinity",
         "topologySpreadConstraints",
-        "tolerations"
+        "tolerations",
+        "signingPublicKey",
+        "management"
       ],
       "properties": {
         "enabled": { "type": "boolean" },
         "image": { "$ref": "#/definitions/image" },
-        "replicas": { "type": "integer", "minimum": 1, "maximum": 99 },
+        "replicas": { "type": "integer", "minimum": 1, "maximum": 32 },
         "revisionHistoryLimit": { "type": "integer", "minimum": 0 },
         "minReadySeconds": { "type": "integer", "minimum": 0 },
         "podAnnotations": { "$ref": "#/definitions/stringMap" },
         "podLabels": { "$ref": "#/definitions/stringMap" },
         "podSecurityContext": { "$ref": "#/definitions/kubernetesObject" },
         "containerSecurityContext": { "$ref": "#/definitions/kubernetesObject" },
-        "config": {
+        "signingPublicKey": { "$ref": "#/definitions/secretKeyReference" },
+        "management": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["existingConfigMap", "key", "adminSpace", "accessControl"],
+          "required": [
+            "port",
+            "controllerCommonName",
+            "controllerSecret",
+            "routerSecret"
+          ],
           "properties": {
-            "existingConfigMap": { "type": "string", "maxLength": 253 },
-            "key": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
-            "adminSpace": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["enabled", "read", "write"],
-              "properties": {
-                "enabled": { "type": "boolean" },
-                "read": { "type": "boolean" },
-                "write": { "type": "boolean" }
+            "port": {
+              "$ref": "#/definitions/port"
+            },
+            "controllerCommonName": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+              "not": {
+                "pattern": "^agt_"
               }
             },
-            "accessControl": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["enabled", "defaultPermission", "trustedPeerCommonNames"],
-              "properties": {
-                "enabled": { "type": "boolean" },
-                "defaultPermission": { "enum": ["deny", "allow"] },
-                "trustedPeerCommonNames": {
-                  "type": "array",
-                  "minItems": 1,
-                  "uniqueItems": true,
-                  "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }
-                }
-              }
+            "controllerSecret": {
+              "$ref": "#/definitions/tlsSecretReference"
+            },
+            "routerSecret": {
+              "$ref": "#/definitions/tlsSecretReference"
             }
           }
         },

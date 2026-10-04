@@ -25,9 +25,7 @@ spec:
   template:
     metadata:
       annotations:
-        {{- if not .Values.zenoh.config.existingConfigMap }}
         checksum/config: {{ include (print $.Template.BasePath "/zenoh-configmap.yaml") . | sha256sum }}
-        {{- end }}
         {{- with .Values.zenoh.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -58,9 +56,7 @@ spec:
           imagePullPolicy: {{ .Values.zenoh.image.pullPolicy }}
           args:
             - --config
-            - /etc/zenoh/{{ .Values.zenoh.config.key }}
-            - --id
-            - {{ printf "%s$(POD_INDEX)" (include "inari.zenohIdPrefix" .) | quote }}
+            - /etc/inari-router/router-$(POD_INDEX).toml
           env:
             - name: POD_INDEX
               valueFrom:
@@ -72,9 +68,12 @@ spec:
             - name: zenoh-tls
               containerPort: {{ .Values.zenoh.service.port }}
               protocol: TCP
+            - name: management
+              containerPort: {{ .Values.zenoh.management.port }}
+              protocol: TCP
           startupProbe:
             tcpSocket:
-              port: zenoh-tls
+              port: management
             {{- toYaml .Values.zenoh.startupProbe | nindent 12 }}
           readinessProbe:
             tcpSocket:
@@ -82,16 +81,22 @@ spec:
             {{- toYaml .Values.zenoh.readinessProbe | nindent 12 }}
           livenessProbe:
             tcpSocket:
-              port: zenoh-tls
+              port: management
             {{- toYaml .Values.zenoh.livenessProbe | nindent 12 }}
           volumeMounts:
             - name: config
-              mountPath: /etc/zenoh
+              mountPath: /etc/inari-router
               readOnly: true
             - name: data
-              mountPath: /var/lib/zenoh
+              mountPath: /var/lib/inari-router
             - name: tls
-              mountPath: /etc/zenoh/tls
+              mountPath: /etc/inari-router/tls
+              readOnly: true
+            - name: management
+              mountPath: /etc/inari-router/management
+              readOnly: true
+            - name: policy-public-key
+              mountPath: /etc/inari-router/policy
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -101,13 +106,6 @@ spec:
         - name: config
           configMap:
             name: {{ include "inari.zenohConfigMapName" . }}
-            items:
-              - key: {{ .Values.zenoh.config.key }}
-                path: {{ .Values.zenoh.config.key }}
-        {{- if not .Values.zenoh.persistence.enabled }}
-        - name: data
-          emptyDir: {}
-        {{- end }}
         - name: tls
           secret:
             secretName: {{ .Values.zenoh.tls.routerSecret.name }}
@@ -118,6 +116,22 @@ spec:
                 path: tls.crt
               - key: {{ .Values.zenoh.tls.routerSecret.privateKeyKey }}
                 path: tls.key
+        - name: management
+          secret:
+            secretName: {{ .Values.zenoh.management.routerSecret.name }}
+            items:
+              - key: {{ .Values.zenoh.management.routerSecret.caKey }}
+                path: ca.crt
+              - key: {{ .Values.zenoh.management.routerSecret.certificateKey }}
+                path: tls.crt
+              - key: {{ .Values.zenoh.management.routerSecret.privateKeyKey }}
+                path: tls.key
+        - name: policy-public-key
+          secret:
+            secretName: {{ .Values.zenoh.signingPublicKey.name }}
+            items:
+              - key: {{ .Values.zenoh.signingPublicKey.key }}
+                path: signing-key.hex
         - name: tmp
           emptyDir:
             sizeLimit: {{ .Values.zenoh.tmpSizeLimit }}
