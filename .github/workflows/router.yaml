@@ -1,0 +1,73 @@
+name: Router
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/router.yaml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/inari-router/**
+      - patches/**
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/router.yaml
+      - Cargo.toml
+      - Cargo.lock
+      - crates/inari-router/**
+      - patches/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: router-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  router:
+    name: Router policy and stock Zenoh contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust components
+        run: rustup component add clippy rustfmt
+
+      - name: Set up mbx
+        uses: jdx/mr-boxington-action@2bbb8f141e40e388b509cc68fe0bfbe7bc4b6818 # v1
+        with:
+          version: 0.4.0
+
+      - name: Verify formatting and lints
+        run: |
+          mbx fmt --package inari-router -- --check
+          mbx clippy --locked --package inari-router --all-targets -- -D warnings
+
+      - name: Test policy, storage, and management mTLS
+        run: mbx test --locked --package inari-router
+
+      - name: Install verified stock Zenoh
+        shell: bash
+        run: |
+          set -euo pipefail
+          router_tools="${RUNNER_TEMP}/inari-stock-zenoh"
+          mkdir -p "${router_tools}"
+          curl --fail --location --retry 3 \
+            https://github.com/eclipse-zenoh/zenoh/releases/download/1.9.0/zenoh-1.9.0-x86_64-unknown-linux-gnu-standalone.zip \
+            --output "${router_tools}/zenoh.zip"
+          echo 'f18081184b089e79e605f2c0cb3f7790fbf101ae94942988f716e19e1810a46e  zenoh.zip' \
+            | (cd "${router_tools}" && sha256sum --check)
+          unzip -q "${router_tools}/zenoh.zip" -d "${router_tools}"
+          test -x "${router_tools}/zenohd"
+          echo "INARI_TEST_ZENOHD=${router_tools}/zenohd" >> "${GITHUB_ENV}"
+
+      - name: Test isolation, revocation, policy expiry, and TLS rotation
+        run: >-
+          mbx test --locked --package inari-router --test stock_router
+          -- --ignored
