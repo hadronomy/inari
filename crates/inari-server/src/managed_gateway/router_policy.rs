@@ -1,7 +1,8 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{SubsecRound, TimeDelta, Utc};
+use chrono::{DateTime, SubsecRound, TimeDelta, Utc};
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::DecodePrivateKey;
 use futures_util::future::{BoxFuture, try_join_all};
@@ -18,8 +19,10 @@ use crate::error::{AppError, AppResult};
 use crate::shutdown::ShutdownCoordinator;
 use crate::state::RouterPolicyReadiness;
 
-const POLICY_LIFETIME: TimeDelta = TimeDelta::seconds(45);
+const POLICY_EXPIRY: TimeDelta = TimeDelta::seconds(45);
+const CLOCK_SKEW: TimeDelta = TimeDelta::seconds(5);
 const REFRESH_MARGIN: TimeDelta = TimeDelta::seconds(15);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
@@ -35,7 +38,16 @@ pub trait RouterManagement: Send + Sync {
     ) -> BoxFuture<'a, AppResult<RouterStatus>>;
 }
 
+/// Reloads changed management credentials before a request and discards the old pool.
 struct HttpsManagement {
+    ca_file: PathBuf,
+    certificate_file: PathBuf,
+    private_key_file: PathBuf,
+    current: Mutex<Option<ManagementClient>>,
+}
+
+struct ManagementClient {
+    material: [u8; 32],
     client: Client,
 }
 
@@ -51,7 +63,8 @@ impl RouterManagement for HttpsManagement {
                 .join("policy")
                 .map_err(|source| unavailable().with_source(source))?;
             let mut response = self
-                .client
+                .client()
+                .await?
                 .put(address)
                 .json(policy)
                 .send()
@@ -77,26 +90,50 @@ impl RouterManagement for HttpsManagement {
 
 impl HttpsManagement {
     async fn load(config: &RouterPolicyConfig) -> AppResult<Self> {
-        let roots = tokio::fs::read(&config.management_ca_file)
-            .await
-            .map_err(|source| unavailable().with_source(source))?;
-        let mut identity = Zeroizing::new(
-            tokio::fs::read(&config.management_certificate_file)
-                .await
-                .map_err(|source| unavailable().with_source(source))?,
-        );
-        let private_key = Zeroizing::new(
-            tokio::fs::read(&config.management_private_key_file)
-                .await
-                .map_err(|source| unavailable().with_source(source))?,
-        );
-        identity.extend_from_slice(&private_key);
+        let management = Self {
+            ca_file: config.management_ca_file.clone(),
+            certificate_file: config
+                .management_certificate_file
+                .clone(),
+            private_key_file: config
+                .management_private_key_file
+                .clone(),
+            current: Mutex::new(None),
+        };
+        management.client().await?;
+        Ok(management)
+    }
+
+    async fn client(&self) -> AppResult<Client> {
+        let mut current = self.current.lock().await;
+        let client = self.refresh(&mut current).await;
+        if client.is_err() {
+            *current = None;
+        }
+        client
+    }
+
+    async fn refresh(&self, current: &mut Option<ManagementClient>) -> AppResult<Client> {
+        let roots = read_material(&self.ca_file).await?;
+        let mut identity = read_material(&self.certificate_file).await?;
+        identity.extend_from_slice(&read_material(&self.private_key_file).await?);
+        let material: [u8; 32] = Sha256::new()
+            .chain_update(Sha256::digest(&*roots))
+            .chain_update(&*identity)
+            .finalize()
+            .into();
+        if let Some(current) = current
+            .as_ref()
+            .filter(|current| current.material == material)
+        {
+            return Ok(current.client.clone());
+        }
         let certificates = Certificate::from_pem_bundle(&roots)
             .map_err(|source| unavailable().with_source(source))?;
         if certificates.is_empty() {
             return Err(unavailable());
         }
-        let mut builder = Client::builder()
+        let client = Client::builder()
             .https_only(true)
             .tls_certs_only(certificates)
             .identity(
@@ -105,20 +142,27 @@ impl HttpsManagement {
             )
             .redirect(redirect::Policy::none())
             .no_proxy()
-            .connect_timeout(Duration::from_secs(3))
-            .timeout(REQUEST_TIMEOUT);
-        builder = builder.pool_max_idle_per_host(1);
-        let client = builder
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .pool_max_idle_per_host(1)
             .build()
             .map_err(|source| unavailable().with_source(source))?;
-        Ok(Self { client })
+        *current = Some(ManagementClient { material, client: client.clone() });
+        Ok(client)
     }
+}
+
+async fn read_material(path: &Path) -> AppResult<Zeroizing<Vec<u8>>> {
+    tokio::fs::read(path)
+        .await
+        .map(Zeroizing::new)
+        .map_err(|source| unavailable().with_source(source))
 }
 
 #[derive(Clone, Copy)]
 enum RouterPolicyHealth {
     Starting,
-    ReadyUntil(chrono::DateTime<Utc>),
+    ReadyUntil(DateTime<Utc>),
     Unavailable,
 }
 
@@ -168,18 +212,7 @@ impl RouterAdmissionController {
         management: Arc<dyn RouterManagement>,
     ) -> AppResult<Self> {
         config.validate()?;
-        let now = Utc::now().trunc_subsecs(6);
-        let sample = Policy {
-            version: 1,
-            fleet_id: config.fleet_id.clone(),
-            generation: 1,
-            issued_at: now,
-            not_before: now,
-            expires_at: now + POLICY_LIFETIME,
-            namespace_prefix: namespace_prefix.clone(),
-            trusted_peer_common_names: config.trusted_peer_common_names.clone(),
-            agents: vec![],
-        };
+        let sample = router_policy(&config, &namespace_prefix, 1, vec![], Utc::now());
         SignedPolicy::sign(sample, &signing_key)
             .map_err(|source| unavailable().with_source(source))?;
         let configuration_digest = Sha256::digest(serde_json_canonicalizer::to_vec(&(
@@ -245,28 +278,21 @@ impl RouterAdmissionController {
                 &self.configuration_digest,
                 Utc::now() + REFRESH_MARGIN,
                 |generation, agents| {
-                    let now = Utc::now().trunc_subsecs(6);
+                    let agents = agents
+                        .iter()
+                        .map(|agent| AgentAdmission {
+                            common_name: agent.agent_id.clone(),
+                            namespace: agent.namespace.clone(),
+                        })
+                        .collect();
                     let signed = SignedPolicy::sign(
-                        Policy {
-                            version: 1,
-                            fleet_id: self.config.fleet_id.clone(),
+                        router_policy(
+                            &self.config,
+                            &self.namespace_prefix,
                             generation,
-                            issued_at: now,
-                            not_before: now,
-                            expires_at: now + POLICY_LIFETIME,
-                            namespace_prefix: self.namespace_prefix.clone(),
-                            trusted_peer_common_names: self
-                                .config
-                                .trusted_peer_common_names
-                                .clone(),
-                            agents: agents
-                                .iter()
-                                .map(|agent| AgentAdmission {
-                                    common_name: agent.agent_id.clone(),
-                                    namespace: agent.namespace.clone(),
-                                })
-                                .collect(),
-                        },
+                            agents,
+                            Utc::now(),
+                        ),
                         &self.signing_key,
                     )
                     .map_err(|error| GatewayError::Unavailable(error.to_string()))?;
@@ -340,6 +366,28 @@ impl RouterAdmissionController {
                 }
             }
         }
+    }
+}
+
+/// Backdates activation for clock skew without extending the dispatch deadline.
+fn router_policy(
+    config: &RouterPolicyConfig,
+    namespace_prefix: &str,
+    generation: u64,
+    agents: Vec<AgentAdmission>,
+    now: DateTime<Utc>,
+) -> Policy {
+    let now = now.trunc_subsecs(6);
+    Policy {
+        version: 1,
+        fleet_id: config.fleet_id.clone(),
+        generation,
+        issued_at: now - CLOCK_SKEW,
+        not_before: now - CLOCK_SKEW,
+        expires_at: now + POLICY_EXPIRY,
+        namespace_prefix: namespace_prefix.into(),
+        trusted_peer_common_names: config.trusted_peer_common_names.clone(),
+        agents,
     }
 }
 

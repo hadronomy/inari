@@ -9,6 +9,7 @@ use futures_util::future::BoxFuture;
 use inari_gateway::GatewayRepository;
 use inari_gateway::audit::AuditContext;
 use inari_gateway::identity::ActorId;
+use inari_gateway::protocol::ControllerCommand;
 use inari_migration::{Migrator, MigratorTrait};
 use inari_router::SignedPolicy;
 use inari_router::supervisor::RouterStatus;
@@ -216,6 +217,24 @@ async fn router_policy_generations_and_acknowledgments_are_transactional() {
         .require_router_admission(&admitted, &agent_id)
         .await
         .unwrap();
+    repository
+        .enqueue_command(
+            &admitted,
+            &agent_id,
+            Some("job_router_admitted"),
+            &[21; 32],
+            |sequence, command_id, message_id, issued_at| {
+                Ok(ControllerCommand::CancelJob {
+                    sequence,
+                    command_id: command_id.into(),
+                    message_id: message_id.into(),
+                    issued_at,
+                    job_id: "job_test_target".into(),
+                })
+            },
+        )
+        .await
+        .unwrap();
     sqlx::query("UPDATE agents SET namespace = namespace WHERE agent_id = $1")
         .bind(&agent_id)
         .execute(&pool)
@@ -228,6 +247,24 @@ async fn router_policy_generations_and_acknowledgments_are_transactional() {
             .is_err(),
         "an Agent change invalidates the acknowledgment in the same transaction"
     );
+    assert!(
+        repository
+            .enqueue_command(
+                &admitted,
+                &agent_id,
+                Some("job_router_stale"),
+                &[22; 32],
+                |_, _, _, _| panic!("a stale admission cannot reach command construction"),
+            )
+            .await
+            .is_err()
+    );
+    let queued: i64 = sqlx::query_scalar("SELECT count(*) FROM commands WHERE agent_id = $1")
+        .bind(&agent_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(queued, 1, "stale admission must not queue another command");
     let admitted = controllers[0]
         .admit(&agent_id)
         .await
