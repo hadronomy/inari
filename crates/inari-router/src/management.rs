@@ -17,6 +17,7 @@ use chrono::{DateTime, Utc};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::Mutex;
 use tokio_rustls::server::TlsStream;
 use tower::Layer;
 use tower_http::timeout::TimeoutLayer;
@@ -24,13 +25,21 @@ use x509_parser::prelude::FromDer;
 
 use crate::policy::literal_name;
 use crate::supervisor::{RouterStatus, SupervisorHandle};
+use crate::tls::{TlsFiles, TlsMaterial};
 use crate::{RouterError, RouterResult, SignedPolicy};
 
 /// The management CA authorizes a dedicated Controller identity, separate from Agent TLS.
 #[derive(Debug, Clone)]
 pub struct ManagementAcceptor {
-    inner: RustlsAcceptor,
+    files: Arc<TlsFiles>,
+    current: Arc<Mutex<CachedAcceptor>>,
     common_name: Arc<str>,
+}
+
+#[derive(Debug)]
+struct CachedAcceptor {
+    digest: [u8; 32],
+    inner: RustlsAcceptor,
 }
 
 #[derive(Debug, Clone)]
@@ -51,10 +60,22 @@ impl ManagementAcceptor {
                 "management requires a dedicated Controller common name".into(),
             ));
         }
-        let certificate = tokio::fs::read(certificate).await?;
-        let private_key = tokio::fs::read(private_key).await?;
-        let client_ca = tokio::fs::read(client_ca).await?;
-        let roots = rustls_pemfile::certs(&mut BufReader::new(client_ca.as_slice()))
+        let files = TlsFiles {
+            root_ca: client_ca.to_owned(),
+            certificate: certificate.to_owned(),
+            private_key: private_key.to_owned(),
+        };
+        let material = TlsMaterial::load(&files).await?;
+        let current = Self::acceptor(&material)?;
+        Ok(Self {
+            files: Arc::new(files),
+            current: Arc::new(Mutex::new(current)),
+            common_name: common_name.into(),
+        })
+    }
+
+    fn acceptor(material: &TlsMaterial) -> RouterResult<CachedAcceptor> {
+        let roots = rustls_pemfile::certs(&mut BufReader::new(material.root_ca.as_slice()))
             .collect::<Result<Vec<_>, _>>()?;
         if roots.is_empty() {
             return Err(RouterError::InvalidPolicy("management client CA is empty".into()));
@@ -70,10 +91,11 @@ impl ManagementAcceptor {
             WebPkiClientVerifier::builder_with_provider(Arc::new(root_store), provider.clone())
                 .build()
                 .map_err(io::Error::other)?;
-        let chain = rustls_pemfile::certs(&mut BufReader::new(certificate.as_slice()))
+        let chain = rustls_pemfile::certs(&mut BufReader::new(material.certificate.as_slice()))
             .collect::<Result<Vec<_>, _>>()?;
-        let key = rustls_pemfile::private_key(&mut BufReader::new(private_key.as_slice()))?
-            .ok_or_else(|| io::Error::other("management private key is absent"))?;
+        let key =
+            rustls_pemfile::private_key(&mut BufReader::new(material.private_key.as_slice()))?
+                .ok_or_else(|| io::Error::other("management private key is absent"))?;
         let mut config = ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
             .map_err(io::Error::other)?
@@ -81,11 +103,22 @@ impl ManagementAcceptor {
             .with_single_cert(chain, key)
             .map_err(io::Error::other)?;
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-        Ok(Self {
+        Ok(CachedAcceptor {
+            digest: material.digest,
             inner: RustlsAcceptor::new(RustlsConfig::from_config(Arc::new(config)))
                 .handshake_timeout(Duration::from_secs(5)),
-            common_name: common_name.into(),
         })
+    }
+
+    async fn current_acceptor(&self) -> io::Result<RustlsAcceptor> {
+        let mut current = self.current.lock().await;
+        let material = TlsMaterial::load(&self.files)
+            .await
+            .map_err(io::Error::other)?;
+        if current.digest != material.digest {
+            *current = Self::acceptor(&material).map_err(io::Error::other)?;
+        }
+        Ok(current.inner.clone())
     }
 }
 
@@ -99,10 +132,15 @@ where
     type Future = Pin<Box<dyn Future<Output = io::Result<(Self::Stream, Self::Service)>> + Send>>;
 
     fn accept(&self, stream: I, service: S) -> Self::Future {
-        let acceptor = self.inner.clone();
+        let management = self.clone();
         let common_name = self.common_name.clone();
         Box::pin(async move {
-            let (stream, service) = acceptor.accept(stream, service).await?;
+            let (stream, service) = tokio::time::timeout(Duration::from_secs(5), async {
+                let acceptor = management.current_acceptor().await?;
+                acceptor.accept(stream, service).await
+            })
+            .await
+            .map_err(io::Error::other)??;
             let peer = stream
                 .get_ref()
                 .1

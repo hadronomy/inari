@@ -52,8 +52,8 @@ async fn management_requires_the_dedicated_controller_certificate() {
             root_ca_file: ca_path.clone(),
             certificate_file: certificate_path.clone(),
             private_key_file: key_path,
-            probe_certificate_file: certificate_path,
-            probe_private_key_file: ca_path,
+            probe_certificate_file: certificate_path.clone(),
+            probe_private_key_file: ca_path.clone(),
         },
     )
     .unwrap();
@@ -140,6 +140,48 @@ async fn management_requires_the_dedicated_controller_certificate() {
             .send()
             .await
             .is_err()
+    );
+    let renewed_root = issuer("renewed-management-root");
+    let (renewed_certificate, renewed_key) =
+        certificate(&renewed_root, "router-management", ExtendedKeyUsagePurpose::ServerAuth);
+    std::fs::write(&ca_path, renewed_root.pem()).unwrap();
+    std::fs::write(&certificate_path, renewed_certificate).unwrap();
+    std::fs::write(directory.path().join("server.key"), &renewed_key).unwrap();
+    let renewed = client(
+        &renewed_root.pem(),
+        Some(certificate(&renewed_root, "controller-policy", ExtendedKeyUsagePurpose::ClientAuth)),
+    );
+    assert_eq!(
+        renewed
+            .get(&endpoint)
+            .send()
+            .await
+            .expect("management must load the new CA and certificate")
+            .status(),
+        reqwest::StatusCode::OK
+    );
+    std::fs::write(directory.path().join("server.key"), "invalid replacement").unwrap();
+    let fresh = client(
+        &renewed_root.pem(),
+        Some(certificate(&renewed_root, "controller-policy", ExtendedKeyUsagePurpose::ClientAuth)),
+    );
+    assert!(
+        fresh
+            .get(&endpoint)
+            .send()
+            .await
+            .is_err(),
+        "invalid replacement must reject new handshakes"
+    );
+    std::fs::write(directory.path().join("server.key"), renewed_key).unwrap();
+    assert_eq!(
+        fresh
+            .get(&endpoint)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::OK
     );
     shutdown.shutdown();
     task.await.unwrap().unwrap();

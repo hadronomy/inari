@@ -4956,6 +4956,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "axum-server",
+ "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
  "hex",
@@ -4970,6 +4971,7 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tokio-rustls",
  "toml 0.8.23",
@@ -4980,6 +4982,7 @@ dependencies = [
  "usage-rs",
  "x509-parser",
  "zenoh",
+ "zeroize",
 ]
 
 [[package]]

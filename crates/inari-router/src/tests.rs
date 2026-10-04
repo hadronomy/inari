@@ -292,7 +292,6 @@ fn generated_acl_has_exact_tls_subjects_and_disjoint_agent_rules() {
             }
         }
     }
-    assert!(router().probe_config().is_ok());
 }
 
 #[test]

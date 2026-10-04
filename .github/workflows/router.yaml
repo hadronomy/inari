@@ -67,7 +67,7 @@ jobs:
           test -x "${router_tools}/zenohd"
           echo "INARI_TEST_ZENOHD=${router_tools}/zenohd" >> "${GITHUB_ENV}"
 
-      - name: Test isolation, live revocation, expiry, and restart
+      - name: Test isolation, revocation, policy expiry, and TLS rotation
         run: >-
           mbx test --locked --package inari-router --test stock_router
-          -- --ignored --exact stock_router_isolates_agents_closes_old_links_and_expires_policy
+          -- --ignored

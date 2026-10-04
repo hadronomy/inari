@@ -10,10 +10,12 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
 
 use crate::policy::literal_name;
+use crate::tls::DataTls;
 use crate::{PolicyStore, RouterConfig, RouterError, RouterResult, SignedPolicy, VerifiedPolicy};
 
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+const TLS_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +77,8 @@ pub struct RouterSupervisor {
     config: RouterConfig,
     policy: Option<VerifiedPolicy>,
     child: Option<Child>,
+    tls: Option<DataTls>,
+    next_tls_check: Instant,
     commands: mpsc::Receiver<Apply>,
     status: watch::Sender<RouterStatus>,
 }
@@ -121,6 +125,8 @@ impl RouterSupervisor {
                 config,
                 policy,
                 child: None,
+                tls: None,
+                next_tls_check: Instant::now(),
                 commands,
                 status,
             },
@@ -201,8 +207,10 @@ impl RouterSupervisor {
                 biased;
                 _ = ticks.tick() => {
                     // Slow storage cannot extend the authority of the running Router.
-                    if previous.require_current(Utc::now()).is_err() {
-                        self.not_ready("Router policy expired during refresh.".into());
+                    if previous.require_current(Utc::now()).is_err()
+                        || self.tls.as_ref().is_some_and(|tls| tls.require_current(Utc::now()).is_err())
+                    {
+                        self.not_ready("Router policy or TLS certificate expired during refresh.".into());
                         if let Err(error) = self.stop().await {
                             stop_failure = Some(error);
                         }
@@ -242,26 +250,29 @@ impl RouterSupervisor {
     }
 
     async fn activate(&mut self, policy: VerifiedPolicy) -> RouterResult<()> {
-        let config = self.config.render(&policy)?;
+        let mut config = self.config.render(&policy)?;
         self.not_ready("Router applies signed policy.".into());
         // All old links close before a new ACL can become active.
         self.stop().await?;
         let store = self.store.clone();
         self.policy = Some(policy.clone());
         let durable = policy.clone();
-        let bytes = serde_json::to_vec(&config)?;
-        tokio::task::spawn_blocking(move || {
-            store.persist(&durable)?;
-            store.write("router.json", &bytes)
-        })
-        .await
-        .map_err(|error| RouterError::NotReady(error.to_string()))??;
+        tokio::task::spawn_blocking(move || store.persist(&durable))
+            .await
+            .map_err(|error| RouterError::NotReady(error.to_string()))??;
         self.policy = Some(policy.clone());
         self.status.send_modify(|status| {
             status.generation = Some(policy.policy().generation);
             status.digest = Some(policy.digest().to_owned());
             status.expires_at = Some(policy.policy().expires_at);
         });
+        let tls = DataTls::load(&self.config).await?;
+        tls.configure(&mut config)?;
+        let store = self.store.clone();
+        let bytes = zeroize::Zeroizing::new(serde_json::to_vec(&config)?);
+        tokio::task::spawn_blocking(move || store.write("router.json", &bytes))
+            .await
+            .map_err(|error| RouterError::NotReady(error.to_string()))??;
         policy.require_current(Utc::now())?;
         let child = Command::new(&self.executable)
             .arg("--config")
@@ -272,9 +283,17 @@ impl RouterSupervisor {
             .kill_on_drop(true)
             .spawn()?;
         self.child = Some(child);
+        self.next_tls_check = Instant::now() + TLS_CHECK_INTERVAL;
+        self.tls = Some(tls);
         let remaining = policy
             .policy()
             .expires_at
+            .min(
+                self.tls
+                    .as_ref()
+                    .ok_or(RouterError::Unavailable)?
+                    .expires_at(),
+            )
             .signed_duration_since(Utc::now())
             .to_std()
             .map_err(|_| RouterError::NotCurrent)?;
@@ -284,6 +303,10 @@ impl RouterSupervisor {
         match result {
             Ok(()) => {
                 policy.require_current(Utc::now())?;
+                self.tls
+                    .as_ref()
+                    .ok_or(RouterError::Unavailable)?
+                    .require_current(Utc::now())?;
                 self.status.send_modify(|status| {
                     status.ready = true;
                     status.message = "Router is ready with the acknowledged policy.".into();
@@ -312,7 +335,12 @@ impl RouterSupervisor {
             if let Some(exit) = child.try_wait()? {
                 return Err(RouterError::NotReady(format!("Router process exited: {exit}")));
             }
-            let config = self.config.probe_config()?;
+            let tls = self
+                .tls
+                .as_ref()
+                .ok_or(RouterError::Unavailable)?;
+            tls.require_current(Utc::now())?;
+            let config = tls.probe_config(&self.config.probe_endpoint)?;
             let probe_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
             match tokio::time::timeout_at(probe_deadline, zenoh::open(config)).await {
                 Ok(Ok(session)) => {
@@ -357,7 +385,57 @@ impl RouterSupervisor {
             && let Some(exit) = child.try_wait()?
         {
             self.child = None;
+            self.tls = None;
             self.not_ready(format!("Router process exited: {exit}"));
+        } else if self.child.is_some() {
+            if let Some(tls) = &self.tls
+                && let Err(error) = tls.require_current(Utc::now())
+            {
+                self.not_ready(error.to_string());
+                self.stop().await?;
+                return Ok(());
+            }
+            if Instant::now() >= self.next_tls_check {
+                self.next_tls_check = Instant::now() + TLS_CHECK_INTERVAL;
+                let material = match tokio::time::timeout(
+                    Duration::from_millis(500),
+                    DataTls::load(&self.config),
+                )
+                .await
+                .map_err(|_| RouterError::NotReady("TLS credential read timed out.".into()))
+                .and_then(|result| result)
+                {
+                    Ok(material) => material,
+                    Err(error) => {
+                        self.not_ready(error.to_string());
+                        self.stop().await?;
+                        return Ok(());
+                    },
+                };
+                if self
+                    .tls
+                    .as_ref()
+                    .is_none_or(|tls| !tls.matches(&material))
+                {
+                    let policy = self
+                        .policy
+                        .clone()
+                        .ok_or(RouterError::Unavailable)?;
+                    if let Err(error) = self.activate(policy).await {
+                        self.not_ready(error.to_string());
+                    }
+                }
+            }
+        } else if Instant::now() >= self.next_tls_check
+            && let Some(policy) = self.policy.clone()
+            && policy
+                .require_current(Utc::now())
+                .is_ok()
+        {
+            self.next_tls_check = Instant::now() + TLS_CHECK_INTERVAL;
+            if let Err(error) = self.activate(policy).await {
+                self.not_ready(error.to_string());
+            }
         }
         Ok(())
     }
@@ -370,6 +448,7 @@ impl RouterSupervisor {
     }
 
     async fn stop(&mut self) -> RouterResult<()> {
+        self.tls = None;
         let Some(mut child) = self.child.take() else { return Ok(()) };
         if child.try_wait()?.is_some() {
             return Ok(());
