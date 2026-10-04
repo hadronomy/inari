@@ -75,24 +75,6 @@ impl RouterConfig {
             .map_err(|error| RouterError::InvalidPolicy(error.to_string()))?;
         Ok(value)
     }
-
-    pub(crate) fn probe_config(&self) -> RouterResult<zenoh::Config> {
-        let value = json!({
-            "mode": "client",
-            "connect": { "endpoints": [self.probe_endpoint], "timeout_ms": 2000 },
-            "listen": { "endpoints": [] },
-            "scouting": { "multicast": { "enabled": false }, "gossip": { "enabled": false } },
-            "transport": { "link": { "tls": {
-                "root_ca_certificate": self.root_ca_file,
-                "connect_certificate": self.probe_certificate_file,
-                "connect_private_key": self.probe_private_key_file,
-                "enable_mtls": true,
-                "verify_name_on_connect": true
-            } } }
-        });
-        zenoh::Config::from_json5(&serde_json::to_string(&value)?)
-            .map_err(|error| RouterError::InvalidPolicy(error.to_string()))
-    }
 }
 
 #[derive(Serialize)]

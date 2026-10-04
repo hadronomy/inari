@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 axum.workspace = true
+base64.workspace = true
 axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
 chrono.workspace = true
 ed25519-dalek.workspace = true
@@ -32,6 +33,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 x509-parser.workspace = true
 zenoh.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["signal", "process"] }
@@ -39,3 +41,4 @@ nix = { version = "0.31", features = ["signal", "process"] }
 [dev-dependencies]
 rcgen = "0.14"
 reqwest.workspace = true
+time.workspace = true

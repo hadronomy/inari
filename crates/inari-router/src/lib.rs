@@ -6,6 +6,7 @@ mod acl;
 mod error;
 mod policy;
 mod store;
+mod tls;
 
 pub mod management;
 pub mod supervisor;

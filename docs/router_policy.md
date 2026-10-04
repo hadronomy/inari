@@ -16,6 +16,11 @@ management request. TLS validates the certificate chain, client authentication
 usage, validity, and signature. Each request also checks certificate validity,
 including requests on an existing connection.
 
+Each new management handshake reads the configured CA, certificate, and private
+key. Content changes replace the TLS acceptor before that handshake. An unreadable,
+invalid, or expired replacement rejects new connections until the files recover.
+The Supervisor does not require a restart for management certificate rotation.
+
 The Controller sends `PUT /policy` with a `SignedPolicy` JSON document. The body
 contains exactly `policy` and `signature`. Unknown fields and duplicate struct
 fields are invalid. The body limit is 2 MiB.
@@ -70,12 +75,22 @@ For an update that needs activation, the Supervisor:
 5. Opens a real mTLS Zenoh session and verifies the expected Router ID.
 6. Returns the exact generation, digest, expiry, and `ready: true`.
 
-A higher generation with the same fleet, namespace, trusted peers, and Agent
-permissions refreshes the signed lifetime without restarting a ready Router.
+A higher generation with the same fleet, namespace, trusted peers, Agent
+permissions, and TLS credentials refreshes the lifetime without restarting a ready Router.
 The Supervisor persists that generation before acknowledgment and keeps existing
 links open. The previous policy remains the authority during the durable write.
 If that policy expires while storage is slow, the Supervisor stops the Router.
 A failed durable write also closes admission and stops the Router.
+
+The Supervisor reads data-plane and probe TLS files once per second. A content
+change stops the old Router and activates the current policy with the new TLS
+material. The configuration contains an immutable credential snapshot, so Secret
+symlink changes cannot alter the child credentials after activation. The state
+directory therefore contains private TLS material and must stay private.
+
+Loaded certificate expiry stops the Router even if the signed policy is current.
+An invalid replacement also stops it. A valid replacement can recover the same
+current policy without changing its generation. A real mTLS probe precedes readiness.
 
 The Supervisor cannot acknowledge a policy after its expiry. A failed start
 leaves readiness false and retains the durable generation. Policy expiry stops
@@ -139,11 +154,13 @@ Run the unit, storage, and real management mTLS contracts with
 
 ```sh
 export INARI_TEST_ZENOHD=/absolute/path/to/zenohd
-mbx test -p inari-router --test stock_router -- --ignored --exact stock_router_isolates_agents_closes_old_links_and_expires_policy
+mbx test -p inari-router --test stock_router -- --ignored
 ```
 
 The contract verifies allowed Agent publications and queries, cross-Agent
 denial, preservation of a TCP connection across a lifetime refresh, closure of
 that connection after revocation, policy expiry,
-durable rollback rejection, and recovery with a higher generation. The CI job
+durable rollback rejection, and recovery with a higher generation. A second
+contract verifies certificate rotation, rejection of an invalid replacement,
+recovery, and certificate expiry. The CI job
 verifies the official executable's SHA-256 digest before this contract runs.
