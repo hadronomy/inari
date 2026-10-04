@@ -95,9 +95,6 @@ impl Screen {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Deck {
     pub screen: Screen,
-    /// GPUI's own `DebugBelow`: a red outline around every div, with no
-    /// instrumentation in any component. A mode, not a screen.
-    pub outline_all: bool,
     /// The width the stage is held at, or the full stage when `None`.
     pub stage_width: Option<f32>,
     /// Bumped when knobs are reset, so the panel drops the control entities it
@@ -357,6 +354,9 @@ impl Panel {
     /// The knobs the last story render recorded, in the order it read them.
     fn knobs(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.inari().clone();
+        if !super::is_bench(window, cx) {
+            return hint(&theme, "Open the Bench to tune a story.");
+        }
         let Some(story) = dial::active_story(cx) else {
             return hint(&theme, "Open the Bench to tune a story.");
         };
@@ -617,11 +617,9 @@ fn chrome(
                         .icon(IconName::Frame)
                         .ghost()
                         .small()
-                        .selected(deck.outline_all)
-                        .tooltip("Outline every element")
-                        .on_click(|_, window: &mut Window, cx: &mut App| {
-                            adjust(window, cx, |deck| deck.outline_all = !deck.outline_all)
-                        }),
+                        .selected(cx.has_global::<gpui::DebugBelow>())
+                        .tooltip("Outline every window")
+                        .on_click(|_, _: &mut Window, cx: &mut App| toggle_outlines(cx)),
                 )
                 .child(
                     Button::new("dev-pick")
@@ -679,6 +677,15 @@ fn hint(theme: &Theme, message: &'static str) -> AnyElement {
         .into_any_element()
 }
 
+fn toggle_outlines(cx: &mut App) {
+    if cx.has_global::<gpui::DebugBelow>() {
+        cx.remove_global::<gpui::DebugBelow>();
+    } else {
+        cx.set_global(gpui::DebugBelow);
+    }
+    cx.refresh_windows();
+}
+
 // ---- the tools that need no state ----
 
 /// One frame, as the chart plots it.
@@ -710,8 +717,8 @@ struct Counted {
 /// explicitly rather than left to its `chart_1..5` palette, which our theme does
 /// not define and which would arrive from somewhere else's idea of a chart.
 fn frames_tool(theme: &Theme, window: &Window, cx: &App) -> AnyElement {
-    let cadence = frames::cadence(cx);
-    let samples = frames::samples(cx);
+    let cadence = frames::cadence(window, cx);
+    let samples = frames::samples(window, cx);
     let stats = window.frame_stats();
     let latest = samples
         .last()
@@ -1047,6 +1054,7 @@ fn millis(duration: Duration) -> String {
 
 #[cfg(test)]
 mod tests {
+    use gpui::TestAppContext;
     use gpui_component::IconNamed as _;
 
     use super::*;
@@ -1121,5 +1129,37 @@ mod tests {
                 screen.title()
             );
         }
+    }
+
+    #[gpui::test]
+    fn rendering_another_window_preserves_the_global_outline_preference(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let first = cx
+            .add_empty_window()
+            .update(|window, _| window.window_handle());
+        let second = cx
+            .add_empty_window()
+            .update(|window, _| window.window_handle());
+        cx.update(|cx| {
+            toggle_outlines(cx);
+            for handle in [first, second] {
+                handle
+                    .update(cx, |_, window, cx| {
+                        Theme::sync(window, cx);
+                        let _ = super::super::attach(window, cx);
+                        assert!(cx.has_global::<gpui::DebugBelow>());
+                    })
+                    .unwrap();
+            }
+            second
+                .update(cx, |_, _, cx| toggle_outlines(cx))
+                .unwrap();
+            first
+                .update(cx, |_, window, cx| {
+                    let _ = super::super::attach(window, cx);
+                    assert!(!cx.has_global::<gpui::DebugBelow>());
+                })
+                .unwrap();
+        });
     }
 }

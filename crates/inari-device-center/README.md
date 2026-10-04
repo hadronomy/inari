@@ -59,8 +59,10 @@ quiet until the pointer reaches it.
 | `cmd-alt-i` / `ctrl-alt-i` | the devtools panel on the active window |
 
 The panel is docked in GPUI's own inspector strip, so it never covers what is
-being judged, and GPUI's element picker works with it. Five tools share it:
-Knobs, Element, Layout, Frames, and Stage.
+being judged, and GPUI's element picker works with it. Four tools share it:
+Knobs, Element, Frames, and Stage. Knobs controls the Bench story. Frames reads
+only the current window. The toolbar's outline mode applies to every window;
+the selected element's box model appears in the window that owns the selection.
 
 Add a story next to the component it previews. There is no central list:
 

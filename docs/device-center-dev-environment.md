@@ -255,7 +255,7 @@ returned from `App::set_inspector_renderer`, so GPUI docks it. The same Panel
 appears in the Bench and in the application window; the tool list does not
 change, only what the tools have to say.
 
-Tools in the first version:
+The panel has four screens:
 
 - **Knobs** — the current story's dials. Empty outside the Bench.
 - **Element** — the selected element. Hosts `gpui_component::DivInspector`
@@ -263,12 +263,11 @@ Tools in the first version:
   live Rust and JSON style editors are kept rather than rewritten, and adds our
   own report above it: source location, instance, bounds, content size, and the
   box model read from `base_style`.
-- **Layout** — outlines, the box-model overlay, and the size chip.
-- **Frames** — render cadence.
+- **Frames** — render cadence and frame cost for the panel's window.
 - **Stage** — appearance, material, reduced motion, rem size, stage width.
 
-`Tool` is a small trait, and it earns its place: it is the thing that makes
-"add a devtool" a single file rather than an edit in four places.
+`Screen` selects the content. Picking and outlining are toolbar modes. The
+outline mode applies to every window, as required by GPUI's global `DebugBelow`.
 
 ### 3.4 The Bubble
 
@@ -287,7 +286,7 @@ free of debugging code.
 
 ### 3.5 The overlay
 
-The Layout tool paints over the window, not into it:
+The floating layer paints the selected element over its window:
 
 - **Outline everything** sets `DebugBelow` (§1.4) — one global, no
   instrumentation.

@@ -84,24 +84,11 @@ pub fn init(cx: &mut App) {
 /// The floating layer, mounted once at each window root.
 ///
 /// This is the single integration point: it records the render for the Frames
-/// tool, reports whether the dock is open, applies GPUI's `DebugBelow` global
-/// for the outline-everything toggle, and returns the launcher and overlay.
+/// tool, reports whether the dock is open, and returns the launcher and overlay.
 /// Ordinary components carry no debugging code at all.
 pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
     frames::tick(window, cx);
     panel::observe(window, cx);
-
-    // One global, and every div in the window outlines itself
-    // (`gpui/src/style.rs:612-618`). Nothing else has to know.
-    //
-    // `remove_global` panics on a global that was never added, so the check is
-    // load-bearing rather than defensive: the first frame of every run reaches
-    // here with the toggle off and nothing set.
-    if panel::deck(window, cx).outline_all {
-        cx.set_global(gpui::DebugBelow);
-    } else if cx.has_global::<gpui::DebugBelow>() {
-        cx.remove_global::<gpui::DebugBelow>();
-    }
 
     // While the picker is armed GPUI gives *every* div a hitbox
     // (`elements/div.rs:1711`), and this layer is `deferred`, so its hitbox
@@ -113,6 +100,11 @@ pub fn attach(window: &mut Window, cx: &mut App) -> AnyElement {
     }
 
     bubble::render(window, cx)
+}
+
+fn is_bench(window: &Window, cx: &App) -> bool {
+    cx.try_global::<BenchWindow>()
+        .is_some_and(|bench| bench.0.window_id() == window.window_handle().window_id())
 }
 
 /// Open the Bench, or raise it when it is already open.
@@ -167,4 +159,30 @@ fn open_bench(cx: &mut App) {
         })
         .ok();
     cx.set_global(BenchWindow(handle.into()));
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    use super::*;
+
+    #[gpui::test]
+    fn the_bench_identity_does_not_follow_the_active_application_window(cx: &mut TestAppContext) {
+        let bench = cx
+            .add_empty_window()
+            .update(|window, _| window.window_handle());
+        let application = cx
+            .add_empty_window()
+            .update(|window, _| window.window_handle());
+        cx.update(|cx| {
+            cx.set_global(BenchWindow(bench));
+            bench
+                .update(cx, |_, window, cx| assert!(is_bench(window, cx)))
+                .unwrap();
+            application
+                .update(cx, |_, window, cx| assert!(!is_bench(window, cx)))
+                .unwrap();
+        });
+    }
 }
