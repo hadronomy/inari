@@ -141,13 +141,15 @@ done
 
 kube-linter lint "${workspace}/helm-${CURRENT_KUBERNETES_VERSION}.yaml"
 
-helm template inari "${CHART}" \
-  --namespace inari \
-  --values "${CHART}/ci/managed-work-values.yaml" \
-  --kube-version "${CURRENT_KUBERNETES_VERSION}" \
-  >"${workspace}/managed-work.yaml"
-kubeconform -strict -summary -kubernetes-version "${CURRENT_KUBERNETES_VERSION}" \
-  "${workspace}/managed-work.yaml"
+for kubernetes_version in "${MINIMUM_KUBERNETES_VERSION}" "${CURRENT_KUBERNETES_VERSION}"; do
+  helm template inari "${CHART}" \
+    --namespace inari \
+    --values "${CHART}/ci/managed-work-values.yaml" \
+    --kube-version "${kubernetes_version}" \
+    >"${workspace}/managed-work.yaml"
+  kubeconform -strict -summary -kubernetes-version "${kubernetes_version}" \
+    "${workspace}/managed-work.yaml"
+done
 kube-linter lint "${workspace}/managed-work.yaml"
 
 helm template inari "${CHART}" \
