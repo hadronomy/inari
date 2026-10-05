@@ -50,6 +50,13 @@ try {
     & $Uv sync --all-packages --frozen --group windows-build
     Assert-NativeCommandSucceeded $LASTEXITCODE "Python dependency synchronization"
 
+    & $Uv run --no-sync pytest `
+        packages/agent/tests/test_local_api_server.py `
+        packages/agent/tests/test_windows_service.py `
+        packages/agent/tests/test_windows_pairing.py `
+        -q
+    Assert-NativeCommandSucceeded $LASTEXITCODE "Windows service shutdown tests"
+
     & $Uv run --no-sync python deploy/windows/build.py icon --output $ExecutableIcon
     Assert-NativeCommandSucceeded $LASTEXITCODE "Windows icon generation"
 

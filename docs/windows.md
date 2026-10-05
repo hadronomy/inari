@@ -217,6 +217,10 @@ This acknowledgment proves that the host accepted the restart request.
 Device Center still requires an authoritative setup completion response before
 it opens the operations window.
 
+The HTTPS listener allows five seconds for pending requests and connections to
+finish. After this limit, it cancels pending HTTP tasks and continues application
+cleanup. Runtime cleanup still finishes before the next runtime starts.
+
 For a TLS listener, set `[api].endpoint` in the protected Agent config. Use the
 certificate hostname and the actual listener port:
 
