@@ -99,7 +99,7 @@ pub(super) fn InvitationComposer(
                             OnboardingError::Forbidden => view! {
                                 <InlineNotice kind="error">
                                     "Your account cannot create invitations. "
-                                    <a href="/auth/login?return_to=/onboarding">"Sign in with another account"</a>
+                                    <a href="/auth/login?return_to=/onboarding" rel="external">"Sign in with another account"</a>
                                 </InlineNotice>
                             }.into_any(),
                             error => view! {

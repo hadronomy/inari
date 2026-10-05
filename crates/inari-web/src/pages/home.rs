@@ -140,7 +140,7 @@ fn AccessPanel() -> impl IntoView {
                 <h2>"Sign in to see fleet operations."</h2>
                 <p>"Your organization identity determines which sites, devices, jobs, and security actions are available."</p>
             </div>
-            <a class="button button-primary" href="/auth/login?return_to=/">"Sign in"</a>
+            <a class="button button-primary" href="/auth/login?return_to=/" rel="external">"Sign in"</a>
         </section>
     }
 }
