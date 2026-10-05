@@ -1,11 +1,7 @@
-//! First-run setup: connect this computer to a controller.
+//! Connect this computer to a Controller.
 //!
-//! This is the one screen in the app that asks the operator to trust something
-//! external, so the review card is deliberately plain and complete. It names
-//! the organization, the controller URL, the security posture, and the expiry
-//! before the connect action appears — an invitation link is a credential, and
-//! a link someone was sent in a chat message deserves to be read before it is
-//! used.
+//! The review shows the Controller, address, connection security, and expiry
+//! before the operator uses the invitation credential.
 
 use std::collections::HashSet;
 
@@ -454,8 +450,8 @@ fn trust_review(preview: EnrollmentPreview, theme: &Theme) -> impl IntoElement {
                 .text_heading()
                 .child("Review this connection"),
         )
-        .child(Field::new("Organization", controller))
-        .child(Field::new("Controller", preview.controller_url.to_string()).technical())
+        .child(Field::new("Controller", controller))
+        .child(Field::new("Controller address", preview.controller_url.to_string()).technical())
         .child(Field::new(
             "Connection security",
             if preview.requires_mutual_tls {
@@ -490,7 +486,7 @@ fn copy_for(snapshot: &SetupSnapshot) -> (&'static str, &'static str, &'static s
             SetupStage::Invitation => (
                 "Set up Inari",
                 "Connect this computer",
-                "Confirm the organization and controller before you connect this computer.",
+                "Review the Controller and connection security before you connect this computer.",
             ),
             SetupStage::Securing => (
                 "Securing the connection",

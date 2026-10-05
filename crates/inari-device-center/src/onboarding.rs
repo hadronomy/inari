@@ -261,17 +261,16 @@ impl Render for Onboarding {
                     .child(
                         div()
                             .id("onboarding-area")
+                            .debug_selector(|| "onboarding-viewport".into())
                             .h_full()
                             .overflow_y_scroll()
                             .track_scroll(&scroll)
                             .child(
-                                // The column is centred in both axes and the padding is
-                                // the window's, not the view's: the same content then
-                                // sits correctly whether it is two fields or a device
-                                // list, and it never touches the window edge.
+                                // Short forms stay centered. Taller forms grow so their
+                                // first field remains inside the scrollable area.
                                 div()
                                     .v_flex()
-                                    .h_full()
+                                    .min_h_full()
                                     .w_full()
                                     .items_center()
                                     .justify_center()
@@ -280,6 +279,7 @@ impl Render for Onboarding {
                                     .child(
                                         div()
                                             .v_flex()
+                                            .debug_selector(|| "onboarding-column".into())
                                             .w_full()
                                             .max_w(px(COLUMN))
                                             .child(SetupView::new(
@@ -737,7 +737,7 @@ mod tests {
     use std::{cell::RefCell, rc::Rc, sync::Arc};
 
     use chrono::Utc;
-    use gpui::TestAppContext;
+    use gpui::{ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext};
     use inari_agent_client::{
         AgentClientError, AgentClientResult, ClientIdentity, Device, DeviceKind, DeviceState,
         IdentityStore,
@@ -840,6 +840,76 @@ mod tests {
         cx.run_until_parked();
 
         assert_eq!(captured.borrow().as_slice(), &[expected]);
+    }
+
+    #[gpui::test]
+    fn invitation_review_is_reachable_after_resize_and_scroll(cx: &mut TestAppContext) {
+        init_test_app(cx);
+        let window = cx.update(|app| {
+            open(runtime(), Rc::new(|_, _| None), Some("not an invitation".into()), app)
+                .expect("setup window opens")
+        });
+        let onboarding = window
+            .onboarding
+            .upgrade()
+            .expect("setup view exists");
+        cx.update(|app| {
+            onboarding.update(app, |onboarding, cx| {
+                onboarding._setup_task = Task::ready(());
+                onboarding.snapshot = SetupSnapshot::invitation();
+                onboarding.preview = Some(EnrollmentPreview {
+                    controller_name: Some("MIZONA Controller".into()),
+                    controller_url: "https://inari.eden.mizonaecologica.es"
+                        .parse()
+                        .unwrap(),
+                    expires_at: Utc::now(),
+                    requires_mutual_tls: true,
+                    supported_protocol_versions: vec!["2026-10-03".into()],
+                });
+                onboarding.working = false;
+                cx.notify();
+            });
+        });
+        let mut visual = VisualTestContext::from_window(window.handle.into(), cx);
+        for (width, height) in [(420.0, 560.0), (468.0, 660.0), (720.0, 980.0)] {
+            visual.simulate_resize(gpui::size(px(width), px(height)));
+            visual.run_until_parked();
+            visual
+                .refresh()
+                .expect("setup window redraws");
+            visual.run_until_parked();
+            let viewport = visual
+                .debug_bounds("onboarding-viewport")
+                .expect("viewport bounds");
+            let position = gpui::point(viewport.right() - px(12.0), viewport.center().y);
+            visual.simulate_event(ScrollWheelEvent {
+                position,
+                delta: ScrollDelta::Pixels(gpui::point(px(0.0), px(2000.0))),
+                touch_phase: TouchPhase::Moved,
+                ..Default::default()
+            });
+            let column = visual
+                .debug_bounds("onboarding-column")
+                .expect("column bounds");
+            assert!(
+                column.top() >= viewport.top(),
+                "the review starts inside the viewport at {width} x {height}"
+            );
+
+            visual.simulate_event(ScrollWheelEvent {
+                position,
+                delta: ScrollDelta::Pixels(gpui::point(px(0.0), px(-2000.0))),
+                touch_phase: TouchPhase::Moved,
+                ..Default::default()
+            });
+            let column = visual
+                .debug_bounds("onboarding-column")
+                .expect("column bounds");
+            assert!(
+                column.bottom() <= viewport.bottom(),
+                "the connect action is reachable at {width} x {height}"
+            );
+        }
     }
 
     #[gpui::test]
