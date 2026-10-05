@@ -280,7 +280,7 @@ async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
         )
         await event_hub.publish(
             JobEventRecord(
-                sequence=11,
+                sequence=9,
                 resource_id="job_accepted",
                 event_type=RuntimeEventKind.JOB_SUCCEEDED,
                 occurred_at=utc_now(),

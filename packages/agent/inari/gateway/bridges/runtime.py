@@ -350,7 +350,7 @@ class GatewayRuntimeEventForwarder:
                 message_type=message.type,
                 payload=message.model_dump(mode="json"),
                 correlation_id=command_id,
-                dedupe_key=f"runtime-event:{event.sequence}",
+                dedupe_key=f"runtime-event:{event.resource_kind}:{event.sequence}",
             )
 
 

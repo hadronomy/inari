@@ -32,6 +32,11 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+
+def onboarding_record_path(settings: AgentSettings) -> Path:
+    return settings.resolved_security_state_dir / "onboarding.json"
+
+
 if TYPE_CHECKING:
     from ..runtime.models import DeviceRecord
     from ..security.models import AgentIdentity

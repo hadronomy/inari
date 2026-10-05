@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ..config import AgentSettings
 from ..security.models import GatewayMode
-from .onboarding import read_onboarding_record
+from .onboarding import onboarding_record_path, read_onboarding_record
 
 
 class DeviceSharingPolicy:
@@ -14,9 +14,7 @@ class DeviceSharingPolicy:
     def shared_device_ids(self) -> frozenset[str]:
         if self.settings.gateway_mode is not GatewayMode.MANAGED:
             return frozenset()
-        record = read_onboarding_record(
-            self.settings.resolved_security_state_dir / "onboarding.json"
-        )
+        record = read_onboarding_record(onboarding_record_path(self.settings))
         if (
             record.devices_confirmed_at is None
             or record.controller_url is None

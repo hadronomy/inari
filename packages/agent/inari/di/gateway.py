@@ -9,7 +9,7 @@ from ..gateway.enrollment.auth import UpstreamAuthProvider
 from ..gateway.connector import GatewayConnector
 from ..gateway.data_plane import ZenohGatewayTransport
 from ..gateway.enrollment import GatewayEnrollmentService
-from ..gateway.onboarding import ManagedOnboardingService
+from ..gateway.onboarding import ManagedOnboardingService, onboarding_record_path
 from ..gateway.repositories import GatewayRepository
 from ..gateway.state_events import GatewayStateEventProjector
 from ..gateway.sharing import DeviceSharingPolicy
@@ -148,7 +148,7 @@ class GatewayProvider(Provider):
             secret_store=secret_store,
             gateway_service=gateway_service,
             device_catalog=device_catalog,
-            status_path=settings.resolved_security_state_dir / "onboarding.json",
+            status_path=onboarding_record_path(settings),
             tls_context_factory=tls_context_factory,
         )
         gateway_supervisor = GatewaySupervisor(
