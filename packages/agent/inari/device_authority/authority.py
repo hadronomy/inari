@@ -4,7 +4,7 @@ import hashlib
 import secrets
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Never, Protocol
 from uuid import uuid4
@@ -44,6 +44,10 @@ from .models import (
     SignedHardwareCertificationMatrixRow,
 )
 from .ports import AuthorityProjectionReader, DeviceObservationReader
+from .testing import DeviceTestAuthorization, DeviceTestPermit
+
+
+_TEST_MAX_DURATION = timedelta(seconds=30)
 
 
 class AdmissionAuthorizer(Protocol):
@@ -99,7 +103,135 @@ class DeviceCapabilityAuthority:
         self._permit_ttl = permit_ttl
         self._observation_max_age = observation_max_age
         self._issued_permits: dict[bytes, _IssuedPermit] = {}
+        self._test_permits: dict[bytes, DeviceTestAuthorization] = {}
         self._permit_lock = threading.RLock()
+
+    def authorize_test(
+        self, target: CapabilityAdmissionTarget, *, now: datetime | None = None
+    ) -> DeviceTestPermit:
+        """Check an installed graph without requiring a prior test or activation."""
+
+        at = _now(now)
+        authorization = self._test_authorization(target, at)
+        with self._permit_lock:
+            self._test_permits = {
+                token: item
+                for token, item in self._test_permits.items()
+                if item.expires_at > at
+            }
+            token = secrets.token_bytes(32)
+            while token in self._test_permits:
+                token = secrets.token_bytes(32)
+            self._test_permits[token] = authorization
+        return DeviceTestPermit._issue(authorization, token)
+
+    def check_test(
+        self, permit: DeviceTestPermit, *, now: datetime | None = None
+    ) -> DeviceTestAuthorization:
+        """Recheck test authority immediately before standard Device Test I/O."""
+
+        if not isinstance(permit, DeviceTestPermit):
+            _reject(
+                AuthorityErrorCode.INVALID_REQUEST, "The Device Test permit is invalid."
+            )
+        at = _now(now)
+        token = permit._token_for_test_check()
+        with self._permit_lock:
+            issued = self._test_permits.get(token)
+        if issued is None or issued != permit.authorization:
+            _reject(
+                AuthorityErrorCode.INVALID_REQUEST, "The Device Test permit is invalid."
+            )
+        if at < issued.issued_at or at >= issued.expires_at:
+            with self._permit_lock:
+                self._test_permits.pop(token, None)
+            _reject(
+                AuthorityErrorCode.EXPIRED, "The Device Test permit is not current."
+            )
+
+        current = self._test_authorization(issued.target, at)
+        prior_revision = issued.revision.revision
+        current_revision = current.revision.revision
+        if current_revision.revision_number < prior_revision.revision_number:
+            _reject(
+                AuthorityErrorCode.AUTHORITY_UNAVAILABLE,
+                "The Device Capability authority revision moved backwards.",
+            )
+        if (
+            current_revision.revision_number == prior_revision.revision_number
+            and current.revision != issued.revision
+        ):
+            _reject(
+                AuthorityErrorCode.SIGNATURE_INVALID,
+                "The Device Capability authority revision changed in place.",
+            )
+        if self._projections.is_revoked(
+            RevocationSubjectKind.AUTHORITY_REVISION,
+            prior_revision.revision_id,
+            issued.revision.digest,
+        ):
+            _reject(
+                AuthorityErrorCode.REVOKED,
+                "The Device Test authority revision is revoked.",
+            )
+        if (
+            current.binding != issued.binding
+            or current.profile != issued.profile
+            or current.certification != issued.certification
+        ):
+            _reject(AuthorityErrorCode.GRAPH_MISMATCH, "The Device Test graph changed.")
+        return replace(
+            current,
+            issued_at=issued.issued_at,
+            expires_at=min(current.expires_at, issued.expires_at),
+        )
+
+    def _test_authorization(
+        self, target: CapabilityAdmissionTarget, at: datetime
+    ) -> DeviceTestAuthorization:
+        _ensure_target(target)
+        state = self._read_authority_state(at)
+        signed_binding = self._read_binding(target.binding_revision_id)
+        self._check_binding(signed_binding, target.binding_revision_id, at)
+        binding = signed_binding.revision
+        if binding.scope != target.scope:
+            _reject(
+                AuthorityErrorCode.SCOPE_MISMATCH,
+                "The Binding Revision does not belong to this scope.",
+            )
+        self._check_binding_target(binding, target)
+        profile = self._read_profile(binding.driver_profile_digest)
+        self._check_profile(profile, binding.driver_profile_digest, at)
+        capability = _find_capability(profile.profile, binding.capability_id)
+        self._check_capability(capability, target)
+        row = self._read_matrix(binding.matrix_row_id)
+        self._check_matrix(row, profile.profile, binding, at)
+        observation = self._read_observation(
+            binding.device_id, binding.driver_profile_digest
+        )
+        self._check_observation(observation, row.row, profile.profile, at)
+        self._check_revocations(signed_binding, profile, row)
+        deadlines = (
+            at + min(self._permit_ttl, _TEST_MAX_DURATION),
+            state.current_revision.revision.expires_at,
+            profile.profile.expires_at,
+            row.row.expires_at,
+            target.requested_expires_at,
+        )
+        expires_at = min(value for value in deadlines if value is not None)
+        if expires_at <= at:
+            _reject(AuthorityErrorCode.EXPIRED, "The Device Test deadline passed.")
+        return DeviceTestAuthorization(
+            target=target,
+            revision=state.current_revision,
+            binding=signed_binding,
+            profile=profile,
+            certification=row,
+            capability=capability,
+            observation=observation,
+            issued_at=at,
+            expires_at=expires_at,
+        )
 
     def authorize(
         self, target: CapabilityAdmissionTarget, *, now: datetime | None = None
@@ -728,9 +860,9 @@ class DeviceCapabilityAuthority:
         binding: SignedBindingRevision,
         profile: SignedDriverProfile,
         row: SignedHardwareCertificationMatrixRow,
-        evidence: SignedDeviceTestEvidence,
+        evidence: SignedDeviceTestEvidence | None = None,
     ) -> None:
-        for subject_kind, subject_id, subject_digest in (
+        subjects = [
             (
                 RevocationSubjectKind.BINDING_REVISION,
                 binding.revision.revision_id,
@@ -746,12 +878,16 @@ class DeviceCapabilityAuthority:
                 row.row.row_id,
                 row.digest,
             ),
-            (
-                RevocationSubjectKind.DEVICE_TEST_EVIDENCE,
-                evidence.evidence.evidence_id,
-                evidence.digest,
-            ),
-        ):
+        ]
+        if evidence is not None:
+            subjects.append(
+                (
+                    RevocationSubjectKind.DEVICE_TEST_EVIDENCE,
+                    evidence.evidence.evidence_id,
+                    evidence.digest,
+                )
+            )
+        for subject_kind, subject_id, subject_digest in subjects:
             if self._projections.is_revoked(
                 subject_kind,
                 subject_id,

@@ -40,6 +40,7 @@ from .models import (
 from .ports import AuthorityProjectionReader, DeviceObservationReader
 from .sqlite import SqliteDeviceAuthorityReader
 from .errors import AuthorityError, AuthorityErrorCode
+from .testing import DeviceTestAuthorization, DeviceTestPermit
 
 __all__ = [
     "AdmissionAuthorizer",
@@ -62,6 +63,8 @@ __all__ = [
     "DeviceObservation",
     "DeviceObservationReader",
     "DeviceTestEvidence",
+    "DeviceTestAuthorization",
+    "DeviceTestPermit",
     "DeviceTestResult",
     "DriverProfile",
     "HardwareCertificationMatrixRow",
