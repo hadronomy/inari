@@ -1,13 +1,17 @@
+use std::sync::Arc;
+
 use async_tungstenite::{
     WebSocketStream,
-    tokio::{ConnectStream, client_async_tls_with_config},
+    tokio::{ConnectStream, client_async_tls_with_connector_and_config},
     tungstenite::{
         client::IntoClientRequest as _,
+        error::TlsError,
         http::{HeaderValue, header::AUTHORIZATION},
     },
 };
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt as _;
+use rustls_platform_verifier::BuilderVerifierExt as _;
 use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 use url::Url;
@@ -77,9 +81,24 @@ impl AgentEventStream {
             tokio::net::TcpStream::connect(crate::local_transport::socket_address(endpoint)?)
                 .await
                 .map_err(|error| AgentClientError::EventStreamUnavailable(error.into()))?;
-        let (socket, _) = client_async_tls_with_config(request, stream, None)
-            .await
-            .map_err(AgentClientError::EventStreamUnavailable)?;
+        let connector = if scheme == "wss" {
+            let configuration = rustls::ClientConfig::builder_with_provider(Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .and_then(|builder| builder.with_platform_verifier())
+            .map_err(|error| {
+                AgentClientError::EventStreamUnavailable(TlsError::Rustls(Box::new(error)).into())
+            })?
+            .with_no_client_auth();
+            Some(Arc::new(configuration).into())
+        } else {
+            None
+        };
+        let (socket, _) =
+            client_async_tls_with_connector_and_config(request, stream, connector, None)
+                .await
+                .map_err(AgentClientError::EventStreamUnavailable)?;
         Ok(Self { socket })
     }
 
@@ -196,6 +215,51 @@ impl TryFrom<WireEvent> for AgentEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn tls_events_do_not_require_a_process_crypto_provider() {
+        const CHILD: &str = "INARI_TLS_PROVIDER_TEST_CHILD";
+        if std::env::var(CHILD).as_deref() != Ok("1") {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "events::tests::tls_events_do_not_require_a_process_crypto_provider",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap();
+            assert!(result.success());
+            return;
+        }
+        assert!(rustls::crypto::CryptoProvider::get_default().is_none());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let endpoint =
+            format!("https://agent.fixture.invalid:{}/", listener.local_addr().unwrap().port())
+                .parse()
+                .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut hello = [0; 1024];
+            assert!(
+                tokio::io::AsyncReadExt::read(&mut stream, &mut hello)
+                    .await
+                    .unwrap()
+                    > 0
+            );
+        });
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            AgentEventStream::connect(&endpoint, &SecretString::from("fixture-token")),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, Err(AgentClientError::EventStreamUnavailable(_))));
+        server.await.unwrap();
+        assert!(rustls::crypto::CryptoProvider::get_default().is_none());
+    }
 
     #[tokio::test]
     #[allow(

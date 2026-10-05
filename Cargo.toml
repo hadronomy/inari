@@ -81,6 +81,8 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 regress = "0.11.1"
 rust-embed = "8"
+rustls = { version = "0.23.39", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-platform-verifier = "0.6.2"
 secrecy = "0.10"
 service-manager = "=0.11.0"
 windows-sys = { version = "0.61.2", features = [

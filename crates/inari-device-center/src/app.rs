@@ -310,7 +310,10 @@ impl DeviceCenter {
                 &self.devices,
                 &self.jobs,
                 self.agent_status(),
-                self.setup.guidance.clone(),
+                self.setup
+                    .guidance
+                    .clone()
+                    .filter(|_| self.setup.access == SetupAccess::Unknown),
                 cx.entity().downgrade(),
             )
             .into_any_element(),
