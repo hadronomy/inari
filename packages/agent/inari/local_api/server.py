@@ -58,6 +58,8 @@ class AgentServerController:
                 else uvicorn.config.LOGGING_CONFIG
             ),
             reload=False,
+            # A reset transport must not block application cleanup indefinitely.
+            timeout_graceful_shutdown=5,
             ssl_certfile=tls_options.get("ssl_certfile"),
             ssl_keyfile=tls_options.get("ssl_keyfile"),
         )
