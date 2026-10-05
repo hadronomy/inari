@@ -102,6 +102,18 @@ def test_executable_icon_contains_each_required_windows_size(tmp_path) -> None:
         assert icon.ico.sizes() == {
             (size, size) for size in WINDOWS_EXECUTABLE_ICON_SIZES
         }
+        for size in WINDOWS_EXECUTABLE_ICON_SIZES:
+            frame = icon.ico.getimage((size, size))
+            for corner in (
+                (0, 0),
+                (size - 1, 0),
+                (0, size - 1),
+                (size - 1, size - 1),
+            ):
+                pixel = frame.getpixel(corner)
+                assert isinstance(pixel, tuple)
+                assert len(pixel) == 4
+                assert pixel[3] == 0
 
 
 def test_package_metadata_is_safe_across_windows_console_encodings(tmp_path) -> None:

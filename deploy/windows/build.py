@@ -188,11 +188,14 @@ def _write_assets(destination: Path) -> None:
 
 def write_executable_icon(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    source = _render_icon(width=256, height=256)
-    source.save(
+    frames = [
+        _render_icon(width=size, height=size) for size in WINDOWS_EXECUTABLE_ICON_SIZES
+    ]
+    frames[-1].save(
         destination,
         format="ICO",
         sizes=[(size, size) for size in WINDOWS_EXECUTABLE_ICON_SIZES],
+        append_images=frames[:-1],
     )
 
 
@@ -202,7 +205,7 @@ def _render_icon(*, width: int, height: int) -> Image.Image:
             (width, height),
             resample=Image.Resampling.LANCZOS,
         )
-    alpha = icon.getchannel("A").point(lambda value: 0 if value <= 1 else value)
+    alpha = icon.getchannel("A").point(lambda value: 0 if value <= 2 else value)
     icon.putalpha(alpha)
     return icon
 
