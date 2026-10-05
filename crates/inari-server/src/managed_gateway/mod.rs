@@ -13,6 +13,8 @@ mod enrollment;
 #[cfg(test)]
 mod enrollment_tests;
 mod fleet;
+#[cfg(test)]
+mod inventory_tests;
 mod jobs;
 mod keyspace;
 mod managed_work;

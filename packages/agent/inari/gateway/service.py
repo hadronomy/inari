@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from typing import TYPE_CHECKING, Iterable, Mapping, Protocol
 
 from ..printing.commands import DeviceCommandKind
@@ -164,6 +165,10 @@ class GatewaySnapshotBuilder:
                             system_name=device.name,
                             driver_key=device.driver_key,
                             connection_state=device.connection_state.value,
+                            transport=device.identity.transport.value,
+                            identity_digest=sha256(
+                                device.identity.stable_key().encode("utf-8")
+                            ).hexdigest(),
                             capabilities=tuple(
                                 key
                                 for key, enabled in device.capabilities.items()

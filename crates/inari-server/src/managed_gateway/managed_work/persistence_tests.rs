@@ -98,7 +98,8 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     Migrator::up(&database, None)
         .await
         .unwrap();
-    seed_database(&pool).await;
+    seed_agent_scope(&pool).await;
+    seed_current_device(&pool).await;
     let repository = GatewayRepository::new(database);
     let directory = tempfile::tempdir().unwrap();
     let signing_key_file = directory
@@ -165,15 +166,16 @@ async fn signed_state_recovers_acceptance_and_preserves_terminal_evidence() {
     ))
     .unwrap();
     let key = &fixture["public_jwk"];
+    let now = Utc::now();
     sqlx::query("UPDATE agent_verification_keys SET retired_at = now() WHERE key_id = 'key_test'")
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', 'transport_identity', 'state-test', $2, now())")
-        .bind(key["kid"].as_str().unwrap()).bind(key).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', 'transport_identity', 'state-test', $2, $3)")
+        .bind(key["kid"].as_str().unwrap()).bind(key).bind(now - TimeDelta::seconds(1))
+        .execute(&pool).await.unwrap();
     let mut observation: AgentStateObservation =
         serde_json::from_value(fixture["claims"].clone()).unwrap();
-    let now = Utc::now();
     observation.agent_id = work.scope.agent_id.clone();
     observation.observed_at = now;
     observation.issued_at = now;
@@ -464,7 +466,7 @@ impl ManagedPayloadKeyWrapper for TestKeyWrapper {
     }
 }
 
-async fn seed_database(pool: &PgPool) {
+async fn seed_agent_scope(pool: &PgPool) {
     sqlx::raw_sql(
         "INSERT INTO organizations (organization_id, name) VALUES ('org_example', 'Managed Work test');
          INSERT INTO sites (site_id, organization_id, name) VALUES ('site_example', 'org_example', 'Test site');
@@ -472,11 +474,7 @@ async fn seed_database(pool: &PgPool) {
              namespace, protocol_version, controller_actions, enrolled_at, last_enrolled_at)
          VALUES ('agt_000000000000000000000001', 'org_example', 'site_example', 'key_test', 'test',
              '{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"x\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}',
-             'inari/org_example/site_example/agt_000000000000000000000001', '1.0', '[\"managed_work:dispatch\"]', now(), now());
-         INSERT INTO devices (device_id, agent_id, site_id, kind, display_name, state, transport,
-             hardware_fingerprint, capabilities, first_seen_at, last_seen_at)
-         VALUES ('dev_printer', 'agt_000000000000000000000001', 'site_example', 'printer', 'Test printer', 'online',
-             'usb', 'printer_test', '[\"print\"]', now(), now());",
+             'inari/org_example/site_example/agt_000000000000000000000001', '1.0', '[\"managed_work:dispatch\"]', now(), now());",
     )
     .execute(pool)
     .await
@@ -491,6 +489,18 @@ async fn seed_database(pool: &PgPool) {
         "public_key_base64url": URL_SAFE_NO_PAD.encode(public_key.to_bytes()),
     }))
     .bind(inari_gateway::protocol::ProtocolVersion::current().to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_current_device(pool: &PgPool) {
+    sqlx::raw_sql(
+        "INSERT INTO devices (device_id, agent_id, site_id, kind, display_name, state, transport,
+             identity_digest, device_class, capabilities, first_seen_at, last_seen_at)
+         VALUES ('dev_printer', 'agt_000000000000000000000001', 'site_example', 'printer', 'Test printer', 'online',
+             'usb', repeat('a', 64), 'physical', '[\"print\"]', now(), now());",
+    )
     .execute(pool)
     .await
     .unwrap();
@@ -579,7 +589,16 @@ async fn managed_payload_admission_replay_and_deletion() {
     Migrator::up(&database, Some(5))
         .await
         .unwrap();
-    seed_database(&pool).await;
+    seed_agent_scope(&pool).await;
+    sqlx::raw_sql(
+        "INSERT INTO devices (device_id, agent_id, site_id, kind, display_name, state, transport,
+             hardware_fingerprint, capabilities, first_seen_at, last_seen_at)
+         VALUES ('dev_printer', 'agt_000000000000000000000001', 'site_example', 'printer', 'Test printer', 'online',
+             'usb', 'legacy hardware', '[\"print\"]', now(), now());",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let repository = GatewayRepository::new(database.clone());
     let directory = tempfile::tempdir().unwrap();
     let signing_key_file = directory
@@ -690,6 +709,7 @@ async fn managed_payload_admission_replay_and_deletion() {
             .await
             .unwrap();
     assert_eq!(legacy_command, serde_json::json!({"managed_work_id": "mw_legacy"}));
+    seed_current_device(&pool).await;
 
     let (zenoh, _) = ZenohSupervisor::new(ZenohConfig::default());
     let wrapper = Arc::new(TestKeyWrapper::default());
@@ -843,15 +863,16 @@ async fn managed_payload_admission_replay_and_deletion() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', 'agent_state', 'state-test', $2, now())")
-        .bind(key["kid"].as_str().unwrap()).bind(key).execute(&pool).await.unwrap();
+    let now = Utc::now();
+    sqlx::query("INSERT INTO agent_verification_keys (key_id, agent_id, purpose, jwk_thumbprint, public_jwk, registered_at) VALUES ($1, 'agt_000000000000000000000001', 'agent_state', 'state-test', $2, $3)")
+        .bind(key["kid"].as_str().unwrap()).bind(key).bind(now - TimeDelta::seconds(1))
+        .execute(&pool).await.unwrap();
     let mut observation: AgentStateObservation =
         serde_json::from_value(fixture["claims"].clone()).unwrap();
     let work = controller
         .managed_work(&receipt.managed_work_id)
         .await
         .unwrap();
-    let now = Utc::now();
     observation.agent_id = work.scope.agent_id.clone();
     observation.observed_at = now;
     observation.issued_at = now;

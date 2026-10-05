@@ -140,7 +140,7 @@ Content-Type: application/json
     "protocol": {},
     "service": {},
     "security": {},
-    "runtime": {},
+    "runtime": {"inventory": {"devices": []}},
     "capabilities": {},
     "observability": {}
   }
@@ -172,6 +172,90 @@ The migration registers existing Agent transport keys before new enrollments.
 
 All API errors use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
 details with `Content-Type: application/problem+json`.
+
+### Device inventory
+
+Every enrollment and managed snapshot MUST contain `runtime.inventory.devices`.
+The list contains only the Devices that the operator confirmed for this Controller.
+An empty list withdraws every Device from this Agent's Controller Projection.
+Local Device Work and local discovery remain independent of that selection.
+
+Each Device item uses this closed contract. Unknown or missing fields invalidate
+the complete inventory.
+
+```json
+{
+  "device_id": "dev_counter",
+  "kind": "printer",
+  "device_class": "physical",
+  "display_name": "Front counter",
+  "system_name": "POS-80",
+  "driver_key": "windows.spooler",
+  "connection_state": "online",
+  "transport": "spooler",
+  "identity_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capabilities": ["raw", "text"],
+  "metadata": {}
+}
+```
+
+- `kind` is `printer`, `scale`, `scanner`, or `display`.
+- `device_class` is `physical` or `virtual`.
+- `connection_state` is `online` or `offline`.
+- `transport` is `spooler`, `network`, `usb`, `hid`, or `serial`.
+- `identity_digest` is the lowercase SHA-256 digest of the UTF-8 Agent identity
+  stable key. The Agent MUST NOT publish that raw stable key.
+- `capabilities` contains distinct discovery values: `raw`, `text`, `documents`,
+  or `cash_drawer`. These values do not authorize Managed Device Work.
+- `metadata` contains at most 16 KiB of serialized JSON.
+
+The list contains at most 1,024 Devices. Names contain 1–1,024 UTF-8 bytes and
+no control characters. Device identifiers and `(kind, identity_digest)` pairs
+MUST be unique within one Agent inventory. While a Device remains in the
+Projection, its identifier MUST retain its kind and identity digest.
+
+The Controller keys Device rows by `(agent_id, device_id)`. Separate Agents can
+publish the same host-local Device identity. A valid snapshot replaces only
+its Agent's Projection and retains each present Device's `first_seen_at`.
+Withdrawal removes the Device row. Re-addition starts a new `first_seen_at`
+and can use a new identity digest. It does not restore Device Binding or
+Device Capability authority.
+The Controller currently stores an empty Device Capability list. Discovery does
+not prove a Driver Profile, Device Test Result, or Hardware Certification Matrix entry.
+
+The Controller applies a snapshot only to its current enrollment and only when
+`generated_at` exceeds the latest applied snapshot. Exact publication replay
+and older snapshots preserve history without changing the Projection.
+Equal timestamps also preserve the applied snapshot. The latest status query
+returns only a publication whose snapshot matches the current Projection.
+New enrollment resets the Projection to its new Site. Credential retirement
+deletes that Agent's Projection. Historical publications remain available.
+
+Invalid inventory rejects the whole publication or enrollment transaction.
+The Controller records rejected publications as `agent.inventory_rejected`
+audit events with outcome `denied`. These records contain no inventory content.
+
+#### Inventory rollout
+
+Upgrade every Agent before deploying this Controller change. Older Agents omit
+the required inventory fields, so the new Controller rejects their enrollment
+and snapshot publications. The protocol draft remains `2026-10-03`.
+Changes to this closed Device item contract require an explicit protocol upgrade.
+
+Stop old Controller replicas before applying migration
+`m20261005_223036_project_device_inventory`. The Helm migration hook runs before
+the Deployment update. The `Recreate` strategy alone does not stop old replicas
+before that hook. Keep the old replicas at zero until the migration completes.
+Old replicas cannot read the renamed Device column or the
+new composite key. A rollback across this schema migration requires a matching
+Recovery Point and its Release Set.
+
+The migration clears derived Device rows with unverified identity fingerprints.
+Current Agent snapshots rebuild them. It preserves invitations, publications,
+and Print Audit Records. Managed Work retains its immutable Device identity
+after the current Device Projection disappears.
+Managed dispatch remains disabled until its authority
+and Recovery Point acceptance gates pass.
 
 ### Response
 

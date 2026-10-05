@@ -97,6 +97,8 @@ class GatewayDeviceInventoryItem(GatewayProtocolModel):
     system_name: str
     driver_key: str
     connection_state: str
+    transport: Literal["spooler", "network", "usb", "hid", "serial"]
+    identity_digest: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     capabilities: tuple[str, ...] = ()
     metadata: JsonObject = Field(default_factory=dict)
 

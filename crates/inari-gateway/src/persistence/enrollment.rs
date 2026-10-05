@@ -15,7 +15,7 @@ use super::entity::value::{
     AgentKeyPurpose, InvitationState, StoredActions, StoredDispatchEncryptionKey, StoredJwk,
     StoredSnapshot,
 };
-use super::entity::{agent, agent_verification_key, invitation, invitation_attempt};
+use super::entity::{agent, agent_verification_key, device, invitation, invitation_attempt};
 use super::{AgentEnrollmentRecord, GatewayRepository, PreparedEnrollment, stored_time, utc_time};
 use crate::audit::{AuditAction, AuditEventDraft, AuditOutcome, AuditResource};
 use crate::identity::ActorId;
@@ -275,6 +275,7 @@ async fn persist_enrollment(
     fingerprint: [u8; 32],
     enrolled_at: DateTime<Utc>,
 ) -> GatewayResult<()> {
+    let inventory = super::inventory::InventoryProjection::parse(&snapshot.runtime.inventory)?;
     let enrolled_at = stored_time(enrolled_at);
     agent::Entity::insert(agent::ActiveModel {
         agent_id: Set(enrollment.agent_id.as_str().to_owned()),
@@ -312,6 +313,19 @@ async fn persist_enrollment(
     )
     .exec(transaction)
     .await?;
+
+    device::Entity::delete_many()
+        .filter(device::Column::AgentId.eq(enrollment.agent_id.as_str()))
+        .exec(transaction)
+        .await?;
+    inventory
+        .apply(
+            transaction,
+            enrollment.agent_id.as_str(),
+            enrollment.site_id.as_str(),
+            snapshot.generated_at,
+        )
+        .await?;
 
     for (purpose, jwk) in [
         (AgentKeyPurpose::TransportIdentity, enrollment.public_jwk),

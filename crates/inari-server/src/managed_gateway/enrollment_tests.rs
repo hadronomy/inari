@@ -25,7 +25,7 @@ use sqlx::PgPool;
 const LIMIT: InvitationAttemptLimit =
     InvitationAttemptLimit { window: Duration::from_secs(60), max_failures: 3 };
 
-fn jwk(seed: u8, state: bool) -> Jwk {
+pub(super) fn jwk(seed: u8, state: bool) -> Jwk {
     let public = SigningKey::from_bytes(&[seed; 32])
         .verifying_key()
         .to_bytes();
@@ -36,7 +36,7 @@ fn jwk(seed: u8, state: bool) -> Jwk {
     })).unwrap()
 }
 
-fn enrollment(agent_id: &str, identity: Jwk, state: Jwk) -> AgentEnrollmentRecord {
+pub(super) fn enrollment(agent_id: &str, identity: Jwk, state: Jwk) -> AgentEnrollmentRecord {
     AgentEnrollmentRecord {
         agent_id: agent_id.parse().unwrap(),
         organization_id: "org_keys".parse().unwrap(),
@@ -57,20 +57,20 @@ fn enrollment(agent_id: &str, identity: Jwk, state: Jwk) -> AgentEnrollmentRecor
     }
 }
 
-fn snapshot() -> GatewaySnapshot {
+pub(super) fn snapshot() -> GatewaySnapshot {
     serde_json::from_value(json!({
         "generated_at": Utc::now(), "protocol": inari_gateway::protocol::ProtocolDescriptor::default(),
-        "service": {}, "runtime": {}, "capabilities": {"transport": "https+zenoh"},
+        "service": {}, "runtime": {"inventory": {"devices": []}}, "capabilities": {"transport": "https+zenoh"},
         "security": {"mode": "managed", "exposure": "private", "tls_required": true,
             "certificate_mode": "step_ca", "mutual_tls_mode": "required", "mutual_tls_enabled": true},
     })).unwrap()
 }
 
-fn operator() -> AuditContext {
+pub(super) fn operator() -> AuditContext {
     AuditContext::new(ActorId::from_oidc_subject("test-operator"), None)
 }
 
-async fn test_database() -> (PgPool, DatabaseConnection) {
+pub(super) async fn test_database() -> (PgPool, DatabaseConnection) {
     let pool = PgPool::connect(&std::env::var("INARI_TEST_DATABASE_URL").unwrap())
         .await
         .unwrap();
@@ -78,7 +78,7 @@ async fn test_database() -> (PgPool, DatabaseConnection) {
     (pool, database)
 }
 
-async fn create_scope(pool: &PgPool) {
+pub(super) async fn create_scope(pool: &PgPool) {
     sqlx::raw_sql("INSERT INTO organizations (organization_id, name) VALUES ('org_keys', 'Key tests');
         INSERT INTO sites (site_id, organization_id, name) VALUES ('site_keys', 'org_keys', 'Key tests');
         INSERT INTO sites (site_id, organization_id, name) VALUES ('site_other', 'org_keys', 'Other site');")
@@ -102,7 +102,7 @@ async fn invite(repository: &GatewayRepository, lifetime: chrono::Duration) -> I
     code
 }
 
-async fn live_invitation(repository: &GatewayRepository) -> InvitationCode {
+pub(super) async fn live_invitation(repository: &GatewayRepository) -> InvitationCode {
     invite(repository, chrono::Duration::hours(1)).await
 }
 
