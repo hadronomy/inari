@@ -60,6 +60,15 @@ revision has no effect. Older revisions, changed immutable records, and
 same-number revision replacements are rejected. Import cannot clear Agent
 Quarantine. Existing signed records remain available for audit and recovery.
 
+Each revision retains its signed manifest. Device Test authorization requires
+the exact Binding Revision, Driver Profile, and certification row in the current
+manifest. A newer manifest can withdraw a graph while its historical records
+remain available for audit. Withdrawal blocks new tests and the pre-I/O check.
+
+Reissue authority with a newer signed revision after an upgrade from a database
+that did not retain manifests. A historical manifest digest cannot prove record
+membership. Such revisions cannot authorize a Device Test.
+
 This command installs authority. It does not manufacture Device Test evidence,
 perform Device I/O, or establish Client Pairing. At admission, the Agent signs
 the latest Driver discovery record with its protected Device observation key.

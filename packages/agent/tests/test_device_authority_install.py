@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import timedelta
 import json
+from pathlib import Path
 
 import pytest
 from sqlalchemy import insert, select, func
@@ -12,6 +13,7 @@ from inari.db import DatabaseMigrator
 from inari.db.schema import devices_table, device_authority_revisions_table
 from inari.device_authority import (
     AuthorityError,
+    AuthorityErrorCode,
     DeviceCapabilityAuthority,
     SignedAuthorityRevision,
     SignerPurpose,
@@ -125,6 +127,88 @@ def test_installed_bundle_authorizes_through_sqlite(installation):
         == target.binding_revision_id
     )
     assert not installer.install(bundle, now=now)
+
+
+@pytest.mark.parametrize("withdrawn", ["bindings", "profiles", "certification_rows"])
+def test_device_test_rejects_withdrawn_historical_graph(installation, withdrawn):
+    installer, store, bundle_for, observations, target, now = installation
+    first = bundle_for()
+    installer.install(first, now=now)
+    reader = SqliteDeviceAuthorityReader(store)
+    authority = DeviceCapabilityAuthority(
+        projections=reader, observations=observations, current_agent_version="1.20.0"
+    )
+    permit = authority.authorize_test(target, now=now)
+    manifest = first.manifest.model_copy(
+        update={withdrawn: (), "evidence": (), "activations": ()}
+    )
+    installer.install(bundle_for(manifest, number=2), now=now)
+    assert reader.read_binding_revision(target.binding_revision_id) is not None
+
+    for operation in (
+        lambda: authority.authorize_test(target, now=now),
+        lambda: authority.check_test(permit, now=now + timedelta(seconds=1)),
+    ):
+        with pytest.raises(AuthorityError) as error:
+            operation()
+        assert error.value.code is AuthorityErrorCode.GRAPH_MISMATCH
+
+
+def test_device_test_accepts_a_graph_retained_in_the_next_manifest(installation):
+    installer, store, bundle_for, observations, target, now = installation
+    first = bundle_for()
+    manifest = first.manifest.model_copy(update={"evidence": (), "activations": ()})
+    installer.install(bundle_for(manifest), now=now)
+    authority = DeviceCapabilityAuthority(
+        projections=SqliteDeviceAuthorityReader(store),
+        observations=observations,
+        current_agent_version="1.20.0",
+    )
+    permit = authority.authorize_test(target, now=now)
+    installer.install(bundle_for(manifest, number=2), now=now)
+    checked = authority.check_test(permit, now=now + timedelta(seconds=1))
+    assert checked.revision.revision.revision_number == 2
+    assert checked.expires_at == permit.authorization.expires_at
+
+
+def test_installed_manifest_is_immutable(installation):
+    installer, store, bundle_for, _, _, now = installation
+    bundle = bundle_for()
+    installer.install(bundle, now=now)
+    with (
+        pytest.raises(IntegrityError, match="authority revision is immutable"),
+        store.connection() as connection,
+    ):
+        connection.execute(
+            device_authority_revisions_table.update().values(
+                manifest=bundle.manifest.model_copy(
+                    update={"bindings": ()}
+                ).model_dump_json()
+            )
+        )
+
+
+def test_device_test_rejects_a_historical_revision_without_a_manifest(installation):
+    installer, store, bundle_for, observations, target, now = installation
+    installer.install(bundle_for(), now=now)
+    with store.connection() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE device_authority_revisions DROP COLUMN manifest"
+        )
+        connection.exec_driver_sql(
+            "UPDATE alembic_version SET version_num='20260906_0016'"
+        )
+    DatabaseMigrator(Path(store.engine.url.database)).ensure_current()
+    authority = DeviceCapabilityAuthority(
+        projections=SqliteDeviceAuthorityReader(store),
+        observations=observations,
+        current_agent_version="1.20.0",
+    )
+    with pytest.raises(AuthorityError) as error:
+        authority.authorize_test(target, now=now)
+    assert error.value.code is AuthorityErrorCode.AUTHORITY_UNAVAILABLE
+    assert installer.install(bundle_for(number=2), now=now)
+    assert authority.authorize_test(target, now=now)
 
 
 def test_rejects_manifest_tampering_without_writes(installation):

@@ -1246,6 +1246,7 @@ device_authority_revisions_table = Table(
     Column("revision_id", String, primary_key=True),
     Column("revision_number", Integer, nullable=False),
     Column("manifest_digest", LargeBinary, nullable=False),
+    Column("manifest", Text),
     Column("effective_at", String, nullable=False),
     Column("expires_at", String),
     Column("revision_digest", LargeBinary, nullable=False),

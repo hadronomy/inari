@@ -211,6 +211,32 @@ class DeviceCapabilityAuthority:
         )
         self._check_observation(observation, row.row, profile.profile, at)
         self._check_revocations(signed_binding, profile, row)
+        manifest = self._projections.read_manifest(
+            state.current_revision.revision.revision_id
+        )
+        if manifest is None:
+            _reject(
+                AuthorityErrorCode.AUTHORITY_UNAVAILABLE,
+                "The Device Test authority manifest is unavailable.",
+            )
+        if (
+            canonical_digest(manifest.model_dump(mode="json"))
+            != state.current_revision.revision.manifest_digest
+        ):
+            _reject(
+                AuthorityErrorCode.SIGNATURE_INVALID,
+                "The Device Test authority manifest digest differs.",
+            )
+        if (
+            manifest.scope != target.scope
+            or signed_binding not in manifest.bindings
+            or profile not in manifest.profiles
+            or row not in manifest.certification_rows
+        ):
+            _reject(
+                AuthorityErrorCode.GRAPH_MISMATCH,
+                "The Device Test graph is absent from current authority.",
+            )
         deadlines = (
             at + min(self._permit_ttl, _TEST_MAX_DURATION),
             state.current_revision.revision.expires_at,

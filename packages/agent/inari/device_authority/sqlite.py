@@ -5,6 +5,7 @@ import json
 
 from sqlalchemy import select
 from sqlalchemy.engine import RowMapping
+from pydantic import ValidationError
 
 from ..db.schema import (
     device_authority_revisions_table,
@@ -19,6 +20,7 @@ from ..db.schema import (
     hardware_certification_matrix_rows_table,
 )
 from ..runtime.store import RuntimeStore
+from .bundle import AuthorityManifest
 from .models import (
     AuthorityRevision,
     AuthorityScope,
@@ -89,6 +91,19 @@ class SqliteDeviceAuthorityReader:
             )
         )
         return None if row is None else _signed_binding(row)
+
+    def read_manifest(self, revision_id: str) -> AuthorityManifest | None:
+        row = self._one(
+            select(device_authority_revisions_table.c.manifest).where(
+                device_authority_revisions_table.c.revision_id == revision_id
+            )
+        )
+        if row is None or not isinstance(row["manifest"], str):
+            return None
+        try:
+            return AuthorityManifest.model_validate_json(row["manifest"])
+        except ValidationError:
+            return None
 
     def read_active_test_evidence_id(self, revision_id: str) -> str | None:
         with self._store.connection() as connection:

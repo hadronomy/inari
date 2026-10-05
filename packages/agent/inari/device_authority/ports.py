@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .bundle import AuthorityManifest
 
 from .models import (
     AuthorityState,
@@ -19,6 +22,8 @@ class AuthorityProjectionReader(Protocol):
     """Read-only seam for the Controller or Odoo authority projections."""
 
     def read_authority_state(self) -> AuthorityState | None: ...
+
+    def read_manifest(self, revision_id: str) -> AuthorityManifest | None: ...
 
     def read_binding_revision(
         self, revision_id: str

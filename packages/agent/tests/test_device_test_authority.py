@@ -14,7 +14,13 @@ from inari.device_authority import (
     RevocationSubjectKind,
 )
 
-from .test_device_capability_authority import NOW, _authority, _fixture, _signed
+from .test_device_capability_authority import (
+    NOW,
+    _authority,
+    _fixture,
+    _signed,
+    _refresh_manifest,
+)
 
 
 def test_first_device_test_does_not_require_activation_or_previous_evidence():
@@ -49,6 +55,15 @@ def test_device_test_permit_cannot_supply_business_admission_proof():
     assert not hasattr(permit, "authority_proof")
     with pytest.raises(AttributeError):
         permit.authorization = permit.authorization
+
+
+def test_device_test_rejects_manifest_digest_drift():
+    projections, observations, target, _ = _fixture()
+    projections.manifest = projections.manifest.model_copy(update={"bindings": ()})
+    authority = _authority(projections, observations)
+    with pytest.raises(AuthorityError) as error:
+        authority.authorize_test(target, now=NOW)
+    assert error.value.code is AuthorityErrorCode.SIGNATURE_INVALID
 
 
 def test_device_test_permit_is_bound_to_its_authority_instance():
@@ -188,6 +203,7 @@ def test_unavailable_firmware_requires_an_exact_signed_matrix_match(observed_fir
     authority = _authority(projections, observations)
 
     if observed_firmware == "unavailable":
+        _refresh_manifest(projections)
         permit = authority.authorize_test(target, now=NOW)
         assert authority.check_test(permit, now=NOW).certification.row == row
         assert authority.check(authority.authorize(target, now=NOW), now=NOW)
