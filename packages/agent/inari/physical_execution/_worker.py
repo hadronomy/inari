@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import multiprocessing
 import json
+import re
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from typing import Any
@@ -23,6 +24,7 @@ from .models import (
 
 
 _READY_TIMEOUT_SECONDS = 10.0
+_FAILURE_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 
 
 class IsolatedPrinterWorker:
@@ -87,18 +89,55 @@ class ProcessPreparedWorker:
                 error_code="worker_protocol_error",
                 message_key="print.outcome_unknown",
             )
-        if message[0] == "submitted":
-            evidence = OutputEvidence(str(message[1]))
+        if message[0] == "result":
+            if len(message) != 4:
+                return DriverExecutionResult(
+                    outcome=DriverOutcome.UNKNOWN,
+                    error_code="worker_protocol_error",
+                    message_key="print.outcome_unknown",
+                )
+            try:
+                outcome = DriverOutcome(message[1])
+                evidence = OutputEvidence(message[2])
+            except (TypeError, ValueError):
+                outcome = None
+                evidence = None
+            platform_job_id = message[3]
+            if outcome not in {DriverOutcome.CONFIRMED, DriverOutcome.UNKNOWN} or (
+                platform_job_id is not None
+                and (
+                    not isinstance(platform_job_id, str)
+                    or not 1 <= len(platform_job_id) <= 256
+                )
+            ):
+                return DriverExecutionResult(
+                    outcome=DriverOutcome.UNKNOWN,
+                    error_code="worker_protocol_error",
+                    message_key="print.outcome_unknown",
+                )
+            return DriverExecutionResult(
+                outcome=outcome,
+                evidence=evidence,
+                platform_job_id=platform_job_id,
+                error_code=(
+                    "output_not_confirmed" if outcome is DriverOutcome.UNKNOWN else None
+                ),
+                message_key=(
+                    "print.output_not_confirmed"
+                    if outcome is DriverOutcome.UNKNOWN
+                    else None
+                ),
+            )
+        if message[0] != "failed" or len(message) != 2:
             return DriverExecutionResult(
                 outcome=DriverOutcome.UNKNOWN,
-                evidence=evidence,
-                platform_job_id=message[2],
-                error_code="output_not_confirmed",
-                message_key="print.output_not_confirmed",
+                error_code="worker_protocol_error",
+                message_key="print.outcome_unknown",
             )
+        code = message[1].lower() if isinstance(message[1], str) else "device_failed"
         return DriverExecutionResult(
             outcome=DriverOutcome.UNKNOWN,
-            error_code=str(message[1]) if len(message) > 1 else "device_failed",
+            error_code=code if _FAILURE_CODE.fullmatch(code) else "device_failed",
             message_key="print.outcome_unknown",
         )
 
@@ -119,7 +158,7 @@ def _receive(connection: Connection, timeout: float) -> Any:
         raise TimeoutError
     try:
         return connection.recv()
-    except EOFError:
+    except (EOFError, OSError):
         return ("failed", "worker_exited")
 
 
@@ -156,9 +195,28 @@ def _printer_process(
             or work.driver_key in {"cups.printers", "windows.printers"}
             else OutputEvidence.TRANSPORT
         )
+        # Complete Windows RAW writes meet the spooler contract. Other backends
+        # need their own terminal evidence before they can confirm output.
+        confirmed = (
+            work.driver_key == "windows.printers"
+            and (work.operation, work.media_type)
+            in {
+                ("receipt_image", "application/vnd.inari.escpos"),
+                ("label_document", "application/vnd.zebra-zpl"),
+            }
+            and result.printer == device
+            and result.transport is PrinterTransport.RAW
+            and type(result.bytes_written) is int
+            and result.bytes_written == len(work.content)
+            and type(result.job_id) is int
+            and result.job_id > 0
+        )
         connection.send(
             (
-                "submitted",
+                "result",
+                DriverOutcome.CONFIRMED.value
+                if confirmed
+                else DriverOutcome.UNKNOWN.value,
                 evidence.value,
                 str(result.job_id) if result.job_id is not None else None,
             )

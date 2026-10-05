@@ -2125,6 +2125,11 @@ document format, and submission time.
 Successful Windows `WritePrinter` and `EndDocPrinter` calls give `spooler`
 evidence for receipt and label Drivers. The Driver checks every byte count.
 
+These complete submissions produce `output_confirmed` with `spooler` evidence.
+The ledger, Agent State Envelope, and Controller preserve that evidence level.
+The result must meet the evidence level in the admitted Driver Profile. A weaker
+result retains `outcome_unknown`.
+
 The Windows Report PDF Platform Backend uses GDI. Successful `StartDoc`, page
 calls, and `EndDoc` give `spooler` evidence.
 

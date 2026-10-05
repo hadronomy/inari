@@ -93,7 +93,9 @@ class FakeRootSecretStore:
         self.values.pop(key, None)
 
 
-def _migrate(tmp_path: Path, *, purpose: str = "pos_receipt") -> Path:
+def _migrate(
+    tmp_path: Path, *, purpose: str = "pos_receipt", output_evidence: str = "transport"
+) -> Path:
     database_path = tmp_path / "agent.sqlite3"
     DatabaseMigrator(database_path).ensure_current()
     with sqlite3.connect(database_path) as connection:
@@ -116,7 +118,9 @@ def _migrate(tmp_path: Path, *, purpose: str = "pos_receipt") -> Path:
             )
         for device_id in ("device-1", "device-2", "device-3"):
             _seed_authority_graph(
-                connection, _authority_proof_for(device_id, purpose=purpose)
+                connection,
+                _authority_proof_for(device_id, purpose=purpose),
+                output_evidence=output_evidence,
             )
     return database_path
 
@@ -165,6 +169,8 @@ def _authority_proof_for(
 def _seed_authority_graph(
     connection: sqlite3.Connection,
     proof: AuthorityProof,
+    *,
+    output_evidence: str = "transport",
 ) -> None:
     timestamps = (
         proof.issued_at.isoformat().replace("+00:00", "Z"),
@@ -224,7 +230,7 @@ def _seed_authority_graph(
                 "media_type": proof.media_type,
                 "operation": proof.operation,
                 "options_digest": proof.options_digest,
-                "output_evidence": "transport",
+                "output_evidence": output_evidence,
             }
         ],
         separators=(",", ":"),
@@ -308,7 +314,7 @@ def _seed_authority_graph(
             output_evidence, result, test_pattern_digest, tested_at,
             valid_until, evidence_digest, signer_key_id, signature,
             authority_revision_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'transport', 'passed', ?, ?, ?, ?,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'passed', ?, ?, ?, ?,
             'test-key', ?, ?)
         """,
         (
@@ -319,6 +325,7 @@ def _seed_authority_graph(
             proof.capability_id,
             bytes.fromhex(proof.driver_profile_digest),
             proof.matrix_row_id,
+            output_evidence,
             b"t" * 32,
             *timestamps,
             bytes.fromhex(proof.test_evidence_digest),

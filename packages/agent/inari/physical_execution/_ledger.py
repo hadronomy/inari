@@ -247,6 +247,22 @@ class SqliteExecutionLedger:
                 connection, claim, phase="permission_delivered", now=now
             )
             job = self._job(connection, claim.job_id)
+            if (
+                result.outcome is DriverOutcome.CONFIRMED
+                and result.evidence is not None
+                and not self._authority_guard.output_evidence_meets_contract(
+                    connection,
+                    read_authority_proof(connection, admission_id=claim.admission_id),
+                    result.evidence.value,
+                )
+            ):
+                result = replace(
+                    result,
+                    outcome=DriverOutcome.UNKNOWN,
+                    evidence=None,
+                    error_code="output_evidence_insufficient",
+                    message_key="print.output_evidence_insufficient",
+                )
             state, evidence, error_code, message_key = self._result_state(result)
             next_version = int(job["state_version"]) + 1
             values: dict[str, object] = {
@@ -770,10 +786,7 @@ class SqliteExecutionLedger:
     def _result_state(
         result: DriverExecutionResult,
     ) -> tuple[PrintJobState, OutputEvidence | None, str | None, str | None]:
-        if (
-            result.outcome is DriverOutcome.CONFIRMED
-            and result.evidence is OutputEvidence.DEVICE
-        ):
+        if result.outcome is DriverOutcome.CONFIRMED and result.evidence is not None:
             return PrintJobState.OUTPUT_CONFIRMED, result.evidence, None, None
         if result.outcome is DriverOutcome.FAILED:
             return (

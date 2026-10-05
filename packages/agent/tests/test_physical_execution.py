@@ -78,8 +78,10 @@ def _jpeg() -> bytes:
     return output.getvalue()
 
 
-async def _fixture(tmp_path: Path, *, content: bytes | None = None) -> ExecutionFixture:
-    database_path = spool_support._migrate(tmp_path)
+async def _fixture(
+    tmp_path: Path, *, content: bytes | None = None, output_evidence: str = "transport"
+) -> ExecutionFixture:
+    database_path = spool_support._migrate(tmp_path, output_evidence=output_evidence)
     spool_path = tmp_path / "spool"
     root_secrets = spool_support.FakeRootSecretStore()
     admission = spool_support._store(
@@ -267,8 +269,33 @@ async def test_managed_work_rechecks_device_authority_without_a_client_grant(
 
 
 @pytest.mark.anyio
-async def test_device_evidence_is_required_for_output_confirmation(
+@pytest.mark.parametrize(
+    "outcome,evidence,expected",
+    [
+        (
+            DriverOutcome.CONFIRMED,
+            OutputEvidence.DEVICE,
+            PrintJobState.OUTPUT_CONFIRMED,
+        ),
+        (
+            DriverOutcome.CONFIRMED,
+            OutputEvidence.SPOOLER,
+            PrintJobState.OUTPUT_CONFIRMED,
+        ),
+        (
+            DriverOutcome.CONFIRMED,
+            OutputEvidence.TRANSPORT,
+            PrintJobState.OUTPUT_CONFIRMED,
+        ),
+        (DriverOutcome.CONFIRMED, None, PrintJobState.OUTCOME_UNKNOWN),
+        (DriverOutcome.UNKNOWN, OutputEvidence.SPOOLER, PrintJobState.OUTCOME_UNKNOWN),
+    ],
+)
+async def test_output_confirmation_preserves_only_declared_completion_evidence(
     tmp_path: Path,
+    outcome,
+    evidence,
+    expected,
 ) -> None:
     fixture = await _fixture(tmp_path)
     claim = fixture.ledger.claim_next(OWNER, device_id=None, now=NOW)
@@ -280,15 +307,17 @@ async def test_device_evidence_is_required_for_output_confirmation(
     receipt = fixture.ledger.finish(
         claim,
         DriverExecutionResult(
-            outcome=DriverOutcome.CONFIRMED,
-            evidence=OutputEvidence.SPOOLER,
+            outcome=outcome,
+            evidence=evidence,
             platform_job_id="spooler-1",
         ),
         now=NOW,
     )
 
-    assert receipt.state is PrintJobState.OUTCOME_UNKNOWN
-    assert _job(fixture.database_path)["confirmation_evidence"] is None
+    assert receipt.state is expected
+    assert _job(fixture.database_path)["confirmation_evidence"] == (
+        evidence.value if expected is PrintJobState.OUTPUT_CONFIRMED else None
+    )
     with pytest.raises(LeaseLost):
         fixture.ledger.finish(
             claim,
@@ -298,6 +327,49 @@ async def test_device_evidence_is_required_for_output_confirmation(
             ),
             now=NOW,
         )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "required,evidence,confirmed",
+    [
+        ("transport", OutputEvidence.TRANSPORT, True),
+        ("transport", OutputEvidence.SPOOLER, True),
+        ("transport", OutputEvidence.DEVICE, True),
+        ("spooler", OutputEvidence.TRANSPORT, False),
+        ("spooler", OutputEvidence.SPOOLER, True),
+        ("spooler", OutputEvidence.DEVICE, True),
+        ("device", OutputEvidence.TRANSPORT, False),
+        ("device", OutputEvidence.SPOOLER, False),
+        ("device", OutputEvidence.DEVICE, True),
+    ],
+)
+async def test_completion_must_meet_the_admitted_profile_evidence_level(
+    tmp_path: Path, required, evidence, confirmed
+) -> None:
+    fixture = await _fixture(tmp_path, output_evidence=required)
+    claim = fixture.ledger.claim_next(OWNER, device_id=None, now=NOW)
+    assert claim is not None
+    fixture.ledger.mark_prepared(claim, now=NOW)
+    permit = fixture.ledger.mark_io_started(claim, now=NOW)
+    fixture.ledger.note_permission_delivered(claim, permit, now=NOW)
+
+    receipt = fixture.ledger.finish(
+        claim,
+        DriverExecutionResult(
+            outcome=DriverOutcome.CONFIRMED,
+            evidence=evidence,
+            platform_job_id="spooler-1",
+        ),
+        now=NOW,
+    )
+
+    assert receipt.state is (
+        PrintJobState.OUTPUT_CONFIRMED if confirmed else PrintJobState.OUTCOME_UNKNOWN
+    )
+    job = _job(fixture.database_path)
+    assert job["confirmation_evidence"] == (evidence.value if confirmed else None)
+    assert job["error_code"] == (None if confirmed else "output_evidence_insufficient")
 
 
 @pytest.mark.anyio

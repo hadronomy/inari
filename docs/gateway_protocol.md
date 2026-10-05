@@ -508,7 +508,9 @@ position. The nested `job` contains the public Print Job and Print Intent IDs,
 Managed Work ID, Device ID, Print Origin, state, state version, lifecycle times,
 contract version, and optional error or Output Evidence.
 The Payload Fingerprint uses the `sha256:<lowercase-hex>` form.
-`output_confirmed` requires Device Output Evidence.
+`output_confirmed` requires `device`, `spooler`, or `transport` Output Evidence.
+Missing or unknown evidence is rejected. The evidence level must meet the
+Driver Profile contract used at admission.
 
 The Agent commits each signed publication and its journal cursor in one SQLite
 transaction. A restart preserves the exact pending envelope. Historical events
