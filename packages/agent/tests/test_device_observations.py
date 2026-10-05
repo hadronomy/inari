@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import json
 
+import pytest
+
 from inari.device_authority.authority import verify_signed
 from inari.device_authority.models import SignerPurpose, SignerRecord, SignerState
 from inari.device_authority.observations import (
@@ -114,6 +116,40 @@ def test_untrusted_observation_key_cannot_publish():
         devices=Devices(device), authority=authority, signing_key=key
     )
     assert reader.read_current(device.id, "a" * 64) is None
+
+
+@pytest.mark.parametrize("missing", [None, "firmware_version", "platform_backend_id"])
+def test_explicit_unavailable_firmware_does_not_fabricate_facts(missing):
+    key = DeviceObservationSigningKey(MemorySecretStore())
+    facts = {
+        "platform_backend_id": "windows-spooler",
+        "connection": "usb",
+        "media_profile": "80mm",
+        "firmware_version": "unavailable",
+        "firmware_build": "unavailable",
+        "operating_system": "windows",
+        "ready": True,
+    }
+    if missing is not None:
+        del facts[missing]
+    device = discovered_device(facts=facts)
+    reader = LiveDeviceObservationReader(
+        devices=Devices(device), authority=Authority(key), signing_key=key
+    )
+
+    signed = reader.read_current(device.id, "a" * 64)
+
+    assert signed.observation.ready is (missing is None)
+    assert signed.observation.firmware_version == "unavailable"
+    assert signed.observation.firmware_build == "unavailable"
+    verify_signed(
+        payload=signed.observation,
+        digest=signed.digest,
+        signer=Authority(key).signer,
+        signature=signed.signature,
+        purpose=SignerPurpose.DEVICE_OBSERVATION,
+        now=datetime.now(UTC),
+    )
 
 
 def test_observation_key_survives_a_new_service_instance():

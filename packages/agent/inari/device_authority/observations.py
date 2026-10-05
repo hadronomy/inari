@@ -25,10 +25,9 @@ _FACT_NAMES = (
     "platform_backend_id",
     "connection",
     "media_profile",
-    "firmware_version",
-    "firmware_build",
     "operating_system",
 )
+_FIRMWARE_FACT_NAMES = ("firmware_version", "firmware_build")
 
 
 class DeviceObservationSigningKey:
@@ -105,7 +104,12 @@ class LiveDeviceObservationReader:
 def _observation(device: DeviceRecord, profile_digest: str) -> DeviceObservation:
     supplied = device.metadata.get("authority_observation")
     facts = supplied if isinstance(supplied, dict) else {}
-    valid = all(_fact(facts, name) != _UNKNOWN for name in _FACT_NAMES)
+    # The spooler cannot observe firmware. Its explicit unavailable value must
+    # still match a separately signed matrix row before Device Work is admitted.
+    valid = all(_fact(facts, name) != _UNKNOWN for name in _FACT_NAMES) and all(
+        facts.get(name) == _UNKNOWN or _fact(facts, name) != _UNKNOWN
+        for name in _FIRMWARE_FACT_NAMES
+    )
     ready = (
         device.connection_state is DeviceConnectionState.ONLINE
         and device.observed_at <= datetime.now(UTC)

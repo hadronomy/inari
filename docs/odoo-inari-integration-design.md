@@ -932,6 +932,14 @@ The first platform gate covers Windows 11 and Linux. Each immutable Hardware
 Certification Matrix Row records the exact Device, firmware, connection,
 media, Driver, Platform Backend, and operating-system combination.
 
+When the Device protocol cannot observe firmware, the observation and exact
+Matrix Row both record `unavailable`. This qualification does not prove the
+firmware version. The signed row pins the Device identity and all remaining
+dimensions. Missing firmware fields and firmware drift block admission. Each
+explicit `unavailable` value must match the signed Matrix Row. If firmware
+becomes observable, the Device requires a new
+Matrix Row, Binding Revision, and Device Test.
+
 The row records its identity, version, status, Release Set, signed test
 evidence, effective date, and revocation date. Device-kind rules use
 `not_applicable` for unused dimensions.

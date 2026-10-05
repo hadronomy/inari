@@ -381,6 +381,8 @@ def _spooler_observation(information: dict[str, Any]) -> dict[str, object]:
     ready = type(status) is int and status >= 0 and status & ~0x6700 == 0
     return {
         "platform_backend_id": "windows-spooler",
+        "firmware_version": "unavailable",
+        "firmware_build": "unavailable",
         "connection": "usb" if re.fullmatch(r"USB[0-9]+", port) else "unavailable",
         "media_profile": media_profile,
         "operating_system": f"windows:{platform.version()}",

@@ -38,6 +38,7 @@ from inari.device_authority import (
     canonical_digest,
     canonical_json_bytes,
 )
+from inari.device_authority.bundle import AuthorityManifest, BindingActivation
 
 
 NOW = datetime(2026, 8, 28, 12, 0, tzinfo=UTC)
@@ -57,9 +58,15 @@ class ProjectionStore:
     signers: dict[str, SignerRecord]
     private_keys: dict[str, Ed25519PrivateKey]
     revoked: set[tuple[RevocationSubjectKind, str, str]]
+    manifest: AuthorityManifest | None = None
 
     def read_authority_state(self) -> AuthorityState:
         return self.authority_state
+
+    def read_manifest(self, revision_id: str) -> AuthorityManifest | None:
+        if revision_id != self.authority_state.current_revision.revision.revision_id:
+            return None
+        return self.manifest
 
     def read_active_test_evidence_id(self, revision_id: str) -> str | None:
         if revision_id != self.binding.revision.revision_id:
@@ -346,6 +353,7 @@ def _fixture() -> tuple[
         },
         set(),
     )
+    _refresh_manifest(projections)
     request = CapabilityAdmissionTarget(
         scope=scope,
         purpose=binding.purpose,
@@ -361,6 +369,44 @@ def _fixture() -> tuple[
         ObservationStore(observation, observation_private),
         request,
         observation_digest,
+    )
+
+
+def _refresh_manifest(projections: ProjectionStore) -> None:
+    manifest = AuthorityManifest(
+        contract="inari.device-authority.v1",
+        agent_id="agent-1",
+        scope=projections.binding.revision.scope,
+        signers=tuple(
+            item
+            for item in projections.signers.values()
+            if item.purpose is not SignerPurpose.AUTHORITY_REVISION
+        ),
+        profiles=(projections.profile,),
+        certification_rows=(projections.row,),
+        bindings=(projections.binding,),
+        evidence=(projections.evidence,),
+        activations=(
+            BindingActivation(
+                revision_id=projections.binding.revision.revision_id,
+                evidence_id=projections.evidence.evidence.evidence_id,
+            ),
+        ),
+    )
+    signed = projections.authority_state.current_revision
+    revision = replace(
+        signed.revision,
+        manifest_digest=canonical_digest(manifest.model_dump(mode="json")),
+    )
+    digest, _, signature = _signed(
+        revision, projections.private_keys[signed.signer_key_id], signed.signer_key_id
+    )
+    projections.manifest = manifest
+    projections.authority_state = replace(
+        projections.authority_state,
+        current_revision=replace(
+            signed, revision=revision, digest=digest, signature=signature
+        ),
     )
 
 

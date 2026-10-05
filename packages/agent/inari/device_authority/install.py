@@ -23,6 +23,7 @@ from .authority import (
     authority_revision_payload,
     binding_revision_payload,
     certification_row_payload,
+    canonical_json_bytes,
     device_test_payload,
     driver_profile_payload,
 )
@@ -91,14 +92,18 @@ class DeviceAuthorityInstaller:
             for signer in (self._trusted_signer, *bundle.manifest.signers):
                 _install_signer(connection, _signer_row(signer))
             revision = bundle.revision
+            revision_row = _signed_row(
+                authority_revision_payload(revision.revision),
+                revision,
+                "revision_digest",
+            )
+            revision_row["manifest"] = canonical_json_bytes(
+                bundle.manifest.model_dump(mode="json")
+            ).decode()
             _insert_immutable(
                 connection,
                 device_authority_revisions_table,
-                _signed_row(
-                    authority_revision_payload(revision.revision),
-                    revision,
-                    "revision_digest",
-                ),
+                revision_row,
             )
             revision_id = revision.revision.revision_id
             for signed in bundle.manifest.profiles:
