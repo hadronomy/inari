@@ -103,12 +103,14 @@ mod browser {
         invitation_id: Memo<String>,
         deep_link: RwSignal<Option<String>>,
     ) {
-        Effect::new(move |_| deep_link.set(enrollment_link(&invitation_id.get())));
+        let location = leptos_router::hooks::use_location();
+        Effect::new(move |_| {
+            deep_link.set(enrollment_link(&invitation_id.get(), &location.hash.get()));
+        });
     }
 
-    fn enrollment_link(invitation_id: &str) -> Option<String> {
+    fn enrollment_link(invitation_id: &str, fragment: &str) -> Option<String> {
         let location = window().location();
-        let fragment = location.hash().ok()?;
         let code = fragment.strip_prefix("#code=")?;
         let origin = location.origin().ok()?;
         let mut url = url::Url::parse("inari://enroll").ok()?;
