@@ -37,6 +37,7 @@ from inari.gateway.models import (
     ZenohSessionMode,
 )
 from inari.gateway.protocol import (
+    AgentCommandAcceptedMessage,
     ControllerExecuteDeviceCommandMessage,
     ControllerDispatchDeviceWorkMessage,
     ManagedDeviceWorkPayload,
@@ -133,7 +134,9 @@ async def test_device_commands_require_sharing_but_replay_accepted_work(
     )
     [response] = repository.list_pending_outbox()
     if previously_accepted:
-        assert response.payload["job"]["id"] == "job-accepted"
+        accepted = AgentCommandAcceptedMessage.model_validate(response.payload)
+        assert accepted.job is not None
+        assert accepted.job["id"] == "job-accepted"
     else:
         assert response.payload["code"] == "UPSTREAM_DEVICE_NOT_SHARED"
 

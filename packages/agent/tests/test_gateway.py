@@ -295,7 +295,10 @@ async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
     outbox = repository.list_pending_outbox()
     assert len(outbox) == 3
     assert all(record.message_type == "agent.runtime.event" for record in outbox)
-    assert {record.payload["event"]["resource_id"] for record in outbox} == {
+    assert {
+        AgentRuntimeEventMessage.model_validate(record.payload).event.resource_id
+        for record in outbox
+    } == {
         "job_123",
         "dev_shared",
         "job_accepted",
