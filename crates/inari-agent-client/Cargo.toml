@@ -22,6 +22,8 @@ progenitor.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
 regress.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
 secrecy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -38,6 +40,7 @@ zeroize.workspace = true
 windows-sys = { workspace = true, features = ["Win32_Storage_Packaging_Appx"] }
 
 [dev-dependencies]
+rustls = { workspace = true, features = ["ring"] }
 tempfile = "3"
 
 [target.'cfg(windows)'.dev-dependencies]

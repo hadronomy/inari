@@ -4797,6 +4797,8 @@ dependencies = [
  "progenitor-client",
  "regress",
  "reqwest 0.13.4",
+ "rustls",
+ "rustls-platform-verifier",
  "secrecy 0.10.3",
  "serde",
  "serde_json",
