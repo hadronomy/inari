@@ -12,6 +12,7 @@ from ..gateway.enrollment import GatewayEnrollmentService
 from ..gateway.onboarding import ManagedOnboardingService
 from ..gateway.repositories import GatewayRepository
 from ..gateway.state_events import GatewayStateEventProjector
+from ..gateway.sharing import DeviceSharingPolicy
 from ..device_streams import DeviceStreamService
 from ..gateway.managed_dispatch import ManagedDispatchVerifier
 from ..gateway.bridges.runtime import (
@@ -49,6 +50,7 @@ class GatewayProvider(Provider):
 
     gateway_command_dispatcher = provide(GatewayCommandDispatcher)
     gateway_runtime_event_forwarder = provide(GatewayRuntimeEventForwarder)
+    device_sharing_policy = provide(DeviceSharingPolicy)
 
     @provide
     def managed_dispatch_verifier(
@@ -87,11 +89,13 @@ class GatewayProvider(Provider):
         gateway_runtime_event_forwarder: GatewayRuntimeEventForwarder,
         zenoh_gateway_transport: ZenohGatewayTransport,
         device_stream_service: DeviceStreamService,
+        device_sharing_policy: DeviceSharingPolicy,
     ) -> GatewayStack:
         snapshot_builder = GatewaySnapshotBuilder(
             settings=settings,
             identity_service=identity_service,
             device_catalog=device_catalog,
+            sharing_policy=device_sharing_policy,
             job_service=job_service,
             gateway_repository=gateway_repository,
             security_policy_service=security_policy_service,
@@ -124,6 +128,7 @@ class GatewayProvider(Provider):
             snapshot_provider=snapshot_builder.build_snapshot,
             gateway_repository=gateway_repository,
             command_dispatcher=gateway_command_dispatcher,
+            sharing_policy=device_sharing_policy,
             state_event_projector=GatewayStateEventProjector(
                 store=gateway_repository.store,
                 signing_keys=enrollment_service.state_signing_keys,

@@ -175,6 +175,7 @@ async def test_lost_receipt_keeps_the_same_observation_pending_until_retry(
             StaticCertificateLifecycle(managed_certificate(tmp_path / "certificate.pem")),
         ),
         snapshot_provider=Mock(),
+        sharing_policy=Mock(),
         gateway_repository=repository,
         command_dispatcher=Mock(),
         state_event_projector=Mock(),

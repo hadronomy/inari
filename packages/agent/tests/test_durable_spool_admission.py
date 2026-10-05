@@ -24,6 +24,12 @@ from inari.documents import (
     PreparationPrintOrigin,
     ReceiptImage,
     SubmissionContext,
+    LabelDocument,
+    ManagedAdmissionScope,
+    ManagedSubmissionContext,
+    RecordsReportSource,
+    ReportBinding,
+    ReportPrintOrigin,
 )
 from inari.documents.models import AdmissionGrantScope
 from inari_print_contracts.fingerprint import (
@@ -459,6 +465,78 @@ def _admission(work: DocumentWork) -> DurableAdmission:
     )
 
 
+def _managed_admission() -> DurableAdmission:
+    context = ManagedSubmissionContext(
+        contract_major=1,
+        database="odoo",
+        company_id="7",
+        organization_id="org-1",
+        site_id="site-1",
+        managed_work_id="work-1",
+        print_intent_id="intent-1",
+        origin_submission_key="report:origin-1",
+        origin=ReportPrintOrigin(
+            binding=ReportBinding(
+                report_binding_id="report-binding-1",
+                binding_revision_id="binding-1",
+                report_action_id="stock.action_report_delivery",
+                report_contract_digest="contract-digest",
+                template_digest="template-digest",
+                command_profile_id=None,
+                layout_profile_id=None,
+                hardware_matrix_digest="matrix-digest",
+            ),
+            route="automatic",
+            source=RecordsReportSource(model="stock.picking", ordered_ids=(17,)),
+            rendered_document_index=0,
+            copy_ordinal=1,
+        ),
+        binding_revision_id="binding-1",
+        device_id="device-1",
+        actor_id="controller:primary",
+        authorization_digest="dispatch-authorization",
+        copy_ordinal=1,
+    )
+    work = DocumentWork(
+        idempotency_key="work-1",
+        context=context,
+        document=LabelDocument(content=b"^XA^FDInari^FS^XZ"),
+    )
+    base = _admission(_jpeg_like_work())
+    return replace(
+        base,
+        work=work,
+        authorization_scope=ManagedAdmissionScope(
+            managed_work_id=context.managed_work_id,
+            organization_id=context.organization_id,
+            site_id=context.site_id,
+            database=context.database,
+            actor_id=context.actor_id,
+            device_id=context.device_id,
+            binding_revision_id=context.binding_revision_id,
+            operation=DocumentKind.LABEL_DOCUMENT,
+            authorization_digest=context.authorization_digest,
+        ),
+        media_type="application/vnd.zebra-zpl",
+        payload_fingerprint=fingerprint_device_work(
+            DeviceWorkFingerprintInput(
+                contract_major=1,
+                operation=work.operation,
+                device_id=context.device_id,
+                media_type="application/vnd.zebra-zpl",
+                document=work.document.content,
+                options={},
+                expires_at=base.deadline.expires_at,
+            )
+        ),
+        authority_proof=replace(
+            _authority_proof_for("device-1", purpose="label_document"),
+            operation="label_document",
+            media_type="application/vnd.zebra-zpl",
+        ),
+    )
+
+
 def _store(
     database_path: Path,
     spool_path: Path,
@@ -470,6 +548,7 @@ def _store(
     clock=lambda: NOW,
     files: ArtifactFileStore | None = None,
     authority_guard: ActiveAuthorityGuard | None = None,
+    managed_device_is_shared=lambda _: True,
 ) -> DurableSpoolAdmissionStore:
     return DurableSpoolAdmissionStore(
         store=RuntimeStore(database_path),
@@ -477,6 +556,7 @@ def _store(
         root_keys=SpoolRootKeyService(secret_store),
         owner=SpoolOwner(owner_id="agent-test", generation=1),
         authority_guard=authority_guard or RecordingAuthorityGuard(),
+        managed_device_is_shared=managed_device_is_shared,
         clock=clock,
         id_factory=ids,
         device_queue_limit=device_queue_limit,
@@ -548,6 +628,133 @@ def _rows(database_path: Path, statement: str, parameters: tuple[object, ...] = 
 
 def _code(error: BaseException) -> str:
     return str(getattr(error, "code", ""))
+
+
+@pytest.mark.anyio
+async def test_managed_sharing_blocks_new_admission_and_preserves_accepted_replay(
+    tmp_path: Path,
+) -> None:
+    database_path = _migrate(tmp_path, purpose="label_document")
+    selected: set[str] = set()
+    calls: list[str] = []
+
+    def is_shared(device_id: str) -> bool:
+        calls.append(device_id)
+        return device_id in selected
+
+    store = _store(
+        database_path,
+        tmp_path / "spool",
+        FakeRootSecretStore(),
+        DeterministicIds(
+            [
+                "admission-1",
+                "job-1",
+                "reservation-1",
+                "artifact-1",
+                "nonce-1",
+                "nonce-2",
+            ]
+        ),
+        managed_device_is_shared=is_shared,
+    )
+    admission = _managed_admission()
+    with pytest.raises(SpoolAdmissionError) as denied:
+        await store.accept(admission)
+    assert _code(denied.value) == "permission_denied"
+    assert _rows(database_path, "SELECT state FROM device_work_admissions") == []
+    assert _rows(database_path, "SELECT state FROM public_print_jobs") == []
+
+    calls.clear()
+    selected.add("device-1")
+    accepted = await store.accept(admission)
+    assert calls == ["device-1", "device-1"]
+    selected.clear()
+    calls.clear()
+    replay = await store.accept(admission)
+    assert replay == replace(accepted, replayed=True)
+    assert calls == []
+    assert _rows(database_path, "SELECT state FROM public_print_jobs") == [
+        ("accepted",)
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("recover", [False, True])
+async def test_managed_sharing_withdrawal_before_acceptance_aborts_staging(
+    tmp_path: Path,
+    recover: bool,
+) -> None:
+    database_path = _migrate(tmp_path, purpose="label_document")
+    selected = {"device-1"}
+
+    class WithdrawingFileStore(ArtifactFileStore):
+        def commit(self, staged: StagedArtifact) -> str:
+            result = super().commit(staged)
+            selected.clear()
+            if recover:
+                raise SpoolCommitUncertainError(result)
+            return result
+
+    store = _store(
+        database_path,
+        tmp_path / "spool",
+        FakeRootSecretStore(),
+        DeterministicIds(
+            [
+                "admission-1",
+                "job-1",
+                "reservation-1",
+                "artifact-1",
+                "nonce-1",
+                "nonce-2",
+            ]
+        ),
+        files=WithdrawingFileStore(tmp_path / "spool"),
+        managed_device_is_shared=selected.__contains__,
+    )
+    with pytest.raises(SpoolAdmissionError) as denied:
+        await store.accept(_managed_admission())
+    assert _code(denied.value) == (
+        "recovery_uncertain" if recover else "capability_changed"
+    )
+    if recover:
+        report = await store.reconcile()
+        assert report.finalized_admissions == 0
+        assert report.released_admissions == 1
+    assert _rows(
+        database_path, "SELECT state, failure_code FROM device_work_admissions"
+    ) == [("aborted", "capability_changed")]
+    assert _rows(database_path, "SELECT state FROM public_print_jobs") == []
+    assert _rows(database_path, "SELECT state FROM spool_reservations") == [
+        ("released",)
+    ]
+
+
+@pytest.mark.anyio
+async def test_controller_sharing_does_not_gate_local_admission(tmp_path: Path) -> None:
+    database_path = _migrate(tmp_path)
+
+    def fail_if_consulted(_: str) -> bool:
+        raise AssertionError("Local Device Work does not depend on Controller sharing")
+
+    store = _store(
+        database_path,
+        tmp_path / "spool",
+        FakeRootSecretStore(),
+        DeterministicIds(
+            [
+                "admission-1",
+                "job-1",
+                "reservation-1",
+                "artifact-1",
+                "nonce-1",
+                "nonce-2",
+            ]
+        ),
+        managed_device_is_shared=fail_if_consulted,
+    )
+    assert (await store.accept(_admission(_jpeg_like_work()))).replayed is False
 
 
 @pytest.mark.anyio

@@ -61,7 +61,7 @@ from .manifest import canonical_json, manifest_from_admission, parse_timestamp
 from .manifest import timestamp as format_timestamp
 from .manifest import utc
 from .owner import SpoolOwner
-from .types import AdmissionPlan
+from .types import AdmissionManifest, AdmissionPlan
 
 
 _ROOT_ROTATION_PERIOD = timedelta(days=90)
@@ -98,6 +98,7 @@ class DurableSpoolAdmissionStore:
         root_keys: SpoolRootKeyService,
         owner: SpoolOwner,
         authority_guard: ActiveAuthorityGuard,
+        managed_device_is_shared: Callable[[str], bool],
         crypto: SpoolCrypto | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(tz=UTC),
         id_factory: Callable[[], str] = lambda: uuid4().hex,
@@ -121,6 +122,7 @@ class DurableSpoolAdmissionStore:
         self._root_keys = root_keys
         self._owner = owner
         self._authority_guard = authority_guard
+        self._managed_device_is_shared = managed_device_is_shared
         self._crypto = crypto or SpoolCrypto()
         self._clock = clock
         self._id_factory = id_factory
@@ -163,6 +165,7 @@ class DurableSpoolAdmissionStore:
         replay = self._ledger.replay(manifest)
         if replay is not None:
             return replay
+        self._check_managed_device_sharing(manifest, code=ProblemCode.PERMISSION_DENIED)
         now = utc(self._clock())
         if now >= admission.deadline.expires_at:
             raise SpoolAdmissionError(ProblemCode.EXPIRED)
@@ -268,6 +271,17 @@ class DurableSpoolAdmissionStore:
             except IntegrityError:
                 self._ledger.release_reservation(plan.reservation_id, now=now)
                 raise SpoolAdmissionError(ProblemCode.REQUEST_CONFLICT) from None
+
+    def _check_managed_device_sharing(
+        self, manifest: AdmissionManifest, *, code: ProblemCode
+    ) -> None:
+        if manifest.managed_work_id is not None and not self._managed_device_is_shared(
+            manifest.device_id
+        ):
+            raise SpoolAdmissionError(
+                code,
+                details=ProblemDetails(device_id=manifest.device_id),
+            )
 
     def _data_key_for(
         self, plan: AdmissionPlan, *, now: datetime
@@ -541,6 +555,9 @@ class DurableSpoolAdmissionStore:
             )
             if row["state"] == "accepted":
                 return _accepted_from_row(row, replayed=True)
+            self._check_managed_device_sharing(
+                plan.manifest, code=ProblemCode.CAPABILITY_CHANGED
+            )
             if parse_timestamp(row["deadline_at"]) <= now:
                 raise SpoolAdmissionError(ProblemCode.EXPIRED)
             artifact = (

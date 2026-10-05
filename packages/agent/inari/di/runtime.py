@@ -7,6 +7,7 @@ import time
 from dishka import Provider, Scope, provide
 
 from ..config import AgentSettings
+from ..gateway.sharing import DeviceSharingPolicy
 from ..device_authority import (
     AdmissionAuthorizer,
     DeviceCapabilityAuthority,
@@ -137,6 +138,7 @@ class RuntimeProvider(Provider):
         root_keys: SpoolRootKeyService,
         owner: SpoolOwner,
         authority_guard: SqlActiveAuthorityGuard,
+        sharing_policy: DeviceSharingPolicy,
     ) -> DurableSpoolAdmissionStore:
         return DurableSpoolAdmissionStore(
             store=store,
@@ -144,6 +146,7 @@ class RuntimeProvider(Provider):
             root_keys=root_keys,
             owner=owner,
             authority_guard=authority_guard,
+            managed_device_is_shared=sharing_policy.is_shared,
         )
 
     @provide

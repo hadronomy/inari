@@ -4,7 +4,9 @@ from typing import TYPE_CHECKING, Iterable, Mapping, Protocol
 
 from ..printing.commands import DeviceCommandKind
 from ..core.version import API_VERSION, SERVICE_NAME
+from ..security.models import GatewayMode
 from .edge.caddy import CaddyControllerProfile
+from .sharing import DeviceSharingPolicy
 from .models import SUPPORTED_CONTROLLER_ACTIONS, resolve_mutual_tls_policy
 from .protocol import (
     GatewayCapabilityDescriptor,
@@ -66,6 +68,7 @@ class GatewaySnapshotBuilder:
         settings: AgentSettings,
         identity_service: IdentitySource,
         device_catalog: DeviceInventory,
+        sharing_policy: DeviceSharingPolicy,
         job_service: QueueMetrics,
         gateway_repository: GatewayMetrics,
         security_policy_service: SecurityPolicyView,
@@ -75,6 +78,7 @@ class GatewaySnapshotBuilder:
         self.settings = settings
         self.identity_service = identity_service
         self.device_catalog = device_catalog
+        self.sharing_policy = sharing_policy
         self.job_service = job_service
         self.gateway_repository = gateway_repository
         self.security_policy_service = security_policy_service
@@ -90,6 +94,9 @@ class GatewaySnapshotBuilder:
 
         identity = self.identity_service.get_or_create_identity()
         devices = list(self.device_catalog.list_devices())
+        if self.settings.gateway_mode is GatewayMode.MANAGED:
+            shared = self.sharing_policy.shared_device_ids()
+            devices = [device for device in devices if device.id in shared]
         device_summary = DeviceDirectorySummaryResponse.from_devices(devices)
         certificate = self.certificate_service.current_certificate()
         certificate_lifecycle = (

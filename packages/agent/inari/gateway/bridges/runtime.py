@@ -29,6 +29,7 @@ from ..protocol import (
 )
 from ..repositories import GatewayRepository
 from ..managed_dispatch import ManagedDispatchVerifier
+from ..sharing import DeviceSharingPolicy
 from .managed_work import managed_admission_request
 from ...spool import SpoolAdmissionError
 
@@ -41,11 +42,13 @@ class GatewayCommandDispatcher:
         gateway_repository: GatewayRepository,
         document_admission: DocumentAdmission,
         managed_dispatch_verifier: ManagedDispatchVerifier,
+        sharing_policy: DeviceSharingPolicy,
     ) -> None:
         self.job_service = job_service
         self.gateway_repository = gateway_repository
         self.document_admission = document_admission
         self.managed_dispatch_verifier = managed_dispatch_verifier
+        self.sharing_policy = sharing_policy
 
     async def handle_execute_device_command(
         self,
@@ -186,6 +189,12 @@ class GatewayCommandDispatcher:
             return
 
         try:
+            if not self.sharing_policy.is_shared(message.payload.target.device_id):
+                raise AgentError(
+                    "UPSTREAM_DEVICE_NOT_SHARED",
+                    "The Device is not shared with this Controller. Review the selection in Setup.",
+                    status_code=403,
+                )
             job = await enqueue()
         except Exception as exc:
             self._reject_command(message.command_id, exc)
@@ -304,12 +313,18 @@ class GatewayRuntimeEventForwarder:
         *,
         event_hub: EventHub,
         gateway_repository: GatewayRepository,
+        sharing_policy: DeviceSharingPolicy,
     ) -> None:
         self.event_hub = event_hub
         self.gateway_repository = gateway_repository
+        self.sharing_policy = sharing_policy
 
     async def run_forever(self) -> None:
         async for event in self.event_hub.iter_events():
+            if event.resource_kind == "device" and not self.sharing_policy.is_shared(
+                event.resource_id
+            ):
+                continue
             command_id = None
             if event.resource_kind == "job":
                 inbound = self.gateway_repository.get_inbound_command_for_job(
@@ -320,6 +335,10 @@ class GatewayRuntimeEventForwarder:
                     and inbound.state is GatewayInboundCommandState.ACCEPTED
                 ):
                     command_id = inbound.command_id
+                elif not self.sharing_policy.is_shared(
+                    str(event.payload.get("device_id", ""))
+                ):
+                    continue
             message = AgentRuntimeEventMessage(
                 message_id=_message_id("gevt"),
                 occurred_at=event.occurred_at,

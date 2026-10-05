@@ -492,6 +492,26 @@ Managed Work or its dispatch state, or to delete a Managed Payload. Acceptance
 requires a verified Agent State Envelope. A rejection receipt does not prove
 that durable Agent acceptance did not occur.
 
+### Operator selection
+
+For a managed connection, the Agent MUST publish only the Device IDs that the
+operator confirmed in native Setup for the current Controller. This selection
+controls inventory, its Device counts, Device events, and local job events.
+A missing or invalid confirmation publishes no Devices. A new invitation clears
+the selection. The Agent reads selection changes without a runtime restart.
+It checks pending Device and local job events again before publication. Events
+for unselected Devices leave the outbox without a delivery record.
+
+New Controller Device actions MUST target a selected Device. New Managed Device
+Work checks selection before staging and again before durable Agent acceptance.
+An unselected Device returns `permission_denied` before staging. Withdrawal
+during staging aborts admission with `capability_changed` and creates no Print Job.
+Recovery applies the same check before it completes a staged admission.
+
+An exact accepted Retry MUST retain its original result after selection changes.
+Accepted Controller work retains its audit events. Selection does not grant a
+Device Capability, replace Device Test evidence, or change Local Device Work.
+
 ### Signed Print Job observations
 
 For a managed Print Job, `agent.runtime.event` uses `resource_kind: "print_job"`.
