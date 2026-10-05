@@ -9,6 +9,8 @@ import pytest
 from inari.config import AgentSettings
 from inari.db.migrations import DatabaseMigrator
 from inari.gateway.connector import GatewayConnector
+from inari.gateway.sharing import DeviceSharingPolicy
+from inari.gateway.onboarding import OnboardingRecord
 from inari.gateway.data_plane.base import GatewayDataPlaneTransport
 from inari.gateway.enrollment import GatewayEnrollmentService
 from inari.gateway.models import (
@@ -24,6 +26,7 @@ from inari.gateway.models import (
     ZenohSessionMode,
 )
 from inari.gateway.protocol import (
+    AgentRuntimeEventMessage,
     AgentStatusSnapshotMessage,
     ControllerCancelJobMessage,
     GatewaySnapshotPayload,
@@ -37,6 +40,7 @@ from inari.gateway.bridges.runtime import (
 from inari.runtime.events import EventHub
 from inari.runtime.models import (
     JobEventRecord,
+    DeviceEventRecord,
     RuntimeEventKind,
     utc_now,
 )
@@ -67,6 +71,7 @@ async def test_connector_stays_disconnected_without_enrollment(tmp_path: Path) -
             StaticCertificateLifecycle(managed_certificate(tmp_path / "client.pem")),
         ),
         snapshot_provider=_snapshot_provider,
+        sharing_policy=DeviceSharingPolicy(AgentSettings()),
         gateway_repository=GatewayRepository(store),
         state_event_projector=GatewayStateEventProjector(
             store=store,
@@ -113,6 +118,7 @@ async def test_connector_marks_online_after_successful_status_sync(
             StaticCertificateLifecycle(managed_certificate(tmp_path / "client.pem")),
         ),
         snapshot_provider=_snapshot_provider,
+        sharing_policy=DeviceSharingPolicy(AgentSettings()),
         gateway_repository=GatewayRepository(store),
         state_event_projector=GatewayStateEventProjector(
             store=store,
@@ -170,6 +176,7 @@ async def test_connector_closes_transport_before_work_when_certificate_is_reject
             ManagedCertificateLifecycleManager, lifecycle
         ),
         snapshot_provider=_snapshot_provider,
+        sharing_policy=DeviceSharingPolicy(AgentSettings()),
         gateway_repository=repository,
         state_event_projector=GatewayStateEventProjector(
             store=store,
@@ -210,9 +217,24 @@ async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
     DatabaseMigrator(store.database_path).ensure_current()
     repository = GatewayRepository(store)
     event_hub = EventHub()
+    settings = AgentSettings(
+        gateway_mode=GatewayMode.MANAGED,
+        upstream_base_url="https://controller.example",
+        security_state_dir=tmp_path / "security",
+    )
+    settings.resolved_security_state_dir.mkdir()
+    (settings.resolved_security_state_dir / "onboarding.json").write_text(
+        OnboardingRecord(
+            controller_url=settings.upstream_base_url,
+            confirmed_device_ids=("dev_shared",),
+            devices_confirmed_at=utc_now(),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
     forwarder = GatewayRuntimeEventForwarder(
         event_hub=event_hub,
         gateway_repository=repository,
+        sharing_policy=DeviceSharingPolicy(settings),
     )
     worker = asyncio.create_task(forwarder.run_forever())
     try:
@@ -223,7 +245,46 @@ async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
                 resource_id="job_123",
                 event_type=RuntimeEventKind.JOB_SUCCEEDED,
                 occurred_at=utc_now(),
-                payload={"job_id": "job_123"},
+                payload={"job_id": "job_123", "device_id": "dev_shared"},
+            )
+        )
+        for sequence, device_id in ((8, "dev_private"), (9, "dev_shared")):
+            await event_hub.publish(
+                DeviceEventRecord(
+                    sequence=sequence,
+                    resource_id=device_id,
+                    event_type=RuntimeEventKind.DEVICE_UPDATED,
+                    occurred_at=utc_now(),
+                )
+            )
+        await event_hub.publish(
+            JobEventRecord(
+                sequence=10,
+                resource_id="job_private",
+                event_type=RuntimeEventKind.JOB_SUCCEEDED,
+                occurred_at=utc_now(),
+                payload={"device_id": "dev_private"},
+            )
+        )
+        repository.record_inbound_command(
+            command_id="command_audit",
+            message_id="message_audit",
+            sequence=1,
+            message_type="controller.command.execute_device_command",
+            payload={},
+        )
+        repository.mark_inbound_accepted(
+            "command_audit",
+            job_id="job_accepted",
+            response_payload={"type": "agent.command.accepted"},
+        )
+        await event_hub.publish(
+            JobEventRecord(
+                sequence=9,
+                resource_id="job_accepted",
+                event_type=RuntimeEventKind.JOB_SUCCEEDED,
+                occurred_at=utc_now(),
+                payload={"device_id": "dev_private"},
             )
         )
         await asyncio.sleep(0)
@@ -232,8 +293,115 @@ async def test_runtime_event_forwarder_enqueues_runtime_event_messages(
         await asyncio.gather(worker, return_exceptions=True)
 
     outbox = repository.list_pending_outbox()
-    assert len(outbox) == 1
-    assert outbox[0].message_type == "agent.runtime.event"
+    assert len(outbox) == 3
+    assert all(record.message_type == "agent.runtime.event" for record in outbox)
+    assert {
+        AgentRuntimeEventMessage.model_validate(record.payload).event.resource_id
+        for record in outbox
+    } == {
+        "job_123",
+        "dev_shared",
+        "job_accepted",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("withdraw", [False, True])
+async def test_outbox_rechecks_sharing_without_discarding_controller_audit(
+    tmp_path: Path, withdraw: bool
+) -> None:
+    store = RuntimeStore(_database_path(tmp_path))
+    DatabaseMigrator(store.database_path).ensure_current()
+    repository = GatewayRepository(store)
+    settings = AgentSettings(
+        gateway_mode=GatewayMode.MANAGED,
+        upstream_base_url="https://controller.example",
+        security_state_dir=tmp_path / "security",
+    )
+    settings.resolved_security_state_dir.mkdir()
+    confirmation = settings.resolved_security_state_dir / "onboarding.json"
+    confirmation.write_text(
+        OnboardingRecord(
+            controller_url=settings.upstream_base_url,
+            confirmed_device_ids=("dev_shared",),
+            devices_confirmed_at=utc_now(),
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+    repository.record_inbound_command(
+        command_id="command_audit",
+        message_id="message_audit",
+        sequence=1,
+        message_type="controller.command.execute_device_command",
+        payload={},
+    )
+    repository.mark_inbound_accepted(
+        "command_audit", job_id="job_accepted", response_payload={}
+    )
+    for message_id, resource_kind, resource_id, device_id in (
+        ("private_device", "device", "dev_private", "dev_private"),
+        ("shared_device", "device", "dev_shared", "dev_shared"),
+        ("private_job", "job", "job_private", "dev_private"),
+        ("shared_job", "job", "job_shared", "dev_shared"),
+        ("accepted_job", "job", "job_accepted", "dev_private"),
+    ):
+        message = AgentRuntimeEventMessage.model_validate(
+            {
+                "message_id": message_id,
+                "occurred_at": utc_now(),
+                "event": {
+                    "sequence": 1,
+                    "resource_kind": resource_kind,
+                    "resource_id": resource_id,
+                    "event_type": "updated",
+                    "occurred_at": utc_now(),
+                    "payload": {"device_id": device_id},
+                },
+            }
+        )
+        repository.enqueue_outbound(
+            message_type=message.type, payload=message.model_dump(mode="json")
+        )
+    if withdraw:
+        confirmation.write_text(
+            OnboardingRecord(
+                controller_url=settings.upstream_base_url,
+                devices_confirmed_at=utc_now(),
+            ).model_dump_json(),
+            encoding="utf-8",
+        )
+    transport = FakeDataPlaneTransport()
+    connector = GatewayConnector(
+        settings=settings,
+        enrollment_service=cast(
+            GatewayEnrollmentService, FakeEnrollmentService(_enrollment_record())
+        ),
+        certificate_lifecycle_manager=cast(
+            ManagedCertificateLifecycleManager,
+            StaticCertificateLifecycle(managed_certificate(tmp_path / "client.pem")),
+        ),
+        snapshot_provider=_snapshot_provider,
+        sharing_policy=DeviceSharingPolicy(settings),
+        gateway_repository=repository,
+        state_event_projector=GatewayStateEventProjector(
+            store=store,
+            signing_keys=AgentStateSigningKeyService(MemorySecretStore()),
+            agent_boot_id="boot_test",
+        ),
+        command_dispatcher=cast(GatewayCommandDispatcher, FakeCommandDispatcher()),
+        data_plane_transport=cast(GatewayDataPlaneTransport, transport),
+    )
+    await connector.flush_outbox_once()
+    expected = {"accepted_job"}
+    if not withdraw:
+        expected.update(("shared_device", "shared_job"))
+    assert {message.message_id for message in transport.publications} == expected
+    assert repository.list_pending_outbox() == ()
+    for message_id in {"private_device", "private_job"} | (
+        {"shared_device", "shared_job"} if withdraw else set()
+    ):
+        assert repository.get_outbox(message_id) is None
+    assert repository.get_inbound_command("command_audit") is not None
 
 
 class FakeEnrollmentService:

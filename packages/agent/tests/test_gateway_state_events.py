@@ -13,20 +13,6 @@ from alembic import command
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from inari.db.migrations import DatabaseMigrator
-from inari.documents import (
-    DocumentKind,
-    DocumentWork,
-    ManagedAdmissionScope,
-    ManagedSubmissionContext,
-    RecordsReportSource,
-    ReportBinding,
-    ReportPrintOrigin,
-    LabelDocument,
-)
-from inari_print_contracts.fingerprint import (
-    DeviceWorkFingerprintInput,
-    fingerprint_device_work,
-)
 from inari.gateway.models import AgentManagedScope
 from inari.gateway.repositories import GatewayRepository
 from inari.gateway.state_events import GatewayStateEventProjector
@@ -60,75 +46,7 @@ async def admitted(tmp_path: Path):
             }
         },
     )
-    context = ManagedSubmissionContext(
-        contract_major=1,
-        database="odoo",
-        company_id="7",
-        organization_id=SCOPE.organization_id,
-        site_id=SCOPE.site_id,
-        managed_work_id="work-1",
-        print_intent_id="intent-1",
-        origin_submission_key="report:origin-1",
-        origin=ReportPrintOrigin(
-            binding=ReportBinding(
-                report_binding_id="report-binding-1",
-                binding_revision_id="binding-1",
-                report_action_id="stock.action_report_delivery",
-                report_contract_digest="contract-digest",
-                template_digest="template-digest",
-                command_profile_id=None,
-                layout_profile_id=None,
-                hardware_matrix_digest="matrix-digest",
-            ),
-            route="automatic",
-            source=RecordsReportSource(model="stock.picking", ordered_ids=(17,)),
-            rendered_document_index=0,
-            copy_ordinal=1,
-        ),
-        binding_revision_id="binding-1",
-        device_id="device-1",
-        actor_id="controller:primary",
-        authorization_digest="dispatch-authorization",
-        copy_ordinal=1,
-    )
-    work = DocumentWork(
-        idempotency_key="work-1",
-        context=context,
-        document=LabelDocument(content=b"^XA^FDInari^FS^XZ"),
-    )
-    base = spool_support._admission(spool_support._jpeg_like_work())
-    admission = replace(
-        base,
-        work=work,
-        authorization_scope=ManagedAdmissionScope(
-            managed_work_id=context.managed_work_id,
-            organization_id=context.organization_id,
-            site_id=context.site_id,
-            database=context.database,
-            actor_id=context.actor_id,
-            device_id=context.device_id,
-            binding_revision_id=context.binding_revision_id,
-            operation=DocumentKind.LABEL_DOCUMENT,
-            authorization_digest=context.authorization_digest,
-        ),
-        media_type="application/vnd.zebra-zpl",
-        payload_fingerprint=fingerprint_device_work(
-            DeviceWorkFingerprintInput(
-                contract_major=1,
-                operation=work.operation,
-                device_id=context.device_id,
-                media_type="application/vnd.zebra-zpl",
-                document=work.document.content,
-                options={},
-                expires_at=base.deadline.expires_at,
-            )
-        ),
-        authority_proof=replace(
-            spool_support._authority_proof_for("device-1", purpose="label_document"),
-            operation="label_document",
-            media_type="application/vnd.zebra-zpl",
-        ),
-    )
+    admission = spool_support._managed_admission()
     files = ArtifactFileStore(tmp_path / "spool")
     spool = spool_support._store(
         database_path,

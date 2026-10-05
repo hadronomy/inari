@@ -17,6 +17,7 @@ from inari.gateway.models import (
 )
 from inari.gateway.onboarding import ManagedOnboardingService
 from inari.gateway.service import GatewaySnapshotBuilder
+from inari.gateway.sharing import DeviceSharingPolicy
 from inari.runtime.models import DeviceConnectionState, DeviceRecord, utc_now
 from inari.security.certificates.store import ManagedCertificate
 from inari.security.models import (
@@ -395,6 +396,7 @@ def test_gateway_snapshot_contains_redacted_full_device_inventory(tmp_path) -> N
     )
     builder = GatewaySnapshotBuilder(
         settings=settings,
+        sharing_policy=DeviceSharingPolicy(settings),
         identity_service=StubIdentitySource(
             AgentIdentity(
                 agent_id="agt_test",
@@ -427,3 +429,94 @@ def test_gateway_snapshot_contains_redacted_full_device_inventory(tmp_path) -> N
     assert inventory[0].metadata["location"] == "Front desk"
     assert "access_token" not in inventory[0].metadata
     assert snapshot.security.certificate_mode is UpstreamCertificateMode.CONTROLLER
+
+
+@pytest.mark.anyio
+async def test_managed_inventory_follows_native_device_confirmation_without_restart(
+    tmp_path,
+) -> None:
+    now = utc_now()
+    devices = tuple(
+        DeviceRecord(
+            id=device_id,
+            kind=DeviceKind.PRINTER,
+            driver_key="test.printer",
+            identity=DeviceIdentity(
+                transport=DeviceTransport.SPOOLER,
+                os_instance_id=f"queue:{device_id}",
+            ),
+            name=name,
+            connection_state=DeviceConnectionState.ONLINE,
+            first_seen_at=now,
+            last_seen_at=now,
+            updated_at=now,
+            capabilities={"text": True},
+        )
+        for device_id, name in (
+            ("dev_pos", "POS-80"),
+            ("dev_private", "Private printer"),
+        )
+    )
+    service, settings, _, _ = onboarding_service(tmp_path, devices=devices)
+    await service.start(INVITE_CODE, controller_url="https://controller.example.com")
+    settings.gateway_mode = GatewayMode.MANAGED
+    settings.upstream_base_url = "https://controller.example.com"
+    builder = GatewaySnapshotBuilder(
+        settings=settings,
+        sharing_policy=DeviceSharingPolicy(settings),
+        identity_service=StubIdentitySource(service.gateway_service.get_identity()),
+        device_catalog=service.device_catalog,
+        job_service=EmptyQueueMetrics(),
+        gateway_repository=EmptyGatewayMetrics(),
+        security_policy_service=StaticSecurityPolicy(
+            GatewaySecurityPolicy(
+                mode=GatewayMode.MANAGED, exposure=GatewayExposure.LOOPBACK
+            )
+        ),
+        certificate_service=EmptyCertificateSource(),
+        certificate_lifecycle_manager=None,
+    )
+    assert builder.build_snapshot().runtime.inventory.devices == ()
+
+    service.confirm_devices(
+        device_ids=("dev_pos",), labels={}, default_printer_device_id="dev_pos"
+    )
+    snapshot = builder.build_snapshot()
+    assert [device.device_id for device in snapshot.runtime.inventory.devices] == [
+        "dev_pos"
+    ]
+    assert snapshot.runtime.devices.count == 1
+    assert snapshot.runtime.devices.online_count == 1
+    assert {device.id for device in service.device_catalog.list_devices()} == {
+        "dev_pos",
+        "dev_private",
+    }
+    assert DeviceSharingPolicy(settings).shared_device_ids() == frozenset({"dev_pos"})
+    settings.upstream_base_url = "https://another-controller.example.com"
+    assert builder.build_snapshot().runtime.inventory.devices == ()
+    settings.upstream_base_url = "https://controller.example.com"
+
+    service.confirm_devices(device_ids=(), labels={}, default_printer_device_id=None)
+    snapshot = builder.build_snapshot()
+    assert snapshot.runtime.inventory.devices == ()
+    assert snapshot.runtime.devices.count == 0
+
+    service.confirm_devices(
+        device_ids=("dev_pos",), labels={}, default_printer_device_id="dev_pos"
+    )
+    assert DeviceSharingPolicy(settings).shared_device_ids() == frozenset({"dev_pos"})
+    await service.start(INVITE_CODE, controller_url="https://controller.example.com")
+    assert DeviceSharingPolicy(settings).shared_device_ids() == frozenset()
+
+
+def test_sharing_fails_closed_for_missing_or_corrupt_confirmation(tmp_path) -> None:
+    service, settings, _, _ = onboarding_service(tmp_path)
+    settings.gateway_mode = GatewayMode.MANAGED
+    settings.upstream_base_url = "https://controller.example.com"
+    policy = DeviceSharingPolicy(settings)
+    assert policy.shared_device_ids() == frozenset()
+    service.status_path.parent.mkdir(parents=True, exist_ok=True)
+    service.status_path.write_text("{invalid json", encoding="utf-8")
+    assert policy.shared_device_ids() == frozenset()
+    service.status_path.write_bytes(b"\xff")
+    assert policy.shared_device_ids() == frozenset()

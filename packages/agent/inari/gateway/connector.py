@@ -14,6 +14,7 @@ from .data_plane.base import GatewayDataPlaneTransport
 from .enrollment import GatewayEnrollmentService
 from .models import (
     GatewayEnrollmentRecord,
+    GatewayInboundCommandState,
     ManagedCertificateState,
     MutualTlsPolicy,
     UpstreamConnectionState,
@@ -22,6 +23,7 @@ from .models import (
 )
 from .protocol import (
     AGENT_PUBLICATION_ADAPTER,
+    AgentRuntimeEventMessage,
     AgentStatusSnapshotMessage,
     ControllerCancelJobMessage,
     ControllerExecuteDeviceCommandMessage,
@@ -29,6 +31,7 @@ from .protocol import (
     GatewaySnapshotPayload,
 )
 from .repositories import GatewayRepository
+from .sharing import DeviceSharingPolicy
 from .state_events import GatewayStateEventProjector
 from .bridges.runtime import GatewayCommandDispatcher
 
@@ -44,6 +47,7 @@ class GatewayConnector:
         certificate_lifecycle_manager: ManagedCertificateLifecycleManager,
         snapshot_provider: Callable[[], GatewaySnapshotPayload],
         gateway_repository: GatewayRepository,
+        sharing_policy: DeviceSharingPolicy,
         command_dispatcher: GatewayCommandDispatcher,
         state_event_projector: GatewayStateEventProjector,
         data_plane_transport: GatewayDataPlaneTransport | None = None,
@@ -53,6 +57,7 @@ class GatewayConnector:
         self.certificate_lifecycle_manager = certificate_lifecycle_manager
         self.snapshot_provider = snapshot_provider
         self.gateway_repository = gateway_repository
+        self.sharing_policy = sharing_policy
         self.command_dispatcher = command_dispatcher
         self.state_event_projector = state_event_projector
         self.data_plane_transport = data_plane_transport
@@ -209,6 +214,11 @@ class GatewayConnector:
         transport = self._transport()
         for record in pending:
             message = AGENT_PUBLICATION_ADAPTER.validate_python(record.payload)
+            if isinstance(
+                message, AgentRuntimeEventMessage
+            ) and not self._event_is_shared(message):
+                self.gateway_repository.discard_pending_outbound(record.message_id)
+                continue
             try:
                 await transport.publish_publications(
                     enrollment=enrollment,
@@ -226,6 +236,24 @@ class GatewayConnector:
                 raise
             self.gateway_repository.mark_outbox_sent(record.message_id)
         await self._update_status(last_data_plane_activity_at=utc_now())
+
+    def _event_is_shared(self, message: AgentRuntimeEventMessage) -> bool:
+        event = message.event
+        if event.resource_kind == "device":
+            return self.sharing_policy.is_shared(event.resource_id)
+        if event.resource_kind == "job":
+            inbound = self.gateway_repository.get_inbound_command_for_job(
+                event.resource_id
+            )
+            if (
+                inbound is not None
+                and inbound.state is GatewayInboundCommandState.ACCEPTED
+            ):
+                return True
+            return self.sharing_policy.is_shared(
+                str(event.payload.get("device_id", ""))
+            )
+        return True
 
     async def close(self) -> None:
         if self.data_plane_transport is not None:

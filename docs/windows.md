@@ -277,6 +277,18 @@ An automatic connection check never clears a failed credential-store read.
 An explicit restart or retry can clear the Client's cached identity result.
 The saved identity remains in the credential store.
 
+### Select Devices for the Controller
+
+Native Setup lists the local Devices. Select the Devices for this Controller,
+then select **Share selected devices**. The Agent publishes only the selected
+Devices and reads later selection changes without a restart. Unselected Devices
+remain in the local catalog.
+
+A new invitation requires a new selection. Missing or damaged setup state shares
+no Devices. Removing a Device stops new Controller Device actions and new Managed
+Device Work. Accepted work retains its result and audit events.
+Local Device Work still requires its Client Grant and Device Capability authority.
+
 ### App Installer still says “Publisher: Unknown”
 
 Check the two machine stores:

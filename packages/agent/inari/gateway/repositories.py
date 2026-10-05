@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from typing import Any, Mapping
 
-from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import OperationalError
 
@@ -373,6 +373,15 @@ class GatewayRepository:
         with self.store.connection() as connection:
             rows = connection.execute(stmt).mappings().all()
         return tuple(_row_to_outbox(row) for row in rows)
+
+    def discard_pending_outbound(self, message_id: str) -> None:
+        """Remove an unpublished event without recording transport delivery."""
+        stmt = delete(gateway_outbox_table).where(
+            gateway_outbox_table.c.message_id == message_id,
+            gateway_outbox_table.c.state == GatewayOutboxState.PENDING.value,
+        )
+        with self.store.connection() as connection:
+            connection.execute(stmt)
 
     def mark_outbox_sent(self, message_id: str) -> GatewayOutboxRecord | None:
         now = utc_now()

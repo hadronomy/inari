@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -8,6 +8,8 @@ from typing import cast
 import pytest
 
 from inari.core.exceptions import AgentError
+from inari.config import AgentSettings
+from inari.gateway.sharing import DeviceSharingPolicy
 from inari.db.migrations import DatabaseMigrator
 from inari.documents import (
     AdmissionAccepted,
@@ -35,6 +37,8 @@ from inari.gateway.models import (
     ZenohSessionMode,
 )
 from inari.gateway.protocol import (
+    AgentCommandAcceptedMessage,
+    ControllerExecuteDeviceCommandMessage,
     ControllerDispatchDeviceWorkMessage,
     ManagedDeviceWorkPayload,
 )
@@ -73,6 +77,73 @@ class FakeAdmission:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("previously_accepted", [False, True])
+async def test_device_commands_require_sharing_but_replay_accepted_work(
+    tmp_path: Path,
+    previously_accepted: bool,
+) -> None:
+    repository = _repository(tmp_path)
+    message = ControllerExecuteDeviceCommandMessage.model_validate(
+        {
+            "message_id": "message-command",
+            "command_id": "command-unshared",
+            "sequence": 1,
+            "payload": {
+                "target": {"device_id": "dev_private"},
+                "command": {"kind": "cut_paper"},
+            },
+        }
+    )
+    if previously_accepted:
+        repository.record_inbound_command(
+            command_id=message.command_id,
+            message_id=message.message_id,
+            sequence=message.sequence,
+            message_type=message.type,
+            payload=message.model_dump(mode="json"),
+        )
+        repository.mark_inbound_accepted(
+            message.command_id,
+            job_id="job-accepted",
+            response_payload={
+                "type": "agent.command.accepted",
+                "message_id": "ack-accepted",
+                "command_id": message.command_id,
+                "accepted_at": datetime.now(tz=UTC).isoformat(),
+                "detail": "Accepted Device Work.",
+                "job": {"id": "job-accepted"},
+            },
+        )
+    dispatcher = GatewayCommandDispatcher(
+        job_service=cast(JobService, object()),
+        gateway_repository=repository,
+        document_admission=cast(DocumentAdmission, object()),
+        managed_dispatch_verifier=cast(ManagedDispatchVerifier, object()),
+        sharing_policy=DeviceSharingPolicy(AgentSettings()),
+    )
+    await dispatcher.handle_execute_device_command(
+        message,
+        enrollment=replace(
+            _enrollment(), controller_actions=(ControllerAction.COMMANDS_EXECUTE,)
+        ),
+    )
+    inbound = repository.get_inbound_command(message.command_id)
+    assert inbound is not None
+    assert inbound.state is (
+        GatewayInboundCommandState.ACCEPTED
+        if previously_accepted
+        else GatewayInboundCommandState.REJECTED
+    )
+    [response] = repository.list_pending_outbox()
+    if previously_accepted:
+        accepted = AgentCommandAcceptedMessage.model_validate(response.payload)
+        assert accepted.job is not None
+        assert accepted.job["id"] == "job-accepted"
+    else:
+        assert response.payload["code"] == "UPSTREAM_DEVICE_NOT_SHARED"
+
+
+@pytest.mark.anyio
 async def test_dispatcher_admits_and_replays_managed_work_once(tmp_path: Path) -> None:
     repository = _repository(tmp_path)
     verifier = FakeVerifier(_verified())
@@ -82,6 +153,7 @@ async def test_dispatcher_admits_and_replays_managed_work_once(tmp_path: Path) -
         gateway_repository=repository,
         document_admission=cast(DocumentAdmission, admission),
         managed_dispatch_verifier=cast(ManagedDispatchVerifier, verifier),
+        sharing_policy=DeviceSharingPolicy(AgentSettings()),
     )
     message = _message(sequence=1)
 
@@ -130,6 +202,7 @@ async def test_dispatcher_blocks_a_sequence_gap_before_document_admission(
         gateway_repository=repository,
         document_admission=cast(DocumentAdmission, admission),
         managed_dispatch_verifier=cast(ManagedDispatchVerifier, verifier),
+        sharing_policy=DeviceSharingPolicy(AgentSettings()),
     )
 
     with pytest.raises(AgentError, match="Expected Controller command sequence 1"):

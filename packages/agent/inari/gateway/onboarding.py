@@ -32,6 +32,11 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+
+def onboarding_record_path(settings: AgentSettings) -> Path:
+    return settings.resolved_security_state_dir / "onboarding.json"
+
+
 if TYPE_CHECKING:
     from ..runtime.models import DeviceRecord
     from ..security.models import AgentIdentity
@@ -241,7 +246,7 @@ class ManagedOnboardingService:
         return preview, self.settings.gateway_mode is not GatewayMode.MANAGED
 
     def status(self) -> OnboardingStatus:
-        record = self._load_record()
+        record = read_onboarding_record(self.status_path)
         upstream = self.gateway_service.get_upstream_status()
         identity = self.gateway_service.get_identity()
         devices = tuple(self.device_catalog.list_devices())
@@ -397,7 +402,7 @@ class ManagedOnboardingService:
         _write_toml_owner_only(overlay_path, overlay)
         self.settings.device_labels = normalized_labels
         self.settings.default_printer_name = default_printer_name
-        record = self._load_record().model_copy(
+        record = read_onboarding_record(self.status_path).model_copy(
             update={
                 "confirmed_device_ids": tuple(sorted(selected)),
                 "devices_confirmed_at": utc_now(),
@@ -408,7 +413,7 @@ class ManagedOnboardingService:
 
     def cancel(self) -> OnboardingStatus:
         self.secret_store.delete_secret(UPSTREAM_ENROLLMENT_TOKEN_KEY)
-        record = self._load_record()
+        record = read_onboarding_record(self.status_path)
         if record.overlay_path is not None:
             if record.previous_overlay:
                 _write_toml_owner_only(record.overlay_path, record.previous_overlay)
@@ -479,26 +484,25 @@ class ManagedOnboardingService:
         )
         return config_path, overlay_path
 
-    def _load_record(self) -> OnboardingRecord:
-        if not self.status_path.exists():
-            return OnboardingRecord()
-        try:
-            return OnboardingRecord.model_validate_json(
-                self.status_path.read_text(encoding="utf-8")
-            )
-        except (OSError, UnicodeError, ValidationError):
-            logger.warning(
-                "Ignoring invalid onboarding progress; setup remains incomplete",
-                extra={"component": "onboarding"},
-            )
-            return OnboardingRecord()
-
     def _save_record(self, record: OnboardingRecord) -> None:
         write_text_owner_only(
             self.status_path,
             json.dumps(record.model_dump(mode="json"), indent=2, sort_keys=True),
             encoding="utf-8",
         )
+
+
+def read_onboarding_record(path: Path) -> OnboardingRecord:
+    try:
+        return OnboardingRecord.model_validate_json(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return OnboardingRecord()
+    except (OSError, UnicodeError, ValidationError):
+        logger.warning(
+            "Ignoring invalid onboarding progress; setup remains incomplete",
+            extra={"component": "onboarding"},
+        )
+        return OnboardingRecord()
 
 
 def _normalize_controller_url(value: str) -> str:
