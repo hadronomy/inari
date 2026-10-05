@@ -109,6 +109,8 @@ async def test_device_commands_require_sharing_but_replay_accepted_work(
                 "type": "agent.command.accepted",
                 "message_id": "ack-accepted",
                 "command_id": message.command_id,
+                "accepted_at": datetime.now(tz=UTC).isoformat(),
+                "detail": "Accepted Device Work.",
                 "job": {"id": "job-accepted"},
             },
         )
