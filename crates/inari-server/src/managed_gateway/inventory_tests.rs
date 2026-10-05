@@ -120,6 +120,27 @@ async fn device_inventory_is_scoped_ordered_and_atomic() {
     .unwrap();
     assert_eq!(stored_digest, identity);
 
+    let enrollment_tie = publication("inventory_enrollment_tie", inventory(first_time, vec![]));
+    repository
+        .record_publication(agent_id.as_str(), "status", &enrollment_tie, Utc::now())
+        .await
+        .unwrap();
+    assert!(
+        repository
+            .latest_status(agent_id.as_str())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        repository
+            .devices(&agent_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
     let newer_time = first_time + chrono::Duration::seconds(10);
     let mut renamed = item("dev_queue", &identity);
     renamed["display_name"] = json!("Front counter");
@@ -142,6 +163,12 @@ async fn device_inventory_is_scoped_ordered_and_atomic() {
         .unwrap();
     assert_eq!(current[0].display_name, "Front counter");
     assert_eq!(current[0].last_seen_at, newer_time);
+
+    let publication_tie = publication("inventory_publication_tie", inventory(newer_time, vec![]));
+    repository
+        .record_publication(agent_id.as_str(), "status", &publication_tie, Utc::now())
+        .await
+        .unwrap();
 
     let old = publication("inventory_old", original.clone());
     repository
@@ -319,6 +346,26 @@ async fn device_inventory_is_scoped_ordered_and_atomic() {
         1
     );
 
+    let readded_time = newer_time + chrono::Duration::milliseconds(2500);
+    let readded_identity = "e".repeat(64);
+    let readded = publication(
+        "inventory_readded",
+        inventory(readded_time, vec![item("dev_queue", &readded_identity)]),
+    );
+    repository
+        .record_publication(agent_id.as_str(), "status", &readded, Utc::now())
+        .await
+        .unwrap();
+    let (first_seen, stored_digest): (DateTime<Utc>, String) = sqlx::query_as(
+        "SELECT first_seen_at, identity_digest FROM devices WHERE agent_id = $1 AND device_id = 'dev_queue'",
+    )
+    .bind(agent_id.as_str())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(first_seen, readded_time);
+    assert_eq!(stored_digest, readded_identity);
+
     let next_code = inari_gateway::onboarding::InvitationCode::generate().unwrap();
     repository
         .create_invitation(
@@ -426,6 +473,13 @@ async fn device_inventory_is_scoped_ordered_and_atomic() {
         .record_publication(agent_id.as_str(), "status", &after_retirement, Utc::now())
         .await
         .unwrap();
+    assert!(
+        repository
+            .latest_status(agent_id.as_str())
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(
         repository
             .devices(&agent_id)

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, TransactionTrait, TryInsertResult,
 };
 
@@ -196,7 +196,7 @@ impl GatewayRepository {
         &self,
         agent_id: &str,
     ) -> GatewayResult<Option<PersistedAgentStatus>> {
-        let current_agent = require_agent(&self.database, agent_id).await?;
+        require_agent(&self.database, agent_id).await?;
         publication::Entity::find()
             .filter(
                 publication::COLUMN
@@ -208,11 +208,21 @@ impl GatewayRepository {
                     .message_type
                     .eq(PublicationType::StatusSnapshot),
             )
-            .filter(publication::Column::ReceivedAt.gte(current_agent.last_enrolled_at))
-            .order_by(
-                Expr::cust("(payload->'snapshot'->>'generated_at')::timestamptz"),
-                Order::Desc,
-            )
+            // Observation time alone cannot identify the applied snapshot when times tie.
+            .filter(Expr::cust(
+                "EXISTS (
+                    SELECT 1 FROM invitations
+                    JOIN agents ON agents.agent_id = invitations.bound_agent_id
+                    WHERE agents.agent_id = publications.agent_id
+                      AND invitations.enrolled_at = agents.last_enrolled_at
+                      AND invitations.bound_key_id = agents.key_id
+                      AND invitations.organization_id = agents.organization_id
+                      AND invitations.site_id = agents.site_id
+                      AND invitations.state IN ('enrolled', 'online')
+                      AND publications.received_at >= agents.last_enrolled_at
+                      AND invitations.latest_snapshot = publications.payload->'snapshot'
+                )",
+            ))
             .order_by_desc(publication::COLUMN.received_at)
             .one(&self.database)
             .await?

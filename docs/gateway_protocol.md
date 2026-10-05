@@ -211,18 +211,23 @@ the complete inventory.
 
 The list contains at most 1,024 Devices. Names contain 1–1,024 UTF-8 bytes and
 no control characters. Device identifiers and `(kind, identity_digest)` pairs
-MUST be unique within one Agent inventory. A Device identifier MUST retain its
-kind and identity digest throughout the current enrollment.
+MUST be unique within one Agent inventory. While a Device remains in the
+Projection, its identifier MUST retain its kind and identity digest.
 
 The Controller keys Device rows by `(agent_id, device_id)`. Separate Agents can
 publish the same host-local Device identity. A valid snapshot replaces only
 its Agent's Projection and retains each present Device's `first_seen_at`.
+Withdrawal removes the Device row. Re-addition starts a new `first_seen_at`
+and can use a new identity digest. It does not restore Device Binding or
+Device Capability authority.
 The Controller currently stores an empty Device Capability list. Discovery does
 not prove a Driver Profile, Device Test Result, or Hardware Certification Matrix entry.
 
 The Controller applies a snapshot only to its current enrollment and only when
 `generated_at` exceeds the latest applied snapshot. Exact publication replay
 and older snapshots preserve history without changing the Projection.
+Equal timestamps also preserve the applied snapshot. The latest status query
+returns only a publication whose snapshot matches the current Projection.
 New enrollment resets the Projection to its new Site. Credential retirement
 deletes that Agent's Projection. Historical publications remain available.
 
