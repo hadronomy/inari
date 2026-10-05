@@ -238,8 +238,10 @@ and snapshot publications. The protocol draft remains `2026-10-03`.
 Changes to this closed Device item contract require an explicit protocol upgrade.
 
 Stop old Controller replicas before applying migration
-`m20261005_223036_project_device_inventory`. Use the chart's managed Controller
-`Recreate` strategy. Old replicas cannot read the renamed Device column or the
+`m20261005_223036_project_device_inventory`. The Helm migration hook runs before
+the Deployment update. The `Recreate` strategy alone does not stop old replicas
+before that hook. Keep the old replicas at zero until the migration completes.
+Old replicas cannot read the renamed Device column or the
 new composite key. A rollback across this schema migration requires a matching
 Recovery Point and its Release Set.
 
