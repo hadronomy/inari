@@ -95,7 +95,7 @@ fn ControllerStripUnavailable() -> impl IntoView {
             <div class="controller-summary">
                 <div><strong>"Status unavailable"</strong><span>"The controller summary could not be loaded"</span></div>
             </div>
-            <a class="text-link" href="/readyz">"View diagnostics"</a>
+            <a class="text-link" href="/readyz" rel="external">"View diagnostics"</a>
         </section>
     }
 }
@@ -140,7 +140,7 @@ fn AccessPanel() -> impl IntoView {
                 <h2>"Sign in to see fleet operations."</h2>
                 <p>"Your organization identity determines which sites, devices, jobs, and security actions are available."</p>
             </div>
-            <a class="button button-primary" href="/auth/login?return_to=/">"Sign in"</a>
+            <a class="button button-primary" href="/auth/login?return_to=/" rel="external">"Sign in"</a>
         </section>
     }
 }
@@ -159,7 +159,7 @@ fn SetupPanel() -> impl IntoView {
                 <code>"inari-server config validate"</code>
             </div>
             <div class="panel-actions">
-                <a class="button button-quiet" href="/readyz">"View readiness"</a>
+                <a class="button button-quiet" href="/readyz" rel="external">"View readiness"</a>
                 <span>"Then run "<code>"config explain"</code>" for field-level guidance."</span>
             </div>
         </section>
@@ -175,7 +175,7 @@ fn FleetUnavailable(error: OnboardingError) -> impl IntoView {
                 <h2>"Operations could not be loaded."</h2>
                 <p>{error.to_string()}</p>
             </div>
-            <a class="button button-quiet" href="/readyz">"View readiness"</a>
+            <a class="button button-quiet" href="/readyz" rel="external">"View readiness"</a>
         </section>
     }
 }
@@ -186,7 +186,7 @@ fn ServicePanel(snapshot: ControllerSnapshot) -> impl IntoView {
         <aside class="service-panel" aria-labelledby="service-heading">
             <div class="service-panel-heading">
                 <div><p class="eyebrow">"System"</p><h2 id="service-heading">"Service readiness"</h2></div>
-                <a class="text-link" href="/readyz">"Diagnostics"</a>
+                <a class="text-link" href="/readyz" rel="external">"Diagnostics"</a>
             </div>
             <ul class="service-list">
                 {snapshot.components.into_iter().map(|component| {

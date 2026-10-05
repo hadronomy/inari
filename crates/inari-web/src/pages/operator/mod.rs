@@ -40,7 +40,7 @@ fn OnboardingUnavailable(error: OnboardingError, refresh: RwSignal<u64>) -> impl
             </div>
             <div class="unavailable-actions">
                 {(matches!(error, OnboardingError::Forbidden)).then(|| view! {
-                    <a class="button button-primary" href="/auth/login?return_to=/onboarding">"Sign in"</a>
+                    <a class="button button-primary" href="/auth/login?return_to=/onboarding" rel="external">"Sign in"</a>
                 })}
                 <button
                     class="button button-quiet"
