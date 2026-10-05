@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait, TryInsertResult,
 };
 
 use super::entity::value::{
@@ -13,6 +13,8 @@ use super::{
     CommandContent, GatewayRepository, PersistedAgentStatus, PersistedPublication, require_agent,
     stored_time, utc_time,
 };
+use crate::audit::{AuditAction, AuditEventDraft, AuditOutcome, AuditResource};
+use crate::identity::ActorId;
 use crate::protocol::AgentPublication;
 use crate::{GatewayError, GatewayResult};
 
@@ -24,13 +26,64 @@ impl GatewayRepository {
         message: &AgentPublication,
         now: DateTime<Utc>,
     ) -> GatewayResult<()> {
+        let result = self
+            .record_publication_transaction(agent_id, key, message, now)
+            .await;
+        if message.snapshot().is_some()
+            && matches!(&result, Err(GatewayError::InvalidInput(_) | GatewayError::Conflict(_)))
+        {
+            let agent = require_agent(&self.database, agent_id).await?;
+            let agent_id = agent.agent_id.parse()?;
+            self.record_audit_event(&AuditEventDraft {
+                organization_id: agent.organization_id.parse()?,
+                actor_id: ActorId::from_agent(&agent_id),
+                action: AuditAction::AgentInventoryRejected,
+                resource: AuditResource::Agent { agent_id },
+                outcome: AuditOutcome::Denied,
+                request_id: None,
+            })
+            .await?;
+        }
+        result
+    }
+
+    async fn record_publication_transaction(
+        &self,
+        agent_id: &str,
+        key: &str,
+        message: &AgentPublication,
+        now: DateTime<Utc>,
+    ) -> GatewayResult<()> {
+        let inventory = message
+            .snapshot()
+            .map(|snapshot| {
+                super::inventory::InventoryProjection::parse(&snapshot.runtime.inventory)
+            })
+            .transpose()?;
         let transaction = self.database.begin().await?;
+        let candidate = require_agent(&transaction, agent_id).await?;
+        // The invitation precedes the Agent lock, as it does during enrollment.
+        // The Agent is read again under lock because another invitation can rotate it.
+        let bound_invitation = if message.snapshot().is_some() {
+            invitation::Entity::find()
+                .filter(invitation::Column::BoundAgentId.eq(agent_id))
+                .filter(invitation::Column::EnrolledAt.eq(candidate.last_enrolled_at))
+                .filter(
+                    invitation::Column::State
+                        .is_in([InvitationState::Enrolled, InvitationState::Online]),
+                )
+                .lock_exclusive()
+                .one(&transaction)
+                .await?
+        } else {
+            None
+        };
         let current_agent = agent::Entity::find_by_id(agent_id)
             .lock_shared()
             .one(&transaction)
             .await?
             .ok_or_else(|| GatewayError::NotFound(format!("Agent {agent_id} is not enrolled")))?;
-        publication::Entity::insert(publication::ActiveModel {
+        let inserted = publication::Entity::insert(publication::ActiveModel {
             message_id: Set(message.message_id().to_owned()),
             agent_id: Set(agent_id.to_owned()),
             key_expr: Set(key.to_owned()),
@@ -55,6 +108,10 @@ impl GatewayRepository {
                 "publication message ID was reused for different content".into(),
             ));
         }
+        if !matches!(inserted, TryInsertResult::Inserted(_)) {
+            transaction.commit().await?;
+            return Ok(());
+        }
         super::state_observations::reconcile_state_observation(
             &transaction,
             agent_id,
@@ -62,26 +119,20 @@ impl GatewayRepository {
             now,
         )
         .await?;
-        if let Some(snapshot) = message.snapshot()
-            && let Some(model) = invitation::Entity::find()
-                .filter(
-                    invitation::COLUMN
-                        .bound_agent_id
-                        .eq(agent_id),
-                )
-                .filter(
-                    invitation::COLUMN
-                        .enrolled_at
-                        .eq(current_agent.last_enrolled_at),
-                )
-                .filter(
-                    invitation::COLUMN
-                        .state
-                        .is_in([InvitationState::Enrolled, InvitationState::Online]),
-                )
-                .one(&transaction)
-                .await?
+        if let (Some(snapshot), Some(inventory), Some(model)) =
+            (message.snapshot(), inventory, bound_invitation)
+            && model.enrolled_at == Some(current_agent.last_enrolled_at)
+            && model.bound_key_id.as_deref() == Some(current_agent.key_id.as_str())
+            && model.site_id == current_agent.site_id
+            && model.organization_id == current_agent.organization_id
+            && model
+                .latest_snapshot
+                .as_ref()
+                .is_none_or(|previous| snapshot.generated_at > previous.0.generated_at)
         {
+            inventory
+                .apply(&transaction, agent_id, &current_agent.site_id, snapshot.generated_at)
+                .await?;
             let mut update: invitation::ActiveModel = model.into();
             update.state = Set(InvitationState::Online);
             if update.online_at.as_ref().is_none() {
@@ -145,7 +196,7 @@ impl GatewayRepository {
         &self,
         agent_id: &str,
     ) -> GatewayResult<Option<PersistedAgentStatus>> {
-        require_agent(&self.database, agent_id).await?;
+        let current_agent = require_agent(&self.database, agent_id).await?;
         publication::Entity::find()
             .filter(
                 publication::COLUMN
@@ -156,6 +207,11 @@ impl GatewayRepository {
                 publication::COLUMN
                     .message_type
                     .eq(PublicationType::StatusSnapshot),
+            )
+            .filter(publication::Column::ReceivedAt.gte(current_agent.last_enrolled_at))
+            .order_by(
+                Expr::cust("(payload->'snapshot'->>'generated_at')::timestamptz"),
+                Order::Desc,
             )
             .order_by_desc(publication::COLUMN.received_at)
             .one(&self.database)

@@ -3,7 +3,7 @@ use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait};
 
 use super::entity::value::InvitationState;
-use super::entity::{agent, agent_verification_key, invitation};
+use super::entity::{agent, agent_verification_key, device, invitation};
 use super::{GatewayRepository, stored_time};
 use crate::audit::{AuditAction, AuditContext, AuditEventDraft, AuditOutcome, AuditResource};
 use crate::protocol::{AgentId, OrganizationId};
@@ -49,6 +49,10 @@ impl GatewayRepository {
                 invitation::Column::State
                     .is_in([InvitationState::Enrolled, InvitationState::Online]),
             )
+            .exec(&transaction)
+            .await?;
+        device::Entity::delete_many()
+            .filter(device::Column::AgentId.eq(agent_id.as_str()))
             .exec(&transaction)
             .await?;
         if retired.rows_affected > 0 {

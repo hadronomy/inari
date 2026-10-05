@@ -53,6 +53,7 @@ pub struct DeviceSummary {
     pub agent_id: AgentId,
     pub site_id: SiteId,
     pub kind: DeviceKind,
+    pub device_class: DeviceClass,
     pub display_name: String,
     pub state: DeviceState,
     pub transport: DeviceTransport,
@@ -66,6 +67,14 @@ pub enum DeviceKind {
     Printer,
     Scale,
     Scanner,
+    Display,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeviceClass {
+    Physical,
+    Virtual,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -193,7 +193,7 @@ impl ManagedGatewayController {
                     match serde_json::from_slice::<AgentPublication>(bytes.as_ref()) {
                         Ok(message) => {
                             if let Err(error) = self.record_publication_from_key(&key, message).await {
-                                tracing::debug!(error = %error, key, "failed to record agent publication");
+                                tracing::warn!(error = %error, key, "rejected agent publication");
                             }
                         },
                         Err(error) => {

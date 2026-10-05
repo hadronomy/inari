@@ -1,4 +1,5 @@
 from __future__ import annotations
+from hashlib import sha256
 
 import os
 import tomllib
@@ -425,6 +426,12 @@ def test_gateway_snapshot_contains_redacted_full_device_inventory(tmp_path) -> N
     assert len(inventory) == 1
     assert inventory[0].display_name == "Front counter"
     assert inventory[0].system_name == "System Printer"
+    assert inventory[0].transport == "spooler"
+    assert (
+        inventory[0].identity_digest
+        == sha256(printer.identity.stable_key().encode("utf-8")).hexdigest()
+    )
+    assert "test-queue:system-printer" not in inventory[0].model_dump_json()
     assert inventory[0].capabilities == ("text",)
     assert inventory[0].metadata["location"] == "Front desk"
     assert "access_token" not in inventory[0].metadata

@@ -75,7 +75,7 @@ impl GatewayRepository {
         let dispatch_key = agent.dispatch_key.ok_or_else(|| {
             GatewayError::Conflict("managed Agent must re-enroll with a dispatch key".into())
         })?;
-        let device = device::Entity::find_by_id(device_id)
+        let device = device::Entity::find_by_id((agent_id.to_owned(), device_id.to_owned()))
             .one(&self.database)
             .await?
             .ok_or_else(|| GatewayError::NotFound("managed Device was not found".into()))?;
@@ -626,7 +626,7 @@ where
             "managed Agent scope does not match the request".into(),
         ));
     }
-    let device = device::Entity::find_by_id(device_id)
+    let device = device::Entity::find_by_id((agent_id.to_owned(), device_id.to_owned()))
         .one(database)
         .await?
         .ok_or_else(|| GatewayError::NotFound("managed Device was not found".into()))?;

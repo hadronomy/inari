@@ -3,6 +3,7 @@ mod commands;
 mod enrollment;
 mod entity;
 mod fleet;
+mod inventory;
 mod managed_work;
 mod onboarding;
 mod publications;

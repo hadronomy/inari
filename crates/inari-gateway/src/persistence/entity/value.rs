@@ -123,6 +123,17 @@ pub enum DeviceKind {
     Scale,
     #[sea_orm(string_value = "scanner")]
     Scanner,
+    #[sea_orm(string_value = "display")]
+    Display,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "Text")]
+pub enum DeviceClass {
+    #[sea_orm(string_value = "physical")]
+    Physical,
+    #[sea_orm(string_value = "virtual")]
+    Virtual,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]

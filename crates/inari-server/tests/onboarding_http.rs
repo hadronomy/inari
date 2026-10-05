@@ -300,7 +300,7 @@ fn enrollment_request() -> serde_json::Value {
             "kid": format!("agent_state_{:x}", Sha256::digest(state)), "x": URL_SAFE_NO_PAD.encode(state)},
         "csr_pem": CSR,
         "snapshot": {"generated_at": Utc::now(), "protocol": ProtocolDescriptor::default(),
-            "service": {}, "runtime": {},
+            "service": {}, "runtime": {"inventory": {"devices": []}},
             "capabilities": {"transport": "https+zenoh"},
             "security": {"mode": "managed", "exposure": "private", "tls_required": true,
                 "certificate_mode": "step_ca", "mutual_tls_mode": "required", "mutual_tls_enabled": true}},

@@ -5,14 +5,14 @@ use sea_orm::{
 };
 
 use super::entity::value::{
-    DeviceKind as StoredDeviceKind, DeviceState as StoredDeviceState,
-    DeviceTransport as StoredDeviceTransport,
+    DeviceClass as StoredDeviceClass, DeviceKind as StoredDeviceKind,
+    DeviceState as StoredDeviceState, DeviceTransport as StoredDeviceTransport,
 };
 use super::entity::{agent, device, publication, site};
 use super::{GatewayRepository, utc_time};
 use crate::protocol::{
-    AgentHealth, AgentHealthState, AgentId, AgentSummary, DeviceKind, DeviceState, DeviceSummary,
-    DeviceTransport, OrganizationId, SiteId, SiteSummary,
+    AgentHealth, AgentHealthState, AgentId, AgentSummary, DeviceClass, DeviceKind, DeviceState,
+    DeviceSummary, DeviceTransport, OrganizationId, SiteId, SiteSummary,
 };
 use crate::{GatewayError, GatewayResult};
 
@@ -43,7 +43,7 @@ impl GatewayRepository {
                 "agent_count",
             )
             .column_as(
-                Expr::col(device::COLUMN.device_id.as_column_ref()).count_distinct(),
+                Expr::cust("COUNT(DISTINCT (devices.agent_id, devices.device_id)) FILTER (WHERE devices.device_id IS NOT NULL)"),
                 "device_count",
             )
             .left_join(agent::Entity)
@@ -125,6 +125,10 @@ impl GatewayRepository {
                     agent_id: agent_id.clone(),
                     site_id: model.site_id.parse()?,
                     kind: model.kind.into(),
+                    device_class: match model.device_class {
+                        StoredDeviceClass::Physical => DeviceClass::Physical,
+                        StoredDeviceClass::Virtual => DeviceClass::Virtual,
+                    },
                     display_name: model.display_name,
                     state: model.state.into(),
                     transport: model.transport.into(),
@@ -162,6 +166,7 @@ impl From<StoredDeviceKind> for DeviceKind {
             StoredDeviceKind::Printer => Self::Printer,
             StoredDeviceKind::Scale => Self::Scale,
             StoredDeviceKind::Scanner => Self::Scanner,
+            StoredDeviceKind::Display => Self::Display,
         }
     }
 }
