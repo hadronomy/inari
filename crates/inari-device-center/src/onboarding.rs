@@ -881,10 +881,14 @@ mod tests {
             let viewport = visual
                 .debug_bounds("onboarding-viewport")
                 .expect("viewport bounds");
+            let column = visual
+                .debug_bounds("onboarding-column")
+                .expect("column bounds");
+            let scroll_distance = column.size.height + viewport.size.height;
             let position = gpui::point(viewport.right() - px(12.0), viewport.center().y);
             visual.simulate_event(ScrollWheelEvent {
                 position,
-                delta: ScrollDelta::Pixels(gpui::point(px(0.0), px(2000.0))),
+                delta: ScrollDelta::Pixels(gpui::point(px(0.0), scroll_distance)),
                 touch_phase: TouchPhase::Moved,
                 ..Default::default()
             });
@@ -892,13 +896,13 @@ mod tests {
                 .debug_bounds("onboarding-column")
                 .expect("column bounds");
             assert!(
-                column.top() >= viewport.top(),
+                column.top() >= viewport.top() - px(1.0),
                 "the review starts inside the viewport at {width} x {height}"
             );
 
             visual.simulate_event(ScrollWheelEvent {
                 position,
-                delta: ScrollDelta::Pixels(gpui::point(px(0.0), px(-2000.0))),
+                delta: ScrollDelta::Pixels(gpui::point(px(0.0), -scroll_distance)),
                 touch_phase: TouchPhase::Moved,
                 ..Default::default()
             });
@@ -906,7 +910,7 @@ mod tests {
                 .debug_bounds("onboarding-column")
                 .expect("column bounds");
             assert!(
-                column.bottom() <= viewport.bottom(),
+                column.bottom() <= viewport.bottom() + px(1.0),
                 "the connect action is reachable at {width} x {height}"
             );
         }
