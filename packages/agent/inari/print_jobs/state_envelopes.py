@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 import re
 
-from .models import OutputEvidence, PayloadFingerprint, PrintJob, PrintJobState
+from .models import OutputEvidence, PayloadFingerprint, PrintJob
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
@@ -46,11 +46,6 @@ class AgentStateObservation:
         latest_at = self.job.terminal_at or self.job.started_at or self.job.accepted_at
         if self.observed_at < latest_at:
             raise ValueError("Agent State cannot precede its Print Job state.")
-        if (
-            self.job.state is PrintJobState.OUTPUT_CONFIRMED
-            and self.job.confirmation_evidence is not OutputEvidence.DEVICE
-        ):
-            raise ValueError("Confirmed Agent State requires Device Output Evidence.")
 
     def claims(self) -> dict[str, object]:
         job = self.job

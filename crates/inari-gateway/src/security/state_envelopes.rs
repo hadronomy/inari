@@ -4,7 +4,7 @@ use ed25519_dalek::Signature;
 use jsonwebtoken::jwk::Jwk;
 use serde::Deserialize;
 
-use crate::protocol::{AgentStateObservation, PrintJobOutputEvidence, PrintJobState};
+use crate::protocol::{AgentStateObservation, PrintJobState};
 use crate::{GatewayError, GatewayResult};
 
 const MAX_JSON_INTEGER: u64 = (1 << 53) - 1;
@@ -161,7 +161,7 @@ fn validate_observation(observation: &AgentStateObservation) -> GatewayResult<()
             job.state_version >= 3
                 && job.started_at.is_some()
                 && job.terminal_at.is_some()
-                && job.confirmation_evidence == Some(PrintJobOutputEvidence::Device)
+                && job.confirmation_evidence.is_some()
         },
         PrintJobState::OutcomeUnknown => {
             job.state_version >= 3 && job.started_at.is_some() && job.terminal_at.is_some()
@@ -401,15 +401,21 @@ mod tests {
     }
 
     #[test]
-    fn accepts_confirmed_output_only_with_device_evidence() {
+    fn accepts_confirmed_output_with_each_declared_evidence_level() {
         let fixture = fixture();
-        for (evidence, expected) in [("device", true), ("transport", false), ("spooler", false)] {
+        for (evidence, expected) in [
+            (json!("device"), true),
+            (json!("transport"), true),
+            (json!("spooler"), true),
+            (serde_json::Value::Null, false),
+            (json!("unknown"), false),
+        ] {
             let mut claims = fixture.claims.clone();
             claims["job"]["state"] = json!("output_confirmed");
             claims["job"]["state_version"] = json!(3);
             claims["job"]["started_at"] = claims["job"]["accepted_at"].clone();
             claims["job"]["terminal_at"] = claims["job"]["accepted_at"].clone();
-            claims["job"]["confirmation_evidence"] = json!(evidence);
+            claims["job"]["confirmation_evidence"] = evidence;
             let compact = sign(
                 &header(&fixture.public_jwk),
                 &serde_json_canonicalizer::to_vec(&claims).unwrap(),

@@ -44,6 +44,35 @@ class ActiveAuthorityGuard(Protocol):
 class SqlActiveAuthorityGuard:
     """Recheck the durable Device Capability graph at the publication barrier."""
 
+    def output_evidence_meets_contract(
+        self, connection: Connection, proof: AuthorityProof, evidence: str
+    ) -> bool:
+        """Compare completion with the immutable profile used at admission."""
+        if not connection.in_transaction():
+            raise RuntimeError("the authority guard requires an active transaction")
+        try:
+            profile = _one(
+                connection,
+                device_driver_profiles_table,
+                device_driver_profiles_table.c.profile_id == proof.driver_profile_id,
+                ProblemCode.CAPABILITY_CHANGED,
+            )
+            _require_values(
+                profile,
+                {"profile_digest": _bytes(proof.driver_profile_digest)},
+                ProblemCode.CAPABILITY_CHANGED,
+            )
+            capability = _check_capability(profile, proof)
+            ranks = {"transport": 1, "spooler": 2, "device": 3}
+            required = capability.get("output_evidence")
+            return (
+                isinstance(required, str)
+                and required in ranks
+                and ranks.get(evidence, 0) >= ranks[required]
+            )
+        except SpoolAdmissionError:
+            return False
+
     def check(
         self,
         connection: Connection,
@@ -142,8 +171,7 @@ class SqlActiveAuthorityGuard:
         binding = _one(
             connection,
             device_binding_revisions_table,
-            device_binding_revisions_table.c.revision_id
-            == proof.binding_revision_id,
+            device_binding_revisions_table.c.revision_id == proof.binding_revision_id,
             ProblemCode.CAPABILITY_CHANGED,
         )
         _require_values(
@@ -341,8 +369,7 @@ def _check_subjects(connection: Connection, proof: AuthorityProof) -> None:
     rows = tuple(
         connection.execute(
             select(device_work_authority_proof_subjects_table).where(
-                device_work_authority_proof_subjects_table.c.proof_id
-                == proof.proof_id
+                device_work_authority_proof_subjects_table.c.proof_id == proof.proof_id
             )
         ).mappings()
     )
@@ -385,7 +412,7 @@ def _check_subjects(connection: Connection, proof: AuthorityProof) -> None:
         raise SpoolAdmissionError(ProblemCode.CAPABILITY_CHANGED)
 
 
-def _check_capability(profile: RowMapping, proof: AuthorityProof) -> None:
+def _check_capability(profile: RowMapping, proof: AuthorityProof) -> dict[str, object]:
     raw = profile["capabilities"]
     if not isinstance(raw, str):
         raise SpoolAdmissionError(ProblemCode.CAPABILITY_CHANGED)
@@ -410,11 +437,10 @@ def _check_capability(profile: RowMapping, proof: AuthorityProof) -> None:
         matches[0].get(name) != value for name, value in expected.items()
     ):
         raise SpoolAdmissionError(ProblemCode.CAPABILITY_CHANGED)
+    return matches[0]
 
 
-def _check_window(
-    row: RowMapping, now: datetime, code: ProblemCode
-) -> None:
+def _check_window(row: RowMapping, now: datetime, code: ProblemCode) -> None:
     effective = _time(row.get("effective_at"), code)
     expires = row.get("expires_at")
     if now < effective or (expires is not None and now >= _time(expires, code)):
@@ -449,9 +475,7 @@ def _check_signer(
         raise SpoolAdmissionError(code)
     not_before = _time(signer.get("not_before"), code)
     not_after = signer.get("not_after")
-    if now < not_before or (
-        not_after is not None and now >= _time(not_after, code)
-    ):
+    if now < not_before or (not_after is not None and now >= _time(not_after, code)):
         raise SpoolAdmissionError(code)
 
 

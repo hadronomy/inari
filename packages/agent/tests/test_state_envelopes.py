@@ -70,8 +70,8 @@ def test_observation_cannot_precede_durable_job_state(observation):
         replace(observation, observed_at=NOW - timedelta(seconds=1))
 
 
-@pytest.mark.parametrize("evidence", [OutputEvidence.SPOOLER, OutputEvidence.TRANSPORT])
-def test_confirmed_observation_requires_device_evidence(observation, evidence):
+@pytest.mark.parametrize("evidence", list(OutputEvidence))
+def test_confirmed_observation_keeps_declared_evidence(observation, evidence):
     job = replace(
         observation.job,
         state=PrintJobState.OUTPUT_CONFIRMED,
@@ -80,19 +80,18 @@ def test_confirmed_observation_requires_device_evidence(observation, evidence):
         terminal_at=NOW,
         confirmation_evidence=evidence,
     )
-    with pytest.raises(ValueError, match="requires Device Output Evidence"):
-        replace(observation, job=job)
-
-
-def test_confirmed_observation_keeps_device_evidence(observation):
-    job = replace(
-        observation.job,
-        state=PrintJobState.OUTPUT_CONFIRMED,
-        state_version=3,
-        started_at=NOW,
-        terminal_at=NOW,
-        confirmation_evidence=OutputEvidence.DEVICE,
-    )
     claims = replace(observation, job=job).claims()
-    assert claims["job"]["confirmation_evidence"] == "device"
+    assert claims["job"]["confirmation_evidence"] == evidence.value
     assert claims["job"]["state"] == "output_confirmed"
+
+
+def test_confirmed_observation_cannot_omit_evidence(observation):
+    with pytest.raises(ValueError, match="evidence"):
+        replace(
+            observation.job,
+            state=PrintJobState.OUTPUT_CONFIRMED,
+            state_version=3,
+            started_at=NOW,
+            terminal_at=NOW,
+            confirmation_evidence=None,
+        )
