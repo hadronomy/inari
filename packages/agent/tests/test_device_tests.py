@@ -864,20 +864,37 @@ async def test_missing_execution_evidence_cannot_prove_a_contract_result(
 
 
 @pytest.mark.anyio
-async def test_worker_stop_failure_remains_visible_and_fences_the_device(rig):
+@pytest.mark.parametrize("before_io", [False, True])
+async def test_worker_stop_failure_remains_visible_and_fences_the_device(
+    rig, before_io
+):
     service, authorization, request, worker, clock, *_ = rig
+    if before_io:
+        worker.ready_error = RuntimeError("Device unavailable")
 
     def fail_to_stop():
         raise RuntimeError("Worker still alive")
 
     worker.on_close = fail_to_stop
+    accepted = await service.submit(request, authorization)
     with pytest.raises(RuntimeError, match="still alive"):
-        await service.execute(await service.submit(request, authorization))
+        await service.execute(accepted)
     clock.value = NOW + timedelta(seconds=31)
     record = service.get(request.test_id, authorization)
-    assert record.state is TestState.IN_PROGRESS
+    assert record.state is (TestState.ACCEPTED if before_io else TestState.IN_PROGRESS)
     assert record.error_code == "worker_stop_failed"
     assert record.signed_result is None
+    service.ledger.fail_before_io(record.record_id, now=clock.value)
+    assert service.get(request.test_id, authorization) == record
+    assert (
+        service.ledger.mark_io_started(
+            accepted.record,
+            authorization,
+            lambda: pytest.fail("An unproved worker stop cannot authorize Device I/O."),
+            now=clock.value,
+        )
+        is None
+    )
     business = SqliteExecutionLedger(
         store=service.ledger.store, authority_guard=SqlActiveAuthorityGuard()
     )
@@ -890,13 +907,15 @@ async def test_worker_stop_failure_remains_visible_and_fences_the_device(rig):
     with pytest.raises(DomainFailure):
         await service.submit(replace(request, test_id="test-2"), authorization)
     assert (await service.submit(request, authorization)).permit is None
-    assert worker.calls == 1
+    assert worker.calls == (0 if before_io else 1)
 
     worker.on_close = None
     await worker.close()
     service.ledger.recover_after_restart(now=clock.value)
     recovered = service.get(request.test_id, authorization)
-    assert recovered.state is TestState.OUTCOME_UNKNOWN
+    assert recovered.state is (
+        TestState.FAILED_ENVIRONMENT if before_io else TestState.OUTCOME_UNKNOWN
+    )
     assert recovered.error_code == "worker_stop_failed"
     assert (await service.submit(request, authorization)).permit is None
-    assert worker.calls == 1
+    assert worker.calls == (0 if before_io else 1)

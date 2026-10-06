@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import json
 from uuid import uuid4
 
-from sqlalchemy import case, insert, select, update
+from sqlalchemy import case, insert, or_, select, update
 from sqlalchemy.engine import Connection, RowMapping
 
 from ..client_trust import AuthorizedRequest, Permission
@@ -123,7 +123,10 @@ class SqliteDeviceTestLedger:
                 .mappings()
                 .one()
             )
-            if current["state"] != TestState.ACCEPTED.value:
+            if (
+                current["state"] != TestState.ACCEPTED.value
+                or current["error_code"] == "worker_stop_failed"
+            ):
                 return None
             self._check_grant(connection, authorization, now)
             # The writer lock keeps installation and revocation out of the gap
@@ -204,6 +207,7 @@ class SqliteDeviceTestLedger:
                 .where(
                     tests.c.record_id == record_id,
                     tests.c.state == TestState.ACCEPTED.value,
+                    tests.c.error_code.is_(None),
                 )
                 .values(
                     state=TestState.FAILED_ENVIRONMENT.value,
@@ -293,7 +297,12 @@ class SqliteDeviceTestLedger:
             connection.execute(
                 update(tests)
                 .where(
-                    tests.c.state == prior.value, tests.c.io_deadline <= timestamp(now)
+                    tests.c.state == prior.value,
+                    tests.c.io_deadline <= timestamp(now),
+                    or_(
+                        tests.c.error_code.is_(None),
+                        tests.c.error_code != "worker_stop_failed",
+                    ),
                 )
                 .values(
                     state=state.value,

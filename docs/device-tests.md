@@ -68,6 +68,9 @@ An unstarted Test loses its reservation at its execution deadline. A Test in
 `in_progress` keeps its reservation until the worker stops. The Agent preserves
 a confirmed result that arrives at the deadline boundary.
 
+A worker stop failure keeps the reservation in either state, even after the
+execution deadline. The deadline cannot prove that the worker stopped.
+
 Confirmed output enters `awaiting_checks`. Uncertain output enters
 `outcome_unknown`. Failure before Device I/O enters `failed_environment`.
 The Agent records a signed result only after the physical-answer request.

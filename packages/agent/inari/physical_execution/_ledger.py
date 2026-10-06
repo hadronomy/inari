@@ -943,7 +943,10 @@ class SqliteExecutionLedger:
                         device_tests_table.c.state == "in_progress",
                         and_(
                             device_tests_table.c.state == "accepted",
-                            device_tests_table.c.io_deadline > timestamp(now),
+                            or_(
+                                device_tests_table.c.io_deadline > timestamp(now),
+                                device_tests_table.c.error_code == "worker_stop_failed",
+                            ),
                         ),
                     ),
                 )
