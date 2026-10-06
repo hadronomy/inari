@@ -22,6 +22,10 @@ Transit mount and encryption key. Managed dispatch requires payload protection. 
 [Controller configuration example](../crates/inari-server/config.example.toml)
 contains both sections.
 
+The Controller initializes the OpenBao client only when both the managed gateway
+and dispatch are enabled. Dormant connection values do not require mounted
+OpenBao credentials or a CA file.
+
 | Setting | Meaning |
 | --- | --- |
 | `openbao.address` | HTTPS origin for OpenBao. Paths, credentials, queries, and fragments are rejected. |
