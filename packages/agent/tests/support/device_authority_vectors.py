@@ -18,6 +18,7 @@ from inari.device_authority import (
     canonical_digest,
     canonical_json_bytes,
 )
+from inari.device_authority.authority import verify_signed
 from inari.device_authority.bundle import AuthorityBundle, BundleModel
 
 from .. import test_device_capability_authority as fixtures
@@ -94,6 +95,21 @@ def vectors() -> dict[str, object]:
                 now=now,
             )
         wire = activated.model_dump(mode="json")
+        observation = replace(
+            observations.current.observation,
+            observation_id="観測\ncontrol:\u0001",
+            state=" ",
+            reason="",
+        )
+        observation_signer = projections.signers[observations.current.signer_key_id]
+        edge_observation = SignedDeviceObservation(
+            observation,
+            canonical_digest(observation),
+            observation_signer.key_id,
+            projections.private_keys[observation_signer.key_id].sign(
+                canonical_json_bytes(observation)
+            ),
+        )
         records = []
         for purpose, payload, record in (
             (SignerPurpose.AUTHORITY_REVISION, signed.revision, wire["revision"]),
@@ -124,8 +140,23 @@ def vectors() -> dict[str, object]:
                     "signed"
                 ],
             ),
+            (
+                SignerPurpose.DEVICE_OBSERVATION,
+                edge_observation.observation,
+                ObservationJson(signed=edge_observation).model_dump(mode="json")[
+                    "signed"
+                ],
+            ),
         ):
             signer = projections.signers[record["signer_key_id"]]
+            verify_signed(
+                payload=payload,
+                digest=record["digest"],
+                signer=signer,
+                signature=bytes.fromhex(record["signature"]),
+                purpose=purpose,
+                now=now,
+            )
             records.append(
                 {
                     "purpose": purpose.value,

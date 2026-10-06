@@ -212,7 +212,7 @@ pub struct DeviceObservation {
     pub ready: bool,
     pub state: Identifier,
     #[serde(deserialize_with = "Option::deserialize")]
-    pub reason: Option<Identifier>,
+    pub reason: Option<String>,
     pub observed_at: AuthorityTime,
 }
 
@@ -241,7 +241,6 @@ record_payload!(
     |record: &DriverProfile| {
         validity(record.effective_at, record.expires_at)?;
         if record.capabilities.is_empty()
-            || record.capabilities.len() > 256
             || record
                 .capabilities
                 .iter()
@@ -250,7 +249,7 @@ record_payload!(
                 .len()
                 != record.capabilities.len()
         {
-            return Err(invalid("a Driver Profile needs 1 to 256 distinct capabilities"));
+            return Err(invalid("a Driver Profile needs at least one distinct capability"));
         }
         Ok(())
     },

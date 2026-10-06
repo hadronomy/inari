@@ -12,7 +12,7 @@ pub struct Identifier(String);
 
 impl Identifier {
     pub fn new(value: String) -> GatewayResult<Self> {
-        if value.trim().is_empty() || value.chars().count() > 256 {
+        if value.is_empty() || value.chars().count() > 256 {
             return Err(GatewayError::InvalidInput(
                 "authority identifiers need 1 to 256 characters".into(),
             ));

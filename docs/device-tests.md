@@ -149,7 +149,8 @@ contain only test keys and test hardware facts. The
 [Agent generator](../packages/agent/tests/support/device_authority_vectors.py)
 and [Rust tests](../crates/inari-gateway/tests/device_authority_contract.rs)
 verify all six signature purposes at zero, millisecond, and microsecond
-precision. The Agent drift test rejects a stale vector file.
+precision. Observation vectors also cover Unicode, control characters,
+whitespace, and an empty reason. The Agent drift test rejects a stale vector file.
 
 This record boundary does not issue authority, approve hardware facts, or
 activate a Binding Revision. Those actions require the Controller issuer.

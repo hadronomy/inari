@@ -235,6 +235,27 @@ fn canonical_record_rejects_bad_lifetimes_and_repeated_capabilities() {
 }
 
 #[test]
+fn record_acceptance_matches_agent_text_and_capability_bounds() {
+    assert!(Identifier::new(" ".into()).is_ok());
+    let case = vectors().cases.remove(0);
+    let mut observation = case.records[5].record.clone();
+    observation["observation"]["reason"] = json!("");
+    let observation: SignedDeviceObservation = serde_json::from_value(observation).unwrap();
+    assert!(CanonicalRecord::new(observation.observation).is_ok());
+    let mut profile: DriverProfile =
+        serde_json::from_value(case.records[1].record["profile"].clone()).unwrap();
+    let capability = profile.capabilities[0].clone();
+    profile.capabilities = (0..257)
+        .map(|number| {
+            let mut capability = capability.clone();
+            capability.capability_id = Identifier::new(format!("capability-{number}")).unwrap();
+            capability
+        })
+        .collect();
+    assert!(CanonicalRecord::new(profile).is_ok());
+}
+
+#[test]
 fn correctly_signed_activation_rejects_a_changed_device_graph() {
     let case = vectors().cases.remove(0);
     let mut bundle: AuthorityBundle = serde_json::from_value(case.activated_bundle).unwrap();

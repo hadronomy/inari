@@ -542,6 +542,41 @@
             "retired_at": null,
             "state": "active"
           }
+        },
+        {
+          "canonical": "{\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"media_profile\":\"receipt-80mm\",\"observation_id\":\"観測\\ncontrol:\\u0001\",\"observed_at\":\"2026-08-28T12:00:00.000000Z\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"ready\":true,\"reason\":\"\",\"state\":\" \"}",
+          "purpose": "device_observation",
+          "record": {
+            "digest": "0448148be349ee0c8a5bc884b0b15168cb68b35fe9527454cfe96ff39346e419",
+            "observation": {
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "media_profile": "receipt-80mm",
+              "observation_id": "観測\ncontrol:\u0001",
+              "observed_at": "2026-08-28T12:00:00Z",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "ready": true,
+              "reason": "",
+              "state": " "
+            },
+            "signature": "a13195520368048d995dec2c6b3932c5e922b9ffab93c687e2a3a5dc0a8a0fdc2156ecfdf7c78a543a8e03460c5f6595cfbc01efd8c212abea44bcd1f1002601",
+            "signer_key_id": "observation-key"
+          },
+          "signer": {
+            "key_id": "observation-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+            "purpose": "device_observation",
+            "retired_at": null,
+            "state": "active"
+          }
         }
       ],
       "scope": {
@@ -1103,6 +1138,41 @@
             "retired_at": null,
             "state": "active"
           }
+        },
+        {
+          "canonical": "{\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"media_profile\":\"receipt-80mm\",\"observation_id\":\"観測\\ncontrol:\\u0001\",\"observed_at\":\"2026-08-28T12:00:00.001000Z\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"ready\":true,\"reason\":\"\",\"state\":\" \"}",
+          "purpose": "device_observation",
+          "record": {
+            "digest": "032154bffee1619e2f71e5ff3e64b41b2b1e48527c01352e092e1e4f9c80fac8",
+            "observation": {
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "media_profile": "receipt-80mm",
+              "observation_id": "観測\ncontrol:\u0001",
+              "observed_at": "2026-08-28T12:00:00.001000Z",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "ready": true,
+              "reason": "",
+              "state": " "
+            },
+            "signature": "011e232d79ca219f0f9a72439706444c4568e5185771145edf9252203a066b353c9b46547476c1d39d587252e65ee92ceb041caceeaf530a7de19236bb3d460f",
+            "signer_key_id": "observation-key"
+          },
+          "signer": {
+            "key_id": "observation-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+            "purpose": "device_observation",
+            "retired_at": null,
+            "state": "active"
+          }
         }
       ],
       "scope": {
@@ -1653,6 +1723,41 @@
               "state": "ready"
             },
             "signature": "d6c5d8524ba15b15b09197881fefa8f94aa5ad788e92f6441cd6472fef94a0008ebb91fe83f95986f8aef4f628d2d6fc70e9a24cb3767ed850fe46532d25010b",
+            "signer_key_id": "observation-key"
+          },
+          "signer": {
+            "key_id": "observation-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+            "purpose": "device_observation",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"media_profile\":\"receipt-80mm\",\"observation_id\":\"観測\\ncontrol:\\u0001\",\"observed_at\":\"2026-08-28T12:00:00.123456Z\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"ready\":true,\"reason\":\"\",\"state\":\" \"}",
+          "purpose": "device_observation",
+          "record": {
+            "digest": "8091e793e2f05363b4f83731205df1c04cf91e9ffe4addd1bfb67258dd4faf47",
+            "observation": {
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "media_profile": "receipt-80mm",
+              "observation_id": "観測\ncontrol:\u0001",
+              "observed_at": "2026-08-28T12:00:00.123456Z",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "ready": true,
+              "reason": "",
+              "state": " "
+            },
+            "signature": "069efcac42bd516f5659c037e944439e9774c12dbbe952f57e1bab6a1fd0dc2fdf41d33ca18b5ed75bf289b0d901fc3bd1de090808fa49dc7c7a1081dbea1702",
             "signer_key_id": "observation-key"
           },
           "signer": {
