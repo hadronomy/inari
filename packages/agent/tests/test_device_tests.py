@@ -760,6 +760,76 @@ async def test_http_device_test_id_must_match_idempotency_key(rig, mocker):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("test_id", ["batch/123", "batch%2F123", "batch\\123"])
+async def test_http_device_test_rejects_unaddressable_ids(rig, mocker, test_id):
+    _, _, request, worker, *_ = rig
+    async with AsyncClient(
+        transport=ASGITransport(_test_app(rig, mocker)),
+        base_url="https://agent.example",
+    ) as client:
+        response = await client.post(
+            "/v1/device-tests",
+            json={**_test_body(request), "device_test_id": test_id},
+            headers={"Idempotency-Key": test_id},
+        )
+    assert response.status_code == 422
+    assert worker.preparations == 0
+    assert worker.calls == 0 and _count(rig, device_tests_table) == 0
+
+
+@pytest.mark.parametrize("test_id", ["batch/123", "batch%2F123", "batch\\123"])
+def test_device_test_request_rejects_unaddressable_ids(test_id):
+    with pytest.raises(ValueError, match="test_id"):
+        DeviceTestRequest(test_id, "device-1", "revision-1")
+
+
+@pytest.mark.anyio
+async def test_http_device_test_addresses_permitted_identifier_characters(rig, mocker):
+    _, _, request, worker, *_ = rig
+    request = replace(request, test_id="batch:123.a_b-4")
+    async with AsyncClient(
+        transport=ASGITransport(_test_app(rig, mocker)),
+        base_url="https://agent.example",
+    ) as client:
+        accepted = await client.post(
+            "/v1/device-tests",
+            json=_test_body(request),
+            headers={"Idempotency-Key": request.test_id},
+        )
+        assert accepted.status_code == 202
+        observed = await client.get(f"/v1/device-tests/{request.test_id}")
+        assert observed.status_code == 200
+        completed = await client.post(
+            f"/v1/device-tests/{request.test_id}/checks", json=_checks()
+        )
+        assert completed.status_code == 200
+        assert completed.json()["signed_result"]["result"]["outcome"] == "passed"
+    assert worker.calls == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("duplicate", [False, True])
+async def test_http_device_test_requires_one_idempotency_header(rig, mocker, duplicate):
+    _, _, request, worker, *_ = rig
+    headers = (
+        [("Idempotency-Key", request.test_id), ("Idempotency-Key", request.test_id)]
+        if duplicate
+        else []
+    )
+    async with AsyncClient(
+        transport=ASGITransport(_test_app(rig, mocker)),
+        base_url="https://agent.example",
+    ) as client:
+        response = await client.post(
+            "/v1/device-tests", json=_test_body(request), headers=headers
+        )
+    assert response.status_code == (400 if duplicate else 422)
+    assert response.headers["content-type"] == "application/problem+json"
+    assert worker.preparations == 0
+    assert worker.calls == 0 and _count(rig, device_tests_table) == 0
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("path", ["/v1/device-tests", "/v1/device-tests/test-1/checks"])
 async def test_http_device_test_denies_permission_before_reading_body(
     rig, mocker, path

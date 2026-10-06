@@ -12,6 +12,8 @@ from .pattern import REQUIRED_CHECKS
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
+DEVICE_TEST_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+_TEST_IDENTIFIER = re.compile(DEVICE_TEST_ID_PATTERN)
 
 
 class PhysicalCheckAnswer(StrEnum):
@@ -38,8 +40,12 @@ class DeviceTestRequest:
     binding_revision_id: str
 
     def __post_init__(self) -> None:
-        for name in ("test_id", "device_id", "binding_revision_id"):
-            if not isinstance(getattr(self, name), str) or not _IDENTIFIER.fullmatch(
+        for name, pattern in (
+            ("test_id", _TEST_IDENTIFIER),
+            ("device_id", _IDENTIFIER),
+            ("binding_revision_id", _IDENTIFIER),
+        ):
+            if not isinstance(getattr(self, name), str) or not pattern.fullmatch(
                 getattr(self, name)
             ):
                 raise ValueError(f"{name} must be a stable identifier")

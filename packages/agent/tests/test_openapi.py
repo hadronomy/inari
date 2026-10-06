@@ -110,3 +110,24 @@ def test_device_test_success_and_validation_responses_match_the_http_contract(
                     "schema": {"$ref": "#/components/schemas/ErrorResponse"}
                 }
             }
+
+
+def test_device_test_contract_requires_the_idempotency_header(tmp_path: Path) -> None:
+    canonical_path = tmp_path / "canonical.json"
+    codegen_path = tmp_path / "codegen.json"
+    write_contracts(canonical_path, codegen_path)
+    for contract in (_load(canonical_path), _load(codegen_path)):
+        paths = contract["paths"]
+        assert isinstance(paths, dict)
+        submit = paths["/v1/device-tests"]["post"]
+        header = next(
+            (
+                item
+                for item in submit.get("parameters", ())
+                if item["in"] == "header" and item["name"] == "Idempotency-Key"
+            ),
+            None,
+        )
+        assert header is not None
+        assert header["required"] is True
+        assert header["schema"]["type"] == "string"

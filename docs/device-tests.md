@@ -20,9 +20,15 @@ configuration, Client Pairing, and actor.
 | `POST /v1/device-tests/{test_id}/checks` | Record all physical answers and return the immutable signed result. |
 
 Submission contains `contract_major: 1`, `device_test_id`, `device_id`, and
-`binding_revision_id`. `Idempotency-Key` must equal `device_test_id`. The Agent
+`binding_revision_id`. Exactly one `Idempotency-Key` header is required.
+Its value must equal `device_test_id`. A missing header returns 422.
+Duplicate headers return 400. The Agent
 owns the pattern. The caller cannot supply business content, a printer name,
 renderer options, or another operation.
+
+Test IDs contain 1 to 256 ASCII characters and start with a letter or digit.
+The remaining characters can be letters, digits, `.`, `_`, `:`, or `-`.
+The submission and both routes enforce the same Test ID rule.
 
 The OpenAPI files in [contracts](../contracts/local-agent.openapi.json) define
 the request and response models. The HTTP regression tests in

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request, Response
 from pydantic import Field
 
 from ..application.container import AgentContainer
@@ -12,7 +12,7 @@ from ..device_tests import (
     PhysicalCheckAnswer,
     TestState,
 )
-from ..device_tests.models import DeviceTestRecord
+from ..device_tests.models import DEVICE_TEST_ID_PATTERN, DeviceTestRecord
 from ..device_tests.pattern import (
     CODE_VALUE,
     PATTERN_DIGEST,
@@ -28,11 +28,14 @@ from .schemas.base import APIModel
 Identifier = Annotated[
     str, Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
 ]
+TestId = Annotated[
+    str, Field(min_length=1, max_length=256, pattern=DEVICE_TEST_ID_PATTERN)
+]
 
 
 class DeviceTestInput(APIModel):
     contract_major: Literal[1]
-    device_test_id: Identifier
+    device_test_id: TestId
     device_id: Identifier
     binding_revision_id: Identifier
 
@@ -112,9 +115,13 @@ async def submit_device_test(
     response: Response,
     background_tasks: BackgroundTasks,
     service: Service,
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", description="Must equal device_test_id.")
+    ],
 ) -> DeviceTestResponse:
     authorization = authorized_device_work_request(connection)
-    if body.device_test_id != idempotency_key_from_request(connection):
+    key = idempotency_key_from_request(connection)
+    if key != idempotency_key or body.device_test_id != key:
         raise DomainFailure(ProblemCode.PAYLOAD_INVALID)
     accepted = await service.submit(
         DeviceTestRequest(
@@ -135,7 +142,7 @@ async def submit_device_test(
     responses=problem_responses(401, 403, 404, 409, 422, 500, 503),
 )
 async def get_device_test(
-    test_id: Identifier, connection: Request, service: Service
+    test_id: TestId, connection: Request, service: Service
 ) -> DeviceTestResponse:
     return DeviceTestResponse.from_domain(
         service.get(test_id, authorized_device_work_request(connection))
@@ -148,7 +155,7 @@ async def get_device_test(
     responses=problem_responses(400, 401, 403, 404, 409, 422, 500, 503),
 )
 async def finalize_device_test(
-    test_id: Identifier,
+    test_id: TestId,
     body: PhysicalChecksInput,
     connection: Request,
     service: Service,

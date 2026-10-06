@@ -577,7 +577,7 @@
           "device_test_id": {
             "maxLength": 256,
             "minLength": 1,
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
             "title": "Device Test Id",
             "type": "string"
           }
@@ -6516,6 +6516,19 @@
     "/v1/device-tests": {
       "post": {
         "operationId": "submit_device_test",
+        "parameters": [
+          {
+            "description": "Must equal device_test_id.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Must equal device_test_id.",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6645,7 +6658,7 @@
             "schema": {
               "maxLength": 256,
               "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
               "title": "Test Id",
               "type": "string"
             }
@@ -6750,7 +6763,7 @@
             "schema": {
               "maxLength": 256,
               "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
               "title": "Test Id",
               "type": "string"
             }
