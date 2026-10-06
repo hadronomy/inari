@@ -26,6 +26,7 @@ use crate::managed_gateway::{
     ManagedDispatchSigner, ManagedGatewaySecurity, ManagedPayloadProtector, ManagedWorkSecurity,
     OpenBaoTransitKeyWrapper, RouterAdmissionController, StepCaIssuer,
 };
+use crate::openbao::OpenBaoClient;
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
@@ -103,7 +104,8 @@ impl ServerBuilder<WithConfig> {
         let onboarding = initialize_onboarding(&loaded, database.as_ref()).await?;
         let identity = initialize_identity(&loaded, database.as_ref()).await?;
         let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
-        let security = initialize_managed_work_security(&loaded).await?;
+        let openbao = initialize_openbao_client(&loaded).await?;
+        let security = initialize_managed_work_security(&loaded, openbao.as_ref()).await?;
         let router_admission = if loaded.settings.managed_gateway.enabled {
             let repository = onboarding
                 .as_ref()
@@ -153,8 +155,17 @@ impl ServerBuilder<WithConfig> {
     }
 }
 
+async fn initialize_openbao_client(loaded: &LoadedConfig) -> AppResult<Option<Arc<OpenBaoClient>>> {
+    let config = &loaded.settings.managed_gateway;
+    if !config.enabled || !config.dispatch.enabled {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(OpenBaoClient::load(loaded.settings.openbao.clone()).await?)))
+}
+
 async fn initialize_managed_work_security(
     loaded: &LoadedConfig,
+    openbao: Option<&Arc<OpenBaoClient>>,
 ) -> AppResult<Option<Arc<ManagedWorkSecurity>>> {
     let config = &loaded.settings.managed_gateway;
     if !config.enabled || !config.dispatch.enabled {
@@ -162,7 +173,11 @@ async fn initialize_managed_work_security(
     }
     let signer =
         ManagedDispatchSigner::load(&config.dispatch, &config.controller_instance_id).await?;
-    let wrapper = OpenBaoTransitKeyWrapper::load(config.payload_protection.clone()).await?;
+    let openbao = openbao.ok_or_else(|| {
+        AppError::service_unavailable("Managed Payload protection requires OpenBao.")
+    })?;
+    let wrapper =
+        OpenBaoTransitKeyWrapper::new(openbao.clone(), config.payload_protection.clone())?;
     Ok(Some(Arc::new(ManagedWorkSecurity::new(
         signer,
         ManagedPayloadProtector::new(Arc::new(wrapper)),
@@ -755,4 +770,64 @@ fn duration_millis(duration: Duration) -> u64 {
         .as_millis()
         .try_into()
         .unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_unmounted_openbao(directory: &std::path::Path) -> LoadedConfig {
+        let mut loaded = LoadedConfig::default();
+        loaded.settings.openbao.address = Some(
+            "https://openbao.example/"
+                .parse()
+                .unwrap(),
+        );
+        loaded.settings.openbao.kubernetes_role = Some("controller".into());
+        loaded
+            .settings
+            .openbao
+            .ca_certificate_file = Some(directory.join("unmounted-ca.pem"));
+        loaded
+            .settings
+            .openbao
+            .service_account_token_file = directory.join("unmounted-token");
+        loaded
+    }
+
+    #[tokio::test]
+    async fn dormant_openbao_does_not_require_mounted_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        for (gateway_enabled, dispatch_enabled) in [(false, false), (false, true), (true, false)] {
+            let mut loaded = config_with_unmounted_openbao(directory.path());
+            loaded.settings.managed_gateway.enabled = gateway_enabled;
+            loaded
+                .settings
+                .managed_gateway
+                .dispatch
+                .enabled = dispatch_enabled;
+
+            let client = initialize_openbao_client(&loaded)
+                .await
+                .unwrap();
+            assert!(client.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn active_openbao_requires_its_configured_certificate_authority() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut loaded = config_with_unmounted_openbao(directory.path());
+        loaded.settings.managed_gateway.enabled = true;
+        loaded
+            .settings
+            .managed_gateway
+            .dispatch
+            .enabled = true;
+
+        let error = initialize_openbao_client(&loaded)
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "The OpenBao certificate authority file could not be read.");
+    }
 }

@@ -15,7 +15,8 @@ use serde_json::{Value, json};
 use tokio::task::JoinHandle;
 
 use super::{ManagedPayloadKeyWrapper, OpenBaoTransitKeyWrapper};
-use crate::config::ManagedGatewayPayloadProtectionConfig;
+use crate::config::{ManagedGatewayPayloadProtectionConfig, OpenBaoConfig};
+use crate::openbao::OpenBaoClient;
 
 struct Fixture {
     wrapper: OpenBaoTransitKeyWrapper,
@@ -44,15 +45,22 @@ async fn fixture(router: Router) -> Fixture {
     let directory = tempfile::tempdir().unwrap();
     let service_account_token_file = directory.path().join("workload-token");
     std::fs::write(&service_account_token_file, "test-workload-jwt\n").unwrap();
-    let wrapper = OpenBaoTransitKeyWrapper::load(ManagedGatewayPayloadProtectionConfig {
+    let client = OpenBaoClient::load_test(OpenBaoConfig {
         address: Some(address),
         service_account_token_file,
         kubernetes_role: Some("controller".into()),
-        transit_key_name: "payloads".into(),
         namespace: Some("test".into()),
         ..Default::default()
     })
     .await
+    .unwrap();
+    let wrapper = OpenBaoTransitKeyWrapper::new(
+        Arc::new(client),
+        ManagedGatewayPayloadProtectionConfig {
+            transit_key_name: "payloads".into(),
+            ..Default::default()
+        },
+    )
     .unwrap();
     Fixture { wrapper, server, _directory: directory }
 }
@@ -135,6 +143,12 @@ async fn revoked_transit_tokens_force_authentication_on_the_next_request() {
 #[tokio::test]
 async fn transit_responses_have_a_size_limit_even_without_content_length() {
     let router = Router::new()
+        .route(
+            "/v1/auth/kubernetes/login",
+            post(|| async {
+                Json(json!({"auth": {"client_token": "test-token", "lease_duration": 60}}))
+            }),
+        )
         .route("/sized", post(|| async { "x".repeat(65 * 1024) }))
         .route(
             "/chunked",
@@ -149,7 +163,8 @@ async fn transit_responses_have_a_size_limit_even_without_content_length() {
     for path in ["sized", "chunked"] {
         let result: crate::error::AppResult<Value> = fixture
             .wrapper
-            .post(path, None, &json!({}))
+            .client
+            .post(path, &json!({}))
             .await;
         assert!(result.is_err(), "{path} must reject an oversized response");
     }
@@ -176,7 +191,8 @@ async fn transit_does_not_follow_redirects_or_accept_invalid_key_sizes() {
     let fixture = fixture(router).await;
     let result: crate::error::AppResult<Value> = fixture
         .wrapper
-        .post("redirect", None, &json!({}))
+        .client
+        .post("redirect", &json!({}))
         .await;
     assert!(result.is_err());
     assert!(

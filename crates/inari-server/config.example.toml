@@ -122,13 +122,15 @@ envelope_ttl = "2m"
 
 [managed_gateway.payload_protection]
 # OpenBao Transit wraps one random AES-256-GCM data key for each Managed Payload.
-# The Controller exchanges its mounted Kubernetes identity for a short-lived token.
 enabled = true
+transit_mount = "transit"
+transit_key_name = "inari-managed-payload"
+
+[openbao]
+# One connection supplies workload authentication for payload wrapping and authority signing.
 address = "https://openbao.example.com"
 kubernetes_role = "inari-controller"
 kubernetes_auth_mount = "kubernetes"
-transit_mount = "transit"
-transit_key_name = "inari-managed-payload"
 service_account_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 namespace = "inari"
 ca_certificate_file = "/etc/inari/openbao/ca.pem"

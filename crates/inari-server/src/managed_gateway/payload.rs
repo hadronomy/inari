@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -7,20 +6,16 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures_util::future::BoxFuture;
 use inari_gateway::NewManagedPayload;
-use secrecy::{ExposeSecret, SecretString};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt;
-use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
-use crate::config::ManagedGatewayPayloadProtectionConfig;
+use crate::config::{ManagedGatewayPayloadProtectionConfig, valid_openbao_name};
 use crate::error::{AppError, AppResult};
+use crate::openbao::OpenBaoClient;
 
 const DATA_KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
-const MAX_OPENBAO_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct TransitWrappedKey {
@@ -158,16 +153,15 @@ impl PreparedManagedPayload {
 }
 
 pub struct OpenBaoTransitKeyWrapper {
-    client: reqwest::Client,
+    client: Arc<OpenBaoClient>,
     config: ManagedGatewayPayloadProtectionConfig,
-    token: Mutex<Option<CachedToken>>,
 }
 
 impl std::fmt::Debug for OpenBaoTransitKeyWrapper {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("OpenBaoTransitKeyWrapper")
-            .field("address", &self.config.address)
+            .field("client", &self.client)
             .field("transit_mount", &self.config.transit_mount)
             .field("transit_key_name", &self.config.transit_key_name)
             .finish_non_exhaustive()
@@ -175,167 +169,16 @@ impl std::fmt::Debug for OpenBaoTransitKeyWrapper {
 }
 
 impl OpenBaoTransitKeyWrapper {
-    pub async fn load(config: ManagedGatewayPayloadProtectionConfig) -> AppResult<Self> {
-        let mut builder = reqwest::Client::builder()
-            .timeout(config.request_timeout)
-            .redirect(reqwest::redirect::Policy::none());
-        if let Some(path) = &config.ca_certificate_file {
-            let pem = tokio::fs::read(path)
-                .await
-                .map_err(|source| {
-                    AppError::service_unavailable(
-                        "The OpenBao certificate authority file could not be read.",
-                    )
-                    .with_source(source)
-                })?;
-            let certificate = reqwest::Certificate::from_pem(&pem).map_err(|source| {
-                AppError::service_unavailable("The OpenBao certificate authority file is invalid.")
-                    .with_source(source)
-            })?;
-            builder = builder.add_root_certificate(certificate);
-        }
-        let client = builder.build().map_err(|source| {
-            AppError::service_unavailable("The OpenBao client could not be initialized.")
-                .with_source(source)
-        })?;
-        Ok(Self { client, config, token: Mutex::new(None) })
-    }
-
-    async fn token(&self) -> AppResult<SecretString> {
-        let mut cached = self.token.lock().await;
-        if let Some(token) = cached.as_ref()
-            && token.refresh_at > Instant::now()
+    pub fn new(
+        client: Arc<OpenBaoClient>,
+        config: ManagedGatewayPayloadProtectionConfig,
+    ) -> AppResult<Self> {
+        if !valid_openbao_name(&config.transit_mount)
+            || !valid_openbao_name(&config.transit_key_name)
         {
-            return Ok(token.value.clone());
+            return Err(AppError::bad_request("The Managed Payload Transit key path is invalid."));
         }
-        let file = tokio::fs::File::open(&self.config.service_account_token_file)
-            .await
-            .map_err(|source| {
-                AppError::service_unavailable(
-                    "The Controller workload identity token could not be read.",
-                )
-                .with_source(source)
-            })?;
-        let mut workload_jwt = Zeroizing::new(String::new());
-        file.take((MAX_OPENBAO_RESPONSE_BYTES + 1) as u64)
-            .read_to_string(&mut workload_jwt)
-            .await
-            .map_err(|source| {
-                AppError::service_unavailable(
-                    "The Controller workload identity token could not be read.",
-                )
-                .with_source(source)
-            })?;
-        if workload_jwt.len() > MAX_OPENBAO_RESPONSE_BYTES || workload_jwt.trim().is_empty() {
-            return Err(AppError::service_unavailable(
-                "The Controller workload identity token is invalid.",
-            ));
-        }
-        let role = self
-            .config
-            .kubernetes_role
-            .as_deref()
-            .ok_or_else(|| AppError::service_unavailable("The OpenBao role is not configured."))?;
-        let response: OpenBaoLoginResponse = self
-            .post(
-                &format!("v1/auth/{}/login", self.config.kubernetes_auth_mount),
-                None,
-                &OpenBaoLoginRequest { role, jwt: workload_jwt.trim() },
-            )
-            .await?;
-        if response.auth.client_token.is_empty() || response.auth.lease_duration == 0 {
-            return Err(AppError::service_unavailable(
-                "OpenBao returned invalid authentication data.",
-            ));
-        }
-        let refresh_seconds = response
-            .auth
-            .lease_duration
-            .saturating_mul(4)
-            .checked_div(5)
-            .unwrap_or(1)
-            .max(1);
-        let token = SecretString::from(response.auth.client_token);
-        *cached = Some(CachedToken {
-            value: token.clone(),
-            refresh_at: Instant::now()
-                .checked_add(Duration::from_secs(refresh_seconds))
-                .ok_or_else(|| {
-                    AppError::service_unavailable("OpenBao returned an invalid token lifetime.")
-                })?,
-        });
-        Ok(token)
-    }
-
-    async fn post<T, B>(&self, path: &str, token: Option<&SecretString>, body: &B) -> AppResult<T>
-    where
-        T: DeserializeOwned,
-        B: Serialize + ?Sized,
-    {
-        let address = self
-            .config
-            .address
-            .as_ref()
-            .ok_or_else(|| {
-                AppError::service_unavailable("The OpenBao address is not configured.")
-            })?;
-        let url = address.join(path).map_err(|source| {
-            AppError::service_unavailable("The OpenBao request URL is invalid.").with_source(source)
-        })?;
-        let mut request = self.client.post(url).json(body);
-        if let Some(namespace) = self.config.namespace.as_deref() {
-            request = request.header("X-Vault-Namespace", namespace);
-        }
-        if let Some(token) = token {
-            request = request.header("X-Vault-Token", token.expose_secret());
-        }
-        let mut response = request.send().await.map_err(|source| {
-            AppError::service_unavailable("OpenBao did not accept the request.").with_source(source)
-        })?;
-        let status = response.status();
-        if token.is_some()
-            && matches!(status, reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN)
-        {
-            self.token.lock().await.take();
-        }
-        if !status.is_success()
-            || response
-                .content_length()
-                .is_some_and(|length| length > MAX_OPENBAO_RESPONSE_BYTES as u64)
-        {
-            return Err(AppError::service_unavailable(
-                "OpenBao returned an unsuccessful response.",
-            ));
-        }
-        let mut bytes = Zeroizing::new(Vec::with_capacity(
-            response
-                .content_length()
-                .and_then(|length| usize::try_from(length).ok())
-                .unwrap_or(0),
-        ));
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|source| {
-                AppError::service_unavailable("The OpenBao response could not be read.")
-                    .with_source(source)
-            })?
-        {
-            if bytes
-                .len()
-                .checked_add(chunk.len())
-                .is_none_or(|length| length > MAX_OPENBAO_RESPONSE_BYTES)
-            {
-                return Err(AppError::service_unavailable(
-                    "The OpenBao response exceeded its size limit.",
-                ));
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        serde_json::from_slice(&bytes).map_err(|source| {
-            AppError::service_unavailable("OpenBao returned an invalid response.")
-                .with_source(source)
-        })
+        Ok(Self { client, config })
     }
 }
 
@@ -346,15 +189,14 @@ impl ManagedPayloadKeyWrapper for OpenBaoTransitKeyWrapper {
         authenticated_data: &'a [u8],
     ) -> BoxFuture<'a, AppResult<TransitWrappedKey>> {
         Box::pin(async move {
-            let token = self.token().await?;
             let plaintext = Zeroizing::new(STANDARD.encode(data_key));
             let response: OpenBaoEncryptResponse = self
+                .client
                 .post(
                     &format!(
                         "v1/{}/encrypt/{}",
                         self.config.transit_mount, self.config.transit_key_name
                     ),
-                    Some(&token),
                     &OpenBaoEncryptRequest {
                         plaintext: plaintext.as_str(),
                         associated_data: STANDARD.encode(authenticated_data),
@@ -372,14 +214,13 @@ impl ManagedPayloadKeyWrapper for OpenBaoTransitKeyWrapper {
         authenticated_data: &'a [u8],
     ) -> BoxFuture<'a, AppResult<Zeroizing<Vec<u8>>>> {
         Box::pin(async move {
-            let token = self.token().await?;
             let response: OpenBaoDecryptResponse = self
+                .client
                 .post(
                     &format!(
                         "v1/{}/decrypt/{}",
                         self.config.transit_mount, self.config.transit_key_name
                     ),
-                    Some(&token),
                     &OpenBaoDecryptRequest {
                         ciphertext: wrapped_data_key,
                         associated_data: STANDARD.encode(authenticated_data),
@@ -402,28 +243,6 @@ impl ManagedPayloadKeyWrapper for OpenBaoTransitKeyWrapper {
             Ok(data_key)
         })
     }
-}
-
-struct CachedToken {
-    value: SecretString,
-    refresh_at: Instant,
-}
-
-#[derive(Serialize)]
-struct OpenBaoLoginRequest<'a> {
-    role: &'a str,
-    jwt: &'a str,
-}
-
-#[derive(Deserialize)]
-struct OpenBaoLoginResponse {
-    auth: OpenBaoAuth,
-}
-
-#[derive(Deserialize)]
-struct OpenBaoAuth {
-    client_token: String,
-    lease_duration: u64,
 }
 
 #[derive(Serialize)]

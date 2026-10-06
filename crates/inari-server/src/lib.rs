@@ -12,6 +12,7 @@ pub mod http;
 pub mod identity;
 pub mod managed_gateway;
 pub mod observability;
+pub mod openbao;
 pub mod runtime;
 pub mod shutdown;
 pub mod state;

@@ -84,11 +84,13 @@ data:
 
     [managed_gateway.payload_protection]
     enabled = true
+    transit_mount = {{ .Values.managedGateway.payloadProtection.transitMount | quote }}
+    transit_key_name = {{ .Values.managedGateway.payloadProtection.transitKeyName | quote }}
+
+    [openbao]
     address = {{ .Values.managedGateway.payloadProtection.address | quote }}
     kubernetes_role = {{ .Values.managedGateway.payloadProtection.kubernetesRole | quote }}
     kubernetes_auth_mount = {{ .Values.managedGateway.payloadProtection.kubernetesAuthMount | quote }}
-    transit_mount = {{ .Values.managedGateway.payloadProtection.transitMount | quote }}
-    transit_key_name = {{ .Values.managedGateway.payloadProtection.transitKeyName | quote }}
     service_account_token_file = "/var/run/secrets/inari/openbao-identity/token"
     request_timeout = {{ .Values.managedGateway.payloadProtection.requestTimeout | quote }}
     {{- with .Values.managedGateway.payloadProtection.namespace }}

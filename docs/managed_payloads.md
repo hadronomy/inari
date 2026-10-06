@@ -16,32 +16,45 @@ Idempotency Key. A new preflight does not change the identity of an exact Retry.
 
 ## OpenBao configuration
 
-The `managed_gateway.payload_protection` section configures the OpenBao client.
-Managed dispatch requires payload protection. The
+The `[openbao]` section configures the shared OpenBao connection and workload
+authentication. The `[managed_gateway.payload_protection]` section selects the
+Transit mount and encryption key. Managed dispatch requires payload protection. The
 [Controller configuration example](../crates/inari-server/config.example.toml)
-contains the complete section.
+contains both sections.
+
+The Controller initializes the OpenBao client only when both the managed gateway
+and dispatch are enabled. Dormant connection values do not require mounted
+OpenBao credentials or a CA file.
 
 | Setting | Meaning |
 | --- | --- |
-| `address` | HTTPS origin for OpenBao. Paths, credentials, queries, and fragments are rejected. |
-| `kubernetes_role` | OpenBao role for the Controller workload identity. |
-| `kubernetes_auth_mount` | Kubernetes authentication mount. The default is `kubernetes`. |
-| `transit_mount` | Transit secrets mount. The default is `transit`. |
-| `transit_key_name` | Existing environment key. The default is `inari-managed-payload`. |
-| `service_account_token_file` | Mounted Kubernetes service account token. |
-| `namespace` | Optional OpenBao namespace. |
-| `ca_certificate_file` | Optional PEM certificate authority for the OpenBao HTTPS connection. |
-| `request_timeout` | Timeout for each OpenBao request. The default is five seconds. |
+| `openbao.address` | HTTPS origin for OpenBao. Paths, credentials, queries, and fragments are rejected. |
+| `openbao.kubernetes_role` | OpenBao role for the Controller workload identity. |
+| `openbao.kubernetes_auth_mount` | Kubernetes authentication mount. The default is `kubernetes`. |
+| `managed_gateway.payload_protection.transit_mount` | Transit secrets mount. The default is `transit`. |
+| `managed_gateway.payload_protection.transit_key_name` | Existing environment key. The default is `inari-managed-payload`. |
+| `openbao.service_account_token_file` | Mounted Kubernetes service account token. |
+| `openbao.namespace` | Optional OpenBao namespace. |
+| `openbao.ca_certificate_file` | Optional PEM certificate authority for the OpenBao HTTPS connection. |
+| `openbao.request_timeout` | Timeout for each OpenBao request. The default is five seconds. |
 
-The workload role needs access to the named Transit key's `encrypt` and `decrypt`
-endpoints. It does not need key creation, export, backup, or deletion privileges.
+Payload protection requires the workload role to have `update` on
+`<mount>/encrypt/<key>` and `<mount>/decrypt/<key>` for the named encryption key.
+Authority signing also requires the
+[Controller signing permissions](device-tests.md#controller-signing-boundary).
+The role does not need key creation, export, backup, or deletion privileges.
 The client uses base64 `associated_data` on both operations, as specified by the
 [OpenBao Transit API](https://openbao.org/docs/next/api/secret/transit/).
 
 The client refreshes its authentication before the token lease ends. An
 authentication rejection clears the cached token. The next request authenticates
-again. Redirects are disabled. Workload token files and OpenBao responses have a
+again. Redirects and environment proxies are disabled. Workload token files and OpenBao responses have a
 64 KiB limit, including responses without a `Content-Length` header.
+
+For a manual Controller configuration, move the connection and authentication
+values from `[managed_gateway.payload_protection]` to `[openbao]`. The Controller
+rejects those values in the old section. The Helm chart renders the new section
+from the existing `managedGateway.payloadProtection` values.
 
 ## Failure and deletion behavior
 

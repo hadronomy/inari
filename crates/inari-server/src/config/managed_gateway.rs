@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 use zenoh::key_expr::OwnedKeyExpr;
 
-use super::RouterPolicyConfig;
+use super::{RouterPolicyConfig, valid_openbao_name};
 use crate::error::ConfigError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,73 +205,14 @@ impl ManagedGatewayConfig {
             }
         }
         if self.payload_protection.enabled {
-            let address = self
-                .payload_protection
-                .address
-                .as_ref()
-                .ok_or_else(|| {
-                    ConfigError::invalid(
-                        "managed_gateway.payload_protection.address is required when payload protection is enabled.",
-                    )
-                })?;
-            if address.scheme() != "https"
-                || address.host_str().is_none()
-                || address.path() != "/"
-                || address.query().is_some()
-                || address.fragment().is_some()
-                || !address.username().is_empty()
-                || address.password().is_some()
+            for value in
+                [&self.payload_protection.transit_mount, &self.payload_protection.transit_key_name]
             {
-                return Err(ConfigError::invalid(
-                    "managed_gateway.payload_protection.address must be an HTTPS origin.",
-                ));
-            }
-            for (name, value) in [
-                (
-                    "kubernetes_role",
-                    self.payload_protection
-                        .kubernetes_role
-                        .as_deref(),
-                ),
-                (
-                    "kubernetes_auth_mount",
-                    Some(
-                        self.payload_protection
-                            .kubernetes_auth_mount
-                            .as_str(),
-                    ),
-                ),
-                (
-                    "transit_mount",
-                    Some(
-                        self.payload_protection
-                            .transit_mount
-                            .as_str(),
-                    ),
-                ),
-                (
-                    "transit_key_name",
-                    Some(
-                        self.payload_protection
-                            .transit_key_name
-                            .as_str(),
-                    ),
-                ),
-            ] {
-                if value.is_none_or(|value| !valid_openbao_name(value)) {
-                    return Err(ConfigError::invalid(format!(
-                        "managed_gateway.payload_protection.{name} must contain 1 to 128 ASCII letters, digits, hyphens, or underscores."
-                    )));
+                if !valid_openbao_name(value) {
+                    return Err(ConfigError::invalid(
+                        "managed_gateway.payload_protection Transit names need 1 to 128 ASCII letters, digits, hyphens, or underscores.",
+                    ));
                 }
-            }
-            if self
-                .payload_protection
-                .request_timeout
-                .is_zero()
-            {
-                return Err(ConfigError::invalid(
-                    "managed_gateway.payload_protection.request_timeout must be non-zero.",
-                ));
             }
         }
         Ok(())
@@ -288,34 +229,12 @@ mod payload_tests {
             router_policy: super::super::RouterPolicyConfig::test_config(),
             payload_protection: ManagedGatewayPayloadProtectionConfig {
                 enabled: true,
-                address: Some(
-                    "https://openbao.example/"
-                        .parse()
-                        .unwrap(),
-                ),
-                kubernetes_role: Some("controller".into()),
                 ..Default::default()
             },
             ..Default::default()
         };
         config.data_plane.connect_endpoints = vec!["tls/router.example:7447".into()];
         config
-    }
-
-    #[test]
-    fn payload_protection_requires_an_https_origin() {
-        assert!(config().validate().is_ok());
-        for address in [
-            "http://openbao.example/",
-            "https://user:password@openbao.example/",
-            "https://openbao.example/v1/",
-            "https://openbao.example/?token=value",
-            "https://openbao.example/#fragment",
-        ] {
-            let mut config = config();
-            config.payload_protection.address = Some(address.parse().unwrap());
-            assert!(config.validate().is_err(), "{address} must be rejected");
-        }
     }
 
     #[test]
@@ -339,45 +258,20 @@ mod payload_tests {
     }
 }
 
-fn valid_openbao_name(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ManagedGatewayPayloadProtectionConfig {
     pub enabled: bool,
-    pub address: Option<Url>,
-    pub kubernetes_role: Option<String>,
-    pub kubernetes_auth_mount: String,
     pub transit_mount: String,
     pub transit_key_name: String,
-    pub service_account_token_file: PathBuf,
-    pub namespace: Option<String>,
-    pub ca_certificate_file: Option<PathBuf>,
-    #[serde(with = "humantime_serde")]
-    pub request_timeout: Duration,
 }
 
 impl Default for ManagedGatewayPayloadProtectionConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            address: None,
-            kubernetes_role: None,
-            kubernetes_auth_mount: "kubernetes".into(),
             transit_mount: "transit".into(),
             transit_key_name: "inari-managed-payload".into(),
-            service_account_token_file: PathBuf::from(
-                "/var/run/secrets/kubernetes.io/serviceaccount/token",
-            ),
-            namespace: None,
-            ca_certificate_file: None,
-            request_timeout: Duration::from_secs(5),
         }
     }
 }
