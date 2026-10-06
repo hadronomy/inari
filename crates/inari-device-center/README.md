@@ -70,6 +70,11 @@ Mutable screen state lives in GPUI entities. Long-running network work belongs
 to the owned Tokio runtime in `infrastructure/runtime.rs`, which cancels and
 joins its tasks during shutdown.
 
+The runtime retains the current connection state. Each window receives that
+state when it subscribes, even if the Agent connection opened before the
+window. Activity events use a separate live channel. A closed event stream
+sets the connection to Reconnecting before the next connection attempt.
+
 ### Development environment
 
 Debug builds carry a Bench and a set of devtools. A small launcher floats at the
