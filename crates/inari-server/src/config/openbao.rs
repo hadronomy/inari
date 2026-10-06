@@ -37,21 +37,20 @@ impl Default for OpenBaoConfig {
 
 impl OpenBaoConfig {
     pub(crate) fn validate(&self, required: bool) -> Result<(), ConfigError> {
-        if !required && self.address.is_none() {
-            return Ok(());
-        }
-        if self
-            .address
-            .as_ref()
-            .is_none_or(|address| {
-                address.scheme() != "https"
-                    || address.host_str().is_none()
-                    || address.path() != "/"
-                    || address.query().is_some()
-                    || address.fragment().is_some()
-                    || !address.username().is_empty()
-                    || address.password().is_some()
-            })
+        let Some(address) = self.address.as_ref() else {
+            return if required {
+                Err(ConfigError::invalid("openbao.address is required."))
+            } else {
+                Ok(())
+            };
+        };
+        if address.scheme() != "https"
+            || address.host_str().is_none()
+            || address.path() != "/"
+            || address.query().is_some()
+            || address.fragment().is_some()
+            || !address.username().is_empty()
+            || address.password().is_some()
         {
             return Err(ConfigError::invalid("openbao.address must be an HTTPS origin."));
         }
@@ -90,6 +89,14 @@ pub(crate) fn valid_openbao_name(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::OpenBaoConfig;
+
+    #[test]
+    fn required_connection_reports_missing_address() {
+        let error = OpenBaoConfig::default()
+            .validate(true)
+            .unwrap_err();
+        assert_eq!(error.to_string(), "openbao.address is required.");
+    }
 
     #[test]
     fn required_connection_rejects_missing_or_credential_bearing_origins() {

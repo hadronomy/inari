@@ -162,6 +162,12 @@ Controller signature purpose to an approved Transit key name, positive key
 version, and public key. It checks the key metadata before each signature.
 The key must use Ed25519 with derivation, export, and plaintext backup disabled.
 
+For each approved signing key, the shared workload role needs `read` on
+`<mount>/keys/<key>` and `update` on `<mount>/sign/<key>`. These are OpenBao
+policy paths, without the HTTP `/v1/` prefix. The
+[OpenBao signing policy example](https://openbao.org/blog/flux-openbao-secrets-signatures/#step-1-generate-the-signing-key-in-openbao)
+shows these capabilities.
+
 Signing requires a current approval and a validated `CanonicalRecord` for the
 same purpose. The request contains the canonical bytes, the exact approved key
 version, and `prehashed=false`. The OpenBao 2.5.4 request omits `hash_algorithm`.

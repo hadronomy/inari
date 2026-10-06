@@ -2,7 +2,19 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use inari_server::{DeploymentEnvironment, LoadedConfig, LogFormat, ZenohMode};
+use inari_server::{
+    AppConfig, ConfigError, DeploymentEnvironment, LoadedConfig, LogFormat, ZenohMode,
+};
+
+const OPENBAO_CONNECTION_FIELDS: [(&str, &str); 7] = [
+    ("address", "https://openbao.test"),
+    ("kubernetes_role", "controller"),
+    ("kubernetes_auth_mount", "kubernetes"),
+    ("service_account_token_file", "/test/token"),
+    ("namespace", "test"),
+    ("ca_certificate_file", "/test/ca.pem"),
+    ("request_timeout", "5s"),
+];
 
 #[test]
 fn environment_overrides_cover_every_nested_field() {
@@ -313,4 +325,53 @@ fn environment_rejects_non_router_zenoh_modes() {
     )]));
 
     assert!(result.is_err(), "server config should reject non-router Zenoh modes");
+}
+
+#[test]
+fn toml_rejects_openbao_connection_fields_in_payload_protection() {
+    for (field, value) in OPENBAO_CONNECTION_FIELDS {
+        let source = format!("[managed_gateway.payload_protection]\n{field} = {value:?}\n");
+        let error = toml::from_str::<AppConfig>(&source).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("unknown field `{field}`"))
+        );
+    }
+    let source = OPENBAO_CONNECTION_FIELDS
+        .iter()
+        .map(|(field, value)| format!("{field} = {value:?}\n"))
+        .collect::<String>();
+    let config = toml::from_str::<AppConfig>(&format!("[openbao]\n{source}")).unwrap();
+    assert_eq!(
+        config
+            .openbao
+            .kubernetes_role
+            .as_deref(),
+        Some("controller")
+    );
+    assert_eq!(config.openbao.request_timeout, Duration::from_secs(5));
+}
+
+#[test]
+fn environment_rejects_openbao_connection_fields_in_payload_protection() {
+    for (field, value) in OPENBAO_CONNECTION_FIELDS {
+        let result = LoadedConfig::load_from_environment_map(HashMap::from([(
+            format!(
+                "INARI_SERVER_MANAGED_GATEWAY__PAYLOAD_PROTECTION__{}",
+                field.to_ascii_uppercase()
+            ),
+            value.into(),
+        )]));
+        match result.unwrap_err() {
+            ConfigError::Deserialize { source } => {
+                assert!(
+                    source
+                        .to_string()
+                        .contains(&format!("unknown field `{field}`"))
+                );
+            },
+            other => panic!("unexpected configuration error: {other}"),
+        }
+    }
 }

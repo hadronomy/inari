@@ -34,8 +34,11 @@ contains both sections.
 | `openbao.ca_certificate_file` | Optional PEM certificate authority for the OpenBao HTTPS connection. |
 | `openbao.request_timeout` | Timeout for each OpenBao request. The default is five seconds. |
 
-The workload role needs access to the named Transit key's `encrypt` and `decrypt`
-endpoints. It does not need key creation, export, backup, or deletion privileges.
+Payload protection requires the workload role to have `update` on
+`<mount>/encrypt/<key>` and `<mount>/decrypt/<key>` for the named encryption key.
+Authority signing also requires the
+[Controller signing permissions](device-tests.md#controller-signing-boundary).
+The role does not need key creation, export, backup, or deletion privileges.
 The client uses base64 `associated_data` on both operations, as specified by the
 [OpenBao Transit API](https://openbao.org/docs/next/api/secret/transit/).
 
