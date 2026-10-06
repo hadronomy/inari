@@ -37,6 +37,7 @@ def upgrade() -> None:
         *[
             sa.Column(name, sa.String())
             for name in (
+                "worker_claim_id",
                 "started_at",
                 "terminal_at",
                 "marker_id",
@@ -61,6 +62,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "state != 'completed' OR (checks IS NOT NULL AND signed_result IS NOT NULL AND terminal_at IS NOT NULL)",
             name="ck_device_tests_result",
+        ),
+        sa.CheckConstraint(
+            "worker_claim_id IS NULL OR (length(worker_claim_id) = 32 AND state IN ('accepted', 'in_progress'))",
+            name="ck_device_tests_worker_claim",
         ),
         sa.UniqueConstraint(
             "database",

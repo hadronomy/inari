@@ -141,6 +141,11 @@ class DeviceTestService:
         if permit is None:
             return
         record = accepted.record
+        claim = self.ledger.claim_worker(
+            record, accepted.authorization, now=self.clock()
+        )
+        if claim is None:
+            return
         worker = None
         marker = None
         result = DriverExecutionResult(
@@ -178,9 +183,11 @@ class DeviceTestService:
                 return current
 
             marker = self.ledger.mark_io_started(
-                record, accepted.authorization, check, now=now
+                claim, accepted.authorization, check, now=now
             )
             if marker is None:
+                if now >= record.io_deadline:
+                    error_code = "execution_deadline"
                 return
             result = await worker.execute(marker)
         except asyncio.CancelledError:
@@ -197,13 +204,13 @@ class DeviceTestService:
                 try:
                     await worker.close()
                 except (Exception, asyncio.CancelledError):
-                    self.ledger.mark_worker_stop_failed(record.record_id)
+                    self.ledger.mark_worker_stop_failed(claim)
                     raise
             if marker is not None:
-                self.ledger.finish_io(record.record_id, result, now=self.clock())
+                self.ledger.finish_io(claim, result, now=self.clock())
             else:
                 self.ledger.fail_before_io(
-                    record.record_id, now=self.clock(), error_code=error_code
+                    claim, now=self.clock(), error_code=error_code
                 )
 
     def get(self, test_id: str, authorization: AuthorizedRequest) -> DeviceTestRecord:

@@ -23,7 +23,13 @@ from ..device_authority.models import SignedDeviceTestEvidence
 from ..device_authority.testing import DeviceTestAuthorization
 from ..physical_execution.models import DriverExecutionResult, DriverOutcome
 from ..runtime.store import RuntimeStore
-from .models import DeviceTestRecord, DeviceTestRequest, TestIoMarker, TestState
+from .models import (
+    DeviceTestRecord,
+    DeviceTestRequest,
+    TestIoMarker,
+    TestState,
+    TestWorkerClaim,
+)
 
 
 class SqliteDeviceTestLedger:
@@ -103,9 +109,47 @@ class SqliteDeviceTestLedger:
             )
             return _record(row), True
 
-    def mark_io_started(
+    def claim_worker(
         self,
         record: DeviceTestRecord,
+        authorization: AuthorizedRequest,
+        *,
+        now: datetime,
+    ) -> TestWorkerClaim | None:
+        """Hold the Device before preparation. A deadline cannot stop a worker."""
+        with self.store.immediate_transaction() as connection:
+            self._expire(connection, now)
+            statement = update(tests).where(
+                tests.c.record_id == record.record_id,
+                *_owned_scope(authorization),
+                tests.c.state == TestState.ACCEPTED.value,
+                tests.c.error_code.is_(None),
+                tests.c.worker_claim_id.is_(None),
+                tests.c.io_deadline > timestamp(now),
+            )
+            try:
+                self._check_grant(connection, authorization, now)
+            except DomainFailure as error:
+                connection.execute(
+                    statement.values(
+                        state=TestState.FAILED_ENVIRONMENT.value,
+                        state_version=tests.c.state_version + 1,
+                        error_code=error.code.value,
+                        terminal_at=timestamp(now),
+                    )
+                )
+                return None
+            claim_id = uuid4().hex
+            row = connection.execute(
+                statement.values(worker_claim_id=claim_id).returning(tests.c.device_id)
+            ).first()
+            if row is None:
+                return None
+            return TestWorkerClaim(record.record_id, row.device_id, claim_id)
+
+    def mark_io_started(
+        self,
+        claim: TestWorkerClaim,
         authorization: AuthorizedRequest,
         check: Callable[[], DeviceTestAuthorization],
         *,
@@ -116,7 +160,7 @@ class SqliteDeviceTestLedger:
             current = (
                 connection.execute(
                     select(tests).where(
-                        tests.c.record_id == record.record_id,
+                        tests.c.record_id == claim.record_id,
                         *_owned_scope(authorization),
                     )
                 )
@@ -125,7 +169,9 @@ class SqliteDeviceTestLedger:
             )
             if (
                 current["state"] != TestState.ACCEPTED.value
+                or current["worker_claim_id"] != claim.claim_id
                 or current["error_code"] == "worker_stop_failed"
+                or parse_time(current["io_deadline"]) <= now
             ):
                 return None
             self._check_grant(connection, authorization, now)
@@ -144,10 +190,10 @@ class SqliteDeviceTestLedger:
                 "required_output_evidence": authority.capability.output_evidence.value,
                 "valid_until": _valid_until(authority),
             }
-            marker = TestIoMarker(record.record_id, record.device_id, uuid4().hex)
+            marker = TestIoMarker(claim.record_id, current["device_id"], uuid4().hex)
             connection.execute(
                 update(tests)
-                .where(tests.c.record_id == record.record_id)
+                .where(tests.c.record_id == claim.record_id)
                 .values(
                     state=TestState.IN_PROGRESS.value,
                     state_version=tests.c.state_version + 1,
@@ -158,12 +204,13 @@ class SqliteDeviceTestLedger:
             )
         return marker
 
-    def mark_worker_stop_failed(self, record_id: str) -> None:
+    def mark_worker_stop_failed(self, claim: TestWorkerClaim) -> None:
         with self.store.immediate_transaction() as connection:
             connection.execute(
                 update(tests)
                 .where(
-                    tests.c.record_id == record_id,
+                    tests.c.record_id == claim.record_id,
+                    tests.c.worker_claim_id == claim.claim_id,
                     tests.c.state.in_(
                         (TestState.ACCEPTED.value, TestState.IN_PROGRESS.value)
                     ),
@@ -175,7 +222,7 @@ class SqliteDeviceTestLedger:
             )
 
     def finish_io(
-        self, record_id: str, result: DriverExecutionResult, *, now: datetime
+        self, claim: TestWorkerClaim, result: DriverExecutionResult, *, now: datetime
     ) -> None:
         state = (
             TestState.AWAITING_CHECKS
@@ -186,11 +233,14 @@ class SqliteDeviceTestLedger:
             connection.execute(
                 update(tests)
                 .where(
-                    tests.c.record_id == record_id,
+                    tests.c.record_id == claim.record_id,
+                    tests.c.worker_claim_id == claim.claim_id,
                     tests.c.state == TestState.IN_PROGRESS.value,
+                    tests.c.error_code.is_(None),
                 )
                 .values(
                     state=state.value,
+                    worker_claim_id=None,
                     state_version=tests.c.state_version + 1,
                     output_evidence=result.evidence.value if result.evidence else None,
                     platform_job_id=result.platform_job_id,
@@ -199,18 +249,24 @@ class SqliteDeviceTestLedger:
             )
 
     def fail_before_io(
-        self, record_id: str, *, now: datetime, error_code: str = "device_unavailable"
+        self,
+        claim: TestWorkerClaim,
+        *,
+        now: datetime,
+        error_code: str = "device_unavailable",
     ) -> None:
         with self.store.immediate_transaction() as connection:
             connection.execute(
                 update(tests)
                 .where(
-                    tests.c.record_id == record_id,
+                    tests.c.record_id == claim.record_id,
+                    tests.c.worker_claim_id == claim.claim_id,
                     tests.c.state == TestState.ACCEPTED.value,
                     tests.c.error_code.is_(None),
                 )
                 .values(
                     state=TestState.FAILED_ENVIRONMENT.value,
+                    worker_claim_id=None,
                     state_version=tests.c.state_version + 1,
                     error_code=error_code,
                     terminal_at=timestamp(now),
@@ -299,6 +355,7 @@ class SqliteDeviceTestLedger:
                 .where(
                     tests.c.state == prior.value,
                     tests.c.io_deadline <= timestamp(now),
+                    tests.c.worker_claim_id.is_(None),
                     or_(
                         tests.c.error_code.is_(None),
                         tests.c.error_code != "worker_stop_failed",
@@ -324,6 +381,7 @@ class SqliteDeviceTestLedger:
                     .where(tests.c.state == prior.value)
                     .values(
                         state=state.value,
+                        worker_claim_id=None,
                         state_version=tests.c.state_version + 1,
                         error_code=case(
                             (

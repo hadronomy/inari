@@ -75,6 +75,15 @@ class DeviceTestAccepted:
 
 
 @dataclass(frozen=True, slots=True)
+class TestWorkerClaim:
+    __test__ = False
+
+    record_id: str
+    device_id: str
+    claim_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class TestIoMarker:
     __test__ = False
 

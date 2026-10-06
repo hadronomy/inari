@@ -1548,6 +1548,7 @@ device_tests_table = Table(
     Column("state_version", Integer, nullable=False),
     Column("accepted_at", String, nullable=False),
     Column("io_deadline", String, nullable=False),
+    Column("worker_claim_id", String),
     Column("started_at", String),
     Column("terminal_at", String),
     Column("marker_id", String),
@@ -1572,6 +1573,10 @@ device_tests_table = Table(
     CheckConstraint(
         "state != 'completed' OR (checks IS NOT NULL AND signed_result IS NOT NULL AND terminal_at IS NOT NULL)",
         name="ck_device_tests_result",
+    ),
+    CheckConstraint(
+        "worker_claim_id IS NULL OR (length(worker_claim_id) = 32 AND state IN ('accepted', 'in_progress'))",
+        name="ck_device_tests_worker_claim",
     ),
     UniqueConstraint(
         "database",

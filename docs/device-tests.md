@@ -59,17 +59,23 @@ Incorrect answers cannot turn missing execution evidence into Failed Contract.
 
 ## Execution and retry
 
-New work enters `accepted`. The Agent checks current authority again under the
-SQLite writer lock and commits its I/O marker before it permits Device I/O.
+New work enters `accepted`. The Agent commits one worker claim before it starts
+preparation. The claim keeps the Device reserved and rejects another execution
+of the same Test. The Agent checks current authority again under the SQLite
+writer lock and commits its I/O marker before it permits Device I/O.
 The marker retains the exact signed graph and observation digest.
 
 Device Tests and business work reserve the same Device for physical execution.
-An unstarted Test loses its reservation at its execution deadline. A Test in
-`in_progress` keeps its reservation until the worker stops. The Agent preserves
-a confirmed result that arrives at the deadline boundary.
+A Test that did not start worker preparation loses its reservation at its
+execution deadline. Preparation and `in_progress` keep the reservation until
+the worker stops. An expired Test cannot start Device I/O. The Agent preserves a
+confirmed result that arrives at the deadline boundary.
 
 A worker stop failure keeps the reservation in either state, even after the
 execution deadline. The deadline cannot prove that the worker stopped.
+
+Only the matching worker claim can record I/O or cleanup. Successful cleanup
+releases the claim. A failed stop retains it until repair and restart recovery.
 
 Confirmed output enters `awaiting_checks`. Uncertain output enters
 `outcome_unknown`. Failure before Device I/O enters `failed_environment`.

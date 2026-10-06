@@ -54,6 +54,7 @@ from inari.device_authority.bundle import AuthorityBundle
 from inari.device_authority.install import DeviceAuthorityInstaller
 from inari.device_tests import DeviceTestRequest, DeviceTestService, TestState
 from inari.device_tests.pattern import PATTERN_DIGEST, REQUIRED_CHECKS, receipt_image
+from inari.device_tests.models import TestWorkerClaim
 from inari.device_tests.signing import DeviceTestSigningKey
 from inari.device_tests.sqlite import SqliteDeviceTestLedger
 from inari.local_api.app import create_app
@@ -93,6 +94,8 @@ class Worker:
         self.ledger = ledger
         self.authorization = authorization
         self.calls = 0
+        self.preparations = 0
+        self.claim = None
         self.ready_error = None
         self.execute_error = None
         self.result = DriverExecutionResult(
@@ -105,6 +108,22 @@ class Worker:
         self.on_close = None
 
     async def prepare(self, work):
+        self.preparations += 1
+        with self.ledger.store.connection() as connection:
+            row = (
+                connection.execute(
+                    select(device_tests_table).where(
+                        device_tests_table.c.device_id == work.device_id,
+                        device_tests_table.c.state == TestState.ACCEPTED.value,
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert row["worker_claim_id"] is not None
+        self.claim = TestWorkerClaim(
+            row["record_id"], work.device_id, row["worker_claim_id"]
+        )
         self.work = work
         return self
 
@@ -460,6 +479,7 @@ async def test_revoked_grant_blocks_replay_lookup_and_physical_io(rig):
         await service.submit(request, authorization)
     await service.execute(accepted)
     assert worker.calls == 0
+    assert worker.preparations == 0
 
 
 @pytest.mark.anyio
@@ -553,8 +573,10 @@ async def test_cancellation_closes_worker_before_releasing_reservation(rig):
 async def test_startup_recovery_never_repeats_abandoned_io(rig):
     service, authorization, request, worker, clock, *_ = rig
     accepted = await service.submit(request, authorization)
+    claim = service.ledger.claim_worker(accepted.record, authorization, now=NOW)
+    assert claim is not None
     service.ledger.mark_io_started(
-        accepted.record,
+        claim,
         authorization,
         lambda: service.authority.check_test(accepted.permit, now=NOW),
         now=NOW,
@@ -864,6 +886,124 @@ async def test_missing_execution_evidence_cannot_prove_a_contract_result(
 
 
 @pytest.mark.anyio
+async def test_expired_test_never_starts_worker_preparation(rig):
+    service, authorization, request, worker, clock, *_ = rig
+    accepted = await service.submit(request, authorization)
+    clock.value = NOW + timedelta(seconds=31)
+    await service.execute(accepted)
+    assert worker.preparations == 0
+    assert worker.calls == 0
+    assert worker.closed is False
+    record = service.get(request.test_id, authorization)
+    assert record.state is TestState.FAILED_ENVIRONMENT
+    assert record.error_code == "execution_deadline"
+
+
+@pytest.mark.anyio
+async def test_delayed_execution_cannot_start_another_worker(rig):
+    service, authorization, request, worker, *_ = rig
+    worker.release = asyncio.Event()
+    accepted = await service.submit(request, authorization)
+    execution = asyncio.create_task(service.execute(accepted))
+    await worker.entered.wait()
+    await service.execute(accepted)
+    assert worker.preparations == 1
+    assert worker.calls == 1
+    assert worker.closed is False
+    worker.release.set()
+    await execution
+    assert worker.closed is True
+    assert (
+        service.get(request.test_id, authorization).state is TestState.AWAITING_CHECKS
+    )
+
+
+@pytest.mark.anyio
+async def test_another_worker_claim_cannot_change_execution(rig):
+    service, authorization, request, worker, *_ = rig
+    accepted = await service.submit(request, authorization)
+    claim = service.ledger.claim_worker(accepted.record, authorization, now=NOW)
+    assert claim is not None
+    assert service.ledger.claim_worker(accepted.record, authorization, now=NOW) is None
+    other = replace(
+        claim,
+        claim_id=("0" if claim.claim_id[0] != "0" else "1") + claim.claim_id[1:],
+    )
+    before = service.get(request.test_id, authorization)
+    assert (
+        service.ledger.mark_io_started(
+            other,
+            authorization,
+            lambda: pytest.fail("Another worker claim cannot authorize I/O."),
+            now=NOW,
+        )
+        is None
+    )
+    service.ledger.mark_worker_stop_failed(other)
+    service.ledger.fail_before_io(other, now=NOW)
+    assert service.get(request.test_id, authorization) == before
+    marker = service.ledger.mark_io_started(
+        claim,
+        authorization,
+        lambda: service.authority.check_test(accepted.permit, now=NOW),
+        now=NOW,
+    )
+    assert marker is not None
+    started = service.get(request.test_id, authorization)
+    service.ledger.finish_io(other, worker.result, now=NOW)
+    assert service.get(request.test_id, authorization) == started
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("stop_fails", [False, True])
+async def test_preparing_worker_keeps_device_reserved_after_deadline(rig, stop_fails):
+    service, authorization, request, worker, clock, *_ = rig
+    business = SqliteExecutionLedger(
+        store=service.ledger.store, authority_guard=SqlActiveAuthorityGuard()
+    )
+    observed = []
+
+    def expire_during_preparation():
+        clock.value = NOW + timedelta(seconds=31)
+        record = service.get(request.test_id, authorization)
+        with service.ledger.store.connection() as connection:
+            busy = business._device_is_busy(
+                connection, device_id=request.device_id, now=clock.value
+            )
+        observed.append((record, busy))
+
+    def fail_to_stop():
+        raise RuntimeError("Worker still alive")
+
+    worker.on_ready = expire_during_preparation
+    worker.on_close = fail_to_stop if stop_fails else None
+    accepted = await service.submit(request, authorization)
+    if stop_fails:
+        with pytest.raises(RuntimeError, match="still alive"):
+            await service.execute(accepted)
+    else:
+        await service.execute(accepted)
+    record_during_preparation, busy = observed[0]
+    assert record_during_preparation.state is TestState.ACCEPTED
+    assert busy is True
+    assert worker.calls == 0
+    record = service.get(request.test_id, authorization)
+    assert record.state is (
+        TestState.ACCEPTED if stop_fails else TestState.FAILED_ENVIRONMENT
+    )
+    assert record.error_code == (
+        "worker_stop_failed" if stop_fails else "execution_deadline"
+    )
+    with service.ledger.store.connection() as connection:
+        assert (
+            business._device_is_busy(
+                connection, device_id=request.device_id, now=clock.value
+            )
+            is stop_fails
+        )
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("before_io", [False, True])
 async def test_worker_stop_failure_remains_visible_and_fences_the_device(
     rig, before_io
@@ -884,11 +1024,14 @@ async def test_worker_stop_failure_remains_visible_and_fences_the_device(
     assert record.state is (TestState.ACCEPTED if before_io else TestState.IN_PROGRESS)
     assert record.error_code == "worker_stop_failed"
     assert record.signed_result is None
-    service.ledger.fail_before_io(record.record_id, now=clock.value)
+    assert worker.claim is not None
+    service.ledger.fail_before_io(worker.claim, now=clock.value)
+    assert service.get(request.test_id, authorization) == record
+    service.ledger.finish_io(worker.claim, worker.result, now=clock.value)
     assert service.get(request.test_id, authorization) == record
     assert (
         service.ledger.mark_io_started(
-            accepted.record,
+            worker.claim,
             authorization,
             lambda: pytest.fail("An unproved worker stop cannot authorize Device I/O."),
             now=clock.value,
@@ -904,8 +1047,18 @@ async def test_worker_stop_failure_remains_visible_and_fences_the_device(
         )
     with pytest.raises(DomainFailure):
         service.finalize(request.test_id, _checks(), authorization)
-    with pytest.raises(DomainFailure):
+    with pytest.raises(DomainFailure) as error:
         await service.submit(replace(request, test_id="test-2"), authorization)
+    assert error.value.code is ProblemCode.CAPABILITY_CHANGED
+    with pytest.raises(DomainFailure) as error:
+        service.ledger.admit(
+            replace(request, test_id="test-2"),
+            authorization,
+            record.fingerprint,
+            now=clock.value,
+            deadline=clock.value + timedelta(seconds=30),
+        )
+    assert error.value.code is ProblemCode.DEVICE_UNAVAILABLE
     assert (await service.submit(request, authorization)).permit is None
     assert worker.calls == (0 if before_io else 1)
 
