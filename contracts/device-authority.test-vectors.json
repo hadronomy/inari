@@ -1,0 +1,1689 @@
+{
+  "cases": [
+    {
+      "activated_bundle": {
+        "manifest": {
+          "activations": [
+            {
+              "evidence_id": "test-1",
+              "revision_id": "revision-1"
+            }
+          ],
+          "agent_id": "agent-1",
+          "bindings": [
+            {
+              "digest": "73fb499be0ffd697b08c86d139287b4352cb4b71333129087aa8fe074b308de4",
+              "revision": {
+                "binding_id": "binding-1",
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+                "matrix_row_id": "matrix-1",
+                "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "purpose": "pos_receipt",
+                "revision_id": "revision-1",
+                "revision_number": 1,
+                "scope": {
+                  "database": "odoo-prod",
+                  "kind": "pos_configuration",
+                  "organization_id": "org-1",
+                  "pos_configuration_id": "pos-1",
+                  "site_id": "site-1"
+                }
+              },
+              "signature": "8c122ae50384be041c05796d6b57be4230c71a38cb962a8a9b9783523c2983f47358ada9d2d80b621bba60483b87d646d81a9bc048f36faedc5bf4070b3eb00f",
+              "signer_key_id": "binding-key"
+            }
+          ],
+          "certification_rows": [
+            {
+              "digest": "127e72affcef78e484cddb9ac0f71e30fdb40b6598e6a791bb4d1b4b4b3c0e8b",
+              "row": {
+                "capability_id": "receipt-image-v1",
+                "connection": "usb",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_id": "driver-escpos",
+                "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+                "effective_at": "2026-08-27T12:00:00Z",
+                "expires_at": "2026-09-27T12:00:00Z",
+                "firmware_build": "2026.08",
+                "firmware_version": "2.1",
+                "manufacturer": "Acme",
+                "media_profile": "receipt-80mm",
+                "model": "Receipt 2000",
+                "operating_system": "linux-x86_64",
+                "platform_backend_id": "cups",
+                "release_set_id": "release-2026-08",
+                "row_id": "matrix-1",
+                "version": 1
+              },
+              "signature": "ff0b0f8407df3ee763bd63e2016cf71bbaf301cb29cdb6aabb1eb369687543785bca8823b9f974b20d61e3e55b0ebadfe49175ff3a9d73ac52797b2264d92400",
+              "signer_key_id": "matrix-key"
+            }
+          ],
+          "contract": "inari.device-authority.v1",
+          "evidence": [
+            {
+              "digest": "9a04ffde88d7e8f41f132f1b3fb7d61f1abb70e2cdcd625ec47b1d75bd8ed840",
+              "evidence": {
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+                "evidence_id": "test-1",
+                "matrix_row_id": "matrix-1",
+                "output_evidence": "transport",
+                "result": "passed",
+                "revision_id": "revision-1",
+                "test_pattern_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+                "tested_at": "2026-08-28T11:00:00Z",
+                "valid_until": "2026-08-29T12:00:00Z"
+              },
+              "signature": "fc272749e5dc280dcfbd6ccc2b5433a21f44198fc8ddf6b0e511b11dd56cf1015b0fe05c8ed4a53114279b065f8d6d849ef20e4aef07c6ae12518ac267428b0f",
+              "signer_key_id": "test-key"
+            }
+          ],
+          "profiles": [
+            {
+              "digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "profile": {
+                "capabilities": [
+                  {
+                    "capability_id": "receipt-image-v1",
+                    "contract_major": 1,
+                    "max_copies": 1,
+                    "max_payload_bytes": 2097152,
+                    "media_type": "image/jpeg",
+                    "operation": "receipt_image",
+                    "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "output_evidence": "transport"
+                  }
+                ],
+                "driver_id": "driver-escpos",
+                "effective_at": "2026-08-27T12:00:00Z",
+                "expires_at": "2026-09-27T12:00:00Z",
+                "min_agent_version": "1.20.0",
+                "profile_id": "profile-1",
+                "version": "1.0.0"
+              },
+              "signature": "77ac02d1b5d334f5f44066132b3a19507ef77c688959427c2f1855a8154ac19680fde2ccea9385b266df6c589ff07abda95e944eb34e167fa4847cfa305ac406",
+              "signer_key_id": "profile-key"
+            }
+          ],
+          "scope": {
+            "database": "odoo-prod",
+            "kind": "pos_configuration",
+            "organization_id": "org-1",
+            "pos_configuration_id": "pos-1",
+            "site_id": "site-1"
+          },
+          "signers": [
+            {
+              "key_id": "profile-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+              "purpose": "driver_profile",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "matrix-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+              "purpose": "certification_matrix",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "binding-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+              "purpose": "binding_revision",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "test-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+              "purpose": "device_test_evidence",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "observation-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+              "purpose": "device_observation",
+              "retired_at": null,
+              "state": "active"
+            }
+          ]
+        },
+        "revision": {
+          "digest": "53c03a9aa246742b86797bbd462ddf98b9073a60efff6aa56e4d72d49dcfa187",
+          "revision": {
+            "effective_at": "2026-08-27T12:00:00Z",
+            "expires_at": "2026-09-04T12:00:00Z",
+            "manifest_digest": "e180fcccac55d8a9d0b14f12d9b7df0af67a6d1580eeb57f22cb8da6a8c91f22",
+            "revision_id": "authority-revision-1",
+            "revision_number": 1
+          },
+          "signature": "00a70c0de8ad2dc4be2db7b2288cb92cecdf51d8e45cdce73542a48fa9ee1d6efe25a51612a9a6d570bf9896cbf46ce9649a8d90ae81c6c8ee8a3afea5b9aa0f",
+          "signer_key_id": "authority-revision-key"
+        }
+      },
+      "agent_id": "agent-1",
+      "initial_bundle": {
+        "manifest": {
+          "activations": [],
+          "agent_id": "agent-1",
+          "bindings": [
+            {
+              "digest": "73fb499be0ffd697b08c86d139287b4352cb4b71333129087aa8fe074b308de4",
+              "revision": {
+                "binding_id": "binding-1",
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+                "matrix_row_id": "matrix-1",
+                "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "purpose": "pos_receipt",
+                "revision_id": "revision-1",
+                "revision_number": 1,
+                "scope": {
+                  "database": "odoo-prod",
+                  "kind": "pos_configuration",
+                  "organization_id": "org-1",
+                  "pos_configuration_id": "pos-1",
+                  "site_id": "site-1"
+                }
+              },
+              "signature": "8c122ae50384be041c05796d6b57be4230c71a38cb962a8a9b9783523c2983f47358ada9d2d80b621bba60483b87d646d81a9bc048f36faedc5bf4070b3eb00f",
+              "signer_key_id": "binding-key"
+            }
+          ],
+          "certification_rows": [
+            {
+              "digest": "127e72affcef78e484cddb9ac0f71e30fdb40b6598e6a791bb4d1b4b4b3c0e8b",
+              "row": {
+                "capability_id": "receipt-image-v1",
+                "connection": "usb",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_id": "driver-escpos",
+                "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+                "effective_at": "2026-08-27T12:00:00Z",
+                "expires_at": "2026-09-27T12:00:00Z",
+                "firmware_build": "2026.08",
+                "firmware_version": "2.1",
+                "manufacturer": "Acme",
+                "media_profile": "receipt-80mm",
+                "model": "Receipt 2000",
+                "operating_system": "linux-x86_64",
+                "platform_backend_id": "cups",
+                "release_set_id": "release-2026-08",
+                "row_id": "matrix-1",
+                "version": 1
+              },
+              "signature": "ff0b0f8407df3ee763bd63e2016cf71bbaf301cb29cdb6aabb1eb369687543785bca8823b9f974b20d61e3e55b0ebadfe49175ff3a9d73ac52797b2264d92400",
+              "signer_key_id": "matrix-key"
+            }
+          ],
+          "contract": "inari.device-authority.v1",
+          "evidence": [],
+          "profiles": [
+            {
+              "digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "profile": {
+                "capabilities": [
+                  {
+                    "capability_id": "receipt-image-v1",
+                    "contract_major": 1,
+                    "max_copies": 1,
+                    "max_payload_bytes": 2097152,
+                    "media_type": "image/jpeg",
+                    "operation": "receipt_image",
+                    "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "output_evidence": "transport"
+                  }
+                ],
+                "driver_id": "driver-escpos",
+                "effective_at": "2026-08-27T12:00:00Z",
+                "expires_at": "2026-09-27T12:00:00Z",
+                "min_agent_version": "1.20.0",
+                "profile_id": "profile-1",
+                "version": "1.0.0"
+              },
+              "signature": "77ac02d1b5d334f5f44066132b3a19507ef77c688959427c2f1855a8154ac19680fde2ccea9385b266df6c589ff07abda95e944eb34e167fa4847cfa305ac406",
+              "signer_key_id": "profile-key"
+            }
+          ],
+          "scope": {
+            "database": "odoo-prod",
+            "kind": "pos_configuration",
+            "organization_id": "org-1",
+            "pos_configuration_id": "pos-1",
+            "site_id": "site-1"
+          },
+          "signers": [
+            {
+              "key_id": "profile-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+              "purpose": "driver_profile",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "matrix-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+              "purpose": "certification_matrix",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "binding-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+              "purpose": "binding_revision",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "test-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+              "purpose": "device_test_evidence",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "observation-key",
+              "not_after": "2026-11-26T12:00:00Z",
+              "not_before": "2026-08-27T12:00:00Z",
+              "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+              "purpose": "device_observation",
+              "retired_at": null,
+              "state": "active"
+            }
+          ]
+        },
+        "revision": {
+          "digest": "6a32a4991da30e8dd90ac3a95d75ac4aae69b0785f4f07e7049b21c50b6e0e61",
+          "revision": {
+            "effective_at": "2026-08-27T12:00:00Z",
+            "expires_at": "2026-09-04T12:00:00Z",
+            "manifest_digest": "f585d86eb955bb12fd1446f0d55d522a179836326c1a54e91022976e0ba3f339",
+            "revision_id": "initial-authority-revision",
+            "revision_number": 1
+          },
+          "signature": "94897464a66091c536b5ed02c285458131a8cfb37d9071b44b1c4f237fdfaec35a6465a2e61cf77b970c5a8862c0629d862cc621390bc8ea776260572e93380a",
+          "signer_key_id": "authority-revision-key"
+        }
+      },
+      "microsecond": 0,
+      "now": "2026-08-28T12:00:00Z",
+      "records": [
+        {
+          "canonical": "{\"effective_at\":\"2026-08-27T12:00:00.000000Z\",\"expires_at\":\"2026-09-04T12:00:00.000000Z\",\"manifest_digest\":\"e180fcccac55d8a9d0b14f12d9b7df0af67a6d1580eeb57f22cb8da6a8c91f22\",\"revision_id\":\"authority-revision-1\",\"revision_number\":1}",
+          "purpose": "authority_revision",
+          "record": {
+            "digest": "53c03a9aa246742b86797bbd462ddf98b9073a60efff6aa56e4d72d49dcfa187",
+            "revision": {
+              "effective_at": "2026-08-27T12:00:00Z",
+              "expires_at": "2026-09-04T12:00:00Z",
+              "manifest_digest": "e180fcccac55d8a9d0b14f12d9b7df0af67a6d1580eeb57f22cb8da6a8c91f22",
+              "revision_id": "authority-revision-1",
+              "revision_number": 1
+            },
+            "signature": "00a70c0de8ad2dc4be2db7b2288cb92cecdf51d8e45cdce73542a48fa9ee1d6efe25a51612a9a6d570bf9896cbf46ce9649a8d90ae81c6c8ee8a3afea5b9aa0f",
+            "signer_key_id": "authority-revision-key"
+          },
+          "signer": {
+            "key_id": "authority-revision-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "ce695cec4f026e513d746caa219feb514cb8f88ffc5672ad554f6abac77dbb8c",
+            "purpose": "authority_revision",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capabilities\":[{\"capability_id\":\"receipt-image-v1\",\"contract_major\":1,\"max_copies\":1,\"max_payload_bytes\":2097152,\"media_type\":\"image/jpeg\",\"operation\":\"receipt_image\",\"options_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"output_evidence\":\"transport\"}],\"driver_id\":\"driver-escpos\",\"effective_at\":\"2026-08-27T12:00:00.000000Z\",\"expires_at\":\"2026-09-27T12:00:00.000000Z\",\"min_agent_version\":\"1.20.0\",\"profile_id\":\"profile-1\",\"version\":\"1.0.0\"}",
+          "purpose": "driver_profile",
+          "record": {
+            "digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+            "profile": {
+              "capabilities": [
+                {
+                  "capability_id": "receipt-image-v1",
+                  "contract_major": 1,
+                  "max_copies": 1,
+                  "max_payload_bytes": 2097152,
+                  "media_type": "image/jpeg",
+                  "operation": "receipt_image",
+                  "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "output_evidence": "transport"
+                }
+              ],
+              "driver_id": "driver-escpos",
+              "effective_at": "2026-08-27T12:00:00Z",
+              "expires_at": "2026-09-27T12:00:00Z",
+              "min_agent_version": "1.20.0",
+              "profile_id": "profile-1",
+              "version": "1.0.0"
+            },
+            "signature": "77ac02d1b5d334f5f44066132b3a19507ef77c688959427c2f1855a8154ac19680fde2ccea9385b266df6c589ff07abda95e944eb34e167fa4847cfa305ac406",
+            "signer_key_id": "profile-key"
+          },
+          "signer": {
+            "key_id": "profile-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+            "purpose": "driver_profile",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capability_id\":\"receipt-image-v1\",\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8\",\"effective_at\":\"2026-08-27T12:00:00.000000Z\",\"expires_at\":\"2026-09-27T12:00:00.000000Z\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"manufacturer\":\"Acme\",\"media_profile\":\"receipt-80mm\",\"model\":\"Receipt 2000\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"release_set_id\":\"release-2026-08\",\"row_id\":\"matrix-1\",\"version\":1}",
+          "purpose": "certification_matrix",
+          "record": {
+            "digest": "127e72affcef78e484cddb9ac0f71e30fdb40b6598e6a791bb4d1b4b4b3c0e8b",
+            "row": {
+              "capability_id": "receipt-image-v1",
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "effective_at": "2026-08-27T12:00:00Z",
+              "expires_at": "2026-09-27T12:00:00Z",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "manufacturer": "Acme",
+              "media_profile": "receipt-80mm",
+              "model": "Receipt 2000",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "release_set_id": "release-2026-08",
+              "row_id": "matrix-1",
+              "version": 1
+            },
+            "signature": "ff0b0f8407df3ee763bd63e2016cf71bbaf301cb29cdb6aabb1eb369687543785bca8823b9f974b20d61e3e55b0ebadfe49175ff3a9d73ac52797b2264d92400",
+            "signer_key_id": "matrix-key"
+          },
+          "signer": {
+            "key_id": "matrix-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+            "purpose": "certification_matrix",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"binding_id\":\"binding-1\",\"capability_id\":\"receipt-image-v1\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_profile_digest\":\"ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8\",\"matrix_row_id\":\"matrix-1\",\"options_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"purpose\":\"pos_receipt\",\"revision_id\":\"revision-1\",\"revision_number\":1,\"scope\":{\"database\":\"odoo-prod\",\"kind\":\"pos_configuration\",\"organization_id\":\"org-1\",\"pos_configuration_id\":\"pos-1\",\"site_id\":\"site-1\"}}",
+          "purpose": "binding_revision",
+          "record": {
+            "digest": "73fb499be0ffd697b08c86d139287b4352cb4b71333129087aa8fe074b308de4",
+            "revision": {
+              "binding_id": "binding-1",
+              "capability_id": "receipt-image-v1",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "matrix_row_id": "matrix-1",
+              "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+              "purpose": "pos_receipt",
+              "revision_id": "revision-1",
+              "revision_number": 1,
+              "scope": {
+                "database": "odoo-prod",
+                "kind": "pos_configuration",
+                "organization_id": "org-1",
+                "pos_configuration_id": "pos-1",
+                "site_id": "site-1"
+              }
+            },
+            "signature": "8c122ae50384be041c05796d6b57be4230c71a38cb962a8a9b9783523c2983f47358ada9d2d80b621bba60483b87d646d81a9bc048f36faedc5bf4070b3eb00f",
+            "signer_key_id": "binding-key"
+          },
+          "signer": {
+            "key_id": "binding-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+            "purpose": "binding_revision",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capability_id\":\"receipt-image-v1\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_profile_digest\":\"ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8\",\"evidence_id\":\"test-1\",\"matrix_row_id\":\"matrix-1\",\"output_evidence\":\"transport\",\"result\":\"passed\",\"revision_id\":\"revision-1\",\"test_pattern_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"tested_at\":\"2026-08-28T11:00:00.000000Z\",\"valid_until\":\"2026-08-29T12:00:00.000000Z\"}",
+          "purpose": "device_test_evidence",
+          "record": {
+            "digest": "9a04ffde88d7e8f41f132f1b3fb7d61f1abb70e2cdcd625ec47b1d75bd8ed840",
+            "evidence": {
+              "capability_id": "receipt-image-v1",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "evidence_id": "test-1",
+              "matrix_row_id": "matrix-1",
+              "output_evidence": "transport",
+              "result": "passed",
+              "revision_id": "revision-1",
+              "test_pattern_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+              "tested_at": "2026-08-28T11:00:00Z",
+              "valid_until": "2026-08-29T12:00:00Z"
+            },
+            "signature": "fc272749e5dc280dcfbd6ccc2b5433a21f44198fc8ddf6b0e511b11dd56cf1015b0fe05c8ed4a53114279b065f8d6d849ef20e4aef07c6ae12518ac267428b0f",
+            "signer_key_id": "test-key"
+          },
+          "signer": {
+            "key_id": "test-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+            "purpose": "device_test_evidence",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"media_profile\":\"receipt-80mm\",\"observation_id\":\"observation-1\",\"observed_at\":\"2026-08-28T12:00:00.000000Z\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"ready\":true,\"reason\":null,\"state\":\"ready\"}",
+          "purpose": "device_observation",
+          "record": {
+            "digest": "69797c2a1773ef457e1b2ef127843ea905c19da6ed997d484e8cce7055092384",
+            "observation": {
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "ef3adf3b50206041dca291ec6174db9b6bd18e34178523f392d966f9280d02a8",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "media_profile": "receipt-80mm",
+              "observation_id": "observation-1",
+              "observed_at": "2026-08-28T12:00:00Z",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "ready": true,
+              "reason": null,
+              "state": "ready"
+            },
+            "signature": "0ff50b5e6d2b7b6e5dc3683cc3c8e163e566b165666b907ad5db04ff07f98671ef29a78ce99a7d095d66da6b6510ceb485f78b45a2776566974fe78a1a6fbe0d",
+            "signer_key_id": "observation-key"
+          },
+          "signer": {
+            "key_id": "observation-key",
+            "not_after": "2026-11-26T12:00:00Z",
+            "not_before": "2026-08-27T12:00:00Z",
+            "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+            "purpose": "device_observation",
+            "retired_at": null,
+            "state": "active"
+          }
+        }
+      ],
+      "scope": {
+        "database": "odoo-prod",
+        "kind": "pos_configuration",
+        "organization_id": "org-1",
+        "pos_configuration_id": "pos-1",
+        "site_id": "site-1"
+      },
+      "trusted_signer": {
+        "key_id": "authority-revision-key",
+        "not_after": "2026-11-26T12:00:00Z",
+        "not_before": "2026-08-27T12:00:00Z",
+        "public_key": "ce695cec4f026e513d746caa219feb514cb8f88ffc5672ad554f6abac77dbb8c",
+        "purpose": "authority_revision",
+        "retired_at": null,
+        "state": "active"
+      }
+    },
+    {
+      "activated_bundle": {
+        "manifest": {
+          "activations": [
+            {
+              "evidence_id": "test-1",
+              "revision_id": "revision-1"
+            }
+          ],
+          "agent_id": "agent-1",
+          "bindings": [
+            {
+              "digest": "563a3836d0f26b19b72aadbf4b5501324fe34df907b30c8daf62086796922500",
+              "revision": {
+                "binding_id": "binding-1",
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+                "matrix_row_id": "matrix-1",
+                "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "purpose": "pos_receipt",
+                "revision_id": "revision-1",
+                "revision_number": 1,
+                "scope": {
+                  "database": "odoo-prod",
+                  "kind": "pos_configuration",
+                  "organization_id": "org-1",
+                  "pos_configuration_id": "pos-1",
+                  "site_id": "site-1"
+                }
+              },
+              "signature": "65ba1a5f18433ca89f3eb9c20b406e1fc336992805498b656baebda01af33212deacd40d63df396138477a4a1a04fb3c3dc4703f2b3897def0f1a646d6b40003",
+              "signer_key_id": "binding-key"
+            }
+          ],
+          "certification_rows": [
+            {
+              "digest": "8f3e68c3b026bae75d53fde83f922096823f9bdcf4136627edb81baacc4fb7a6",
+              "row": {
+                "capability_id": "receipt-image-v1",
+                "connection": "usb",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_id": "driver-escpos",
+                "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+                "effective_at": "2026-08-27T12:00:00.001000Z",
+                "expires_at": "2026-09-27T12:00:00.001000Z",
+                "firmware_build": "2026.08",
+                "firmware_version": "2.1",
+                "manufacturer": "Acme",
+                "media_profile": "receipt-80mm",
+                "model": "Receipt 2000",
+                "operating_system": "linux-x86_64",
+                "platform_backend_id": "cups",
+                "release_set_id": "release-2026-08",
+                "row_id": "matrix-1",
+                "version": 1
+              },
+              "signature": "61d4560f2b5f4dc2b6cb84445ee544ee62b2958953d189d939107af8813f78fa544a9f9332de59f80cdf9c37c6b00d35f6b64d22850577e47742a6aebc7c4700",
+              "signer_key_id": "matrix-key"
+            }
+          ],
+          "contract": "inari.device-authority.v1",
+          "evidence": [
+            {
+              "digest": "f4ebb1b1fa27c3da1d7e5210fd42b2cbbc0babff87642079bd6ba3411b497e61",
+              "evidence": {
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+                "evidence_id": "test-1",
+                "matrix_row_id": "matrix-1",
+                "output_evidence": "transport",
+                "result": "passed",
+                "revision_id": "revision-1",
+                "test_pattern_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+                "tested_at": "2026-08-28T11:00:00.001000Z",
+                "valid_until": "2026-08-29T12:00:00.001000Z"
+              },
+              "signature": "d85c121a5bff0386e439aad6b4a14def268eb509ef0dfb363031a0c3295b76a268c1fa69d6463fe329635a1aa4c6c3258b38d61ce3708dee2f536505b904ac05",
+              "signer_key_id": "test-key"
+            }
+          ],
+          "profiles": [
+            {
+              "digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "profile": {
+                "capabilities": [
+                  {
+                    "capability_id": "receipt-image-v1",
+                    "contract_major": 1,
+                    "max_copies": 1,
+                    "max_payload_bytes": 2097152,
+                    "media_type": "image/jpeg",
+                    "operation": "receipt_image",
+                    "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "output_evidence": "transport"
+                  }
+                ],
+                "driver_id": "driver-escpos",
+                "effective_at": "2026-08-27T12:00:00.001000Z",
+                "expires_at": "2026-09-27T12:00:00.001000Z",
+                "min_agent_version": "1.20.0",
+                "profile_id": "profile-1",
+                "version": "1.0.0"
+              },
+              "signature": "2525ea316769854de5b900407b37ce5c8ea52f7a882e3e045d98d2f0eaa2770601f0921a60b2745a0aeaeab22a45fa304eca277c36dafdfc60d789804fa7a407",
+              "signer_key_id": "profile-key"
+            }
+          ],
+          "scope": {
+            "database": "odoo-prod",
+            "kind": "pos_configuration",
+            "organization_id": "org-1",
+            "pos_configuration_id": "pos-1",
+            "site_id": "site-1"
+          },
+          "signers": [
+            {
+              "key_id": "profile-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+              "purpose": "driver_profile",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "matrix-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+              "purpose": "certification_matrix",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "binding-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+              "purpose": "binding_revision",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "test-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+              "purpose": "device_test_evidence",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "observation-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+              "purpose": "device_observation",
+              "retired_at": null,
+              "state": "active"
+            }
+          ]
+        },
+        "revision": {
+          "digest": "c145dc266d8723a9c9d24a5760e023029243cc08003fad4dd93a7794cafc2ea7",
+          "revision": {
+            "effective_at": "2026-08-27T12:00:00.001000Z",
+            "expires_at": "2026-09-04T12:00:00.001000Z",
+            "manifest_digest": "4827e42e5aeed73888fa1ad59606d2bf52b3dbd0fb864b477f5c528a31a3f805",
+            "revision_id": "authority-revision-1",
+            "revision_number": 1
+          },
+          "signature": "7c9d45e70fb36464c960a22ef804a805ea296b72c787e921f7df5a314c453d6d2d0b8e0fe7e48c010a6a95ed40ea74383a1404b1a83c2baba86f936683c0b20e",
+          "signer_key_id": "authority-revision-key"
+        }
+      },
+      "agent_id": "agent-1",
+      "initial_bundle": {
+        "manifest": {
+          "activations": [],
+          "agent_id": "agent-1",
+          "bindings": [
+            {
+              "digest": "563a3836d0f26b19b72aadbf4b5501324fe34df907b30c8daf62086796922500",
+              "revision": {
+                "binding_id": "binding-1",
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+                "matrix_row_id": "matrix-1",
+                "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "purpose": "pos_receipt",
+                "revision_id": "revision-1",
+                "revision_number": 1,
+                "scope": {
+                  "database": "odoo-prod",
+                  "kind": "pos_configuration",
+                  "organization_id": "org-1",
+                  "pos_configuration_id": "pos-1",
+                  "site_id": "site-1"
+                }
+              },
+              "signature": "65ba1a5f18433ca89f3eb9c20b406e1fc336992805498b656baebda01af33212deacd40d63df396138477a4a1a04fb3c3dc4703f2b3897def0f1a646d6b40003",
+              "signer_key_id": "binding-key"
+            }
+          ],
+          "certification_rows": [
+            {
+              "digest": "8f3e68c3b026bae75d53fde83f922096823f9bdcf4136627edb81baacc4fb7a6",
+              "row": {
+                "capability_id": "receipt-image-v1",
+                "connection": "usb",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_id": "driver-escpos",
+                "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+                "effective_at": "2026-08-27T12:00:00.001000Z",
+                "expires_at": "2026-09-27T12:00:00.001000Z",
+                "firmware_build": "2026.08",
+                "firmware_version": "2.1",
+                "manufacturer": "Acme",
+                "media_profile": "receipt-80mm",
+                "model": "Receipt 2000",
+                "operating_system": "linux-x86_64",
+                "platform_backend_id": "cups",
+                "release_set_id": "release-2026-08",
+                "row_id": "matrix-1",
+                "version": 1
+              },
+              "signature": "61d4560f2b5f4dc2b6cb84445ee544ee62b2958953d189d939107af8813f78fa544a9f9332de59f80cdf9c37c6b00d35f6b64d22850577e47742a6aebc7c4700",
+              "signer_key_id": "matrix-key"
+            }
+          ],
+          "contract": "inari.device-authority.v1",
+          "evidence": [],
+          "profiles": [
+            {
+              "digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "profile": {
+                "capabilities": [
+                  {
+                    "capability_id": "receipt-image-v1",
+                    "contract_major": 1,
+                    "max_copies": 1,
+                    "max_payload_bytes": 2097152,
+                    "media_type": "image/jpeg",
+                    "operation": "receipt_image",
+                    "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "output_evidence": "transport"
+                  }
+                ],
+                "driver_id": "driver-escpos",
+                "effective_at": "2026-08-27T12:00:00.001000Z",
+                "expires_at": "2026-09-27T12:00:00.001000Z",
+                "min_agent_version": "1.20.0",
+                "profile_id": "profile-1",
+                "version": "1.0.0"
+              },
+              "signature": "2525ea316769854de5b900407b37ce5c8ea52f7a882e3e045d98d2f0eaa2770601f0921a60b2745a0aeaeab22a45fa304eca277c36dafdfc60d789804fa7a407",
+              "signer_key_id": "profile-key"
+            }
+          ],
+          "scope": {
+            "database": "odoo-prod",
+            "kind": "pos_configuration",
+            "organization_id": "org-1",
+            "pos_configuration_id": "pos-1",
+            "site_id": "site-1"
+          },
+          "signers": [
+            {
+              "key_id": "profile-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+              "purpose": "driver_profile",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "matrix-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+              "purpose": "certification_matrix",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "binding-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+              "purpose": "binding_revision",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "test-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+              "purpose": "device_test_evidence",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "observation-key",
+              "not_after": "2026-11-26T12:00:00.001000Z",
+              "not_before": "2026-08-27T12:00:00.001000Z",
+              "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+              "purpose": "device_observation",
+              "retired_at": null,
+              "state": "active"
+            }
+          ]
+        },
+        "revision": {
+          "digest": "cbbc652127e135dea936249f6025aaa02e69523ec67ceba9b0264ce947efcddd",
+          "revision": {
+            "effective_at": "2026-08-27T12:00:00.001000Z",
+            "expires_at": "2026-09-04T12:00:00.001000Z",
+            "manifest_digest": "294433a32e3ffa1f01566bc7247266dbf5ec9033ee7d69cbe401c369765c4207",
+            "revision_id": "initial-authority-revision",
+            "revision_number": 1
+          },
+          "signature": "c76e400a371bd984af3853699a833f67de0e1b98533d7cab933c2c2e54112a51634c9a4bf31922542989a6470577257857f5ce9005cc8def797fa6e7fec2b909",
+          "signer_key_id": "authority-revision-key"
+        }
+      },
+      "microsecond": 1000,
+      "now": "2026-08-28T12:00:00.001000Z",
+      "records": [
+        {
+          "canonical": "{\"effective_at\":\"2026-08-27T12:00:00.001000Z\",\"expires_at\":\"2026-09-04T12:00:00.001000Z\",\"manifest_digest\":\"4827e42e5aeed73888fa1ad59606d2bf52b3dbd0fb864b477f5c528a31a3f805\",\"revision_id\":\"authority-revision-1\",\"revision_number\":1}",
+          "purpose": "authority_revision",
+          "record": {
+            "digest": "c145dc266d8723a9c9d24a5760e023029243cc08003fad4dd93a7794cafc2ea7",
+            "revision": {
+              "effective_at": "2026-08-27T12:00:00.001000Z",
+              "expires_at": "2026-09-04T12:00:00.001000Z",
+              "manifest_digest": "4827e42e5aeed73888fa1ad59606d2bf52b3dbd0fb864b477f5c528a31a3f805",
+              "revision_id": "authority-revision-1",
+              "revision_number": 1
+            },
+            "signature": "7c9d45e70fb36464c960a22ef804a805ea296b72c787e921f7df5a314c453d6d2d0b8e0fe7e48c010a6a95ed40ea74383a1404b1a83c2baba86f936683c0b20e",
+            "signer_key_id": "authority-revision-key"
+          },
+          "signer": {
+            "key_id": "authority-revision-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "ce695cec4f026e513d746caa219feb514cb8f88ffc5672ad554f6abac77dbb8c",
+            "purpose": "authority_revision",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capabilities\":[{\"capability_id\":\"receipt-image-v1\",\"contract_major\":1,\"max_copies\":1,\"max_payload_bytes\":2097152,\"media_type\":\"image/jpeg\",\"operation\":\"receipt_image\",\"options_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"output_evidence\":\"transport\"}],\"driver_id\":\"driver-escpos\",\"effective_at\":\"2026-08-27T12:00:00.001000Z\",\"expires_at\":\"2026-09-27T12:00:00.001000Z\",\"min_agent_version\":\"1.20.0\",\"profile_id\":\"profile-1\",\"version\":\"1.0.0\"}",
+          "purpose": "driver_profile",
+          "record": {
+            "digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+            "profile": {
+              "capabilities": [
+                {
+                  "capability_id": "receipt-image-v1",
+                  "contract_major": 1,
+                  "max_copies": 1,
+                  "max_payload_bytes": 2097152,
+                  "media_type": "image/jpeg",
+                  "operation": "receipt_image",
+                  "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "output_evidence": "transport"
+                }
+              ],
+              "driver_id": "driver-escpos",
+              "effective_at": "2026-08-27T12:00:00.001000Z",
+              "expires_at": "2026-09-27T12:00:00.001000Z",
+              "min_agent_version": "1.20.0",
+              "profile_id": "profile-1",
+              "version": "1.0.0"
+            },
+            "signature": "2525ea316769854de5b900407b37ce5c8ea52f7a882e3e045d98d2f0eaa2770601f0921a60b2745a0aeaeab22a45fa304eca277c36dafdfc60d789804fa7a407",
+            "signer_key_id": "profile-key"
+          },
+          "signer": {
+            "key_id": "profile-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+            "purpose": "driver_profile",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capability_id\":\"receipt-image-v1\",\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670\",\"effective_at\":\"2026-08-27T12:00:00.001000Z\",\"expires_at\":\"2026-09-27T12:00:00.001000Z\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"manufacturer\":\"Acme\",\"media_profile\":\"receipt-80mm\",\"model\":\"Receipt 2000\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"release_set_id\":\"release-2026-08\",\"row_id\":\"matrix-1\",\"version\":1}",
+          "purpose": "certification_matrix",
+          "record": {
+            "digest": "8f3e68c3b026bae75d53fde83f922096823f9bdcf4136627edb81baacc4fb7a6",
+            "row": {
+              "capability_id": "receipt-image-v1",
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "effective_at": "2026-08-27T12:00:00.001000Z",
+              "expires_at": "2026-09-27T12:00:00.001000Z",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "manufacturer": "Acme",
+              "media_profile": "receipt-80mm",
+              "model": "Receipt 2000",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "release_set_id": "release-2026-08",
+              "row_id": "matrix-1",
+              "version": 1
+            },
+            "signature": "61d4560f2b5f4dc2b6cb84445ee544ee62b2958953d189d939107af8813f78fa544a9f9332de59f80cdf9c37c6b00d35f6b64d22850577e47742a6aebc7c4700",
+            "signer_key_id": "matrix-key"
+          },
+          "signer": {
+            "key_id": "matrix-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+            "purpose": "certification_matrix",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"binding_id\":\"binding-1\",\"capability_id\":\"receipt-image-v1\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_profile_digest\":\"3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670\",\"matrix_row_id\":\"matrix-1\",\"options_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"purpose\":\"pos_receipt\",\"revision_id\":\"revision-1\",\"revision_number\":1,\"scope\":{\"database\":\"odoo-prod\",\"kind\":\"pos_configuration\",\"organization_id\":\"org-1\",\"pos_configuration_id\":\"pos-1\",\"site_id\":\"site-1\"}}",
+          "purpose": "binding_revision",
+          "record": {
+            "digest": "563a3836d0f26b19b72aadbf4b5501324fe34df907b30c8daf62086796922500",
+            "revision": {
+              "binding_id": "binding-1",
+              "capability_id": "receipt-image-v1",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "matrix_row_id": "matrix-1",
+              "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+              "purpose": "pos_receipt",
+              "revision_id": "revision-1",
+              "revision_number": 1,
+              "scope": {
+                "database": "odoo-prod",
+                "kind": "pos_configuration",
+                "organization_id": "org-1",
+                "pos_configuration_id": "pos-1",
+                "site_id": "site-1"
+              }
+            },
+            "signature": "65ba1a5f18433ca89f3eb9c20b406e1fc336992805498b656baebda01af33212deacd40d63df396138477a4a1a04fb3c3dc4703f2b3897def0f1a646d6b40003",
+            "signer_key_id": "binding-key"
+          },
+          "signer": {
+            "key_id": "binding-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+            "purpose": "binding_revision",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capability_id\":\"receipt-image-v1\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_profile_digest\":\"3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670\",\"evidence_id\":\"test-1\",\"matrix_row_id\":\"matrix-1\",\"output_evidence\":\"transport\",\"result\":\"passed\",\"revision_id\":\"revision-1\",\"test_pattern_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"tested_at\":\"2026-08-28T11:00:00.001000Z\",\"valid_until\":\"2026-08-29T12:00:00.001000Z\"}",
+          "purpose": "device_test_evidence",
+          "record": {
+            "digest": "f4ebb1b1fa27c3da1d7e5210fd42b2cbbc0babff87642079bd6ba3411b497e61",
+            "evidence": {
+              "capability_id": "receipt-image-v1",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "evidence_id": "test-1",
+              "matrix_row_id": "matrix-1",
+              "output_evidence": "transport",
+              "result": "passed",
+              "revision_id": "revision-1",
+              "test_pattern_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+              "tested_at": "2026-08-28T11:00:00.001000Z",
+              "valid_until": "2026-08-29T12:00:00.001000Z"
+            },
+            "signature": "d85c121a5bff0386e439aad6b4a14def268eb509ef0dfb363031a0c3295b76a268c1fa69d6463fe329635a1aa4c6c3258b38d61ce3708dee2f536505b904ac05",
+            "signer_key_id": "test-key"
+          },
+          "signer": {
+            "key_id": "test-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+            "purpose": "device_test_evidence",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"media_profile\":\"receipt-80mm\",\"observation_id\":\"observation-1\",\"observed_at\":\"2026-08-28T12:00:00.001000Z\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"ready\":true,\"reason\":null,\"state\":\"ready\"}",
+          "purpose": "device_observation",
+          "record": {
+            "digest": "4e7b49e3605a080cdf395db70e340fc6f05a6506d7ba4a70c384221f993333e3",
+            "observation": {
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "3ba566f3b304e98dead6c97a679a2a06ab468064a10f8d683dd5132bd8578670",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "media_profile": "receipt-80mm",
+              "observation_id": "observation-1",
+              "observed_at": "2026-08-28T12:00:00.001000Z",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "ready": true,
+              "reason": null,
+              "state": "ready"
+            },
+            "signature": "091b6f75fc9f530bd7d5ea564099360aaf42dac6139fe78bb4c5efeec119ada1d53617cd159c3314037813b65ae37a4185140ad1ca29097c83e61d22935f1806",
+            "signer_key_id": "observation-key"
+          },
+          "signer": {
+            "key_id": "observation-key",
+            "not_after": "2026-11-26T12:00:00.001000Z",
+            "not_before": "2026-08-27T12:00:00.001000Z",
+            "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+            "purpose": "device_observation",
+            "retired_at": null,
+            "state": "active"
+          }
+        }
+      ],
+      "scope": {
+        "database": "odoo-prod",
+        "kind": "pos_configuration",
+        "organization_id": "org-1",
+        "pos_configuration_id": "pos-1",
+        "site_id": "site-1"
+      },
+      "trusted_signer": {
+        "key_id": "authority-revision-key",
+        "not_after": "2026-11-26T12:00:00.001000Z",
+        "not_before": "2026-08-27T12:00:00.001000Z",
+        "public_key": "ce695cec4f026e513d746caa219feb514cb8f88ffc5672ad554f6abac77dbb8c",
+        "purpose": "authority_revision",
+        "retired_at": null,
+        "state": "active"
+      }
+    },
+    {
+      "activated_bundle": {
+        "manifest": {
+          "activations": [
+            {
+              "evidence_id": "test-1",
+              "revision_id": "revision-1"
+            }
+          ],
+          "agent_id": "agent-1",
+          "bindings": [
+            {
+              "digest": "4b835db00bd66df214ae68cef2a69411ccd3301943242ad1839ea7472a2a51b0",
+              "revision": {
+                "binding_id": "binding-1",
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+                "matrix_row_id": "matrix-1",
+                "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "purpose": "pos_receipt",
+                "revision_id": "revision-1",
+                "revision_number": 1,
+                "scope": {
+                  "database": "odoo-prod",
+                  "kind": "pos_configuration",
+                  "organization_id": "org-1",
+                  "pos_configuration_id": "pos-1",
+                  "site_id": "site-1"
+                }
+              },
+              "signature": "e68496b3006c24e3baf1561bc4fb9b93d7987160bc97ec6a8af038357a34a26a7efd5de6a0f8b068a9019a62d5c178cc89bb2383affbdde465383b6df847ed0a",
+              "signer_key_id": "binding-key"
+            }
+          ],
+          "certification_rows": [
+            {
+              "digest": "b7626e210d48f92456d388a1aeb7554dd48ae328bec3460db1bbca3ed3e4792c",
+              "row": {
+                "capability_id": "receipt-image-v1",
+                "connection": "usb",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_id": "driver-escpos",
+                "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+                "effective_at": "2026-08-27T12:00:00.123456Z",
+                "expires_at": "2026-09-27T12:00:00.123456Z",
+                "firmware_build": "2026.08",
+                "firmware_version": "2.1",
+                "manufacturer": "Acme",
+                "media_profile": "receipt-80mm",
+                "model": "Receipt 2000",
+                "operating_system": "linux-x86_64",
+                "platform_backend_id": "cups",
+                "release_set_id": "release-2026-08",
+                "row_id": "matrix-1",
+                "version": 1
+              },
+              "signature": "3be2b52d5a522d5c5126fdf537097aed7259b70961262839a48ac1b81ee82422cfaeb01ecb8f9aba3dd6041dc1ec65c6966e51cd8b4b840ab92cc729c2f45409",
+              "signer_key_id": "matrix-key"
+            }
+          ],
+          "contract": "inari.device-authority.v1",
+          "evidence": [
+            {
+              "digest": "8119ffb15ead508b531a1d53fc95240855e389750460750a54dabaf99a1a0f0f",
+              "evidence": {
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+                "evidence_id": "test-1",
+                "matrix_row_id": "matrix-1",
+                "output_evidence": "transport",
+                "result": "passed",
+                "revision_id": "revision-1",
+                "test_pattern_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+                "tested_at": "2026-08-28T11:00:00.123456Z",
+                "valid_until": "2026-08-29T12:00:00.123456Z"
+              },
+              "signature": "f3939ab3635bdeccab7fddb472bb80918e0d949614a1d8f01ee07ac317a4e390ae8d748cc2327120a3f85d7afe5577980f46101996b5ec4db16b1e53ad448c05",
+              "signer_key_id": "test-key"
+            }
+          ],
+          "profiles": [
+            {
+              "digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "profile": {
+                "capabilities": [
+                  {
+                    "capability_id": "receipt-image-v1",
+                    "contract_major": 1,
+                    "max_copies": 1,
+                    "max_payload_bytes": 2097152,
+                    "media_type": "image/jpeg",
+                    "operation": "receipt_image",
+                    "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "output_evidence": "transport"
+                  }
+                ],
+                "driver_id": "driver-escpos",
+                "effective_at": "2026-08-27T12:00:00.123456Z",
+                "expires_at": "2026-09-27T12:00:00.123456Z",
+                "min_agent_version": "1.20.0",
+                "profile_id": "profile-1",
+                "version": "1.0.0"
+              },
+              "signature": "394adbeb7208b748d7e1bdef347cc05d23d6fd4c76e99e5c4819216543faa143c68550bb5faaf8ace331ff78090478ff1afd64d5e98e4a79209b09b7aaf0a209",
+              "signer_key_id": "profile-key"
+            }
+          ],
+          "scope": {
+            "database": "odoo-prod",
+            "kind": "pos_configuration",
+            "organization_id": "org-1",
+            "pos_configuration_id": "pos-1",
+            "site_id": "site-1"
+          },
+          "signers": [
+            {
+              "key_id": "profile-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+              "purpose": "driver_profile",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "matrix-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+              "purpose": "certification_matrix",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "binding-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+              "purpose": "binding_revision",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "test-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+              "purpose": "device_test_evidence",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "observation-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+              "purpose": "device_observation",
+              "retired_at": null,
+              "state": "active"
+            }
+          ]
+        },
+        "revision": {
+          "digest": "d20b98a8c0c431f9440320fbc6b674bdd4edebf82c03228b72c436528c946629",
+          "revision": {
+            "effective_at": "2026-08-27T12:00:00.123456Z",
+            "expires_at": "2026-09-04T12:00:00.123456Z",
+            "manifest_digest": "3225a1792461205b4e32b3d0eadac1a1bdf6ea9a58153dcb0f8bd5096825a92a",
+            "revision_id": "authority-revision-1",
+            "revision_number": 1
+          },
+          "signature": "c905eb111f221a75ff9611df579959adea25daf54225a8522b1e07a7573d085950aad77dcd7fa9eae09af687115e25165f06b7391294fbe66673c14021f59000",
+          "signer_key_id": "authority-revision-key"
+        }
+      },
+      "agent_id": "agent-1",
+      "initial_bundle": {
+        "manifest": {
+          "activations": [],
+          "agent_id": "agent-1",
+          "bindings": [
+            {
+              "digest": "4b835db00bd66df214ae68cef2a69411ccd3301943242ad1839ea7472a2a51b0",
+              "revision": {
+                "binding_id": "binding-1",
+                "capability_id": "receipt-image-v1",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+                "matrix_row_id": "matrix-1",
+                "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                "purpose": "pos_receipt",
+                "revision_id": "revision-1",
+                "revision_number": 1,
+                "scope": {
+                  "database": "odoo-prod",
+                  "kind": "pos_configuration",
+                  "organization_id": "org-1",
+                  "pos_configuration_id": "pos-1",
+                  "site_id": "site-1"
+                }
+              },
+              "signature": "e68496b3006c24e3baf1561bc4fb9b93d7987160bc97ec6a8af038357a34a26a7efd5de6a0f8b068a9019a62d5c178cc89bb2383affbdde465383b6df847ed0a",
+              "signer_key_id": "binding-key"
+            }
+          ],
+          "certification_rows": [
+            {
+              "digest": "b7626e210d48f92456d388a1aeb7554dd48ae328bec3460db1bbca3ed3e4792c",
+              "row": {
+                "capability_id": "receipt-image-v1",
+                "connection": "usb",
+                "device_id": "device-1",
+                "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+                "driver_id": "driver-escpos",
+                "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+                "effective_at": "2026-08-27T12:00:00.123456Z",
+                "expires_at": "2026-09-27T12:00:00.123456Z",
+                "firmware_build": "2026.08",
+                "firmware_version": "2.1",
+                "manufacturer": "Acme",
+                "media_profile": "receipt-80mm",
+                "model": "Receipt 2000",
+                "operating_system": "linux-x86_64",
+                "platform_backend_id": "cups",
+                "release_set_id": "release-2026-08",
+                "row_id": "matrix-1",
+                "version": 1
+              },
+              "signature": "3be2b52d5a522d5c5126fdf537097aed7259b70961262839a48ac1b81ee82422cfaeb01ecb8f9aba3dd6041dc1ec65c6966e51cd8b4b840ab92cc729c2f45409",
+              "signer_key_id": "matrix-key"
+            }
+          ],
+          "contract": "inari.device-authority.v1",
+          "evidence": [],
+          "profiles": [
+            {
+              "digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "profile": {
+                "capabilities": [
+                  {
+                    "capability_id": "receipt-image-v1",
+                    "contract_major": 1,
+                    "max_copies": 1,
+                    "max_payload_bytes": 2097152,
+                    "media_type": "image/jpeg",
+                    "operation": "receipt_image",
+                    "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                    "output_evidence": "transport"
+                  }
+                ],
+                "driver_id": "driver-escpos",
+                "effective_at": "2026-08-27T12:00:00.123456Z",
+                "expires_at": "2026-09-27T12:00:00.123456Z",
+                "min_agent_version": "1.20.0",
+                "profile_id": "profile-1",
+                "version": "1.0.0"
+              },
+              "signature": "394adbeb7208b748d7e1bdef347cc05d23d6fd4c76e99e5c4819216543faa143c68550bb5faaf8ace331ff78090478ff1afd64d5e98e4a79209b09b7aaf0a209",
+              "signer_key_id": "profile-key"
+            }
+          ],
+          "scope": {
+            "database": "odoo-prod",
+            "kind": "pos_configuration",
+            "organization_id": "org-1",
+            "pos_configuration_id": "pos-1",
+            "site_id": "site-1"
+          },
+          "signers": [
+            {
+              "key_id": "profile-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+              "purpose": "driver_profile",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "matrix-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+              "purpose": "certification_matrix",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "binding-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+              "purpose": "binding_revision",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "test-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+              "purpose": "device_test_evidence",
+              "retired_at": null,
+              "state": "active"
+            },
+            {
+              "key_id": "observation-key",
+              "not_after": "2026-11-26T12:00:00.123456Z",
+              "not_before": "2026-08-27T12:00:00.123456Z",
+              "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+              "purpose": "device_observation",
+              "retired_at": null,
+              "state": "active"
+            }
+          ]
+        },
+        "revision": {
+          "digest": "6e3e0122278636f451e100d7c95c165d1d587b54609682d55226985904d4abcf",
+          "revision": {
+            "effective_at": "2026-08-27T12:00:00.123456Z",
+            "expires_at": "2026-09-04T12:00:00.123456Z",
+            "manifest_digest": "47dbf1b04c198f5a44f05476bf625ace213820188f8d442e2dba4abc4057ea1e",
+            "revision_id": "initial-authority-revision",
+            "revision_number": 1
+          },
+          "signature": "8d4cb0a44abcf2e25bb4722fb00ea4f0b92dccaf57537e41bcc0adb69e64b8b41efc17eb0f87ef4e4ba507b24e9c2bfd1e534e00c8fb2bb8f3e923b040e62608",
+          "signer_key_id": "authority-revision-key"
+        }
+      },
+      "microsecond": 123456,
+      "now": "2026-08-28T12:00:00.123456Z",
+      "records": [
+        {
+          "canonical": "{\"effective_at\":\"2026-08-27T12:00:00.123456Z\",\"expires_at\":\"2026-09-04T12:00:00.123456Z\",\"manifest_digest\":\"3225a1792461205b4e32b3d0eadac1a1bdf6ea9a58153dcb0f8bd5096825a92a\",\"revision_id\":\"authority-revision-1\",\"revision_number\":1}",
+          "purpose": "authority_revision",
+          "record": {
+            "digest": "d20b98a8c0c431f9440320fbc6b674bdd4edebf82c03228b72c436528c946629",
+            "revision": {
+              "effective_at": "2026-08-27T12:00:00.123456Z",
+              "expires_at": "2026-09-04T12:00:00.123456Z",
+              "manifest_digest": "3225a1792461205b4e32b3d0eadac1a1bdf6ea9a58153dcb0f8bd5096825a92a",
+              "revision_id": "authority-revision-1",
+              "revision_number": 1
+            },
+            "signature": "c905eb111f221a75ff9611df579959adea25daf54225a8522b1e07a7573d085950aad77dcd7fa9eae09af687115e25165f06b7391294fbe66673c14021f59000",
+            "signer_key_id": "authority-revision-key"
+          },
+          "signer": {
+            "key_id": "authority-revision-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "ce695cec4f026e513d746caa219feb514cb8f88ffc5672ad554f6abac77dbb8c",
+            "purpose": "authority_revision",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capabilities\":[{\"capability_id\":\"receipt-image-v1\",\"contract_major\":1,\"max_copies\":1,\"max_payload_bytes\":2097152,\"media_type\":\"image/jpeg\",\"operation\":\"receipt_image\",\"options_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"output_evidence\":\"transport\"}],\"driver_id\":\"driver-escpos\",\"effective_at\":\"2026-08-27T12:00:00.123456Z\",\"expires_at\":\"2026-09-27T12:00:00.123456Z\",\"min_agent_version\":\"1.20.0\",\"profile_id\":\"profile-1\",\"version\":\"1.0.0\"}",
+          "purpose": "driver_profile",
+          "record": {
+            "digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+            "profile": {
+              "capabilities": [
+                {
+                  "capability_id": "receipt-image-v1",
+                  "contract_major": 1,
+                  "max_copies": 1,
+                  "max_payload_bytes": 2097152,
+                  "media_type": "image/jpeg",
+                  "operation": "receipt_image",
+                  "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+                  "output_evidence": "transport"
+                }
+              ],
+              "driver_id": "driver-escpos",
+              "effective_at": "2026-08-27T12:00:00.123456Z",
+              "expires_at": "2026-09-27T12:00:00.123456Z",
+              "min_agent_version": "1.20.0",
+              "profile_id": "profile-1",
+              "version": "1.0.0"
+            },
+            "signature": "394adbeb7208b748d7e1bdef347cc05d23d6fd4c76e99e5c4819216543faa143c68550bb5faaf8ace331ff78090478ff1afd64d5e98e4a79209b09b7aaf0a209",
+            "signer_key_id": "profile-key"
+          },
+          "signer": {
+            "key_id": "profile-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "05d2de799fb956f0c4399eaf6d6284e87bfbf59fa3dac2970645bfedb437fb90",
+            "purpose": "driver_profile",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capability_id\":\"receipt-image-v1\",\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df\",\"effective_at\":\"2026-08-27T12:00:00.123456Z\",\"expires_at\":\"2026-09-27T12:00:00.123456Z\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"manufacturer\":\"Acme\",\"media_profile\":\"receipt-80mm\",\"model\":\"Receipt 2000\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"release_set_id\":\"release-2026-08\",\"row_id\":\"matrix-1\",\"version\":1}",
+          "purpose": "certification_matrix",
+          "record": {
+            "digest": "b7626e210d48f92456d388a1aeb7554dd48ae328bec3460db1bbca3ed3e4792c",
+            "row": {
+              "capability_id": "receipt-image-v1",
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "effective_at": "2026-08-27T12:00:00.123456Z",
+              "expires_at": "2026-09-27T12:00:00.123456Z",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "manufacturer": "Acme",
+              "media_profile": "receipt-80mm",
+              "model": "Receipt 2000",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "release_set_id": "release-2026-08",
+              "row_id": "matrix-1",
+              "version": 1
+            },
+            "signature": "3be2b52d5a522d5c5126fdf537097aed7259b70961262839a48ac1b81ee82422cfaeb01ecb8f9aba3dd6041dc1ec65c6966e51cd8b4b840ab92cc729c2f45409",
+            "signer_key_id": "matrix-key"
+          },
+          "signer": {
+            "key_id": "matrix-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "fa9c2709176e0e35d16355cba2c1c51d3311fbcbc07452703518c924cced326c",
+            "purpose": "certification_matrix",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"binding_id\":\"binding-1\",\"capability_id\":\"receipt-image-v1\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_profile_digest\":\"eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df\",\"matrix_row_id\":\"matrix-1\",\"options_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"purpose\":\"pos_receipt\",\"revision_id\":\"revision-1\",\"revision_number\":1,\"scope\":{\"database\":\"odoo-prod\",\"kind\":\"pos_configuration\",\"organization_id\":\"org-1\",\"pos_configuration_id\":\"pos-1\",\"site_id\":\"site-1\"}}",
+          "purpose": "binding_revision",
+          "record": {
+            "digest": "4b835db00bd66df214ae68cef2a69411ccd3301943242ad1839ea7472a2a51b0",
+            "revision": {
+              "binding_id": "binding-1",
+              "capability_id": "receipt-image-v1",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "matrix_row_id": "matrix-1",
+              "options_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+              "purpose": "pos_receipt",
+              "revision_id": "revision-1",
+              "revision_number": 1,
+              "scope": {
+                "database": "odoo-prod",
+                "kind": "pos_configuration",
+                "organization_id": "org-1",
+                "pos_configuration_id": "pos-1",
+                "site_id": "site-1"
+              }
+            },
+            "signature": "e68496b3006c24e3baf1561bc4fb9b93d7987160bc97ec6a8af038357a34a26a7efd5de6a0f8b068a9019a62d5c178cc89bb2383affbdde465383b6df847ed0a",
+            "signer_key_id": "binding-key"
+          },
+          "signer": {
+            "key_id": "binding-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "b39add1ac80c0c1e7d6ebfa9beca43932042bb725e678596497941e583f99c2d",
+            "purpose": "binding_revision",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"capability_id\":\"receipt-image-v1\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_profile_digest\":\"eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df\",\"evidence_id\":\"test-1\",\"matrix_row_id\":\"matrix-1\",\"output_evidence\":\"transport\",\"result\":\"passed\",\"revision_id\":\"revision-1\",\"test_pattern_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"tested_at\":\"2026-08-28T11:00:00.123456Z\",\"valid_until\":\"2026-08-29T12:00:00.123456Z\"}",
+          "purpose": "device_test_evidence",
+          "record": {
+            "digest": "8119ffb15ead508b531a1d53fc95240855e389750460750a54dabaf99a1a0f0f",
+            "evidence": {
+              "capability_id": "receipt-image-v1",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "evidence_id": "test-1",
+              "matrix_row_id": "matrix-1",
+              "output_evidence": "transport",
+              "result": "passed",
+              "revision_id": "revision-1",
+              "test_pattern_digest": "3333333333333333333333333333333333333333333333333333333333333333",
+              "tested_at": "2026-08-28T11:00:00.123456Z",
+              "valid_until": "2026-08-29T12:00:00.123456Z"
+            },
+            "signature": "f3939ab3635bdeccab7fddb472bb80918e0d949614a1d8f01ee07ac317a4e390ae8d748cc2327120a3f85d7afe5577980f46101996b5ec4db16b1e53ad448c05",
+            "signer_key_id": "test-key"
+          },
+          "signer": {
+            "key_id": "test-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "7f56841efdc282a3605876cfe9e41638ffaec2777195062aec19049bcf10b9e9",
+            "purpose": "device_test_evidence",
+            "retired_at": null,
+            "state": "active"
+          }
+        },
+        {
+          "canonical": "{\"connection\":\"usb\",\"device_id\":\"device-1\",\"device_identity_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"driver_id\":\"driver-escpos\",\"driver_profile_digest\":\"eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df\",\"firmware_build\":\"2026.08\",\"firmware_version\":\"2.1\",\"media_profile\":\"receipt-80mm\",\"observation_id\":\"observation-1\",\"observed_at\":\"2026-08-28T12:00:00.123456Z\",\"operating_system\":\"linux-x86_64\",\"platform_backend_id\":\"cups\",\"ready\":true,\"reason\":null,\"state\":\"ready\"}",
+          "purpose": "device_observation",
+          "record": {
+            "digest": "476ab9058d172c82008b311917a3290956ae13fde9ebfd5dbaadb85a593aadda",
+            "observation": {
+              "connection": "usb",
+              "device_id": "device-1",
+              "device_identity_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+              "driver_id": "driver-escpos",
+              "driver_profile_digest": "eb92c7eecdc62023529beecbd232e9efa4390ca37c19c4559ff1da8e671711df",
+              "firmware_build": "2026.08",
+              "firmware_version": "2.1",
+              "media_profile": "receipt-80mm",
+              "observation_id": "observation-1",
+              "observed_at": "2026-08-28T12:00:00.123456Z",
+              "operating_system": "linux-x86_64",
+              "platform_backend_id": "cups",
+              "ready": true,
+              "reason": null,
+              "state": "ready"
+            },
+            "signature": "d6c5d8524ba15b15b09197881fefa8f94aa5ad788e92f6441cd6472fef94a0008ebb91fe83f95986f8aef4f628d2d6fc70e9a24cb3767ed850fe46532d25010b",
+            "signer_key_id": "observation-key"
+          },
+          "signer": {
+            "key_id": "observation-key",
+            "not_after": "2026-11-26T12:00:00.123456Z",
+            "not_before": "2026-08-27T12:00:00.123456Z",
+            "public_key": "6a805a99431e99c034b4db9fc0488f808f3fe943aaf661b6e3aeed7c09e9bf6e",
+            "purpose": "device_observation",
+            "retired_at": null,
+            "state": "active"
+          }
+        }
+      ],
+      "scope": {
+        "database": "odoo-prod",
+        "kind": "pos_configuration",
+        "organization_id": "org-1",
+        "pos_configuration_id": "pos-1",
+        "site_id": "site-1"
+      },
+      "trusted_signer": {
+        "key_id": "authority-revision-key",
+        "not_after": "2026-11-26T12:00:00.123456Z",
+        "not_before": "2026-08-27T12:00:00.123456Z",
+        "public_key": "ce695cec4f026e513d746caa219feb514cb8f88ffc5672ad554f6abac77dbb8c",
+        "purpose": "authority_revision",
+        "retired_at": null,
+        "state": "active"
+      }
+    }
+  ],
+  "contract": "inari.device-authority.test-vectors.v1",
+  "notice": "Keys, hardware facts, and Passed results are test fixtures."
+}

@@ -123,3 +123,33 @@ This Agent contract does not issue Controller authority or activate a Binding
 Revision. The Controller authorizes activation through a new signed bundle
 after it verifies a passed result. The initial graph can authorize a Device
 Test without previous evidence or activation.
+
+## Controller record contract
+
+The Controller uses typed records from `inari_gateway::device_authority`.
+`CanonicalRecord` validates each record and retains its immutable RFC 8785
+payload and SHA-256 digest. Only Authority Revision, Driver Profile,
+Hardware Certification Matrix Row, and Binding Revision implement
+`ControllerRecordPayload`. Agent observation and Device Test evidence remain
+separate signature purposes.
+
+Signed payload timestamps always use UTC with six microsecond digits. Bundle
+JSON omits the fractional part when the microsecond value is zero. The
+manifest digest covers this bundle JSON. These two formats must remain exact
+because the Agent verifies both hashes independently.
+
+The Controller bundle verifier requires an independently trusted root key,
+the exact Agent and Binding Scope, and a current, bounded Authority Revision.
+It verifies every record signature before it checks the activation graph.
+An initial bundle can contain no evidence or activations. An active Binding
+Revision requires matching Passed evidence and current certification records.
+
+The shared [conformance vectors](../contracts/device-authority.test-vectors.json)
+contain only test keys and test hardware facts. The
+[Agent generator](../packages/agent/tests/support/device_authority_vectors.py)
+and [Rust tests](../crates/inari-gateway/tests/device_authority_contract.rs)
+verify all six signature purposes at zero, millisecond, and microsecond
+precision. The Agent drift test rejects a stale vector file.
+
+This record boundary does not issue authority, approve hardware facts, or
+activate a Binding Revision. Those actions require the Controller issuer.
