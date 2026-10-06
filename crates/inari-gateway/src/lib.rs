@@ -2,6 +2,7 @@
 
 pub mod audit;
 pub mod certificate;
+pub mod device_authority;
 mod error;
 pub mod identity;
 pub mod onboarding;
