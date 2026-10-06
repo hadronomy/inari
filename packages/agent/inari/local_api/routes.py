@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Annotated
 
@@ -18,6 +19,7 @@ from .dependencies import (
     get_device_catalog,
     get_device_work_submission,
     get_device_stream_service,
+    get_event_hub,
     get_gateway_service,
     get_job_service,
     get_print_job_queries,
@@ -39,11 +41,13 @@ from ..printing.commands import DeviceCommandKind
 from ..documents import DocumentKind
 from ..device_streams import DeviceStreamService, SignedStreamMessage
 from ..runtime.models import JobState
+from ..runtime.events import EventHub
 from ..runtime.devices.service import DeviceCatalog
 from ..runtime.jobs.service import JobService
 from ..security.auth import AuthorizationService, connection_origin
 from ..security.local_trust import StandaloneTrustService
-from ..security.models import AccessScope, AuthenticatedPrincipal
+from ..security.models import AccessScope, AuthenticatedPrincipal, PrincipalKind
+from ..security.policies import is_loopback_host
 from ..core.version import API_VERSION, SERVICE_NAME
 from ..drawer_intents import DrawerIntentService
 from .schemas import (
@@ -67,6 +71,8 @@ from .schemas import (
     LocalPairingStartResponse,
     LocalTokenRequest,
     LocalTrustStatusResponse,
+    LiveEventUpdateResponse,
+    LiveSnapshotResponse,
     JobResourceResponse,
     JobResponse,
     PrintJobQueryRequest,
@@ -187,6 +193,7 @@ DrawerIntentServiceDependency = Annotated[
 DeviceStreamServiceDependency = Annotated[
     DeviceStreamService, Depends(get_device_stream_service)
 ]
+EventHubDependency = Annotated[EventHub, Depends(get_event_hub)]
 AuthorizationServiceDependency = Annotated[
     AuthorizationService, Depends(get_authorization_service)
 ]
@@ -479,6 +486,99 @@ async def system_status(
     principal = _current_principal(authorization_service, connection)
     _require_scopes(authorization_service, principal, AccessScope.SYSTEM_READ)
     return build_system_status_response(device_catalog, job_service)
+
+
+def _require_native_monitor(
+    authorization_service: AuthorizationService, connection: Request
+) -> None:
+    if not is_loopback_host(connection.client.host if connection.client else None):
+        raise AgentError(
+            "LOOPBACK_REQUIRED", "The monitor requires a local client.", status_code=403
+        )
+    if connection.headers.get("origin") is not None:
+        raise AgentError(
+            "NATIVE_CLIENT_REQUIRED",
+            "The monitor requires a native client.",
+            status_code=403,
+        )
+    scheme, _, token = connection.headers.get("authorization", "").partition(" ")
+    if scheme.casefold() != "bearer" or not token.strip():
+        raise AgentError(
+            "AUTHENTICATION_REQUIRED",
+            "The monitor requires a bearer header.",
+            status_code=401,
+        )
+    principal = _current_principal(authorization_service, connection)
+    if principal.principal_kind is not PrincipalKind.LOCAL_CLIENT:
+        raise AgentError(
+            "NATIVE_CLIENT_REQUIRED",
+            "The monitor requires a local client identity.",
+            status_code=403,
+        )
+    _require_scopes(
+        authorization_service,
+        principal,
+        AccessScope.EVENTS_READ,
+        AccessScope.SYSTEM_READ,
+        AccessScope.DEVICES_READ,
+        AccessScope.JOBS_READ,
+    )
+
+
+@system_router.get(
+    "/events",
+    response_class=StreamingResponse,
+    responses={
+        **problem_responses(401, 403, 500),
+        200: {
+            "description": "Loopback-only native monitor with bearer authentication.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        },
+    },
+)
+async def stream_native_monitor(
+    connection: Request,
+    authorization_service: AuthorizationServiceDependency,
+    event_hub: EventHubDependency,
+    device_catalog: DeviceCatalogDependency,
+    job_service: JobServiceDependency,
+) -> StreamingResponse:
+    _require_native_monitor(authorization_service, connection)
+
+    async def frames():
+        subscription = await event_hub.subscribe()
+        try:
+            _require_native_monitor(authorization_service, connection)
+            snapshot = LiveSnapshotResponse(
+                status=build_system_status_response(device_catalog, job_service)
+            )
+            yield f"data: {snapshot.model_dump_json()}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(subscription.queue.get(), timeout=10)
+                except TimeoutError:
+                    event = None
+                _require_native_monitor(authorization_service, connection)
+                if event is None:
+                    yield ": keep-alive\n\n"
+                else:
+                    update = LiveEventUpdateResponse(
+                        status=build_system_status_response(
+                            device_catalog, job_service
+                        ),
+                        event=RuntimeEventResponse.from_domain(event),
+                    )
+                    yield f"data: {update.model_dump_json()}\n\n"
+        except AgentError:
+            return
+        finally:
+            await event_hub.unsubscribe(subscription)
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 def _device_response(device_catalog: DeviceCatalog, device) -> DeviceResponse:

@@ -14,7 +14,7 @@ pub enum AgentClientError {
     PairingUnavailable(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[error("the local event stream is unavailable")]
-    EventStreamUnavailable(#[source] async_tungstenite::tungstenite::Error),
+    EventStreamUnavailable(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[error("the local agent returned data that this Device Center cannot understand")]
     InvalidResponse(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -44,6 +44,12 @@ pub enum AgentClientError {
 }
 
 impl AgentClientError {
+    pub(crate) fn event_stream_unavailable(
+        error: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::EventStreamUnavailable(Box::new(error))
+    }
+
     pub(crate) fn invalid_response(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::InvalidResponse(Box::new(error))
     }

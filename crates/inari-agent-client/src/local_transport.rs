@@ -1,4 +1,8 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use url::{Host, Url};
@@ -16,6 +20,14 @@ impl Resolve for LoopbackResolver {
             Ok(addresses)
         })
     }
+}
+
+pub(crate) fn http_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .no_proxy()
+        .dns_resolver(Arc::new(LoopbackResolver))
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(10))
 }
 
 pub(crate) fn socket_address(endpoint: &Url) -> AgentClientResult<SocketAddr> {

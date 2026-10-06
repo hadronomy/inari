@@ -32,10 +32,6 @@ version     = "0.1.0-alpha.1"
 aes-gcm = { version = "0.11", features = ["zeroize"] }
 axum = { version = "0.8", features = ["http1", "json", "macros", "tokio"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
-async-tungstenite = { version = "0.34", default-features = false, features = [
-  "tokio-runtime",
-  "url",
-] }
 async-channel = "2"
 base64 = "0.22"
 bytes = "1.10"
@@ -45,6 +41,7 @@ console_error_panic_hook = "0.1"
 data-encoding = "2"
 directories = "6"
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core", "zeroize"] }
+eventsource-stream = { version = "0.2.3", default-features = false, features = ["std"] }
 fastrand = "2"
 futures-util = "0.3"
 getrandom = "0.3"
@@ -82,7 +79,6 @@ reqwest = { version = "0.13", default-features = false, features = [
 regress = "0.11.1"
 rust-embed = "8"
 rustls = { version = "0.23.39", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
-rustls-platform-verifier = "0.6.2"
 secrecy = "0.10"
 service-manager = "=0.11.0"
 windows-sys = { version = "0.61.2", features = [
