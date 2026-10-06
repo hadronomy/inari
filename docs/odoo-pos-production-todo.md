@@ -12,9 +12,10 @@ the workstation's 80-VII-UL USB printer.
 - Agent Host: Windows `workstation`
 - Odoo release commit: `53d0572853885ed19a066af177a4410f8b45f606`
 - Odoo shared contracts: `1.20.0a11`
-- Windows candidate source: `01bad52b83ba977fe88b60f03ac5e060cb57f7f0`
-- Windows candidate: `1.20.0-alpha.13`, MSIX `1.20.0.1013`
-- Controller source: `d0dfdcdd0bdb88fafeadf9a86c3c1efac767550d`
+- Windows candidate source: `d36c0c976290c270906be6e6dcc63b28ab7f2532`
+- Windows candidate: `1.20.0-alpha.18`, MSIX `1.20.0.1018`
+- Controller source: `4d9c0a1830ded1f7db84c5b09a9ca446d6ea42ff`
+- Controller image: `sha256:0885792d7749e36e7597cf1e35db8f06bc107065538fc6bcd0dce75490883ff7`
 
 Status: **in progress**. Odoo and the Windows Agent are installed. The receipt
 Binding Revision is inactive. No physical receipt passed the full Inari path.
@@ -51,7 +52,7 @@ and test result before marking it complete.
   - [x] Stage the addon, shared contracts, and locked dependency in one Inari artifact.
   - [x] Publish a signed digest from the `main` release workflow.
   - [x] Pin, verify, and mount the artifact in the Odoo runtime.
-- [ ] Prepare the required Controller, Organization, Site, and policy setup.
+- [x] Prepare the required Controller, Organization, Site, and Router policy setup.
 - [x] Configure OpenBao to sign scoped Odoo Pairing Assertions.
   - [x] Merge infrastructure PR 24 and verify Flux revision `e9ff0530`.
   - [x] Provision the non-exportable company key, narrow policy, and Kubernetes role.
@@ -66,10 +67,10 @@ and test result before marking it complete.
 - [x] Install the addon and verify the production POS asset bundle.
 - [x] Start the Windows Agent service and verify service restart and HTTPS.
 - [ ] Synchronize authoritative Agent and Device projections into Odoo.
-- [ ] Connect the USB printer and install its actual Windows driver.
+- [x] Connect the USB printer and install its actual Windows driver.
   - [x] Connect the USB printer and register queue `POS-80` on `USB002`.
   - [x] Configure and observe an initialized 80 mm media width.
-  - [ ] Identify the manufacturer and its supported firmware observation protocol.
+- [ ] Record the manufacturer and supported firmware observation protocol, or their explicit unavailable qualification.
 - [ ] Complete the receipt Device Test and activate the exact Driver Profile.
 - [ ] Activate the receipt Binding Revision for POS configuration `2`.
 - [ ] Pair the production POS browser and approve its scoped Client Grant.
@@ -101,18 +102,21 @@ Infrastructure PRs 29 and 30 deploy it at
 The Helm release, database, API, and OIDC discovery are ready. The Controller
 opened through ZITADEL with `hadronomy@mizonaecologica.es`. Its persisted
 administrator session matches that active ZITADEL account by subject.
-Organization and Site database records remain absent until the supported
-enrollment bootstrap runs. Certificate issuance, enrollment, and Zenoh remain disabled.
+Organization and Site records now exist. The Controller dashboard shows one
+online Agent and one Device. Certificate issuance, enrollment, Zenoh, and
+Router policy admission are ready. Managed dispatch remains disabled.
 
-The signed alpha.13 package runs on WORKSTATION. Device Center discovers the
-protected Agent Endpoint and authenticates through trusted HTTPS over loopback.
-The challenge, token, and onboarding requests returned HTTP 200. The new UI
-shows the organization invitation step. Enrollment must finish before the
-operations window and Client Pairing acceptance checks.
+The signed alpha.18 package runs on WORKSTATION. Its Agent is online through
+required mTLS and publishes the selected POS-80 Device. Device Center discovers
+the protected Agent Endpoint and authenticates through trusted HTTPS over
+loopback. PR 103 restores its native SSE route. The installed route delivered
+a snapshot and five heartbeats over fifty seconds. Device Center still shows
+`Opening the local connection`. Installed UI acceptance remains open until the
+connection state reaches the UI reliably.
 
 The operator supplied rear-label model `POS-8370` and serial `25103000100009`.
 Keep these facts separate from the self-test model and USB descriptor serial.
-The manufacturer remains unconfirmed.
+The operator reports that the product label does not state the manufacturer.
 
 The software also needs a supported path that runs a real Device Test before
 binding activation. Existing signed Device Test models and the authority
@@ -125,9 +129,11 @@ The Agent can now install signed Device authority through the
 [administrator command](device-authority-installation.md). The SQLite-backed
 admission test passes after that import. Production still needs its Controller
 trust and signed bundle. The Agent can sign current discovery records, but the
-Windows receipt Driver does not yet report all certification facts. Admission
-stays closed until the Driver reports those facts and the Controller authorizes
-the Agent's Device observation key.
+Windows receipt Driver cannot observe its firmware identity. A signed Hardware
+Certification Matrix row can qualify that exact Device with firmware observation
+marked `unavailable`, as described in the authority installation document.
+This limitation must remain explicit. Admission requires the signed graph, the
+approved observation key, and a real Device Test before activation.
 
 Keep the Inari artifact separate from the MZE artifact, as required by
 [ADR 0021](adr/0021-keep-addon-artifacts-separate.md). Package the shared Python
@@ -138,8 +144,52 @@ the Odoo runtime. Keep the existing Odoo image and MZE addon ownership intact.
 
 See [the rollout checks](odoo-pos-rollout.md) for the completed Odoo and native
 Windows results, including the October 3 upgrade and Controller recovery.
-The October 2 deployment evidence follows. Full Release Readiness and physical
-acceptance remain incomplete.
+The dated records include the October 6 Controller and Agent acceptance.
+Full Release Readiness and physical receipt acceptance remain incomplete.
+
+## Production acceptance on October 6
+
+Infrastructure PR 47 deployed the signed Controller image from source
+`4d9c0a18`. Helm revision 14 runs that exact digest. Migration
+`m20261005_223036_project_device_inventory` is current. The old Controller Pods
+stopped before the pre-upgrade migration hook. Infrastructure PR 48 records the
+Flux ancestor pause and restoration order. Both Kustomizations and the Helm
+release resumed their prior active state and report Ready.
+
+The fresh pre-upgrade backup `20261006T092153Z` passed all fourteen artifact
+checksums, private-permission checks, SQLite integrity checks, and sealed-authority
+archive checks. The previous backup `20261005T184739Z` passed isolated PostgreSQL
+and OpenBao restoration. Ownership and ACL restoration, K3s startup, and a full
+Managed Work Recovery Point remain unverified.
+
+The Agent certificate expired at `2026-10-06T06:36:25Z`. Authenticated loopback
+diagnostics reported `rebootstrap_required`. A fresh Controller invitation
+restored the same Agent identity without a service restart. Its new certificate
+expires at `2026-10-07T09:52:59Z`. The transport requires mTLS and reports online.
+
+The operator's previous sharing selection contains only
+`dev_6db9c792b1d6545f91421c866a14cd05`, POS-80 on USB002. The installed Windows
+Driver is `POS-80 11.3.0.1`. Fresh Agent publications project that Device into
+Controller Inventory as an online physical printer. The Controller dashboard
+reports one online Agent and one Device. Normal TLS verification returns
+HTTPS `/readyz` 200. All three Routers acknowledge the current policy.
+
+Candidate 18 comes from merged source `d36c0c97`, workflow run `37444804596`.
+All seven asset checksums and provenance attestations passed. The MSIX SBOM
+attestation and Windows publisher signature passed. MSIX
+`1.20.0.1018` has SHA-256
+`8d8782b942cf8d6e65e39c9ed2d4d4394c4e0bc8cf24c197c0ed74a24177d0f6`.
+The published native executable matches its copy inside the package. The
+upgrade preserved the protected config, identity, certificate, enrollment,
+and sharing selection. A private full Agent backup precedes installation.
+The service and Device Center process both run from candidate 18. The
+native SSE endpoint passed a fifty-second snapshot and heartbeat check with
+normal TLS verification. The UI connection state still needs acceptance.
+
+Managed Work remains empty, and the rendered Controller config keeps dispatch
+disabled. This acceptance does not qualify the Hardware Certification Matrix,
+record a Device Test Result, activate a Binding Revision, or prove physical
+receipt output.
 
 ## Production deployment on October 2
 
