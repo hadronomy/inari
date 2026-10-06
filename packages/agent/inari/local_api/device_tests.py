@@ -13,7 +13,7 @@ from ..device_tests import (
     TestState,
 )
 from ..device_tests.models import DEVICE_TEST_ID_PATTERN, DeviceTestRecord
-from ..device_tests.pattern import (
+from ..printing.receipt_pattern import (
     CODE_VALUE,
     PATTERN_DIGEST,
     PATTERN_VERSION,

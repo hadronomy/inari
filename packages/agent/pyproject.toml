@@ -41,7 +41,7 @@ include = ["inari*"]
 exclude = ["notebooks*", "tests*"]
 
 [tool.setuptools.package-data]
-inari = ["db/alembic/script.py.mako", "device_tests/*.jpg"]
+inari = ["db/alembic/script.py.mako", "printing/*.jpg"]
 
 
 

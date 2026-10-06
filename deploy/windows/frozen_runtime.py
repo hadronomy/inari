@@ -27,7 +27,7 @@ def verify_when_requested(
 
         ssl.create_default_context()
         load_application()
-        from inari.device_tests.pattern import receipt_image
+        from inari.printing.receipt_pattern import receipt_image
 
         receipt_image()
     except Exception:

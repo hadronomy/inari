@@ -1,8 +1,8 @@
 from hashlib import sha256
 from importlib.resources import files
 
-from ..printing.protocols import CutMode
-from ..printing.renderers.image_escpos_renderer import EscPosImageReceiptRenderer
+from .protocols import CutMode
+from .renderers.image_escpos_renderer import EscPosImageReceiptRenderer
 
 
 PATTERN_VERSION = "receipt-v1"

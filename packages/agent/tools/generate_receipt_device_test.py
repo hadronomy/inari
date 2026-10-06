@@ -14,7 +14,7 @@ from qrcode.constants import ERROR_CORRECT_M
 
 ROOT = Path(__file__).resolve().parents[3]
 FONTS = ROOT / "packages/brand/inari_brand/assets/fonts"
-DESTINATION = ROOT / "packages/agent/inari/device_tests/receipt_v1.jpg"
+DESTINATION = ROOT / "packages/agent/inari/printing/receipt_v1.jpg"
 CODE = "INARI-TEST-V1"
 
 

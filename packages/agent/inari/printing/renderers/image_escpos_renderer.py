@@ -32,7 +32,7 @@ class EscPosImageReceiptRenderer:
         if self.config.trailing_feed_lines:
             chunks.append(EscPosCommands.feed_lines(self.config.trailing_feed_lines))
         if self.config.cut_mode is not None:
-            chunks.append(EscPosCommands.cut(self.config.cut_mode))
+            chunks.append(EscPosCommands.feed_and_cut(self.config.cut_mode))
         return b"".join(chunks)
 
     def _load_image(self, image_bytes: bytes, *, mime_type: str | None) -> Image.Image:
@@ -56,14 +56,18 @@ class EscPosImageReceiptRenderer:
             image = Image.alpha_composite(background, rgba)
 
         rgb = image.convert("RGB")
-        if rgb.width <= self.config.max_width:
+        if rgb.width > self.config.max_width:
+            ratio = self.config.max_width / rgb.width
+            resized_height = max(1, int(rgb.height * ratio))
+            rgb = rgb.resize(
+                (self.config.max_width, resized_height), Image.Resampling.LANCZOS
+            )
+        if rgb.width == self.config.max_width:
             return rgb
 
-        ratio = self.config.max_width / rgb.width
-        resized_height = max(1, int(rgb.height * ratio))
-        return rgb.resize(
-            (self.config.max_width, resized_height), Image.Resampling.LANCZOS
-        )
+        centered = Image.new("RGB", (self.config.max_width, rgb.height), "white")
+        centered.paste(rgb, ((self.config.max_width - rgb.width) // 2, 0))
+        return centered
 
     def _to_monochrome(self, image: Image.Image) -> Image.Image:
         grayscale = image.convert("L")

@@ -16,6 +16,8 @@ from inari.drivers import (
 )
 from inari.printing.drivers.base import PrinterDriver
 from inari.printing.protocols import (
+    CutMode,
+    EscPosCommands,
     PrintJobResult,
     PrinterCapabilities,
     PrinterDevice,
@@ -131,3 +133,26 @@ def test_command_rejects_a_device_without_raw_capability() -> None:
 
     with pytest.raises(PrinterServiceError, match="RAW receipt printing"):
         service.feed_lines(1, printer_name=device.name)
+
+
+def test_diagnostic_sends_the_full_receipt_pattern_to_the_selected_device() -> None:
+    device = printer()
+    driver = FakePrinterDriver(devices=(device,))
+    service = PrinterService(
+        settings=AgentSettings(),
+        driver_registry=DriverRegistry(drivers=(driver,)),
+    )
+
+    result = service.print_test_ticket(printer_name=device.name)
+
+    assert len(driver.raw_jobs) == 1
+    name, payload, document_name = driver.raw_jobs[0]
+    assert name == device.name
+    assert document_name == "Receipt Test"
+    assert payload.startswith(b"\x1b@\x1dv0\x00\x48\x00\x20\x04")
+    assert len(payload) == 10 + 72 * 1056 + 3 + 4
+    assert payload.endswith(
+        EscPosCommands.feed_lines(3) + EscPosCommands.feed_and_cut(CutMode.PARTIAL)
+    )
+    assert result.bytes_written == len(payload)
+    assert driver.drawer_pulses == []
