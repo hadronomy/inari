@@ -175,10 +175,7 @@ impl AgentClient {
         options: AgentClientOptions,
         identity: impl IdentityStore + 'static,
     ) -> AgentClientResult<Self> {
-        let http = reqwest::Client::builder()
-            .no_proxy()
-            .dns_resolver(Arc::new(crate::local_transport::LoopbackResolver))
-            .redirect(reqwest::redirect::Policy::none())
+        let http = crate::local_transport::http_client_builder()
             .timeout(options.request_timeout)
             .build()
             .map_err(AgentClientError::Unavailable)?;
@@ -438,10 +435,7 @@ impl AgentClient {
                 .map_err(AgentClientError::invalid_response)?;
         authorization.set_sensitive(true);
         headers.insert(AUTHORIZATION, authorization);
-        let http = reqwest::Client::builder()
-            .no_proxy()
-            .dns_resolver(Arc::new(crate::local_transport::LoopbackResolver))
-            .redirect(reqwest::redirect::Policy::none())
+        let http = crate::local_transport::http_client_builder()
             .default_headers(headers)
             .timeout(self.request_timeout)
             .build()

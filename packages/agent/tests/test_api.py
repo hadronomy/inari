@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
@@ -11,6 +12,8 @@ from typing import Any, cast
 import pytest
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
+from starlette.types import Message, Scope
 
 from inari.config import AgentSettings
 from inari.application.container import AgentContainer
@@ -56,6 +59,7 @@ from inari.drivers import (
 from inari.core.exceptions import AgentError
 from inari.gateway.models import UpstreamConnectionState, UpstreamStatus
 from inari.local_api.app import create_app
+from inari.local_api.routes import stream_native_monitor
 from inari.local_api.device_work import DeviceWorkSubmission
 from inari.local_api.print_job_queries import PrintJobQueries
 from inari.local_api.header_authorization import (
@@ -100,6 +104,12 @@ from inari.security.models import (
     IssuedToken,
     PrincipalKind,
 )
+from inari.security.auth import AuthorizationService
+from inari.security.identity import AgentIdentityService
+from inari.security.local_trust import StandaloneTrustService
+from inari.security.policies import SecurityPolicyService
+from inari.security.secrets import SecretStore
+from inari.security.tokens import TokenService
 from inari.core.version import API_VERSION
 
 
@@ -228,18 +238,22 @@ class StubClientTrustAuthorizer:
         request: HeaderAuthorizationRequest,
         policy: EndpointAuthorizationPolicy,
     ) -> AuthorizationDecision:
-        expected_permission = Permission.JOBS_READ if request.path.startswith("/v1/jobs/") else {
-            "/v1/device-work": Permission.RECEIPT_IMAGE,
-            "/v1/jobs/query": Permission.JOBS_READ,
-            "/v1/drawer-intents": Permission.DRAWER,
-            "/v1/drawer-intents/query": Permission.JOBS_READ,
-            "/v1/events/lease": Permission.EVENTS_READ,
-            "/v1/events/lease/renew": Permission.EVENTS_READ,
-            "/v1/events/scale-lease": Permission.EVENTS_READ,
-            "/v1/events/scale-lease/renew": Permission.EVENTS_READ,
-            "/v1/events/ack": Permission.EVENTS_READ,
-            "/v1/events": Permission.EVENTS_READ,
-        }[request.path]
+        expected_permission = (
+            Permission.JOBS_READ
+            if request.path.startswith("/v1/jobs/")
+            else {
+                "/v1/device-work": Permission.RECEIPT_IMAGE,
+                "/v1/jobs/query": Permission.JOBS_READ,
+                "/v1/drawer-intents": Permission.DRAWER,
+                "/v1/drawer-intents/query": Permission.JOBS_READ,
+                "/v1/events/lease": Permission.EVENTS_READ,
+                "/v1/events/lease/renew": Permission.EVENTS_READ,
+                "/v1/events/scale-lease": Permission.EVENTS_READ,
+                "/v1/events/scale-lease/renew": Permission.EVENTS_READ,
+                "/v1/events/ack": Permission.EVENTS_READ,
+                "/v1/events": Permission.EVENTS_READ,
+            }[request.path]
+        )
         assert policy.permission is expected_permission
         if self.error is not None:
             raise self.error
@@ -472,6 +486,203 @@ async def auth_headers(
     response.raise_for_status()
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.anyio
+async def test_native_monitor_requires_authentication(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        response = await client.get("/system/events")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.anyio
+async def test_native_monitor_requires_all_monitor_scopes(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        headers = await auth_headers(client, requested_scopes=("events:read",))
+        response = await client.get("/system/events", headers=headers)
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "origin,peer", [("https://odoo.example", "127.0.0.1"), (None, "192.0.2.1")]
+)
+async def test_native_monitor_rejects_browser_and_remote_peers(
+    mocker, origin, peer
+) -> None:
+    container = make_test_container(mocker=mocker)
+    async with async_client_for(container) as client:
+        headers = await auth_headers(client)
+    if origin is not None:
+        headers["Origin"] = origin
+    async with AsyncClient(
+        transport=ASGITransport(
+            app=create_app(container=container), client=(peer, 1234)
+        ),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/system/events", headers=headers)
+    assert response.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_native_monitor_rejects_query_credentials(mocker) -> None:
+    async with async_client_for(make_test_container(mocker=mocker)) as client:
+        headers = await auth_headers(client)
+        response = await client.get(
+            "/system/events",
+            params={"access_token": headers["Authorization"].removeprefix("Bearer ")},
+        )
+    assert response.status_code == 401
+
+
+async def native_monitor_response(container):
+    async with async_client_for(container) as client:
+        headers = await auth_headers(client)
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/system/events",
+            "scheme": "http",
+            "query_string": b"",
+            "headers": [(b"authorization", headers["Authorization"].encode())],
+            "client": ("127.0.0.1", 1234),
+            "server": ("localhost", 7310),
+        }
+    )
+    return await stream_native_monitor(
+        request,
+        container.authorization_service,
+        container.event_hub,
+        container.device_catalog,
+        container.job_service,
+    )
+
+
+@pytest.mark.anyio
+async def test_native_monitor_streams_snapshot_and_events_then_closes_on_auth_failure(
+    mocker,
+) -> None:
+    container = make_test_container(mocker=mocker)
+    unsubscribe = mocker.spy(container.event_hub, "unsubscribe")
+    response = await native_monitor_response(container)
+    snapshot = await anext(response.body_iterator)
+    assert json.loads(snapshot.removeprefix("data: ").strip())["kind"] == "snapshot"
+    event = cast(StubJobService, container.job_service).job_events[0]
+    await container.event_hub.publish(event)
+    frame = await anext(response.body_iterator)
+    message = json.loads(frame.removeprefix("data: ").strip())
+    assert message["event"]["sequence"] == event.sequence
+    assert message["event"]["event_type"] == "job.queued"
+    cast(
+        StubAuthorizationService, container.authorization_service
+    ).issued_tokens.clear()
+    await container.event_hub.publish(event)
+    with pytest.raises(StopAsyncIteration):
+        await anext(response.body_iterator)
+    unsubscribe.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_native_monitor_middleware_stream_closes_when_idle_token_expires(
+    mocker,
+) -> None:
+    container = make_test_container(mocker=mocker)
+    policy = SecurityPolicyService(container.settings)
+    secret_store = mocker.Mock(spec=SecretStore)
+    secret_store.get_secret.return_value = (
+        "native-monitor-fixture-signing-secret-1234567890"
+    )
+    tokens = TokenService(
+        secret_store=secret_store,
+        identity_service=mocker.Mock(spec=AgentIdentityService),
+        token_ttl_seconds=60,
+        token_audience="inari.local",
+        token_issuer="urn:inari:native-monitor-fixture",
+    )
+    issued = tokens.issue_local_token(client_name="monitor", scopes=tuple(AccessScope))
+    authorization = AuthorizationService(
+        token_service=tokens,
+        policy_service=policy,
+        standalone_trust_service=mocker.Mock(spec=StandaloneTrustService),
+    )
+    container = replace(
+        container,
+        authorization_service=authorization,
+        security_policy_service=policy,
+    )
+    unsubscribe = mocker.spy(container.event_hub, "unsubscribe")
+    app = create_app(container=container)
+    requests: asyncio.Queue[Message] = asyncio.Queue()
+    responses: asyncio.Queue[Message] = asyncio.Queue()
+    await requests.put({"type": "http.request", "body": b"", "more_body": False})
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "path": "/system/events",
+        "root_path": "",
+        "scheme": "http",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"localhost"),
+            (b"authorization", f"Bearer {issued.access_token}".encode()),
+        ],
+        "client": ("127.0.0.1", 1234),
+        "server": ("localhost", 7310),
+    }
+    async with LifespanManager(app):
+        stream = asyncio.create_task(app(scope, requests.get, responses.put))
+        try:
+            async with asyncio.timeout(15):
+                start = await responses.get()
+                assert start["status"] == 200
+                assert (b"x-content-type-options", b"nosniff") in start["headers"]
+                snapshot = await responses.get()
+                assert (
+                    json.loads(snapshot["body"].removeprefix(b"data: "))["kind"]
+                    == "snapshot"
+                )
+                event = cast(StubJobService, container.job_service).job_events[0]
+                await container.event_hub.publish(event)
+                update = await responses.get()
+                assert (
+                    json.loads(update["body"].removeprefix(b"data: "))["event"][
+                        "sequence"
+                    ]
+                    == event.sequence
+                )
+                mocker.patch(
+                    "inari.security.tokens.utc_now",
+                    return_value=issued.expires_at + timedelta(seconds=1),
+                )
+                end = await responses.get()
+                assert end["body"] == b""
+                assert end["more_body"] is False
+                await stream
+        finally:
+            if not stream.done():
+                stream.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await stream
+    unsubscribe.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_native_monitor_cancellation_releases_its_subscription(mocker) -> None:
+    container = make_test_container(mocker=mocker)
+    unsubscribe = mocker.spy(container.event_hub, "unsubscribe")
+    response = await native_monitor_response(container)
+    await anext(response.body_iterator)
+    pending = asyncio.create_task(anext(response.body_iterator))
+    await asyncio.sleep(0)
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    unsubscribe.assert_awaited_once()
 
 
 @pytest.mark.anyio

@@ -38,15 +38,23 @@ The API is organized around a small set of resources:
 | Agent state | `/system/status`, `/gateway/identity`, `/gateway/upstream/status` |
 | Devices | `/devices`, `/devices/{device_id}`, `/devices/{device_id}/events` |
 | Work | `/v1/device-work`, `/v1/jobs/query`, `/device-commands`, `/jobs`, `/jobs/{job_id}` |
-| Live updates | `WS /events` |
+| Native monitor | `GET /system/events` (SSE, loopback only) |
 
 Operational routes require a scoped local token. Device Center pairs, signs a
 challenge with its local identity, and refreshes short-lived tokens
 automatically. Browser clients can bind tokens to an approved origin.
 
-The WebSocket sends a complete snapshot when it opens, then event updates with
-fresh system state. Clients can remain push-driven and use HTTP for deliberate
-reconciliation instead of polling after every event.
+The native monitor sends a complete snapshot when it opens, then SSE event
+updates with fresh system state. It requires a native local identity, the
+`events:read`, `system:read`, `devices:read`, and `jobs:read` scopes, and a bearer
+header. It rejects browser origins, remote peers, and query credentials.
+Authentication is checked before every update and at each ten-second heartbeat.
+Token expiry closes the stream; Device Center reconnects with a current token.
+The client uses the same trusted HTTPS hostname and loopback transport as its
+other local requests. Proxy use and redirects are disabled.
+
+Browser Device Streams use the separate DPoP-protected `/v1/events` contract
+with Transport Leader Leases, signed messages, and Binding Revisions.
 
 Failures use an RFC 9457-style problem document:
 

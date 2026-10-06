@@ -1,17 +1,8 @@
-use std::sync::Arc;
+use std::time::Duration;
 
-use async_tungstenite::{
-    WebSocketStream,
-    tokio::{ConnectStream, client_async_tls_with_connector_and_config},
-    tungstenite::{
-        client::IntoClientRequest as _,
-        error::TlsError,
-        http::{HeaderValue, header::AUTHORIZATION},
-    },
-};
 use chrono::{DateTime, Utc};
-use futures_util::StreamExt as _;
-use rustls_platform_verifier::BuilderVerifierExt as _;
+use eventsource_stream::Eventsource as _;
+use futures_util::{StreamExt as _, stream::BoxStream};
 use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 use url::Url;
@@ -49,69 +40,50 @@ pub struct AgentEvent {
 }
 
 pub struct AgentEventStream {
-    socket: WebSocketStream<ConnectStream>,
+    messages: BoxStream<'static, AgentClientResult<eventsource_stream::Event>>,
 }
 
 impl AgentEventStream {
     pub(crate) async fn connect(endpoint: &Url, token: &SecretString) -> AgentClientResult<Self> {
-        let mut stream_url = endpoint
-            .join("events")
+        crate::local_transport::socket_address(endpoint)?;
+        let stream_url = endpoint
+            .join("system/events")
             .map_err(AgentClientError::invalid_response)?;
-        let scheme = match stream_url.scheme() {
-            "http" => "ws",
-            "https" => "wss",
-            _ => return Err(AgentClientError::EventStreamClosed),
-        };
-        stream_url
-            .set_scheme(scheme)
-            .map_err(|()| AgentClientError::EventStreamClosed)?;
-
-        let mut request = stream_url
-            .as_str()
-            .into_client_request()
-            .map_err(AgentClientError::EventStreamUnavailable)?;
-        let mut authorization = HeaderValue::from_str(&format!("Bearer {}", token.expose_secret()))
-            .map_err(AgentClientError::invalid_response)?;
-        authorization.set_sensitive(true);
-        request
-            .headers_mut()
-            .insert(AUTHORIZATION, authorization);
-
-        let stream =
-            tokio::net::TcpStream::connect(crate::local_transport::socket_address(endpoint)?)
-                .await
-                .map_err(|error| AgentClientError::EventStreamUnavailable(error.into()))?;
-        let connector = if scheme == "wss" {
-            let configuration = rustls::ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::aws_lc_rs::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()
-            .and_then(|builder| builder.with_platform_verifier())
-            .map_err(|error| {
-                AgentClientError::EventStreamUnavailable(TlsError::Rustls(Box::new(error)).into())
-            })?
-            .with_no_client_auth();
-            Some(Arc::new(configuration).into())
-        } else {
-            None
-        };
-        let (socket, _) =
-            client_async_tls_with_connector_and_config(request, stream, connector, None)
-                .await
-                .map_err(AgentClientError::EventStreamUnavailable)?;
-        Ok(Self { socket })
+        let http = crate::local_transport::http_client_builder()
+            .read_timeout(Duration::from_secs(30))
+            .build()
+            .map_err(AgentClientError::Unavailable)?;
+        let response = http
+            .get(stream_url)
+            .bearer_auth(token.expose_secret())
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            .send()
+            .await
+            .map_err(AgentClientError::Unavailable)?;
+        if !response.status().is_success() {
+            return Err(AgentClientError::Rejected);
+        }
+        let media_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next());
+        if media_type != Some("text/event-stream") {
+            return Err(AgentClientError::Rejected);
+        }
+        let messages = response
+            .bytes_stream()
+            .eventsource()
+            .map(|event| event.map_err(AgentClientError::event_stream_unavailable))
+            .boxed();
+        Ok(Self { messages })
     }
 
     pub async fn next(&mut self) -> AgentClientResult<Option<AgentEvent>> {
-        while let Some(message) = self.socket.next().await {
-            let message = message.map_err(AgentClientError::EventStreamUnavailable)?;
-            if message.is_close() {
-                return Ok(None);
-            }
-            let Some(payload) = message.to_text().ok() else {
-                continue;
-            };
-            match serde_json::from_str::<LiveMessage>(payload)
+        while let Some(message) = self.messages.next().await {
+            let message = message?;
+            let payload = message.data;
+            match serde_json::from_str::<LiveMessage>(&payload)
                 .map_err(AgentClientError::invalid_response)?
             {
                 LiveMessage::Snapshot => {},
@@ -215,6 +187,67 @@ impl TryFrom<WireEvent> for AgentEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    #[tokio::test]
+    async fn native_monitor_reads_sse_from_the_agent_route() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, peer) = listener.accept().await.unwrap();
+            assert!(peer.ip().is_loopback());
+            let mut bytes = [0; 4096];
+            let count = stream.read(&mut bytes).await.unwrap();
+            let request = std::str::from_utf8(&bytes[..count])
+                .unwrap()
+                .to_owned();
+            let fixture: Vec<serde_json::Value> =
+                serde_json::from_str(include_str!("../../../contracts/local-agent.events.json"))
+                    .unwrap();
+            let body = format!(
+                ": heartbeat\n\ndata: {{\"kind\":\"snapshot\"}}\n\ndata: {}\n\n",
+                fixture[0]
+            );
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream
+                .write_all(headers.as_bytes())
+                .await
+                .unwrap();
+            for chunk in body.as_bytes().chunks(7) {
+                stream.write_all(chunk).await.unwrap();
+            }
+            request
+        });
+        let endpoint = format!("http://agent.fixture.invalid:{port}/")
+            .parse()
+            .unwrap();
+        let mut stream = AgentEventStream::connect(&endpoint, &SecretString::from("fixture-token"))
+            .await
+            .unwrap();
+        assert_eq!(
+            stream
+                .next()
+                .await
+                .unwrap()
+                .unwrap()
+                .kind,
+            AgentEventKind::DeviceConnected
+        );
+        assert!(stream.next().await.unwrap().is_none());
+        let request = server
+            .await
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(request.starts_with("get /system/events http/1.1\r\n"));
+        assert!(request.contains(&format!("host: agent.fixture.invalid:{port}\r\n")));
+        assert!(request.contains("authorization: bearer fixture-token\r\n"));
+        assert!(request.contains("accept: text/event-stream\r\n"));
+    }
 
     #[tokio::test]
     async fn tls_events_do_not_require_a_process_crypto_provider() {
@@ -256,58 +289,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(result, Err(AgentClientError::EventStreamUnavailable(_))));
+        assert!(matches!(result, Err(AgentClientError::Unavailable(_))));
         server.await.unwrap();
         assert!(rustls::crypto::CryptoProvider::get_default().is_none());
-    }
-
-    #[tokio::test]
-    #[allow(
-        clippy::result_large_err,
-        reason = "Tungstenite fixes the handshake callback error type."
-    )]
-    async fn event_stream_uses_loopback_and_keeps_the_endpoint_authority() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let (sent, received) = tokio::sync::oneshot::channel();
-        let server = tokio::spawn(async move {
-            let (stream, peer) = listener.accept().await.unwrap();
-            assert!(peer.ip().is_loopback());
-            let mut socket = async_tungstenite::tokio::accept_hdr_async(
-                stream,
-                move |request: &async_tungstenite::tungstenite::handshake::server::Request,
-                      response| {
-                    assert_eq!(request.uri().path(), "/events");
-                    assert_eq!(request.headers()[AUTHORIZATION], "Bearer event-fixture-token");
-                    sent.send(
-                        request.headers()["host"]
-                            .to_str()
-                            .unwrap()
-                            .to_owned(),
-                    )
-                    .unwrap();
-                    Ok(response)
-                },
-            )
-            .await
-            .unwrap();
-            socket
-                .send(async_tungstenite::tungstenite::Message::Close(None))
-                .await
-                .unwrap();
-        });
-        let endpoint = format!("http://agent.fixture.invalid:{port}/")
-            .parse()
-            .unwrap();
-        let mut events =
-            AgentEventStream::connect(&endpoint, &SecretString::from("event-fixture-token"))
-                .await
-                .unwrap();
-        assert_eq!(received.await.unwrap(), format!("agent.fixture.invalid:{port}"));
-        assert!(events.next().await.unwrap().is_none());
-        server.await.unwrap();
     }
 
     #[test]
