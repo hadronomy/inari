@@ -8,7 +8,7 @@ from typing import Mapping
 
 from ..client_trust import AuthorizedRequest
 from ..device_authority.testing import DeviceTestPermit
-from .pattern import REQUIRED_CHECKS
+from ..printing.receipt_pattern import REQUIRED_CHECKS
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")

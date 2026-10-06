@@ -53,7 +53,11 @@ from inari.device_authority import (
 from inari.device_authority.bundle import AuthorityBundle
 from inari.device_authority.install import DeviceAuthorityInstaller
 from inari.device_tests import DeviceTestRequest, DeviceTestService, TestState
-from inari.device_tests.pattern import PATTERN_DIGEST, REQUIRED_CHECKS, receipt_image
+from inari.printing.receipt_pattern import (
+    PATTERN_DIGEST,
+    REQUIRED_CHECKS,
+    receipt_image,
+)
 from inari.device_tests.models import TestWorkerClaim
 from inari.device_tests.signing import DeviceTestSigningKey
 from inari.device_tests.sqlite import SqliteDeviceTestLedger

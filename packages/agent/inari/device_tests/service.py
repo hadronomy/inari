@@ -46,7 +46,7 @@ from .models import (
     TestState,
     physical_checks,
 )
-from .pattern import (
+from ..printing.receipt_pattern import (
     CODE_VALUE,
     PATTERN_DIGEST,
     PATTERN_VERSION,

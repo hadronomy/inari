@@ -7,6 +7,8 @@ from ..core.exceptions import PrinterServiceError
 from ..drivers import DriverRegistry
 from .drivers.base import PrinterDriver
 from .protocols import CutMode, EscPosCommands, PrintJobResult, PrinterDevice
+from .receipt_pattern import prepared_receipt
+from .renderers import EscPosImageReceiptRenderer
 
 
 @dataclass(slots=True, frozen=True)
@@ -99,15 +101,7 @@ class PrinterService:
         printer_name: str | None = None,
     ) -> PrintJobResult:
         selection = self._select_raw_printer(printer_name)
-        payload = (
-            EscPosCommands.INITIALIZE
-            + b"\x1b!\x38Inari\n"
-            + b"\x1b!\x00Connectivity check\n"
-            + b"------------------------------------------\n"
-            + b"The agent can reach the receipt printer.\n"
-            + b"\n\n"
-            + EscPosCommands.cut(CutMode.PARTIAL)
-        )
+        payload = prepared_receipt(EscPosImageReceiptRenderer())
         return selection.driver.submit_raw_job(
             selection.printer,
             payload,

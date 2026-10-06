@@ -309,7 +309,7 @@ class ZenohGatewayTransport:
     ) -> None:
         if closed.is_set():
             return
-        if getattr(sample, "kind", None) is not zenoh.SampleKind.PUT:
+        if getattr(sample, "kind", None) != zenoh.SampleKind.PUT:
             return
         try:
             payload = load_json_payload(sample.payload.to_string())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 import ssl
 from collections.abc import Callable
 from dataclasses import replace
@@ -11,6 +12,7 @@ from typing import Any, cast
 
 import httpx
 import pytest
+import zenoh
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
@@ -56,6 +58,62 @@ from inari.security.models import GatewayMode
 from inari.security.policies import SecurityPolicyService
 from inari.security.secrets import MemorySecretStore
 from inari.security.tls import TlsContextFactory
+
+
+@pytest.mark.anyio
+async def test_live_zenoh_sample_reaches_command_queue(tmp_path: Path) -> None:
+    transport = ZenohGatewayTransport(
+        settings=AgentSettings(),
+        certificate_service=CertificateLifecycleService(
+            certificate_path=tmp_path / "client.pem",
+            private_key_path=tmp_path / "key.pem",
+        ),
+    )
+    transport._loop = asyncio.get_running_loop()
+    closed = asyncio.Event()
+    with socket.socket() as address:
+        address.bind(("127.0.0.1", 0))
+        endpoint = f"tcp/127.0.0.1:{address.getsockname()[1]}"
+    listener_config = zenoh.Config()
+    listener_config.insert_json5("mode", '"peer"')
+    listener_config.insert_json5("scouting/multicast/enabled", "false")
+    listener_config.insert_json5("listen/endpoints", json.dumps([endpoint]))
+    sender_config = zenoh.Config()
+    sender_config.insert_json5("mode", '"client"')
+    sender_config.insert_json5("scouting/multicast/enabled", "false")
+    sender_config.insert_json5("connect/endpoints", json.dumps([endpoint]))
+    key = "inari/test/live-command"
+    with zenoh.open(listener_config) as listener:
+        subscriber = listener.declare_subscriber(
+            key,
+            lambda sample: transport._handle_live_command_sample(sample, closed=closed),
+        )
+        try:
+            with zenoh.open(sender_config) as sender:
+                await asyncio.sleep(0.2)
+                sender.put(
+                    key,
+                    json.dumps(
+                        {
+                            "type": "controller.command.execute_device_command",
+                            "message_id": "message-1",
+                            "command_id": "command-1",
+                            "sequence": 1,
+                            "payload": {
+                                "target": {"device_id": "device-1"},
+                                "command": {"kind": "print_test_page"},
+                            },
+                        }
+                    ),
+                )
+                command = await asyncio.wait_for(
+                    transport._command_queue.get(), timeout=2
+                )
+        finally:
+            subscriber.undeclare()
+    assert command.command_id == "command-1"
+    assert command.sequence == 1
+    assert transport._command_queue.empty()
 
 
 @pytest.mark.anyio

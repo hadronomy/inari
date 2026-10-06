@@ -63,6 +63,17 @@ Spooler evidence alone does not prove these physical checks. A Test without
 confirmed output and the required evidence can produce only Failed Environment.
 Incorrect answers cannot turn missing execution evidence into Failed Contract.
 
+## Diagnostic receipt
+
+The explicit `print_test_page` Device command also prints the fixed `receipt-v1`
+pattern. It uses the same packaged JPEG, 576-dot renderer, feed, and partial cut.
+The command accepts no receipt content or renderer options.
+
+This diagnostic records the Driver result through the existing command ledger.
+It creates no signed Device Test Result and cannot activate a Binding Revision.
+The Local Agent Device Test routes remain the authority for physical answers
+and signed certification evidence.
+
 ## Execution and retry
 
 New work enters `accepted`. The Agent commits one worker claim before it starts
