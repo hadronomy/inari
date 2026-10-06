@@ -150,9 +150,9 @@ def test_diagnostic_sends_the_full_receipt_pattern_to_the_selected_device() -> N
     assert name == device.name
     assert document_name == "Receipt Test"
     assert payload.startswith(b"\x1b@\x1dv0\x00\x48\x00\x20\x04")
-    assert len(payload) == 10 + 72 * 1056 + 3 + 3
+    assert len(payload) == 10 + 72 * 1056 + 3 + 4
     assert payload.endswith(
-        EscPosCommands.feed_lines(3) + EscPosCommands.cut(CutMode.PARTIAL)
+        EscPosCommands.feed_lines(3) + EscPosCommands.feed_and_cut(CutMode.PARTIAL)
     )
     assert result.bytes_written == len(payload)
     assert driver.drawer_pulses == []

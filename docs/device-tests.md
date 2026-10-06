@@ -69,6 +69,10 @@ The explicit `print_test_page` Device command also prints the fixed `receipt-v1`
 pattern. It uses the same packaged JPEG, 576-dot renderer, feed, and partial cut.
 The command accepts no receipt content or renderer options.
 
+Receipt images narrower than the configured print width are centered on white
+paper. Raster jobs advance the last printed line to the cutter before the
+partial cut, so the cutter does not cross the footer.
+
 This diagnostic records the Driver result through the existing command ledger.
 It creates no signed Device Test Result and cannot activate a Binding Revision.
 The Local Agent Device Test routes remain the authority for physical answers

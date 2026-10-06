@@ -43,3 +43,9 @@ class EscPosCommands:
         if mode is CutMode.FULL:
             return b"\x1d\x56\x00"
         return b"\x1d\x56\x01"
+
+    @staticmethod
+    def feed_and_cut(mode: CutMode) -> bytes:
+        """Advance the last printed line to the cutter before cutting."""
+        selector = 65 if mode is CutMode.FULL else 66
+        return b"\x1d\x56" + bytes((selector, 0))
