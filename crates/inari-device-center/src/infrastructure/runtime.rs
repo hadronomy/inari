@@ -13,7 +13,7 @@ use inari_agent_client::{
 use tokio::io::AsyncReadExt as _;
 use tokio::{
     runtime::Runtime,
-    sync::{broadcast, mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot, watch},
     task::JoinSet,
     time,
 };
@@ -34,13 +34,50 @@ pub enum AgentRuntimeUpdate {
     Activation(Option<String>),
 }
 
+#[derive(Clone, Debug)]
+enum AgentRuntimeEvent {
+    Event(AgentEvent),
+    #[cfg(windows)]
+    Activation(Option<String>),
+}
+
+pub(crate) struct AgentRuntimeSubscription {
+    connection: watch::Receiver<AgentConnection>,
+    events: broadcast::Receiver<AgentRuntimeEvent>,
+    initial_connection_pending: bool,
+}
+
+impl AgentRuntimeSubscription {
+    pub(crate) async fn recv(&mut self) -> Result<AgentRuntimeUpdate, broadcast::error::RecvError> {
+        if std::mem::take(&mut self.initial_connection_pending) {
+            return Ok(AgentRuntimeUpdate::Connection(*self.connection.borrow_and_update()));
+        }
+
+        tokio::select! {
+            biased;
+            changed = self.connection.changed() => {
+                changed.map_err(|_| broadcast::error::RecvError::Closed)?;
+                Ok(AgentRuntimeUpdate::Connection(*self.connection.borrow_and_update()))
+            }
+            event = self.events.recv() => {
+                Ok(match event? {
+                    AgentRuntimeEvent::Event(event) => AgentRuntimeUpdate::Event(event),
+                    #[cfg(windows)]
+                    AgentRuntimeEvent::Activation(invitation) => AgentRuntimeUpdate::Activation(invitation),
+                })
+            }
+        }
+    }
+}
+
 pub struct AgentRuntime {
     runtime: Mutex<Option<Runtime>>,
     tasks: Mutex<Option<JoinSet<()>>>,
     client: Arc<AgentClient>,
     service: LocalAgentService,
     cancellation: CancellationToken,
-    updates: broadcast::Sender<AgentRuntimeUpdate>,
+    connection: watch::Sender<AgentConnection>,
+    updates: broadcast::Sender<AgentRuntimeEvent>,
 }
 
 impl AgentRuntime {
@@ -57,19 +94,26 @@ impl AgentRuntime {
         let runtime = Runtime::new()?;
         let client = AgentClient::new(AgentClientOptions::default(), identity_store)?;
         let (updates, _) = broadcast::channel(128);
+        let (connection, _) = watch::channel(AgentConnection::Checking);
         let runtime = Arc::new(Self {
             runtime: Mutex::new(Some(runtime)),
             tasks: Mutex::new(Some(JoinSet::new())),
             client: Arc::new(client),
             service: LocalAgentService::installed(),
             cancellation: CancellationToken::new(),
+            connection,
             updates,
         });
         Ok(runtime)
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<AgentRuntimeUpdate> {
-        self.updates.subscribe()
+    /// Start with the current connection, then receive state changes and live events.
+    pub(crate) fn subscribe(&self) -> AgentRuntimeSubscription {
+        AgentRuntimeSubscription {
+            connection: self.connection.subscribe(),
+            events: self.updates.subscribe(),
+            initial_connection_pending: true,
+        }
     }
 
     pub fn setup(&self) -> oneshot::Receiver<SetupResult> {
@@ -252,6 +296,7 @@ impl AgentRuntime {
         let client = self.client.clone();
         let cancellation = self.cancellation.clone();
         let updates = self.updates.clone();
+        let connection = self.connection.clone();
         self.spawn_owned(async move {
             let mut attempt = 0_u32;
             loop {
@@ -262,17 +307,19 @@ impl AgentRuntime {
                 match client.events().await {
                     Ok(mut stream) => {
                         attempt = 0;
-                        let _ = updates
-                            .send(AgentRuntimeUpdate::Connection(AgentConnection::Connected));
+                        connection.send_replace(AgentConnection::Connected);
                         loop {
                             tokio::select! {
                                 () = cancellation.cancelled() => return,
                                 message = stream.next() => {
                                     match message {
                                         Ok(Some(event)) => {
-                                            let _ = updates.send(AgentRuntimeUpdate::Event(event));
+                                            let _ = updates.send(AgentRuntimeEvent::Event(event));
                                         },
-                                        Ok(None) | Err(_) => break,
+                                        Ok(None) | Err(_) => {
+                                            connection.send_replace(AgentConnection::Reconnecting);
+                                            break;
+                                        },
                                     }
                                 }
                             }
@@ -284,7 +331,7 @@ impl AgentRuntime {
                         } else {
                             AgentConnection::Reconnecting
                         };
-                        let _ = updates.send(AgentRuntimeUpdate::Connection(state));
+                        connection.send_replace(state);
                     },
                 }
 
@@ -402,7 +449,7 @@ fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
 #[cfg(windows)]
 async fn serve_activations(
     cancellation: CancellationToken,
-    updates: broadcast::Sender<AgentRuntimeUpdate>,
+    updates: broadcast::Sender<AgentRuntimeEvent>,
 ) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
@@ -435,7 +482,7 @@ async fn serve_activations(
             _ => None,
         };
         if let Some(activation) = activation {
-            let _ = updates.send(AgentRuntimeUpdate::Activation(activation));
+            let _ = updates.send(AgentRuntimeEvent::Activation(activation));
         }
     }
 }
@@ -479,7 +526,186 @@ impl Drop for AgentRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inari_agent_client::SetupAccess;
+    use inari_agent_client::{AgentEventKind, EventResource, SetupAccess};
+
+    fn receive(
+        runtime: &AgentRuntime,
+        subscription: &mut AgentRuntimeSubscription,
+    ) -> Result<AgentRuntimeUpdate, broadcast::error::RecvError> {
+        runtime
+            .runtime
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .block_on(async {
+                time::timeout(Duration::from_millis(50), subscription.recv())
+                    .await
+                    .unwrap()
+            })
+    }
+
+    fn event(sequence: u64) -> AgentRuntimeEvent {
+        AgentRuntimeEvent::Event(AgentEvent {
+            sequence,
+            occurred_at: chrono::DateTime::UNIX_EPOCH,
+            resource: EventResource::Device(DeviceId::parse("dev_front_desk").unwrap()),
+            kind: AgentEventKind::DeviceUpdated,
+            summary: "Device updated".into(),
+        })
+    }
+
+    #[test]
+    fn a_late_subscriber_receives_the_current_connection() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        runtime
+            .connection
+            .send_replace(AgentConnection::Connected);
+        let mut subscription = runtime.subscribe();
+        let result = runtime
+            .runtime
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .block_on(async {
+                time::timeout(Duration::from_millis(50), subscription.recv()).await
+            });
+
+        assert!(matches!(
+            result,
+            Ok(Ok(AgentRuntimeUpdate::Connection(AgentConnection::Connected)))
+        ));
+    }
+
+    #[test]
+    fn the_first_receive_uses_the_latest_connection() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        let mut subscription = runtime.subscribe();
+        runtime
+            .connection
+            .send_replace(AgentConnection::Unavailable);
+        runtime
+            .connection
+            .send_replace(AgentConnection::Connected);
+
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::Connection(AgentConnection::Connected))
+        ));
+
+        runtime.updates.send(event(1)).unwrap();
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::Event(AgentEvent { sequence: 1, .. }))
+        ));
+    }
+
+    #[test]
+    fn subscribers_receive_connection_changes_and_live_events() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        let mut first = runtime.subscribe();
+        let mut second = runtime.subscribe();
+        for subscription in [&mut first, &mut second] {
+            assert!(matches!(
+                receive(&runtime, subscription),
+                Ok(AgentRuntimeUpdate::Connection(AgentConnection::Checking))
+            ));
+        }
+
+        for state in
+            [AgentConnection::Connected, AgentConnection::Reconnecting, AgentConnection::Connected]
+        {
+            runtime.connection.send_replace(state);
+            for subscription in [&mut first, &mut second] {
+                assert!(matches!(
+                    receive(&runtime, subscription),
+                    Ok(AgentRuntimeUpdate::Connection(actual)) if actual == state
+                ));
+            }
+        }
+
+        runtime.updates.send(event(1)).unwrap();
+        for subscription in [&mut first, &mut second] {
+            assert!(matches!(
+                receive(&runtime, subscription),
+                Ok(AgentRuntimeUpdate::Event(AgentEvent { sequence: 1, .. }))
+            ));
+        }
+    }
+
+    #[test]
+    fn connection_state_stays_current_when_live_events_lag() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        let mut subscription = runtime.subscribe();
+        let _ = receive(&runtime, &mut subscription).unwrap();
+        for sequence in 0..129 {
+            runtime
+                .updates
+                .send(event(sequence))
+                .unwrap();
+        }
+        runtime
+            .connection
+            .send_replace(AgentConnection::Connected);
+        runtime
+            .connection
+            .send_replace(AgentConnection::Reconnecting);
+
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::Connection(AgentConnection::Reconnecting))
+        ));
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Err(broadcast::error::RecvError::Lagged(1))
+        ));
+        runtime
+            .connection
+            .send_replace(AgentConnection::Connected);
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::Connection(AgentConnection::Connected))
+        ));
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::Event(AgentEvent { sequence: 1, .. }))
+        ));
+    }
+
+    #[test]
+    fn runtime_shutdown_closes_the_subscription() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        let mut subscription = runtime.subscribe();
+        let _ = receive(&runtime, &mut subscription).unwrap();
+        let events = runtime.updates.clone();
+        drop(runtime);
+
+        let result = Runtime::new().unwrap().block_on(async {
+            time::timeout(Duration::from_millis(50), subscription.recv())
+                .await
+                .unwrap()
+        });
+        assert!(matches!(result, Err(broadcast::error::RecvError::Closed)));
+        drop(events);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_activations_reach_the_subscription() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        let mut subscription = runtime.subscribe();
+        let _ = receive(&runtime, &mut subscription).unwrap();
+        runtime
+            .updates
+            .send(AgentRuntimeEvent::Activation(None))
+            .unwrap();
+
+        assert!(matches!(
+            receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::Activation(None))
+        ));
+    }
 
     #[test]
     fn damaged_identity_fails_closed_with_recovery_guidance() {
