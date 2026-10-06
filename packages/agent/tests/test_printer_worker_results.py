@@ -1,7 +1,10 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from multiprocessing.connection import Connection as ProcessConnection
+from multiprocessing.process import BaseProcess
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -10,6 +13,7 @@ from inari.physical_execution._worker import ProcessPreparedWorker, _printer_pro
 from inari.physical_execution.models import DriverOutcome, IoPermit, PreparedDeviceWork
 from inari.print_jobs import OutputEvidence
 from inari.printing.drivers.windows import WindowsPrinterDriver, WindowsSpooler
+from inari.runtime.models import DeviceRecord
 
 from .test_windows_spool_submission import SpoolerApi
 
@@ -60,10 +64,42 @@ class Process:
         pass
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("can_stop", [True, False])
+async def test_worker_close_requires_a_stopped_process(can_stop):
+    class StubbornProcess(Process):
+        killed = False
+
+        def is_alive(self):
+            return not (self.killed and can_stop)
+
+        def kill(self):
+            self.killed = True
+
+    process = StubbornProcess()
+    connection = Connection()
+    worker = ProcessPreparedWorker(
+        Mock(spec=BaseProcess, wraps=process),
+        Mock(spec=ProcessConnection, wraps=connection),
+        work(),
+    )
+    if can_stop:
+        await worker.close()
+        assert worker._closed
+    else:
+        with pytest.raises(RuntimeError, match="did not stop"):
+            await worker.close()
+        assert not worker._closed
+    assert process.terminated and process.killed and connection.closed
+
+
 def work(*, operation="receipt_image", media_type="application/vnd.inari.escpos"):
     content = b"prepared-output"
+    device = WindowsPrinterDriver(
+        spooler=WindowsSpooler(Mock(wraps=ObservedSpoolerApi()))
+    ).get_device("test")
     return PreparedDeviceWork(
-        device_id="device-1",
+        device_id=DeviceRecord.from_printer(device).id,
         driver_key="windows.printers",
         device_name="test",
         operation=operation,
@@ -81,7 +117,7 @@ def permit():
         lease_id="lease-1",
         execution_id="execution-1",
         job_id="job-1",
-        device_id="device-1",
+        device_id=work().device_id,
         marker_id="marker-1",
         marker_sequence=1,
         committed_at=datetime.now(UTC),
@@ -96,11 +132,20 @@ def child_messages(monkeypatch, api, prepared):
         "inari.di.drivers.build_printer_drivers", lambda settings: [driver]
     )
     connection = Connection(
-        incoming=[("execute", "execution-1", "device-1", "marker-1")]
+        incoming=[("execute", "execution-1", prepared.device_id, "marker-1")]
     )
     _printer_process(connection, AgentSettings(), prepared)
     assert connection.closed
     return connection.sent
+
+
+def test_worker_rejects_a_different_device_before_output(monkeypatch):
+    api = ObservedSpoolerApi()
+    messages = child_messages(
+        monkeypatch, api, replace(work(), device_id="another-device")
+    )
+    assert messages[0][0] == "failed"
+    assert "write" not in api.calls
 
 
 @pytest.mark.anyio

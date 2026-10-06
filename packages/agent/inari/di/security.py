@@ -42,6 +42,7 @@ from ..runtime.store import RuntimeStore
 from ..security.tokens import TokenService
 from ..security.windows_secrets import WindowsMachineSecretStore
 from ..device_authority.observations import DeviceObservationSigningKey
+from ..device_tests.signing import DeviceTestSigningKey
 
 
 def build_secret_store(settings: AgentSettings) -> ProtectedSecretStore:
@@ -121,6 +122,12 @@ class SecurityProvider(Provider):
         self, secret_store: ProtectedSecretStore
     ) -> DeviceObservationSigningKey:
         return DeviceObservationSigningKey(secret_store)
+
+    @provide
+    def device_test_signing_key(
+        self, secret_store: ProtectedSecretStore
+    ) -> DeviceTestSigningKey:
+        return DeviceTestSigningKey(secret_store)
 
     @provide
     def local_trust_store(self, secret_store: ProtectedSecretStore) -> LocalTrustStore:

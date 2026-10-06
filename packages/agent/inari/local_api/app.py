@@ -26,6 +26,7 @@ from .header_authorization import (
 from .middleware import install_security_middleware
 from .problem_handlers import install_problem_handlers
 from .routes import router
+from .device_tests import router as device_tests_router
 
 
 def operation_id(route: APIRoute) -> str:
@@ -92,6 +93,24 @@ def create_app(
                         AuthorizationMode.CLIENT_GRANT,
                         permission=Permission.DRAWER,
                         name="cash drawer intent submission",
+                    ),
+                    ("POST", "/v1/device-tests"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.DEVICE_TEST,
+                        name="Device Test submission",
+                    ),
+                    ("GET", "/v1/device-tests/{test_id}"): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.DEVICE_TEST,
+                        name="Device Test lookup",
+                    ),
+                    (
+                        "POST",
+                        "/v1/device-tests/{test_id}/checks",
+                    ): EndpointAuthorizationPolicy(
+                        AuthorizationMode.CLIENT_GRANT,
+                        permission=Permission.DEVICE_TEST,
+                        name="physical Device Test checks",
                     ),
                     ("POST", "/v1/drawer-intents/query"): EndpointAuthorizationPolicy(
                         AuthorizationMode.CLIENT_GRANT,
@@ -173,6 +192,7 @@ def create_app(
         ],
     )
     app.include_router(router)
+    app.include_router(device_tests_router)
     install_problem_handlers(app)
 
     @app.get("/docs", include_in_schema=False)

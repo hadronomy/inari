@@ -1680,6 +1680,7 @@ def make_test_container(
         device_work_submission=DeviceWorkSubmission(admission=admission),
         print_job_queries=PrintJobQueries(reader=print_job_reader),
         drawer_intent_service=cast(Any, object()),
+        device_test_service=cast(Any, object()),
         device_stream_service=cast(Any, StubDeviceStreamService()),
         physical_execution=cast(Any, object()),
         device_work_authorizer=StubClientTrustAuthorizer(authorization),

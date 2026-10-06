@@ -214,5 +214,13 @@ def authority_observation_key(config: ConfigOption = None) -> None:
     run_observation_key(config)
 
 
+@authority_app.command("test-key")
+def authority_test_key(config: ConfigOption = None) -> None:
+    """Print the Agent key that the Controller must authorize for Device Tests."""
+    from .commands.authority import run_test_key
+
+    run_test_key(config)
+
+
 def main(argv: list[str] | None = None) -> None:
     app(args=argv, prog_name="inari", standalone_mode=False)

@@ -66,6 +66,7 @@ agent_data = collect_data_files(
         "db/alembic/*.py",
         "db/alembic/*.mako",
         "db/alembic/versions/*.py",
+        "device_tests/*.jpg",
     ],
     include_py_files=True,
 )

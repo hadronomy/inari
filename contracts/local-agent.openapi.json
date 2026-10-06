@@ -552,6 +552,220 @@
         "title": "DeviceTargetInput",
         "type": "object"
       },
+      "DeviceTestInput": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_revision_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Binding Revision Id",
+            "type": "string"
+          },
+          "contract_major": {
+            "const": 1,
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "device_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "device_test_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+            "title": "Device Test Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_major",
+          "device_test_id",
+          "device_id",
+          "binding_revision_id"
+        ],
+        "title": "DeviceTestInput",
+        "type": "object"
+      },
+      "DeviceTestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "title": "Accepted At",
+            "type": "string"
+          },
+          "binding_revision_id": {
+            "title": "Binding Revision Id",
+            "type": "string"
+          },
+          "checks": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks"
+          },
+          "code_value": {
+            "default": "INARI-TEST-V1",
+            "title": "Code Value",
+            "type": "string"
+          },
+          "contract_major": {
+            "const": 1,
+            "default": 1,
+            "title": "Contract Major",
+            "type": "integer"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "device_test_id": {
+            "title": "Device Test Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "ok": {
+            "const": true,
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "output_evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Evidence"
+          },
+          "pattern_version": {
+            "default": "receipt-v1",
+            "title": "Pattern Version",
+            "type": "string"
+          },
+          "platform_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Job Id"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "required_checks": {
+            "default": [
+              "text",
+              "accents",
+              "code128",
+              "qr",
+              "feed_and_cut"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Checks",
+            "type": "array"
+          },
+          "signed_result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TestState"
+          },
+          "state_version": {
+            "title": "State Version",
+            "type": "integer"
+          },
+          "terminal_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal At"
+          },
+          "test_pattern_digest": {
+            "default": "b744c997b1de32da1f812287e476ec4c67eb5402cb851270457ea497c32fc57c",
+            "title": "Test Pattern Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_test_id",
+          "device_id",
+          "binding_revision_id",
+          "state",
+          "state_version",
+          "accepted_at",
+          "started_at",
+          "terminal_at",
+          "output_evidence",
+          "platform_job_id",
+          "error_code",
+          "checks",
+          "signed_result"
+        ],
+        "title": "DeviceTestResponse",
+        "type": "object"
+      },
       "DeviceWorkAcceptedResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3149,6 +3363,44 @@
         "title": "PairingScopeResponse",
         "type": "object"
       },
+      "PhysicalCheckAnswer": {
+        "enum": [
+          "correct",
+          "incorrect",
+          "not_run"
+        ],
+        "title": "PhysicalCheckAnswer",
+        "type": "string"
+      },
+      "PhysicalChecksInput": {
+        "additionalProperties": false,
+        "properties": {
+          "accents": {
+            "$ref": "#/components/schemas/PhysicalCheckAnswer"
+          },
+          "code128": {
+            "$ref": "#/components/schemas/PhysicalCheckAnswer"
+          },
+          "feed_and_cut": {
+            "$ref": "#/components/schemas/PhysicalCheckAnswer"
+          },
+          "qr": {
+            "$ref": "#/components/schemas/PhysicalCheckAnswer"
+          },
+          "text": {
+            "$ref": "#/components/schemas/PhysicalCheckAnswer"
+          }
+        },
+        "required": [
+          "text",
+          "accents",
+          "code128",
+          "qr",
+          "feed_and_cut"
+        ],
+        "title": "PhysicalChecksInput",
+        "type": "object"
+      },
       "PosPrintOriginResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4227,6 +4479,18 @@
         ],
         "title": "SystemStatusResponse",
         "type": "object"
+      },
+      "TestState": {
+        "enum": [
+          "accepted",
+          "in_progress",
+          "awaiting_checks",
+          "outcome_unknown",
+          "failed_environment",
+          "completed"
+        ],
+        "title": "TestState",
+        "type": "string"
       },
       "TokenResponse": {
         "additionalProperties": false,
@@ -6246,6 +6510,370 @@
         "summary": "System Status",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/v1/device-tests": {
+      "post": {
+        "operationId": "submit_device_test",
+        "parameters": [
+          {
+            "description": "Must equal device_test_id.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Must equal device_test_id.",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTestResponse"
+                }
+              }
+            },
+            "description": "Existing Device Test"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Submit Device Test",
+        "tags": [
+          "Device Tests"
+        ]
+      }
+    },
+    "/v1/device-tests/{test_id}": {
+      "get": {
+        "operationId": "get_device_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+              "title": "Test Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Get Device Test",
+        "tags": [
+          "Device Tests"
+        ]
+      }
+    },
+    "/v1/device-tests/{test_id}/checks": {
+      "post": {
+        "operationId": "finalize_device_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "test_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
+              "title": "Test Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalChecksInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RFC 9457 Problem Details"
+          }
+        },
+        "summary": "Finalize Device Test",
+        "tags": [
+          "Device Tests"
         ]
       }
     },

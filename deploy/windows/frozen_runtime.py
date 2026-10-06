@@ -27,6 +27,9 @@ def verify_when_requested(
 
         ssl.create_default_context()
         load_application()
+        from inari.device_tests.pattern import receipt_image
+
+        receipt_image()
     except Exception:
         _write_report(report, traceback.format_exc())
         raise SystemExit(1) from None

@@ -192,6 +192,7 @@ def test_device_test_rejects_a_historical_revision_without_a_manifest(installati
     installer, store, bundle_for, observations, target, now = installation
     installer.install(bundle_for(), now=now)
     with store.connection() as connection:
+        connection.exec_driver_sql("DROP TABLE device_tests")
         connection.exec_driver_sql(
             "ALTER TABLE device_authority_revisions DROP COLUMN manifest"
         )

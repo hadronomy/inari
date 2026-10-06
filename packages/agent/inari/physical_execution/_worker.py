@@ -15,12 +15,13 @@ from ..drivers import DriverRegistry
 from ..printing.protocols import PrinterTransport
 from ..printing.protocols.types import PrintJobResult, PrinterDevice
 from ..print_jobs import OutputEvidence
+from ..runtime.models import DeviceRecord
 from .models import (
     DriverExecutionResult,
     DriverOutcome,
-    IoPermit,
     PreparedDeviceWork,
 )
+from .ports import DeviceIoMarker
 
 
 _READY_TIMEOUT_SECONDS = 10.0
@@ -61,7 +62,7 @@ class ProcessPreparedWorker:
         if message != ("ready", self.work.device_id):
             raise RuntimeError("The printer worker did not become ready.")
 
-    async def execute(self, permit: IoPermit) -> DriverExecutionResult:
+    async def execute(self, permit: DeviceIoMarker) -> DriverExecutionResult:
         self.connection.send(
             (
                 "execute",
@@ -144,11 +145,16 @@ class ProcessPreparedWorker:
     async def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
         try:
             if self.process.is_alive():
                 self.process.terminate()
             await asyncio.to_thread(self.process.join, 2.0)
+            if self.process.is_alive():
+                self.process.kill()
+                await asyncio.to_thread(self.process.join, 2.0)
+            if self.process.is_alive():
+                raise RuntimeError("The printer worker did not stop.")
+            self._closed = True
         finally:
             self.connection.close()
 
@@ -177,7 +183,10 @@ def _printer_process(
             if driver.metadata.key == work.driver_key
         )
         device = driver.get_device(work.device_name)
-        if device.driver_key != work.driver_key:
+        if (
+            device.driver_key != work.driver_key
+            or DeviceRecord.from_printer(device).id != work.device_id
+        ):
             raise RuntimeError("The Device driver identity changed.")
         connection.send(("ready", work.device_id))
         command = connection.recv()
@@ -188,7 +197,13 @@ def _printer_process(
             or command[2] != work.device_id
         ):
             raise RuntimeError("The Device I/O permit is invalid.")
-        result = _submit_prepared_work(driver, device, work)
+        current_device = driver.get_device(work.device_name)
+        if (
+            current_device.driver_key != work.driver_key
+            or DeviceRecord.from_printer(current_device).id != work.device_id
+        ):
+            raise RuntimeError("The Device identity changed before I/O.")
+        result = _submit_prepared_work(driver, current_device, work)
         evidence = (
             OutputEvidence.SPOOLER
             if result.transport is not PrinterTransport.RAW
@@ -204,7 +219,7 @@ def _printer_process(
                 ("receipt_image", "application/vnd.inari.escpos"),
                 ("label_document", "application/vnd.zebra-zpl"),
             }
-            and result.printer == device
+            and result.printer == current_device
             and result.transport is PrinterTransport.RAW
             and type(result.bytes_written) is int
             and result.bytes_written == len(work.content)

@@ -19,6 +19,9 @@ from ..device_authority.observations import (
 )
 from ..documents import DocumentAdmission, DocumentAdmissionService
 from ..drawer_intents import DrawerIntentService
+from ..device_tests import DeviceTestService
+from ..device_tests.signing import DeviceTestSigningKey
+from ..device_tests.sqlite import SqliteDeviceTestLedger
 from ..device_streams import (
     AgentEventSigner,
     DeviceStreamService,
@@ -195,6 +198,30 @@ class RuntimeProvider(Provider):
         drawer: PrinterCashDrawerPort,
     ) -> DrawerIntentService:
         return DrawerIntentService(ledger=ledger, authority=authority, drawer=drawer)
+
+    @provide
+    def device_test_ledger(self, store: RuntimeStore) -> SqliteDeviceTestLedger:
+        return SqliteDeviceTestLedger(store)
+
+    @provide
+    def device_test_service(
+        self,
+        ledger: SqliteDeviceTestLedger,
+        authority: DeviceCapabilityAuthority,
+        projections: SqliteDeviceAuthorityReader,
+        devices: DeviceCatalog,
+        worker: IsolatedPrinterWorker,
+        signing_key: DeviceTestSigningKey,
+    ) -> DeviceTestService:
+        return DeviceTestService(
+            ledger,
+            authority,
+            projections,
+            devices,
+            EscPosImageReceiptRenderer(),
+            worker,
+            signing_key,
+        )
 
     @provide
     def device_stream_ledger(self, store: RuntimeStore) -> SqliteDeviceStreamLedger:

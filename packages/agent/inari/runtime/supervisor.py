@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from datetime import UTC, datetime
 
 from ..config import AgentSettings
 from ..physical_execution import ExecutionOwner, PhysicalExecution
+from ..device_tests.sqlite import SqliteDeviceTestLedger
 from ..spool import DurableSpoolAdmissionStore
 from .devices.service import DeviceCatalog
 from .jobs.execution import DeviceWorkerPool, JobScheduler, LeaseRecoveryCoordinator
@@ -28,6 +30,7 @@ class RuntimeSupervisor:
         job_scheduler: JobScheduler,
         lease_recovery: LeaseRecoveryCoordinator,
         worker_pool: DeviceWorkerPool,
+        device_test_ledger: SqliteDeviceTestLedger,
     ) -> None:
         self.settings = settings
         self.device_catalog = device_catalog
@@ -38,6 +41,7 @@ class RuntimeSupervisor:
         self.job_scheduler = job_scheduler
         self.lease_recovery = lease_recovery
         self.worker_pool = worker_pool
+        self.device_test_ledger = device_test_ledger
         self._tasks: list[asyncio.Task[None]] = []
         self._started = False
         self._stopping = False
@@ -48,6 +52,7 @@ class RuntimeSupervisor:
         await self.device_catalog.refresh()
         await self.spool_admission.reconcile()
         await self.physical_execution.recover_after_restart(self.execution_owner)
+        self.device_test_ledger.recover_after_restart(now=datetime.now(UTC))
         for job in self.job_scheduler.job_repository.recover_expired():
             await self.job_service.publish_event(RuntimeEventKind.JOB_RECOVERED, job)
         self._tasks = [
