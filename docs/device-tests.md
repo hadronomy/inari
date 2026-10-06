@@ -154,3 +154,26 @@ whitespace, and an empty reason. The Agent drift test rejects a stale vector fil
 
 This record boundary does not issue authority, approve hardware facts, or
 activate a Binding Revision. Those actions require the Controller issuer.
+
+## Controller signing boundary
+
+`AuthoritySigningKey` uses the shared OpenBao client. Each instance binds one
+Controller signature purpose to an approved Transit key name, positive key
+version, and public key. It checks the key metadata before each signature.
+The key must use Ed25519 with derivation, export, and plaintext backup disabled.
+
+Signing requires a current approval and a validated `CanonicalRecord` for the
+same purpose. The request contains the canonical bytes, the exact approved key
+version, and `prehashed=false`. The OpenBao 2.5.4 request omits `hash_algorithm`.
+The value `none` is invalid for this raw Ed25519 operation. The
+[versioned Transit implementation](https://github.com/openbao/openbao/blob/v2.5.4/builtin/logical/transit/path_sign_verify.go)
+defines this behavior.
+
+The boundary accepts only `vault:v<approved-version>:` signatures. It decodes
+the 64-byte signature and verifies it against the approved public key and
+canonical bytes before returning it. A metadata change, another key version,
+or an invalid signature stops the operation.
+
+This boundary does not create keys or approvals. It cannot sign Agent evidence
+or observations. Durable issuance, approval audit records, and bundle export
+remain responsibilities of the Controller issuer.

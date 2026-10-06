@@ -14,6 +14,7 @@ use crate::error::ConfigError;
 
 mod identity;
 mod managed_gateway;
+mod openbao;
 mod platform;
 mod router_policy;
 
@@ -23,6 +24,8 @@ pub use self::managed_gateway::{
     ManagedGatewayDataPlaneConfig, ManagedGatewayDispatchConfig, ManagedGatewayOnboardingConfig,
     ManagedGatewayPayloadProtectionConfig, StepCaSigningAlgorithm,
 };
+pub use self::openbao::OpenBaoConfig;
+pub(crate) use self::openbao::valid_openbao_name;
 pub use self::platform::{DatabaseConfig, OrganizationConfig};
 pub use self::router_policy::{RouterManagementConfig, RouterPolicyConfig};
 
@@ -298,6 +301,7 @@ pub struct AppConfig {
     pub identity: IdentityConfig,
     pub http: HttpConfig,
     pub managed_gateway: ManagedGatewayConfig,
+    pub openbao: OpenBaoConfig,
     pub zenoh: ZenohConfig,
 }
 
@@ -313,6 +317,7 @@ impl Default for AppConfig {
             identity: IdentityConfig::default(),
             http: HttpConfig::default(),
             managed_gateway: ManagedGatewayConfig::default(),
+            openbao: OpenBaoConfig::default(),
             zenoh: ZenohConfig::default(),
         }
     }
@@ -327,6 +332,13 @@ impl AppConfig {
             )));
         }
         self.managed_gateway.validate()?;
+        self.openbao.validate(
+            self.managed_gateway.enabled
+                && self
+                    .managed_gateway
+                    .payload_protection
+                    .enabled,
+        )?;
         self.identity.validate(&self.server)?;
         self.database
             .validate(self.managed_gateway.enabled || self.identity.oidc.enabled)?;

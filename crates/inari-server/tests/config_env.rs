@@ -76,14 +76,8 @@ fn environment_overrides_cover_every_nested_field() {
             "tls/controller.test:7447".into(),
         ),
         ("INARI_SERVER_MANAGED_GATEWAY__PAYLOAD_PROTECTION__ENABLED".into(), "true".into()),
-        (
-            "INARI_SERVER_MANAGED_GATEWAY__PAYLOAD_PROTECTION__ADDRESS".into(),
-            "https://openbao.test".into(),
-        ),
-        (
-            "INARI_SERVER_MANAGED_GATEWAY__PAYLOAD_PROTECTION__KUBERNETES_ROLE".into(),
-            "controller-test".into(),
-        ),
+        ("INARI_SERVER_OPENBAO__ADDRESS".into(), "https://openbao.test".into()),
+        ("INARI_SERVER_OPENBAO__KUBERNETES_ROLE".into(), "controller-test".into()),
         ("INARI_SERVER_ZENOH__ENABLED".into(), "true".into()),
         ("INARI_SERVER_ZENOH__MODE".into(), "router".into()),
         ("INARI_SERVER_ZENOH__ADMIN_SPACE__ENABLED".into(), "true".into()),
@@ -269,8 +263,7 @@ fn environment_overrides_cover_every_nested_field() {
     assert_eq!(
         loaded
             .settings
-            .managed_gateway
-            .payload_protection
+            .openbao
             .address
             .as_ref()
             .map(url::Url::as_str),

@@ -26,6 +26,7 @@ use crate::managed_gateway::{
     ManagedDispatchSigner, ManagedGatewaySecurity, ManagedPayloadProtector, ManagedWorkSecurity,
     OpenBaoTransitKeyWrapper, RouterAdmissionController, StepCaIssuer,
 };
+use crate::openbao::OpenBaoClient;
 use crate::shutdown::{ShutdownCoordinator, ShutdownReason, wait_for_shutdown_signal};
 use crate::state::{AppState, Http, HttpReadiness, ReadinessSnapshot, Zenoh};
 use crate::zenoh::ZenohSupervisor;
@@ -103,7 +104,11 @@ impl ServerBuilder<WithConfig> {
         let onboarding = initialize_onboarding(&loaded, database.as_ref()).await?;
         let identity = initialize_identity(&loaded, database.as_ref()).await?;
         let certificate_issuer = initialize_certificate_issuer(&loaded).await?;
-        let security = initialize_managed_work_security(&loaded).await?;
+        let openbao = match loaded.settings.openbao.address.as_ref() {
+            Some(_) => Some(Arc::new(OpenBaoClient::load(loaded.settings.openbao.clone()).await?)),
+            None => None,
+        };
+        let security = initialize_managed_work_security(&loaded, openbao.as_ref()).await?;
         let router_admission = if loaded.settings.managed_gateway.enabled {
             let repository = onboarding
                 .as_ref()
@@ -155,6 +160,7 @@ impl ServerBuilder<WithConfig> {
 
 async fn initialize_managed_work_security(
     loaded: &LoadedConfig,
+    openbao: Option<&Arc<OpenBaoClient>>,
 ) -> AppResult<Option<Arc<ManagedWorkSecurity>>> {
     let config = &loaded.settings.managed_gateway;
     if !config.enabled || !config.dispatch.enabled {
@@ -162,7 +168,11 @@ async fn initialize_managed_work_security(
     }
     let signer =
         ManagedDispatchSigner::load(&config.dispatch, &config.controller_instance_id).await?;
-    let wrapper = OpenBaoTransitKeyWrapper::load(config.payload_protection.clone()).await?;
+    let openbao = openbao.ok_or_else(|| {
+        AppError::service_unavailable("Managed Payload protection requires OpenBao.")
+    })?;
+    let wrapper =
+        OpenBaoTransitKeyWrapper::new(openbao.clone(), config.payload_protection.clone())?;
     Ok(Some(Arc::new(ManagedWorkSecurity::new(
         signer,
         ManagedPayloadProtector::new(Arc::new(wrapper)),
