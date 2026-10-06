@@ -1,9 +1,10 @@
 use ed25519_dalek::{Signer, SigningKey};
 use inari_gateway::device_authority::{
-    AuthorityBundle, AuthorityDigest, AuthorityScope, AuthorityTime, CanonicalRecord,
-    DriverProfile, HexBytes, Identifier, PositiveInteger, RecordPayload, SignedAuthorityRevision,
-    SignedBindingRevision, SignedDeviceObservation, SignedDeviceTestEvidence, SignedDriverProfile,
-    SignedHardwareCertificationMatrixRow, SignerRecord, SignerState,
+    AuthorityBundle, AuthorityContract, AuthorityDigest, AuthorityScope, AuthorityTime,
+    CanonicalRecord, DriverProfile, HexBytes, Identifier, PositiveInteger, RecordPayload,
+    SignedAuthorityRevision, SignedBindingRevision, SignedDeviceObservation,
+    SignedDeviceTestEvidence, SignedDriverProfile, SignedHardwareCertificationMatrixRow,
+    SignerRecord, SignerState,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -105,6 +106,7 @@ fn initial_and_activated_bundles_verify_without_changing_the_wire() {
     for case in vectors().cases {
         for wire in [case.initial_bundle, case.activated_bundle] {
             let bundle: AuthorityBundle = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(bundle.manifest.contract, AuthorityContract::V1);
             bundle
                 .verify(&case.trusted_signer, &case.agent_id, &case.scope, case.now)
                 .unwrap();

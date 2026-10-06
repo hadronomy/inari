@@ -6,9 +6,9 @@ mod primitives;
 
 pub use canonical::{CanonicalRecord, ControllerRecordPayload, RecordPayload};
 pub use models::{
-    AuthorityBundle, AuthorityManifest, AuthorityRevision, AuthorityScope, BindingActivation,
-    BindingRevision, DeviceCapability, DeviceObservation, DeviceTestEvidence, DeviceTestResult,
-    DriverProfile, HardwareCertificationMatrixRow, OutputEvidence, ScopeKind,
+    AuthorityBundle, AuthorityContract, AuthorityManifest, AuthorityRevision, AuthorityScope,
+    BindingActivation, BindingRevision, DeviceCapability, DeviceObservation, DeviceTestEvidence,
+    DeviceTestResult, DriverProfile, HardwareCertificationMatrixRow, OutputEvidence, ScopeKind,
     SignedAuthorityRevision, SignedBindingRevision, SignedDeviceObservation,
     SignedDeviceTestEvidence, SignedDriverProfile, SignedHardwareCertificationMatrixRow,
     SignerPurpose, SignerRecord, SignerState,
