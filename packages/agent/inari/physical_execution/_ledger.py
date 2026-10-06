@@ -6,7 +6,7 @@ from hashlib import sha256
 import json
 from uuid import uuid4
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.engine import Connection, RowMapping
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -14,6 +14,7 @@ from ..client_trust import GrantLifecycle, PairingLifecycle, Permission
 from ..db.schema import (
     client_grants_table,
     client_pairings_table,
+    device_tests_table,
     device_work_admissions_table,
     devices_table,
     physical_execution_attempts_table,
@@ -89,7 +90,9 @@ class SqliteExecutionLedger:
                 if parse_timestamp(job["expires_at"]) <= now:
                     self._expire_accepted(connection, job, now=now)
                     continue
-                if self._device_is_busy(connection, device_id=str(job["device_id"])):
+                if self._device_is_busy(
+                    connection, device_id=str(job["device_id"]), now=now
+                ):
                     continue
                 return self._claim(
                     connection,
@@ -929,7 +932,25 @@ class SqliteExecutionLedger:
                 .values(wrapped_key=b"", key_deleted_at=timestamp(now))
             )
 
-    def _device_is_busy(self, connection: Connection, *, device_id: str) -> bool:
+    def _device_is_busy(
+        self, connection: Connection, *, device_id: str, now: datetime
+    ) -> bool:
+        if (
+            connection.execute(
+                select(device_tests_table.c.record_id).where(
+                    device_tests_table.c.device_id == device_id,
+                    or_(
+                        device_tests_table.c.state == "in_progress",
+                        and_(
+                            device_tests_table.c.state == "accepted",
+                            device_tests_table.c.io_deadline > timestamp(now),
+                        ),
+                    ),
+                )
+            ).first()
+            is not None
+        ):
+            return True
         return (
             connection.execute(
                 select(spool_reservations_table.c.id).where(

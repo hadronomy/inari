@@ -1529,6 +1529,67 @@ Index(
     device_binding_revisions_table.c.device_purpose,
 )
 
+device_tests_table = Table(
+    "device_tests",
+    metadata,
+    Column("record_id", String, primary_key=True),
+    Column("test_id", String, nullable=False),
+    Column("database", String, nullable=False),
+    Column("company_id", String, nullable=False),
+    Column("organization_id", String, nullable=False),
+    Column("site_id", String, nullable=False),
+    Column("pos_configuration_id", String, nullable=False),
+    Column("paired_client_id", String, nullable=False),
+    Column("actor_id", String, nullable=False),
+    Column("device_id", String, nullable=False),
+    Column("binding_revision_id", String, nullable=False),
+    Column("fingerprint", LargeBinary, nullable=False),
+    Column("state", String, nullable=False),
+    Column("state_version", Integer, nullable=False),
+    Column("accepted_at", String, nullable=False),
+    Column("io_deadline", String, nullable=False),
+    Column("started_at", String),
+    Column("terminal_at", String),
+    Column("marker_id", String),
+    Column("graph", Text),
+    Column("output_evidence", String),
+    Column("platform_job_id", String),
+    Column("error_code", String),
+    Column("checks", Text),
+    Column("signed_result", Text),
+    CheckConstraint(
+        "length(fingerprint) = 32 AND state_version > 0",
+        name="ck_device_tests_identity",
+    ),
+    CheckConstraint(
+        "state IN ('accepted', 'in_progress', 'awaiting_checks', 'outcome_unknown', 'failed_environment', 'completed')",
+        name="ck_device_tests_state",
+    ),
+    CheckConstraint(
+        "(started_at IS NULL AND marker_id IS NULL) OR (started_at IS NOT NULL AND marker_id IS NOT NULL AND graph IS NOT NULL)",
+        name="ck_device_tests_marker",
+    ),
+    CheckConstraint(
+        "state != 'completed' OR (checks IS NOT NULL AND signed_result IS NOT NULL AND terminal_at IS NOT NULL)",
+        name="ck_device_tests_result",
+    ),
+    UniqueConstraint(
+        "database",
+        "company_id",
+        "organization_id",
+        "site_id",
+        "pos_configuration_id",
+        "test_id",
+        name="uq_device_tests_scope",
+    ),
+)
+Index(
+    "idx_device_tests_execution",
+    device_tests_table.c.device_id,
+    device_tests_table.c.state,
+    device_tests_table.c.io_deadline,
+)
+
 device_test_evidence_table = Table(
     "device_test_evidence",
     metadata,
@@ -2148,6 +2209,7 @@ MANAGED_TABLE_NAMES = frozenset(
         hardware_certification_matrix_rows_table.name,
         device_binding_revisions_table.name,
         device_test_evidence_table.name,
+        device_tests_table.name,
         device_authority_revocations_table.name,
         device_observations_table.name,
         device_binding_authority_state_table.name,

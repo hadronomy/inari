@@ -25,6 +25,7 @@ from inari.client_trust import (
 )
 from inari.client_trust.store import SqliteClientTrustStore
 from inari.drivers import DeviceIdentity, DeviceTransport
+from inari.device_tests.sqlite import SqliteDeviceTestLedger
 from inari.db.migrations import DatabaseMigrator
 from inari.physical_execution import (
     DriverExecutionResult,
@@ -42,6 +43,7 @@ from inari.physical_execution.models import (
     PreparedDeviceWork,
 )
 from inari.physical_execution._worker import _submit_prepared_work
+from inari.physical_execution.ports import DeviceIoMarker
 from inari.print_jobs import OutputEvidence, PrintJobState
 from inari.printing.protocols import (
     PrintJobResult,
@@ -643,7 +645,8 @@ class RecordingPreparedWorker:
     async def wait_ready(self) -> None:
         return None
 
-    async def execute(self, permit: IoPermit) -> DriverExecutionResult:
+    async def execute(self, permit: DeviceIoMarker) -> DriverExecutionResult:
+        assert isinstance(permit, IoPermit)
         self.executed = True
         with sqlite3.connect(self.database_path) as connection:
             phase = connection.execute(
@@ -694,6 +697,53 @@ async def test_facade_commits_permission_before_the_worker_can_send(
     assert receipt.state is PrintJobState.OUTCOME_UNKNOWN
     assert prepared.executed
     assert spool.released
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("can_stop", [True, False])
+async def test_business_execution_holds_the_device_until_the_worker_stops(
+    tmp_path: Path, can_stop: bool
+) -> None:
+    fixture = await _fixture(tmp_path)
+    closing = asyncio.Event()
+    stop = asyncio.Event()
+
+    class ClosingWorker(RecordingPreparedWorker):
+        async def close(self) -> None:
+            closing.set()
+            await stop.wait()
+            if not can_stop:
+                raise RuntimeError("The printer worker did not stop.")
+
+    spool = RecordingSpool()
+    execution = PhysicalExecution(
+        ledger=fixture.ledger,
+        spool=spool,
+        worker=RecordingWorker(ClosingWorker(fixture.database_path)),
+        clock=lambda: NOW,
+    )
+    running = asyncio.create_task(execution.run_one(OWNER))
+    try:
+        await asyncio.wait_for(closing.wait(), timeout=5)
+        assert _job(fixture.database_path)["state"] == "in_progress"
+        assert not spool.released
+        with fixture.ledger._store.connection() as connection:
+            assert SqliteDeviceTestLedger._busy(connection, "device-1")
+    finally:
+        stop.set()
+
+    if can_stop:
+        receipt = await running
+        assert receipt is not None
+        assert receipt.state is PrintJobState.OUTCOME_UNKNOWN
+        assert spool.released
+    else:
+        with pytest.raises(RuntimeError, match="did not stop"):
+            await running
+        assert _job(fixture.database_path)["state"] == "in_progress"
+        assert not spool.released
+        with fixture.ledger._store.connection() as connection:
+            assert SqliteDeviceTestLedger._busy(connection, "device-1")
 
 
 @pytest.mark.anyio

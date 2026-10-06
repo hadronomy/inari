@@ -12,6 +12,7 @@ from ..device_authority.install import DeviceAuthorityInstaller
 from ..runtime.store import RuntimeStore
 from ..security.identity import AgentIdentityService
 from ..device_authority.observations import DeviceObservationSigningKey
+from ..device_tests.signing import DeviceTestSigningKey
 from ..di.security import build_secret_store
 
 
@@ -19,6 +20,18 @@ def run_observation_key(config_path: Path | None) -> None:
     """Print the Agent public key for a Controller-signed observation signer."""
     settings = load_settings(config_path=config_path)
     key = DeviceObservationSigningKey(build_secret_store(settings))
+    typer.echo(
+        json.dumps(
+            {"key_id": key.key_id(), "public_key": key.public_key().hex()},
+            sort_keys=True,
+        )
+    )
+
+
+def run_test_key(config_path: Path | None) -> None:
+    """Print the public key for Controller-approved Device Test evidence."""
+    settings = load_settings(config_path=config_path)
+    key = DeviceTestSigningKey(build_secret_store(settings))
     typer.echo(
         json.dumps(
             {"key_id": key.key_id(), "public_key": key.public_key().hex()},

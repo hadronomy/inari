@@ -110,8 +110,20 @@ revoked records, and authority rollback. The permit has a 30-second maximum
 lifetime. A shorter configured permit lifetime or signed expiry reduces it.
 
 A Device Test permit has no business authority proof. Receipt admission,
-Drawer Intent execution, and the Device Spool cannot use it. The Device Test
-executor must own the fixed pattern and the durable execution record.
+Drawer Intent execution, and the Device Spool cannot use it.
 
-This authority entry point does not execute a Device Test or record a physical
-answer. The executable route and signed-result flow remain separate work.
+Export the Agent's Device Test public key from the service's protected storage:
+
+```sh
+inari authority test-key --config /etc/inari/config.toml
+```
+
+Add the returned key to the Controller-signed manifest with purpose
+`device_test_evidence`. The private key remains on the Agent Host. Device Test
+submission requires this key in the current manifest. The first bundle can
+contain empty evidence and activation lists.
+
+The [Device Test contract](device-tests.md) specifies execution, physical
+answers, and signed results. A passed result does not activate a Binding
+Revision. Activation requires a newer Controller-signed bundle that includes
+the verified evidence and names its Binding Revision.

@@ -83,3 +83,30 @@ def test_contract_exposes_the_separate_client_pairing_interface(
             "DPoP-Nonce",
             "WWW-Authenticate",
         }
+
+
+def test_device_test_success_and_validation_responses_match_the_http_contract(
+    tmp_path: Path,
+) -> None:
+    canonical_path = tmp_path / "canonical.json"
+    codegen_path = tmp_path / "codegen.json"
+    write_contracts(canonical_path, codegen_path)
+    for contract in (_load(canonical_path), _load(codegen_path)):
+        paths = contract["paths"]
+        assert isinstance(paths, dict)
+        submit = paths["/v1/device-tests"]["post"]
+        assert (
+            submit["responses"]["200"]["content"]
+            == submit["responses"]["202"]["content"]
+        )
+        for path, method in (
+            ("/v1/device-tests", "post"),
+            ("/v1/device-tests/{test_id}", "get"),
+            ("/v1/device-tests/{test_id}/checks", "post"),
+        ):
+            content = paths[path][method]["responses"]["422"]["content"]
+            assert content == {
+                "application/problem+json": {
+                    "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                }
+            }

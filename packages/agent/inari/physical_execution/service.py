@@ -116,6 +116,8 @@ class PhysicalExecution:
                     error_code="worker_exited",
                     message_key="print.outcome_unknown",
                 )
+            await prepared_worker.close()
+            prepared_worker = None
             receipt = await asyncio.to_thread(
                 self._ledger.finish, claim, result, now=self._now()
             )
@@ -128,6 +130,9 @@ class PhysicalExecution:
                 raise cancellation
             return receipt
         except BaseException:
+            if prepared_worker is not None:
+                await prepared_worker.close()
+                prepared_worker = None
             if marker_committed:
                 await asyncio.to_thread(
                     self._ledger.abandon_after_marker,
