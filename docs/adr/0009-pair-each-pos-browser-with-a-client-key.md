@@ -42,6 +42,11 @@ The Agent accepts the exact paired browser origin and rejects wildcard,
 missing, and `null` origins. The Local Agent Interface uses no cookies. Device
 Center uses its separate application identity.
 
+The configured `api.endpoint` supplies the listener hostname for TLS and DPoP.
+The ASGI socket address supplies its port and scheme. Both must match the
+configured endpoint before the Agent normalizes the target. The Agent still
+requires an exact Host match and rejects forwarded host authority.
+
 After a clock-related rejection, the browser derives an offset from the Agent
 `Date` value and retries once. A second rejection requires workstation clock
 correction.
