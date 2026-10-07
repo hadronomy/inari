@@ -8,6 +8,7 @@ const PAIRING_PERMISSION_ORDER = Object.freeze([
     "device_work:drawer",
     "device_read:scale",
     "device_read:scanner",
+    "device_test:run",
     "events:read",
     "jobs:read",
 ]);
@@ -232,6 +233,7 @@ export class MemoryPairingStore {
 export class ClientPairingManager {
     constructor({
         binding,
+        deviceTestBindingRevisionId = null,
         posSessionId,
         rpc,
         store = new IndexedDbPairingStore(),
@@ -249,6 +251,20 @@ export class ClientPairingManager {
             throw new TypeError("Client Pairing requires an active POS session");
         }
         this.binding = requiredBinding(binding, browserOrigin);
+        if (deviceTestBindingRevisionId !== null) {
+            if (
+                !Number.isInteger(deviceTestBindingRevisionId) ||
+                deviceTestBindingRevisionId <= 0 ||
+                this.binding.requested_permissions.join("|") !== "device_test:run|jobs:read"
+            ) {
+                throw new TypeError(
+                    "Device Test pairing requires one Binding Revision and test permissions",
+                );
+            }
+        } else if (this.binding.requested_permissions.includes("device_test:run")) {
+            throw new TypeError("Device Test permissions require an explicit Device Test pairing");
+        }
+        this.deviceTestBindingRevisionId = deviceTestBindingRevisionId;
         this.posSessionId = String(posSessionId);
         this.rpc = rpc;
         this.store = store;
@@ -380,10 +396,18 @@ export class ClientPairingManager {
                 phrase: approved.phrase,
                 expiresAt: approved.expires_at,
             });
-            const signed = await this.rpc("/inari_devices/pairing/v1/assertion", {
+            const assertionValues = {
                 pairing_request: this.assertionRequest(approved),
                 pos_session_id: this.posSessionId,
-            });
+            };
+            const assertionRoute =
+                this.deviceTestBindingRevisionId === null
+                    ? "/inari_devices/pairing/v1/assertion"
+                    : "/inari_devices/pairing/v1/device-test-assertion";
+            if (this.deviceTestBindingRevisionId !== null) {
+                assertionValues.binding_revision_id = this.deviceTestBindingRevisionId;
+            }
+            const signed = await this.rpc(assertionRoute, assertionValues);
             if (!signed || typeof signed.assertion !== "string") {
                 throw new ClientPairingError(
                     "assertion_failed",
