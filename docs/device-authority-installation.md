@@ -32,6 +32,41 @@ interval. The bundle cannot change this trust key or its permitted scope.
 
 ## Bundle contract
 
+The Controller provides an operator command for the approved bundle:
+
+```sh
+inari-server authority sign-bundle --draft draft.json \
+  --approval approval.json --output authority.json
+```
+
+The command uses the configured OpenBao Kubernetes identity. Give this identity
+read access to the four approved Transit keys and sign access to those keys.
+Keep each key non-exportable and disable plaintext backup. The command checks
+the approved public key and key version before every signature.
+
+The approval contains `agent_id`, `scope`, `transit_mount`, `agent_signers`, and
+four key approvals: `root`, `profile`, `matrix`, and `binding`. Each key approval
+contains `key_name`, `key_version`, and the purpose-bound `signer` record.
+The root purpose is `authority_revision`. Agent purposes are
+`device_observation` and `device_test_evidence`.
+
+The draft contains `agent_id`, `scope`, `revision_id`, `revision_number`,
+`effective_at`, `expires_at`, `profiles`, `certification_rows`, `bindings`,
+`evidence`, and `activations`. Profile, matrix, and binding entries contain the
+unsigned records from the bundle contract. Evidence entries retain the Agent
+signature. Use the independently approved keys and exact observed hardware
+facts. The command does not infer certification from discovery.
+
+Both inputs accept at most 4 MiB and reject unknown fields. The command requires
+a current expiry and verifies the completed bundle before it writes a new
+output file. It cannot replace an existing file. It does not write Controller
+database records or install authority on an Agent.
+
+For the first Device Test, leave `evidence` and `activations` empty. After the
+operator confirms the physical checks, add the Agent-signed result and its
+activation to a newer draft. Sign and install that bundle to open receipt
+admission.
+
 The `inari.device-authority.v1` manifest contains the exact Agent identity and
 scope, purpose-bound signer records, Driver Profiles, Hardware Certification
 Matrix rows, Binding Revisions, Device Test evidence, and binding activations.
