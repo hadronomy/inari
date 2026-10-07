@@ -41,6 +41,7 @@ def test_bundle_verification_exercises_tls_and_application_imports(
     contents = report.read_text(encoding="utf-8")
     assert contents.startswith("Frozen runtime verified.\nPython ")
     assert "OpenSSL" in contents
+    assert "Isolated printer worker verified without Device I/O." in contents
 
 
 def test_bundle_verification_records_import_failure(tmp_path: Path) -> None:
