@@ -111,6 +111,61 @@ async fn device_inventory_is_scoped_ordered_and_atomic() {
     assert_eq!(devices[0].display_name, "POS-80");
     assert_eq!(devices[0].device_class, DeviceClass::Physical);
     assert!(devices[0].capabilities.is_empty());
+    let workload_scope = inari_gateway::protocol::OrganizationWorkloadScope {
+        database: "odoo".into(),
+        company_id: "1".into(),
+        organization_id: first_agent.organization_id.clone(),
+    };
+    sqlx::raw_sql("INSERT INTO organizations (organization_id, name) VALUES ('org_peer', 'Peer');
+        INSERT INTO sites (site_id, organization_id, name) VALUES ('site_peer', 'org_peer', 'Peer');
+        INSERT INTO agents (agent_id, organization_id, site_id, key_id, jwk_thumbprint,
+            public_jwk, namespace, protocol_version, controller_actions, enrolled_at, last_enrolled_at)
+        VALUES ('agt_peer', 'org_peer', 'site_peer', 'peer_key', 'peer', '{}',
+            'peer_namespace', '1.0', '[]', now(), now());
+        INSERT INTO devices (device_id, agent_id, site_id, kind, device_class, display_name, state,
+            transport, identity_digest, capabilities, first_seen_at, last_seen_at)
+        VALUES ('dev_peer', 'agt_peer', 'site_peer', 'printer', 'physical', 'Peer printer', 'online',
+            'spooler', repeat('f', 64), '[]', now(), now());")
+        .execute(&pool).await.unwrap();
+    let workload_inventory = repository
+        .workload_inventory(&workload_scope)
+        .await
+        .unwrap();
+    assert_eq!(workload_inventory.scope.database, "odoo");
+    assert_eq!(workload_inventory.scope.company_id, "1");
+    assert_eq!(workload_inventory.organization_name, "Key tests");
+    assert_eq!(workload_inventory.agents.len(), 2);
+    assert!(
+        workload_inventory
+            .agents
+            .iter()
+            .all(|agent| agent.agent_id.as_str() != "agt_peer")
+    );
+    assert_eq!(workload_inventory.devices.len(), 1);
+    assert_eq!(workload_inventory.devices[0].display_name, "POS-80");
+    assert!(
+        workload_inventory
+            .sites
+            .iter()
+            .all(|site| site.site_id.as_str() != "site_peer")
+    );
+    sqlx::query(
+        "INSERT INTO sites (site_id, organization_id, name)
+        SELECT 'overflow_' || n, 'org_keys', 'Overflow ' || n FROM generate_series(1, 2001) n",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(matches!(
+        repository
+            .workload_inventory(&workload_scope)
+            .await,
+        Err(GatewayError::Capacity(_))
+    ));
+    sqlx::query("DELETE FROM sites WHERE site_id LIKE 'overflow_%'")
+        .execute(&pool)
+        .await
+        .unwrap();
     let stored_digest: String = sqlx::query_scalar(
         "SELECT identity_digest FROM devices WHERE agent_id = $1 AND device_id = 'dev_queue'",
     )

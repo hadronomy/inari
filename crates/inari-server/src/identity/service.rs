@@ -89,14 +89,7 @@ struct WorkloadClaims {
     inari_database: String,
     inari_company_id: String,
     inari_organization_id: OrganizationId,
-    scope: WorkloadScopeClaim,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(untagged)]
-enum WorkloadScopeClaim {
-    Text(String),
-    Values(Vec<String>),
+    inari_permissions: Vec<String>,
 }
 
 impl std::fmt::Debug for PendingLogin {
@@ -379,13 +372,26 @@ fn authenticate_workload_token(
         .claims;
     let expires_at = DateTime::from_timestamp(claims.exp, 0)
         .ok_or_else(|| AppError::unauthorized("OIDC access token expiry is invalid."))?;
-    let scopes = match claims.scope {
-        WorkloadScopeClaim::Text(value) => value
-            .split_ascii_whitespace()
-            .map(str::to_owned)
-            .collect(),
-        WorkloadScopeClaim::Values(values) => values.into_iter().collect(),
-    };
+    if claims.inari_permissions.is_empty()
+        || claims.inari_permissions.len() > 16
+        || claims
+            .inari_permissions
+            .iter()
+            .any(|permission| {
+                permission.is_empty()
+                    || permission.len() > 64
+                    || !permission.is_ascii()
+                    || permission
+                        .bytes()
+                        .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+            })
+    {
+        return Err(AppError::unauthorized("OIDC workload permissions are invalid."));
+    }
+    let scopes = claims
+        .inari_permissions
+        .into_iter()
+        .collect();
     Ok(WorkloadIdentity {
         actor_id: ActorId::from_oidc_subject(&claims.sub),
         database: claims.inari_database,
@@ -609,21 +615,19 @@ mod tests {
         .expect("test JWKS should parse");
         let mut header = Header::new(Algorithm::EdDSA);
         header.kid = Some("workload-key-1".into());
-        let token = encode(
-            &header,
-            &json!({
-                "sub": "odoo-production",
-                "exp": chrono::Utc::now().timestamp() + 300,
-                "aud": "urn:inari:managed-workload",
-                "iss": "https://identity.example.com",
-                "inari_database": "production",
-                "inari_company_id": "7",
-                "inari_organization_id": "org_example",
-                "scope": "managed_work:write managed_work:read"
-            }),
-            &EncodingKey::from_ed_der(private_key.as_bytes()),
-        )
-        .expect("test token should encode");
+        let claims = json!({
+            "sub": "odoo-production",
+            "exp": chrono::Utc::now().timestamp() + 300,
+            "aud": "urn:inari:managed-workload",
+            "iss": "https://identity.example.com",
+            "inari_database": "production",
+            "inari_company_id": "7",
+            "inari_organization_id": "org_example",
+            "scope": "openid managed_work:write",
+            "inari_permissions": ["inventory:read", "managed_work:read"]
+        });
+        let token = encode(&header, &claims, &EncodingKey::from_ed_der(private_key.as_bytes()))
+            .expect("test token should encode");
 
         let identity = authenticate_workload_token(
             &token,
@@ -640,6 +644,11 @@ mod tests {
         assert!(
             identity
                 .scopes
+                .contains("inventory:read")
+        );
+        assert!(
+            !identity
+                .scopes
                 .contains("managed_work:write")
         );
         assert!(
@@ -647,6 +656,44 @@ mod tests {
                 &token,
                 &jwks,
                 "urn:inari:wrong-audience",
+                "https://identity.example.com",
+            )
+            .is_err()
+        );
+        for permissions in [
+            Value::Null,
+            json!([]),
+            json!(["inventory:read", "managed work:write"]),
+            json!([true]),
+            json!(vec!["inventory:read"; 17]),
+        ] {
+            let mut rejected = claims.clone();
+            rejected["inari_permissions"] = permissions;
+            let token =
+                encode(&header, &rejected, &EncodingKey::from_ed_der(private_key.as_bytes()))
+                    .unwrap();
+            assert!(
+                authenticate_workload_token(
+                    &token,
+                    &jwks,
+                    "urn:inari:managed-workload",
+                    "https://identity.example.com",
+                )
+                .is_err()
+            );
+        }
+        let mut missing = claims;
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("inari_permissions");
+        let token =
+            encode(&header, &missing, &EncodingKey::from_ed_der(private_key.as_bytes())).unwrap();
+        assert!(
+            authenticate_workload_token(
+                &token,
+                &jwks,
+                "urn:inari:managed-workload",
                 "https://identity.example.com",
             )
             .is_err()

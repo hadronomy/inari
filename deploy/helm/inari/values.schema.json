@@ -243,6 +243,7 @@
           "properties": {
             "issuerUrl": { "$ref": "#/definitions/httpsUrl" },
             "clientId": { "type": "string", "minLength": 1 },
+            "workloadAudience": { "type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$" },
             "additionalIdTokenAudiences": {
               "type": "array",
               "uniqueItems": true,
