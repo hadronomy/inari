@@ -31,7 +31,6 @@ class InariInventorySetup(models.Model):
                 [("company_id", "=", setup.company_id.id)]
             )
 
-    @api.model
     def action_connect(self):
         _require_admin(self.env)
         return {
@@ -277,11 +276,9 @@ class InariConnectionWizard(models.TransientModel):
 class InariInventoryDevice(models.Model):
     _inherit = "inari.device"
 
-    @api.model
     def action_connect(self):
         return self.env["inari.setup.state"].action_connect()
 
-    @api.model
     def action_sync_inventory(self):
         _require_admin(self.env)
         setup = self.env["inari.setup.state"].search(
