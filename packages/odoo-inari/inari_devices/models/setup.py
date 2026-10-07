@@ -72,7 +72,7 @@ class InariSetupState(models.Model):
     company_id = fields.Many2one("res.company", required=True, default=lambda self: self.env.company, ondelete="restrict", index=True)
     state = fields.Selection([("not_ready", "Not ready"), ("ready", "Ready"), ("blocked", "Blocked"), ("decommissioned", "Decommissioned")], default="not_ready", index=True)
     contract_major = fields.Integer(default=1)
-    addon_version = fields.Char(default="19.0.1.0.0")
+    addon_version = fields.Char(default="19.0.1.2.0")
     controller_url = fields.Char()
     last_check_at = fields.Datetime(readonly=True)
     last_error = fields.Char()
@@ -84,14 +84,7 @@ class InariSetupState(models.Model):
     )
 
     def action_check_readiness(self):
-        for record in self:
-            identity = self.env["inari.workload.identity"].search([("company_id", "=", record.company_id.id), ("state", "=", "active")], limit=1)
-            organization = self.env["inari.organization"].search([("company_id", "=", record.company_id.id), ("active", "=", True)], limit=1)
-            if not identity or not organization or not record.controller_url:
-                record.write({"state": "blocked", "last_error": "workload_identity, Organization, or Controller URL is missing", "last_check_at": fields.Datetime.now()})
-                continue
-            record.write({"state": "ready", "last_error": False, "last_check_at": fields.Datetime.now()})
-        return True
+        return self.action_sync_inventory()
 
     @api.model
     def removal_guard(self):

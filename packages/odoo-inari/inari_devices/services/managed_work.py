@@ -73,6 +73,13 @@ class ManagedWorkClient:
                 self._tokens.invalidate()
         raise AssertionError("authentication retry did not return")
 
+    def inventory(self):
+        from .inventory import inventory
+
+        return inventory(
+            self._request("GET", "/api/inari/v1/workload/inventory"), self.scope
+        )
+
     def preflight(self, request: Mapping[str, object]) -> Mapping[str, object]:
         if not self.scope.matches(request.get("scope")):
             raise RemoteServiceError(
@@ -174,7 +181,8 @@ def build_managed_work_client(
     openbao, tokens = build_openbao_client()
     return ManagedWorkClient(
         JsonHttpClient(
-            controller, ca_certificate=os.environ.get("INARI_CONTROLLER_CACERT", True)
+            controller, ca_certificate=os.environ.get("INARI_CONTROLLER_CACERT", True),
+            response_limit=2 * 1024 * 1024,
         ),
         WorkloadTokenProvider(
             scope=scope,

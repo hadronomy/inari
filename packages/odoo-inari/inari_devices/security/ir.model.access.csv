@@ -33,5 +33,6 @@ access_inari_evidence_manager,Inari Evidence,model_inari_decommission_evidence,i
 access_inari_purge_manager,Inari Purge Authority,model_inari_decommission_purge_authority,inari_devices.group_inari_manager,1,1,1,0
 access_inari_identity_admin,Inari Workload Identity,model_inari_workload_identity,inari_devices.group_inari_admin,1,1,1,0
 access_inari_setup_admin,Inari Setup,model_inari_setup_state,inari_devices.group_inari_admin,1,1,1,0
+access_inari_connection_admin,Inari Connection,model_inari_connection_wizard,inari_devices.group_inari_admin,1,1,1,1
 access_inari_release_admin,Inari Release Set,model_inari_release_set,inari_devices.group_inari_admin,1,1,1,0
 access_inari_alert_operator,Inari Alert,model_inari_alert,inari_devices.group_inari_operator,1,1,1,0

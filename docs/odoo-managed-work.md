@@ -25,15 +25,40 @@ Use this JSON shape for the KV secret data:
   "client_id": "odoo-company-7",
   "issuer_url": "https://identity.example.com",
   "client_secret": "<client-secret>",
-  "scopes": ["managed_work:read", "managed_work:write"]
+  "scopes": ["openid", "urn:zitadel:iam:org:project:id:<controller-project-id>:aud"]
 }
 ```
 
 Include any scope that the OIDC provider requires for the Controller audience.
 The access token must carry that audience and these exact claims:
-`inari_database`, `inari_company_id`, and `inari_organization_id`. The Controller
+`inari_database`, `inari_company_id`, `inari_organization_id`, and
+`inari_permissions`. The issuer assigns permissions to the approved service
+identity. OAuth request scopes cannot grant Inari permissions. The Controller
 checks them before it permits Managed Work. The client rejects KV data whose
 identity fields differ from the selected Odoo company identity.
+
+For inventory synchronization, assign only `inventory:read`. Managed Work
+requires `managed_work:read` and `managed_work:write`. In ZITADEL, select JWT
+access tokens for the service account. A Complement Token action must match the
+exact service user, Organization owner, and client identity before it assigns
+the Inari claims. Do not derive permissions from requested scopes or editable
+user metadata.
+
+## Connect and synchronize inventory
+
+In the Odoo Devices list, select **Connect Controller**. Enter the company,
+Controller HTTPS origin, Organization identity, identity issuer, and workload
+client identity. The wizard obtains the protected credential from OpenBao and
+checks the exact company inventory before it creates the connection.
+
+**Synchronize** refreshes the same company. A scheduled task runs every five
+minutes. A complete response updates Organizations, Sites, Agents, and Devices,
+then archives absent records. Invalid responses and failed requests preserve
+the previous inventory. An older snapshot cannot replace a newer snapshot.
+
+The Devices list shows connection state separately from Device Health.
+Discovery does not create a certified capability or activate a Device Binding.
+A signed Driver Profile and a passed Device Test remain required for receipts.
 
 The Odoo pod uses `INARI_OPENBAO_ADDR` and `INARI_OPENBAO_KUBERNETES_ROLE` to
 exchange its projected ServiceAccount token for a short-lived OpenBao token.

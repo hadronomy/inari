@@ -43,7 +43,7 @@ class InariProjection(models.AbstractModel):
             raise UserError(_("The Inari sync identity is required."))
         values = dict(values)
         record = self.search(
-            [("controller_uuid", "=", values["controller_uuid"])], limit=1
+            [("company_id", "=", values["company_id"]), ("controller_uuid", "=", values["controller_uuid"])], limit=1
         )
         values.update(controller_version=version, last_synced_at=fields.Datetime.now())
         if record:
@@ -113,6 +113,11 @@ class InariAgent(models.Model):
     endpoint_url = fields.Char(readonly=True)
     certificate_fingerprint = fields.Char(readonly=True)
     boot_identity = fields.Char(readonly=True)
+    connection_state = fields.Selection(
+        [("online", "Online"), ("offline", "Offline"), ("awaiting_first_contact", "Awaiting first contact")],
+        readonly=True,
+    )
+    last_seen_at = fields.Datetime(readonly=True)
     capabilities_count = fields.Integer(compute="_compute_capabilities_count")
     device_ids = fields.One2many("inari.device", "agent_id")
 
@@ -138,8 +143,8 @@ class InariDevice(models.Model):
         "The Device key must be unique per company.",
     )
     _device_id_company_uniq = models.Constraint(
-        "UNIQUE(company_id, device_id)",
-        "The Device identity must be unique per company.",
+        "UNIQUE(company_id, agent_id, device_id)",
+        "The Device identity must be unique per Agent and company.",
     )
 
     name = fields.Char(required=True, readonly=True)
@@ -147,6 +152,13 @@ class InariDevice(models.Model):
     organization_id = fields.Many2one("inari.organization", required=True, readonly=True, ondelete="restrict")
     site_id = fields.Many2one("inari.site", required=True, readonly=True, ondelete="restrict")
     agent_id = fields.Many2one("inari.agent", required=True, readonly=True, ondelete="restrict")
+    kind = fields.Selection([(value, value.capitalize()) for value in ("printer", "scale", "scanner", "display")], readonly=True)
+    device_class = fields.Selection([("physical", "Physical"), ("virtual", "Virtual")], readonly=True)
+    connection_state = fields.Selection(
+        [(value, value.replace("_", " ").capitalize()) for value in ("discovered", "pending_approval", "online", "offline", "degraded", "blocked")],
+        readonly=True,
+    )
+    transport = fields.Selection([(value, value.upper() if value in ("usb", "hid") else value.capitalize()) for value in ("spooler", "network", "usb", "hid", "serial")], readonly=True)
     health_state = fields.Selection(
         [("ready", "Ready"), ("degraded", "Degraded"), ("offline", "Offline"), ("unknown", "Unknown")],
         default="unknown", readonly=True, index=True,

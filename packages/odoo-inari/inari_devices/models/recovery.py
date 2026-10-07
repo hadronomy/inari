@@ -109,17 +109,6 @@ class InariReconciliationCursor(models.Model):
         self.write({"state": "expired"})
         return True
 
-    @api.model
-    def cron_reconcile(self):
-        for cursor in self.search([("state", "=", "active")]):
-            now = fields.Datetime.now()
-            if cursor.expires_at < now:
-                cursor.write({"state": "expired", "last_reconciled_at": now})
-            else:
-                cursor.write({"last_reconciled_at": now})
-        return True
-
-
 class InariDecommissionRun(models.Model):
     _name = "inari.decommission.run"
     _description = "Scoped Inari Decommission Run"

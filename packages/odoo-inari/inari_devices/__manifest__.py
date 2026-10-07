@@ -7,7 +7,7 @@
         "Connects Odoo workflows to Inari Agents through explicit bindings and "
         "content-free audit records. Controller-owned records remain projections."
     ),
-    "version": "19.0.1.1.0",
+    "version": "19.0.1.2.0",
     "category": "Operations",
     "author": "Inari",
     "license": "LGPL-3",

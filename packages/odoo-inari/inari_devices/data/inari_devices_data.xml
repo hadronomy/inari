@@ -1,9 +1,9 @@
 <odoo>
     <record id="ir_cron_inari_reconcile" model="ir.cron">
-        <field name="name">Inari: reconcile projections and work</field>
-        <field name="model_id" ref="model_inari_reconciliation_cursor"/>
+        <field name="name">Inari: synchronize Controller inventory</field>
+        <field name="model_id" ref="model_inari_setup_state"/>
         <field name="state">code</field>
-        <field name="code">model.cron_reconcile()</field>
+        <field name="code">model._cron_sync_inventory()</field>
         <field name="interval_number">5</field>
         <field name="interval_type">minutes</field>
         <field name="active">True</field>
