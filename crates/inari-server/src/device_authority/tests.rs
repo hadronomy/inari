@@ -120,6 +120,21 @@ fn forged_or_unapproved_evidence_fails_before_signing() {
 }
 
 #[test]
+fn approval_rejects_shared_transit_keys_and_signing_material() {
+    let (draft, mut approval, now) = fixture();
+    approval.profile.key_name = approval.root.key_name.clone();
+    assert!(prepare(draft, &approval, now).is_err());
+
+    let (draft, mut approval, now) = fixture();
+    approval.binding.signer.public_key = approval.root.signer.public_key.clone();
+    assert!(prepare(draft, &approval, now).is_err());
+
+    let (draft, mut approval, now) = fixture();
+    approval.agent_signers[0].public_key = approval.root.signer.public_key.clone();
+    assert!(prepare(draft, &approval, now).is_err());
+}
+
+#[test]
 fn document_bounds_and_output_never_replace_existing_files() {
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("input.json");

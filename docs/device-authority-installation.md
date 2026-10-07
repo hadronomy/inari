@@ -39,7 +39,32 @@ inari-server authority sign-bundle --draft draft.json \
   --approval approval.json --output authority.json
 ```
 
-The command uses the configured OpenBao Kubernetes identity. Give this identity
+Run signing with a dedicated operator identity. The standard Controller pod
+does not mount an OpenBao identity when Managed Work dispatch is disabled.
+Signing does not require dispatch. Use the
+[standalone signing Job](../deploy/controller/authority-job.yaml) for Kubernetes.
+Replace its image placeholder with the approved Controller image digest. In the
+Job's namespace, provide `inari-authority-input` with `draft.json` and
+`approval.json`, and `inari-authority-openbao-ca` with the approved `ca.crt`.
+The input ConfigMap must fit Kubernetes' 1 MiB limit.
+
+Configure the `inari-authority-signer` OpenBao Kubernetes role for only that
+ServiceAccount, namespace, and projected token audience. Its policy needs read
+access to `transit/keys/<approved-key>` and update access to
+`transit/sign/<approved-key>` for each of the four approved keys. Give it no
+other key access. The Job mounts a short-lived identity token, the CA, and a
+writable output claim. It stops after one signing attempt and never serves the
+Controller API. Read the completed file from `inari-authority-output` using an
+operator review pod. Retain the approved bundle, then remove the Job, input
+ConfigMaps, ServiceAccount, and output claim. Use a new output claim for the next
+revision; signing refuses an existing output file.
+
+For an operator installation outside Kubernetes, configure `[openbao]` in the
+file selected by `INARI_SERVER_CONFIG`. Set `address`, `kubernetes_role`,
+`service_account_token_file`, and `ca_certificate_file` to that installation's
+approved identity and trust files.
+
+The command uses this configured OpenBao Kubernetes identity. Give this identity
 read access to the four approved Transit keys and sign access to those keys.
 Keep each key non-exportable and disable plaintext backup. The command checks
 the approved public key and key version before every signature.
@@ -47,6 +72,8 @@ the approved public key and key version before every signature.
 The approval contains `agent_id`, `scope`, `transit_mount`, `agent_signers`, and
 four key approvals: `root`, `profile`, `matrix`, and `binding`. Each key approval
 contains `key_name`, `key_version`, and the purpose-bound `signer` record.
+Each Controller purpose needs a distinct Transit key and distinct public key.
+Agent signing keys must also use separate key material.
 The root purpose is `authority_revision`. Agent purposes are
 `device_observation` and `device_test_evidence`.
 
@@ -58,7 +85,7 @@ signature. Use the independently approved keys and exact observed hardware
 facts. The command does not infer certification from discovery.
 
 Both inputs accept at most 4 MiB and reject unknown fields. The command requires
-a current expiry and verifies the completed bundle before it writes a new
+a current expiry and `effective_at <= now`. It verifies the completed bundle before it writes a new
 output file. It cannot replace an existing file. It does not write Controller
 database records or install authority on an Agent.
 

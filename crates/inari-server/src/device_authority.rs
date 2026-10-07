@@ -1,5 +1,6 @@
 //! Operator-approved bundle assembly with purpose-bound OpenBao signing.
 
+use std::collections::BTreeSet;
 use std::io::{Read, Write};
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -67,6 +68,8 @@ impl AuthorityApproval {
         if !valid_openbao_name(&self.transit_mount) || self.agent_signers.len() > 125 {
             return Err(AppError::bad_request("The authority approval is invalid."));
         }
+        let mut key_names = BTreeSet::new();
+        let mut public_keys = BTreeSet::new();
         for (key, purpose) in [
             (&self.root, SignerPurpose::AuthorityRevision),
             (&self.profile, SignerPurpose::DriverProfile),
@@ -74,6 +77,13 @@ impl AuthorityApproval {
             (&self.binding, SignerPurpose::BindingRevision),
         ] {
             key.signer.validate()?;
+            if !key_names.insert(&key.key_name)
+                || !public_keys.insert(*key.signer.public_key.as_bytes())
+            {
+                return Err(AppError::bad_request(
+                    "Each Controller signing purpose requires a distinct Transit key and public key.",
+                ));
+            }
             if key.signer.purpose != purpose
                 || !valid_openbao_name(&key.key_name)
                 || key.key_version.get() > i32::MAX as u32
@@ -91,6 +101,11 @@ impl AuthorityApproval {
         }
         for signer in &self.agent_signers {
             signer.validate()?;
+            if !public_keys.insert(*signer.public_key.as_bytes()) {
+                return Err(AppError::bad_request(
+                    "An Agent signing key cannot share another signing purpose's key material.",
+                ));
+            }
             if !matches!(
                 signer.purpose,
                 SignerPurpose::DeviceObservation | SignerPurpose::DeviceTestEvidence
