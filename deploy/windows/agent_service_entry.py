@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import multiprocessing
+
 from frozen_runtime import verify_migration_bundle, verify_when_requested
 
 
@@ -11,6 +13,7 @@ def _load_agent_service() -> object:
 
 
 def main() -> None:
+    multiprocessing.freeze_support()
     if verify_when_requested(_load_agent_service):
         return
 

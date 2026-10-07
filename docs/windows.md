@@ -111,6 +111,18 @@ For an upgrade of an installed candidate, set `windows_candidate_sequence` to
 an alpha sequence greater than the installed sequence. The value cannot precede
 the pending Tegami version. Stable packages keep their independent versions.
 
+### Frozen printer worker verification
+
+The frozen Agent dispatches multiprocessing children before it handles service
+arguments. Each child runs the isolated printer worker through the same packaged
+executable.
+
+The Windows bundle check and release build run `--verify-runtime <report>`.
+This check sends more than 256 KiB of synthetic content through the actual
+printer worker startup path. It uses an absent Driver and sends no Device I/O
+permit. The worker must return its rejection within ten seconds. The build
+stops the process tree if runtime verification exceeds thirty seconds.
+
 ## Trust the publisher
 
 Inari’s alpha releases use a private code-signing hierarchy. Windows needs the
