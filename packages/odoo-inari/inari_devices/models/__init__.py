@@ -6,4 +6,5 @@ from . import projections as projections
 from . import reporting as reporting
 from . import recovery as recovery
 from . import setup as setup
+from . import inventory as inventory
 from . import work as work

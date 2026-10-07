@@ -152,7 +152,6 @@ class WorkloadTokenProvider:
                 or any(character.isspace() for character in scope)
                 for scope in scopes
             )
-            or not {"managed_work:read", "managed_work:write"}.issubset(scopes)
         ):
             raise RemoteServiceError("The workload credential scopes are invalid.")
         # RFC 6749 encodes each credential before HTTP Basic authentication.
