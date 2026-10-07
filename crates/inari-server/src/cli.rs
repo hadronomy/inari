@@ -1,13 +1,20 @@
+use std::path::PathBuf;
+
 use toml::Value;
 
-use crate::database::ControllerDatabase;
 use crate::config::Origin;
+use crate::database::ControllerDatabase;
 use crate::{AppError, AppResult, LoadedConfig};
 
 // unknown_flags = "error" restores clap's strictness: usage parses unknown
 // flag-like words as values by default, which suits wrapper CLIs, not this one.
 #[derive(Debug, usage::Cli)]
-#[usage(bin = "inari-server", version, about = "Inari managed device controller", unknown_flags = "error")]
+#[usage(
+    bin = "inari-server",
+    version,
+    about = "Inari managed device controller",
+    unknown_flags = "error"
+)]
 pub struct Cli {
     #[usage(subcommand)]
     command: Option<Command>,
@@ -15,6 +22,11 @@ pub struct Cli {
 
 #[derive(Debug, usage::Subcommands)]
 enum Command {
+    /// Sign an operator-approved Device authority bundle through OpenBao.
+    Authority {
+        #[usage(subcommand)]
+        command: AuthorityCommand,
+    },
     /// Inspect and validate the effective controller configuration.
     Config {
         #[usage(subcommand)]
@@ -24,6 +36,19 @@ enum Command {
     Database {
         #[usage(subcommand)]
         command: DatabaseCommand,
+    },
+}
+
+#[derive(Debug, usage::Subcommands)]
+enum AuthorityCommand {
+    /// Create a signed bundle without replacing an existing output file.
+    SignBundle {
+        #[usage(long = "draft")]
+        draft: PathBuf,
+        #[usage(long = "approval")]
+        approval: PathBuf,
+        #[usage(long = "output")]
+        output: PathBuf,
     },
 }
 
@@ -53,12 +78,13 @@ enum ConfigCommand {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandOutcome {
     Serve,
     MigrateDatabase,
     DatabaseStatus,
     Complete,
+    SignAuthorityBundle { draft: PathBuf, approval: PathBuf, output: PathBuf },
 }
 
 impl Cli {
@@ -67,6 +93,9 @@ impl Cli {
             return Ok(CommandOutcome::Serve);
         };
         match command {
+            Command::Authority {
+                command: AuthorityCommand::SignBundle { draft, approval, output },
+            } => Ok(CommandOutcome::SignAuthorityBundle { draft, approval, output }),
             Command::Config { command } => {
                 let loaded = LoadedConfig::load()?;
                 match command {
@@ -139,7 +168,11 @@ fn print_explanation(loaded: &LoadedConfig) {
     }
 
     println!("{} of {total} settings are overridden:", overridden.len());
-    let width = overridden.iter().map(|(key, _)| key.len()).max().unwrap_or_default();
+    let width = overridden
+        .iter()
+        .map(|(key, _)| key.len())
+        .max()
+        .unwrap_or_default();
     for (key, origin) in overridden {
         // `config` reports the path it resolved, relative to the working
         // directory. Absolute reads the same whichever directory the command
@@ -276,7 +309,12 @@ mod tests {
     // --no-redact discloses secrets.
     #[test]
     fn the_positive_flag_can_only_ask_for_redaction() {
-        assert!(print_effective_redaction(&["inari-server", "config", "print-effective", "--redact"]));
+        assert!(print_effective_redaction(&[
+            "inari-server",
+            "config",
+            "print-effective",
+            "--redact"
+        ]));
     }
 
     #[test]

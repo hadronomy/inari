@@ -18,6 +18,17 @@ fn main() -> Result<(), AppError> {
         match command {
             CommandOutcome::MigrateDatabase => migrate_database(&loaded).await,
             CommandOutcome::DatabaseStatus => database_status(&loaded).await,
+            CommandOutcome::SignAuthorityBundle { draft, approval, output } => {
+                let digest = inari_server::device_authority::sign_bundle_files(
+                    loaded.settings.openbao,
+                    &draft,
+                    &approval,
+                    &output,
+                )
+                .await?;
+                println!("Signed authority bundle stored ({}).", digest.as_str());
+                Ok(())
+            },
             CommandOutcome::Serve => {
                 ServerBuilder::new()
                     .with_config(loaded)

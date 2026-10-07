@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: inari-authority-signer
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: inari-authority-output
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: inari-authority-sign
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: inari-authority-signer
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sign
+          image: ghcr.io/hadronomy/inari-controller@sha256:REPLACE_WITH_APPROVED_DIGEST
+          args:
+            - authority
+            - sign-bundle
+            - --draft
+            - /input/draft.json
+            - --approval
+            - /input/approval.json
+            - --output
+            - /output/authority.json
+          env:
+            - name: INARI_SERVER_OPENBAO__ADDRESS
+              value: https://openbao-active.openbao.svc.cluster.local:8200
+            - name: INARI_SERVER_OPENBAO__KUBERNETES_ROLE
+              value: inari-authority-signer
+            - name: INARI_SERVER_OPENBAO__SERVICE_ACCOUNT_TOKEN_FILE
+              value: /identity/token
+            - name: INARI_SERVER_OPENBAO__CA_CERTIFICATE_FILE
+              value: /trust/ca.crt
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: input
+              mountPath: /input
+              readOnly: true
+            - name: output
+              mountPath: /output
+            - name: identity
+              mountPath: /identity
+              readOnly: true
+            - name: trust
+              mountPath: /trust
+              readOnly: true
+      volumes:
+        - name: input
+          configMap:
+            name: inari-authority-input
+        - name: output
+          persistentVolumeClaim:
+            claimName: inari-authority-output
+        - name: identity
+          projected:
+            defaultMode: 0440
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  audience: https://openbao-active.openbao.svc.cluster.local:8200
+                  expirationSeconds: 600
+        - name: trust
+          configMap:
+            name: inari-authority-openbao-ca
+            items:
+              - key: ca.crt
+                path: ca.crt

@@ -7,6 +7,7 @@ pub mod app;
 pub mod cli;
 pub mod config;
 pub mod database;
+pub mod device_authority;
 pub mod error;
 pub mod http;
 pub mod identity;

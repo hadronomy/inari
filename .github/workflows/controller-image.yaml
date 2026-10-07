@@ -89,6 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --read-only inari-controller:verification --version
+          docker run --rm --read-only inari-controller:verification authority sign-bundle --help
           test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.js"
           test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.wasm"
           test -s "${RUNNER_TEMP}/inari-controller-image/site/pkg/inari-web.css"
