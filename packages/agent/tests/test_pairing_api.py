@@ -128,6 +128,11 @@ async def _retry_with_nonce(
     assert first.headers["www-authenticate"] == (
         'DPoP realm="inari", error="use_dpop_nonce"'
     )
+    exposed = {
+        header.strip().lower()
+        for header in first.headers["access-control-expose-headers"].split(",")
+    }
+    assert {"www-authenticate", "dpop-nonce"}.issubset(exposed)
     nonce = first.headers["dpop-nonce"]
     return await client.request(
         method,

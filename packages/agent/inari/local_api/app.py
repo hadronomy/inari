@@ -188,6 +188,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[
+            "WWW-Authenticate",
             "DPoP-Nonce",
             "Date",
             "X-Correlation-ID",
