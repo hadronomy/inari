@@ -127,8 +127,12 @@ The manager approves the Pairing Request in Device Center. Odoo then issues its
 assertion through `/inari_devices/pairing/v1/device-test-assertion`. This route
 requires an active POS session and verifies the company, POS configuration,
 Agent Endpoint, Organization, Site, and selected receipt capability.
-The assertion replay fingerprint includes the selected revision identity.
-Changing that revision requires a new Pairing Request.
+The assertion replay fingerprint includes the initially selected revision.
+The Client Grant carries the `device_manager` role and covers this exact POS
+scope. It can authorize tests of current signed Binding Revisions in that scope.
+Each Device Test separately binds its selected revision through the signed
+authority graph and its immutable test request. A revision outside the POS scope
+cannot use this grant. The browser stores the grant by POS scope and permissions.
 
 Device Test pairing does not activate the Binding Revision or grant receipt
 permission. Normal POS pairing rejects `device_test:run`. The Agent still

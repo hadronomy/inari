@@ -609,7 +609,7 @@ class TestInariDevices(TransactionCase):
         self.assertEqual(first, replay)
         self.assertEqual(len(claims_seen), 1)
         self.assertEqual(claims_seen[0]["scopes"], ["device_test:run", "jobs:read"])
-        self.assertEqual(claims_seen[0]["role"], "manager")
+        self.assertEqual(claims_seen[0]["role"], "device_manager")
         self.assertEqual(claims_seen[0]["agent_id"], self.agent.agent_id)
         self.assertFalse(revision.latest_passed_test_id)
         self.assertFalse(binding.active_revision_id)

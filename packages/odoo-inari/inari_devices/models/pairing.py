@@ -260,6 +260,7 @@ class InariPairingAssertion(models.Model):
             raise AccessError(_("The Device Test does not match this POS scope."))
         scope = self._binding_scope(binding, revision)
         scope["permissions"] = list(_DEVICE_TEST_PERMISSIONS)
+        scope["role"] = "device_manager"
         scope["test_revision_id"] = revision.revision_id
         return self._issue_request(pairing_request, session, scope)
 
@@ -313,10 +314,13 @@ class InariPairingAssertion(models.Model):
             "site_id": pairing_request["site_id"],
             "pos_configuration_id": pairing_request["pos_configuration_id"],
             "actor_id": str(self.env.uid),
-            "role": "manager"
-            if self.env.is_superuser()
-            or self.env.user.has_group("inari_devices.group_inari_manager")
-            else "operator",
+            "role": scope.get("role")
+            or (
+                "manager"
+                if self.env.is_superuser()
+                or self.env.user.has_group("inari_devices.group_inari_manager")
+                else "operator"
+            ),
             "scopes": list(pairing_request["requested_permissions"]),
             "session_nonce": pairing_request["session_nonce"],
         }
