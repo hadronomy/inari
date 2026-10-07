@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from odoo.exceptions import AccessError, UserError, ValidationError
+from odoo.service.model import call_kw
 from odoo.tests.common import TransactionCase, tagged
 
 from ..services.inventory import (
@@ -43,6 +44,20 @@ class TestInariInventory(TransactionCase):
                 ),
             ),
         )
+
+    def test_connection_buttons_accept_empty_record_selection(self):
+        for model in ("inari.device", "inari.setup.state"):
+            action = call_kw(self.env[model], "action_connect", [[]], {})
+            self.assertEqual(action["res_model"], "inari.connection.wizard")
+        with patch.object(
+            type(self.setup),
+            "action_sync_inventory",
+            return_value={"type": "ir.actions.client", "tag": "reload"},
+        ):
+            action = call_kw(
+                self.env["inari.device"], "action_sync_inventory", [[]], {}
+            )
+        self.assertEqual(action["tag"], "reload")
 
     def test_sync_is_company_scoped_and_does_not_claim_business_readiness(self):
         self.setup._apply_inventory(self.snapshot, "org_mizona")

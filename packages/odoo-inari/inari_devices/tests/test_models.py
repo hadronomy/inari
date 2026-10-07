@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from odoo import fields
-from odoo.exceptions import UserError, ValidationError
-from odoo.tests.common import TransactionCase, tagged
+from odoo.exceptions import AccessError, UserError, ValidationError
+from odoo.tests.common import TransactionCase, new_test_user, tagged
 
 from ..services import PairingAssertionSigner, SignedPairingAssertion
 
@@ -503,6 +503,116 @@ class TestInariDevices(TransactionCase):
         self.assertEqual(len(record), 1)
         self.assertEqual(record.pairing_request_id, "pairing_request-1")
         self.assertEqual(record.pos_session_id, session)
+
+    def test_device_test_pairing_requires_a_manager_and_exact_draft_revision(self):
+        self.env["ir.config_parameter"].sudo().set_param(
+            "web.base.url", "https://odoo.example"
+        )
+        config = self.env["pos.config"].create({"name": "Device Test POS"})
+        session = self.env["pos.session"].sudo().create({"config_id": config.id})
+        capability = (
+            self.env["inari.device.capability"]
+            .sudo()
+            .sync_values(
+                {
+                    "company_id": self.company.id,
+                    "controller_uuid": "device-test-receipt-capability",
+                    "device_id": self.device.id,
+                    "operation": "receipt_image",
+                    "contract_major": 1,
+                },
+                1,
+            )
+        )
+        binding = (
+            self.env["inari.device.binding"]
+            .sudo()
+            .create(
+                {
+                    "company_id": self.company.id,
+                    "site_id": self.site.id,
+                    "scope_type": "pos_config",
+                    "purpose": "pos_receipt",
+                    "pos_config_id": config.id,
+                }
+            )
+        )
+        revision = binding.action_create_revision(self.device, capability)
+        self.env["inari.agent.endpoint"].sudo().create(
+            {
+                "company_id": self.company.id,
+                "agent_id": self.agent.id,
+                "origin": "https://odoo.example",
+                "endpoint_url": "https://agent.example",
+                "certificate_fingerprint": "sha256:device-test",
+            }
+        )
+        values = {
+            "request_id": "pairing_request-device-test",
+            "agent_id": "agent-1",
+            "browser_origin": "https://odoo.example",
+            "agent_endpoint": "https://agent.example",
+            "database": self.env.cr.dbname,
+            "company_id": str(self.company.id),
+            "organization_id": "org-test",
+            "site_id": "site-test",
+            "pos_configuration_id": str(config.id),
+            "audience": "inari-agent",
+            "browser_jwk_thumbprint": "A" * 43,
+            "requested_permissions": ["device_test:run", "jobs:read"],
+            "session_nonce": "session_nonce-device-test",
+            "expires_at": (datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
+            "state": "approved",
+        }
+        assertions = self.env["inari.pairing.assertion"].sudo()
+        self.assertFalse(revision.latest_passed_test_id)
+        self.assertFalse(binding.active_revision_id)
+        with self.assertRaises(AccessError):
+            assertions.issue_for_pos(values, session.id)
+        with self.assertRaises(AccessError):
+            assertions.issue_for_device_test(
+                {**values, "site_id": "another-site"}, session.id, revision.id
+            )
+        with self.assertRaises(ValidationError):
+            assertions.issue_for_device_test(values, session.id, True)
+        operator = new_test_user(
+            self.env,
+            login="device-test-operator",
+            groups="inari_devices.group_inari_operator",
+            company_id=self.company.id,
+        )
+        with self.assertRaises(AccessError):
+            assertions.with_user(operator).issue_for_device_test(
+                values, session.id, revision.id
+            )
+        claims_seen = []
+
+        class Signer:
+            def sign(self, claims):
+                claims_seen.append(claims)
+                return SignedPairingAssertion(
+                    compact_jws="header.payload.test-signature",
+                    signer_key_id="inari-odoo-pairing-test:v2",
+                )
+
+        with patch(
+            "odoo.addons.inari_devices.models.pairing.build_pairing_assertion_signer",
+            return_value=Signer(),
+        ):
+            first = assertions.issue_for_device_test(values, session.id, revision.id)
+            replay = assertions.issue_for_device_test(values, session.id, revision.id)
+            replacement = binding.action_create_revision(
+                self.device, capability, normalized_options={"copies": 2}
+            )
+            with self.assertRaises(AccessError):
+                assertions.issue_for_device_test(values, session.id, replacement.id)
+        self.assertEqual(first, replay)
+        self.assertEqual(len(claims_seen), 1)
+        self.assertEqual(claims_seen[0]["scopes"], ["device_test:run", "jobs:read"])
+        self.assertEqual(claims_seen[0]["role"], "device_manager")
+        self.assertEqual(claims_seen[0]["agent_id"], self.agent.agent_id)
+        self.assertFalse(revision.latest_passed_test_id)
+        self.assertFalse(binding.active_revision_id)
 
     def test_transit_signer_binds_the_reported_key_version(self):
         calls = []

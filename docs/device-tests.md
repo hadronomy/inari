@@ -115,6 +115,29 @@ stop the worker before restarting the Agent. A receipt retry cannot release
 the reservation or start another worker. Recovery retains `worker_stop_failed`
 as the reason for an unknown outcome.
 
+## Odoo Device Test pairing
+
+A Device Manager can pair a browser for one draft POS Binding Revision before
+activation. The browser uses `ClientPairingManager` with
+`deviceTestBindingRevisionId` and exactly `device_test:run` and `jobs:read`.
+The revision identifier is the Odoo record ID. The signed authority graph still
+uses the immutable Binding Revision identity.
+
+The manager approves the Pairing Request in Device Center. Odoo then issues its
+assertion through `/inari_devices/pairing/v1/device-test-assertion`. This route
+requires an active POS session and verifies the company, POS configuration,
+Agent Endpoint, Organization, Site, and selected receipt capability.
+The assertion replay fingerprint includes the initially selected revision.
+The Client Grant carries the `device_manager` role and covers this exact POS
+scope. It can authorize tests of current signed Binding Revisions in that scope.
+Each Device Test separately binds its selected revision through the signed
+authority graph and its immutable test request. A revision outside the POS scope
+cannot use this grant. The browser stores the grant by POS scope and permissions.
+
+Device Test pairing does not activate the Binding Revision or grant receipt
+permission. Normal POS pairing rejects `device_test:run`. The Agent still
+requires a current signed authority graph and a bounded Device Test permit.
+
 ## Signed result and activation
 
 The Agent's protected Ed25519 key signs the canonical result. The envelope

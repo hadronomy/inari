@@ -42,7 +42,7 @@ _REQUEST_FIELDS = frozenset(
         "state",
     }
 )
-_PAIRING_PERMISSIONS = frozenset(PAIRING_PERMISSION_ORDER)
+_DEVICE_TEST_PERMISSIONS = ("device_test:run", "jobs:read")
 
 
 def _identifier(values, name):
@@ -91,21 +91,18 @@ def _utc_datetime(value, name):
     return parsed.astimezone(UTC)
 
 
-def _validated_request(values):
+def _validated_request(values, permission_order=PAIRING_PERMISSION_ORDER):
     if not isinstance(values, dict) or set(values) != _REQUEST_FIELDS:
         raise ValidationError(_("The Pairing Request shape is invalid."))
     permissions = values.get("requested_permissions")
     if (
         not isinstance(permissions, list)
         or not permissions
+        or any(not isinstance(permission, str) for permission in permissions)
         or len(permissions) != len(set(permissions))
-        or any(permission not in _PAIRING_PERMISSIONS for permission in permissions)
+        or any(permission not in permission_order for permission in permissions)
         or permissions
-        != [
-            permission
-            for permission in PAIRING_PERMISSION_ORDER
-            if permission in permissions
-        ]
+        != [permission for permission in permission_order if permission in permissions]
     ):
         raise AccessError(_("This POS requested invalid Device permissions."))
     thumbprint = values.get("browser_jwk_thumbprint")
@@ -225,17 +222,61 @@ class InariPairingAssertion(models.Model):
         ):
             raise AccessError(_("A Device Operator is required to pair this browser."))
         pairing_request = _validated_request(request_values)
+        session = self._active_pos_session(pos_session_id)
+        scope = self._local_device_scope(session.config_id, pairing_request["agent_id"])
+        return self._issue_request(pairing_request, session, scope)
+
+    @api.model
+    def issue_for_device_test(
+        self, request_values, pos_session_id, binding_revision_id
+    ):
+        """Pair a manager for a physical test of one POS Binding Revision."""
+        if not self.env.is_superuser() and not self.env.user.has_group(
+            "inari_devices.group_inari_manager"
+        ):
+            raise AccessError(_("A Device Manager is required to pair a Device Test."))
+        pairing_request = _validated_request(request_values, _DEVICE_TEST_PERMISSIONS)
+        session = self._active_pos_session(pos_session_id)
+        if isinstance(binding_revision_id, bool) or not isinstance(
+            binding_revision_id, int
+        ):
+            raise ValidationError(_("The Binding Revision identity is invalid."))
+        revision = (
+            self.env["inari.device.binding.revision"]
+            .sudo()
+            .browse(binding_revision_id)
+            .exists()
+        )
+        binding = revision.binding_id
+        if (
+            not revision
+            or revision.company_id != session.company_id
+            or binding.pos_config_id != session.config_id
+            or not binding.active
+            or binding.state == "disabled"
+            or not revision.device_id.active
+            or revision.capability_id.operation != "receipt_image"
+        ):
+            raise AccessError(_("The Device Test does not match this POS scope."))
+        scope = self._binding_scope(binding, revision)
+        scope["permissions"] = list(_DEVICE_TEST_PERMISSIONS)
+        scope["role"] = "device_manager"
+        scope["test_revision_id"] = revision.revision_id
+        return self._issue_request(pairing_request, session, scope)
+
+    def _issue_request(self, pairing_request, session, scope):
         now = datetime.now(UTC)
         if pairing_request["expires_at"] <= now:
             raise UserError(_("The Pairing Request expired. Create a new request."))
         if pairing_request["expires_at"] > now + timedelta(minutes=11):
             raise ValidationError(_("The Pairing Request lifetime is invalid."))
 
-        session = self._active_pos_session(pos_session_id)
-        scope = self._local_device_scope(session.config_id, pairing_request["agent_id"])
         self._check_request_scope(pairing_request, scope)
         fingerprint = self._request_fingerprint(
-            pairing_request, session.id, self.env.uid
+            pairing_request,
+            session.id,
+            self.env.uid,
+            test_revision_id=scope.get("test_revision_id"),
         )
 
         self.env.cr.execute(
@@ -273,10 +314,13 @@ class InariPairingAssertion(models.Model):
             "site_id": pairing_request["site_id"],
             "pos_configuration_id": pairing_request["pos_configuration_id"],
             "actor_id": str(self.env.uid),
-            "role": "manager"
-            if self.env.is_superuser()
-            or self.env.user.has_group("inari_devices.group_inari_manager")
-            else "operator",
+            "role": scope.get("role")
+            or (
+                "manager"
+                if self.env.is_superuser()
+                or self.env.user.has_group("inari_devices.group_inari_manager")
+                else "operator"
+            ),
             "scopes": list(pairing_request["requested_permissions"]),
             "session_nonce": pairing_request["session_nonce"],
         }
@@ -371,6 +415,12 @@ class InariPairingAssertion(models.Model):
                     "requested Agent."
                 )
             )
+        scope = self._binding_scope(binding, revision)
+        scope["permissions"] = pos_pairing_permissions(self.env, config, scope["agent"])
+        return scope
+
+    @staticmethod
+    def _binding_scope(binding, revision):
         agent = revision.device_id.agent_id
         if (
             agent.site_id != binding.site_id
@@ -385,7 +435,6 @@ class InariPairingAssertion(models.Model):
             "agent": agent,
             "site": binding.site_id,
             "organization": binding.site_id.organization_id,
-            "permissions": pos_pairing_permissions(self.env, config, agent),
         }
 
     def _check_request_scope(self, request_values, scope):
@@ -426,13 +475,17 @@ class InariPairingAssertion(models.Model):
             )
 
     @staticmethod
-    def _request_fingerprint(request_values, pos_session_id, actor_id):
+    def _request_fingerprint(
+        request_values, pos_session_id, actor_id, *, test_revision_id=None
+    ):
         values = {
             **request_values,
             "expires_at": request_values["expires_at"].isoformat(),
             "pos_session_id": pos_session_id,
             "actor_id": actor_id,
         }
+        if test_revision_id is not None:
+            values["test_revision_id"] = test_revision_id
         encoded = json.dumps(
             values, ensure_ascii=True, separators=(",", ":"), sort_keys=True
         ).encode("ascii")
