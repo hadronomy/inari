@@ -109,3 +109,12 @@ def test_empty_inventory_is_a_valid_complete_snapshot():
     document.update(sites=[], agents=[], devices=[])
     value = inventory(document, SCOPE)
     assert value.sites == value.agents == value.devices == ()
+
+
+def test_device_display_name_uses_the_controller_utf8_byte_limit():
+    document = snapshot()
+    document["devices"][0]["display_name"] = "é" * 512
+    assert inventory(document, SCOPE).devices[0].name == "é" * 512
+    document["devices"][0]["display_name"] += "x"
+    with pytest.raises(RemoteServiceError, match="name is invalid"):
+        inventory(document, SCOPE)

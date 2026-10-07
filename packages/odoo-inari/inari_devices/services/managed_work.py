@@ -182,7 +182,7 @@ def build_managed_work_client(
     return ManagedWorkClient(
         JsonHttpClient(
             controller, ca_certificate=os.environ.get("INARI_CONTROLLER_CACERT", True),
-            response_limit=2 * 1024 * 1024,
+            response_limit=16 * 1024 * 1024,
         ),
         WorkloadTokenProvider(
             scope=scope,

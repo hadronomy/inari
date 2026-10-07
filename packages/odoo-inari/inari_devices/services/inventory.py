@@ -77,7 +77,7 @@ def inventory(document: object, scope: WorkloadScope) -> Inventory:
             identifier(item.get("device_id")),
             identifier(item.get("agent_id")),
             identifier(item.get("site_id")),
-            _name(item.get("display_name")),
+            _name(item.get("display_name"), max_bytes=1024),
             _choice(item.get("kind"), {"printer", "scale", "scanner", "display"}),
             _choice(item.get("device_class"), {"physical", "virtual"}),
             _choice(
@@ -123,10 +123,10 @@ def _records(value: object) -> list[dict]:
     return value
 
 
-def _name(value: object) -> str:
+def _name(value: object, *, max_bytes: int = 256) -> str:
     if (
         not isinstance(value, str)
-        or not 1 <= len(value) <= 256
+        or not 1 <= len(value.encode("utf-8")) <= max_bytes
         or any(ord(char) < 32 for char in value)
     ):
         raise RemoteServiceError("The Controller inventory name is invalid.")
