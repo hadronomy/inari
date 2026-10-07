@@ -29,6 +29,7 @@ def test_server_config_supports_a_process_without_console_streams(
     )
 
     assert controller.server.config.log_config is None
+    assert controller.server.config.proxy_headers is False
 
 
 def test_managed_server_reports_readiness_after_uvicorn_starts(mocker) -> None:

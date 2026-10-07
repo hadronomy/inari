@@ -24,6 +24,8 @@ from .header_authorization import (
     ProblemAuthorizationErrorMapper,
 )
 from .middleware import install_security_middleware
+from .endpoint import AgentEndpointMiddleware
+from ..security.local_trust.native_bootstrap import native_agent_endpoint
 from .problem_handlers import install_problem_handlers
 from .routes import router
 from .device_tests import router as device_tests_router
@@ -175,6 +177,10 @@ def create_app(
         install_security_middleware(
             app, policy_service=app_container.security_policy_service
         )
+    if app_settings.agent_endpoint is not None:
+        app.add_middleware(
+            AgentEndpointMiddleware, endpoint=native_agent_endpoint(app_settings)
+        )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.allowed_origins,
@@ -182,6 +188,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[
+            "WWW-Authenticate",
             "DPoP-Nonce",
             "Date",
             "X-Correlation-ID",

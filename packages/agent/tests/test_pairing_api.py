@@ -128,6 +128,11 @@ async def _retry_with_nonce(
     assert first.headers["www-authenticate"] == (
         'DPoP realm="inari", error="use_dpop_nonce"'
     )
+    exposed = {
+        header.strip().lower()
+        for header in first.headers["access-control-expose-headers"].split(",")
+    }
+    assert {"www-authenticate", "dpop-nonce"}.issubset(exposed)
     nonce = first.headers["dpop-nonce"]
     return await client.request(
         method,
@@ -146,7 +151,7 @@ async def _retry_with_nonce(
 
 
 @asynccontextmanager
-async def _client(tmp_path):
+async def _client(tmp_path, *, socket_address=False):
     database_path = tmp_path / "runtime.sqlite3"
     browser_assertion_key = jwk.generate_key("OKP", "Ed25519")
     agent_token_key = jwk.generate_key("OKP", "Ed25519")
@@ -178,6 +183,18 @@ async def _client(tmp_path):
     settings = AgentSettings(
         allowed_origins=[ODOO_ORIGIN],
         runtime_database_path=database_path,
+        **(
+            {
+                "host": "127.0.0.1",
+                "port": 7443,
+                "agent_endpoint": AGENT_ORIGIN,
+                "trusted_hosts": ["agent.example"],
+                "tls_cert_path": tmp_path / "server.pem",
+                "tls_key_path": tmp_path / "server-key.pem",
+            }
+            if socket_address
+            else {}
+        ),
     )
     container = cast(
         AgentContainer,
@@ -194,16 +211,24 @@ async def _client(tmp_path):
         ),
     )
     app = create_app(container=container)
+
+    async def listener(scope, receive, send):
+        if socket_address and scope["type"] == "http":
+            scope = {**scope, "server": ("127.0.0.1", 7443)}
+        await app(scope, receive, send)
+
     async with LifespanManager(app):
         async with AsyncClient(
-            transport=ASGITransport(app=app), base_url=AGENT_ORIGIN
+            transport=ASGITransport(app=listener), base_url=AGENT_ORIGIN
         ) as client:
             yield client, trust, browser_assertion_key, clock
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("socket_address", [False, True])
 async def test_pairing_api_approves_admits_and_renews_one_browser_key(
     tmp_path,
+    socket_address,
 ) -> None:
     browser_key = jwk.generate_key("OKP", "Ed25519")
     public = public_ed25519_jwk(browser_key)
@@ -219,7 +244,12 @@ async def test_pairing_api_approves_admits_and_renews_one_browser_key(
         "requested_permissions": [Permission.RECEIPT_IMAGE.value],
     }
 
-    async with _client(tmp_path) as (client, trust, assertion_key, clock):
+    async with _client(tmp_path, socket_address=socket_address) as (
+        client,
+        trust,
+        assertion_key,
+        clock,
+    ):
         created = await _retry_with_nonce(
             client,
             method="POST",
