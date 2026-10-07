@@ -119,7 +119,7 @@ impl GatewayRepository {
         }
         let agents: Vec<_> = agents
             .into_iter()
-            .map(agent_summary)
+            .map(|row| agent_summary(row, utc_time(observation.observed_at)))
             .collect::<GatewayResult<_>>()?;
         let devices: Vec<_> = devices
             .into_iter()
@@ -226,7 +226,7 @@ impl GatewayRepository {
             .all(&self.database)
             .await?
             .into_iter()
-            .map(agent_summary)
+            .map(|row| agent_summary(row, Utc::now()))
             .collect()
     }
 
@@ -264,9 +264,9 @@ fn device_summary(model: device::Model) -> GatewayResult<DeviceSummary> {
     })
 }
 
-fn agent_summary(row: AgentRow) -> GatewayResult<AgentSummary> {
+fn agent_summary(row: AgentRow, observed_at: DateTime<Utc>) -> GatewayResult<AgentSummary> {
     let last_seen_at = row.last_seen_at.map(utc_time);
-    let online_after = Utc::now() - Duration::minutes(2);
+    let online_after = observed_at - Duration::minutes(2);
     let state = match last_seen_at {
         Some(last_seen_at) if last_seen_at >= online_after => AgentHealthState::Online,
         Some(_) => AgentHealthState::Offline,
