@@ -1,12 +1,31 @@
 use inari_gateway::audit::{AuditContext, AuditEvent, AuditEventDraft};
 use inari_gateway::protocol::{
-    AgentDetail, AgentId, AgentStatus, AgentSummary, DeviceSummary, SiteId, SiteSummary,
+    AgentDetail, AgentId, AgentStatus, AgentSummary, DeviceSummary, OrganizationWorkloadScope,
+    SiteId, SiteSummary, WorkloadInventory,
 };
 
 use super::{AgentPublicationList, ManagedGatewayController};
 use crate::error::{AppError, AppResult};
 
 impl ManagedGatewayController {
+    pub async fn workload_inventory(
+        &self,
+        scope: &OrganizationWorkloadScope,
+    ) -> AppResult<WorkloadInventory> {
+        self.ensure_enabled()?;
+        if scope.organization_id != self.inner.organization.id {
+            return Err(AppError::forbidden(
+                "The Organization Workload Identity belongs to another Controller Organization.",
+            ));
+        }
+        self.inner
+            .store
+            .repository()?
+            .workload_inventory(scope)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn retire_agent_credentials(
         &self,
         agent_id: &AgentId,

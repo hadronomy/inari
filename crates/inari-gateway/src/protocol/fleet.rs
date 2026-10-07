@@ -1,7 +1,26 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{AgentId, DeviceId, GatewaySnapshot, SiteId};
+use super::{AgentId, DeviceId, GatewaySnapshot, OrganizationId, SiteId};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OrganizationWorkloadScope {
+    pub database: String,
+    pub company_id: String,
+    pub organization_id: OrganizationId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkloadInventory {
+    pub scope: OrganizationWorkloadScope,
+    pub organization_name: String,
+    pub observed_at: DateTime<Utc>,
+    pub sites: Vec<SiteSummary>,
+    pub agents: Vec<AgentSummary>,
+    pub devices: Vec<DeviceSummary>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentStatus {

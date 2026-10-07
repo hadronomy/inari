@@ -466,9 +466,23 @@ admission:
 
 These routes accept an OIDC workload access token. The token must use the
 configured workload audience. It must contain `inari_database`,
-`inari_company_id`, `inari_organization_id`, and a `scope` claim. Write routes
+`inari_company_id`, `inari_organization_id`, and an `inari_permissions` array. Write routes
 require `managed_work:write`. The read route requires `managed_work:read`. Each
 request must match the database, company, and Organization in the token.
+
+The identity issuer assigns `inari_permissions` to an approved workload
+identity. OAuth request scopes select the audience and provider behavior. They
+cannot grant Inari permissions. Missing, empty, or malformed permission arrays
+are rejected. The array contains at most 16 ASCII permission names, each with
+at most 64 bytes and no whitespace or control characters.
+
+`GET /api/inari/v1/workload/inventory` requires `inventory:read`. It returns
+`scope`, `organization_name`, `observed_at`, `sites`, `agents`, and `devices`.
+The scope comes from the authenticated identity. It has no request parameters.
+One read-only PostgreSQL snapshot supplies all records and its observation time.
+Each collection has a 2,000-record limit. Overflow rejects the whole response.
+Device identities are unique within their Agent. Inventory does not authorize
+Device Work or claim Hardware Certification.
 
 Preflight checks the durable Agent and Device scope, online state, print
 capability, and current dispatch key. A ready result fixes the work deadline,

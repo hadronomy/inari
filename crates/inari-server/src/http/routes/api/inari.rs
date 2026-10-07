@@ -14,7 +14,8 @@ use inari_gateway::onboarding::InvitationId;
 use inari_gateway::protocol::{
     AgentDetail, AgentId, AgentSummary, DeviceSummary, EnrollmentRequest, EnrollmentResponse,
     JobId, JobList, JobRecord, JobRequest, ManagedWorkId, ManagedWorkPreflightRequest,
-    ManagedWorkPreflightResult, ManagedWorkRecord, ManagedWorkSubmission, SiteId, SiteSummary,
+    ManagedWorkPreflightResult, ManagedWorkRecord, ManagedWorkSubmission,
+    OrganizationWorkloadScope, SiteId, SiteSummary, WorkloadInventory,
 };
 use inari_web::InvitationPreview;
 use tower_http::request_id::RequestId;
@@ -38,6 +39,7 @@ pub(super) fn router() -> Router<AppState> {
         .route("/agents/{agent_id}/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{job_id}", get(get_job))
         .route("/jobs/{job_id}/cancellation", put(cancel_job))
+        .route("/workload/inventory", get(get_workload_inventory))
         .route("/managed-work/preflight", post(preflight_managed_work))
         .route(
             "/managed-work",
@@ -46,6 +48,25 @@ pub(super) fn router() -> Router<AppState> {
         .route("/managed-work/{managed_work_id}", get(get_managed_work))
         .route("/managed-work/by-idempotency-key", get(find_managed_work))
         .route("/audit-events", get(list_audit_events))
+}
+
+async fn get_workload_inventory(
+    principal: WorkloadPrincipal,
+    State(state): State<AppState>,
+) -> Result<Json<WorkloadInventory>, AppError> {
+    principal.require("inventory:read")?;
+    let identity = principal.identity();
+    let scope = OrganizationWorkloadScope {
+        database: identity.database.clone(),
+        company_id: identity.company_id.clone(),
+        organization_id: identity.organization_id.clone(),
+    };
+    let _permit = state.acquire_inari_api_permit().await?;
+    state
+        .managed_gateway()
+        .workload_inventory(&scope)
+        .await
+        .map(Json)
 }
 
 async fn retire_agent_credentials(

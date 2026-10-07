@@ -49,6 +49,7 @@ data:
     enabled = true
     issuer_url = {{ .Values.identity.oidc.issuerUrl | quote }}
     client_id = {{ .Values.identity.oidc.clientId | quote }}
+    workload_audience = {{ .Values.identity.oidc.workloadAudience | default "urn:inari:managed-workload" | quote }}
     additional_id_token_audiences = {{ .Values.identity.oidc.additionalIdTokenAudiences | toJson }}
     client_secret_file = "/var/run/secrets/inari/oidc/client-secret"
     scopes = {{ .Values.identity.oidc.scopes | toJson }}
