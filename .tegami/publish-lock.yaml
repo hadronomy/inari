@@ -1,209 +1,49 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve Windows print queue completion evidence\n\nComplete Windows RAW receipt and label submissions now report confirmed spooler\nevidence. The Agent ledger and Controller preserve the reported evidence level.\nThis result means that Windows accepted the complete document into its print\nqueue. It does not prove physical output.\n\nDeploy the matching Controller image from the same Release Set with this Agent.\n\nPartial writes, failed completion calls, and worker timeouts retain an unknown\noutcome. They do not trigger another physical submission.\n"
-    filename: 2026-10-05-0ee431ad.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Show Spanish test receipt instructions\n\nOdoo now loads the Spanish test receipt dialog, browser approval instructions,\nand printer selection errors. The connection button also uses translated text.\n"
+    filename: 2026-10-08-78a84d72.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Honor the Device selection in native Setup\n\nThe Agent publishes only the Devices selected for the current Controller.\nUnselected Devices remain available in the local catalog. New Controller Device\nactions and Managed Device Work require the current selection. Accepted retries\nretain their result after selection changes. A new invitation clears the selection.\n"
-    filename: 2026-10-05-1ef95743.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Open the Odoo test receipt dialog\n\nThe Test receipts button now opens the dialog without an Owl error. The selected\nprinter stays selected when Odoo supplies numeric Device record IDs.\n"
+    filename: 2026-10-08-9ed2437a.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Finish Agent restarts after a reset connection\n\nThe Agent limits its wait for HTTP connections during shutdown to five seconds.\nA reset Windows connection can no longer block the runtime restart indefinitely.\nThe Agent completes application cleanup before it starts the next runtime.\n"
-    filename: 2026-10-05-481eaa7c.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep the Setup review and actions reachable\n\nSetup now scrolls the full invitation review at the minimum window size.\nShort forms stay centered. The review labels identify the Controller and its\naddress before you connect this computer.\n"
-    filename: 2026-10-05-739d862a.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n  group:controller-chart:\n    type: patch\n---\n\n### Publish selected Devices to the Controller\n\nThe Agent publishes transport and identity digests for selected Devices.\nThe Controller maintains each Agent's Device Projection from validated snapshots.\nOlder snapshots and exact retries cannot replace current Device observations.\nSeparate Agents can use the same host-local Device identifier without a collision.\nCredential retirement clears the Agent's Projection.\nDiscovery does not grant Managed Device Work capabilities.\n\nUpgrade every Agent before deploying the Controller.\nOlder Agents lack required inventory fields and cannot enroll or publish snapshots\nto the new Controller.\n\nStop old Controller replicas before the Device schema migration.\nThe Helm migration hook runs before the Deployment update.\nKeep old replicas at zero until the migration completes.\nThe migration clears derived Device rows and preserves publication history.\nA rollback requires a matching Recovery Point and Release Set.\n"
-    filename: 2026-10-05-751ddeb2.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep Device Center connected to the Agent\n\nDevice Center uses the authenticated native event stream for live Device and\nDevice Work updates. The stream keeps the trusted local HTTPS connection and\nchecks authentication throughout the connection. Browser Device Streams retain\ntheir signed, scoped contract.\n"
-    filename: 2026-10-05-921eac45.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep Device Center connected after secure setup\n\nDevice Center selects its TLS provider for the local event stream and uses the\noperating system's certificate verifier. A build with multiple TLS providers\ncan connect without a process-wide provider setting.\n\nOverview no longer shows a successful setup message as an Agent connection\nerror.\n"
-    filename: 2026-10-05-9ad96114.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep small Windows icons transparent\n\nThe smallest Windows icons now keep transparent corners. Each executable icon\nsize uses the same rendering as the package assets.\n"
-    filename: 2026-10-05-c7d12fb9.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Print the complete diagnostic receipt\n\nThe receipt diagnostic now prints the saved pattern with Spanish accents,\nCode 128, a QR code, feed, and partial cut. Live Controller commands reach the\nAgent without a restart. The diagnostic does not activate a Device Binding.\n\nReceipt images are centered within the print width. The print command advances\nthe complete receipt to the cutter before the partial cut.\n"
-    filename: 2026-10-06-09b8feca.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Execute receipt Device Tests through the Local Agent Interface\n\nDevice Managers can send the fixed receipt pattern through an approved Device\nand Binding Revision. The Agent records one execution per Test ID and signs\nthe result after text, accents, Code 128, QR, and feed-and-cut checks.\n\nRetries return the existing result. Uncertain output and Agent restarts do not\nsend another receipt. A passed result remains separate from Binding activation.\nThe Windows Agent package includes the fixed pattern.\n\nWhen the worker cannot stop, the Device stays reserved until Agent Administrator\nrepair.\n\nThe reservation covers worker preparation, including preparation that reaches\nthe execution deadline. An expired Test cannot start Device I/O. A repeated\nexecution cannot start another worker for the same Test.\n\nTest IDs remain addressable by the query and physical-answer routes.\nBoth OpenAPI contracts declare the required `Idempotency-Key` header.\n"
-    filename: 2026-10-06-642fb9c1.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Show the current Agent connection at startup\n\nDevice Center now shows the current Agent connection when its window opens.\nA fast local connection no longer leaves the window at Opening the local\nconnection. If the event stream closes, Device Center shows Reconnecting\nwhile it waits for the next connection attempt.\n"
-    filename: 2026-10-06-728ccbc3.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Start isolated printer workers in the Windows package\n\nThe packaged Agent starts its printer workers through the frozen executable.\nDevice Tests and queued receipts can reach the printer without blocking the\nAgent during worker startup. Windows builds now verify this startup path with\nsynthetic content and no Device I/O permit.\n"
-    filename: 2026-10-07-54e22b91.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Pair browsers through the configured HTTPS Agent Endpoint\n\nBrowser pairing and Device Work now use the configured HTTPS hostname when\nthe local socket address is an IP. The Agent retains the Host, listener port,\nTLS scheme, and DPoP checks.\n\nOdoo can read the DPoP challenge headers and retry with the required nonce.\n"
-    filename: 2026-10-07-9fd4b802.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Connect the Odoo Devices list to the Controller\n\nAdministrators can connect one Odoo company to its Controller Organization and\nsynchronize its Sites, Agents, and Devices. Scheduled synchronization preserves\nthe last complete inventory if authentication or the Controller fails. Device\ndiscovery does not activate a receipt binding or replace a Device Test.\n"
-    filename: 2026-10-07-bc390aa1.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Show Odoo receipts in Device Center Activity\n\nActivity now includes receipt Print Jobs from the protected Agent queue.\nIt shows the Device, Odoo source, current state, and Output Evidence.\nReceipt history returns after reconnection and updates while the window stays open.\nOutcome Unknown asks the operator to check physical output before a Reprint.\nThe history contains no receipt content.\n\nUpgrade the Agent and Device Center together for the native monitor contract.\n"
-    filename: 2026-10-08-12a093fc.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Accept receipts after a signed authority update\n\nReceipt admission now accepts unchanged signed device records that a later\nauthority bundle retains. It checks each record digest and binding activation\nagainst the signed manifest. Records withdrawn by a later bundle cannot\nauthorize receipt output.\n"
-    filename: 2026-10-08-664ab2de.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Print both test receipts from Odoo\n\nDevice Managers can open Test receipts from the Devices toolbar, a printer row,\nor the printer page. Choose the INARI check, the full MIZONA sample, or both.\nThe dialog shows the target printer, secure pairing, and each job's result.\nPending jobs keep their identity when the dialog reopens. Test prints also\nappear in Device Center Activity.\nCompleted tests can be cleared to start a new test. An unknown result needs a\nphysical printer check first. Preparation printers use their authorized scope.\n"
-    filename: 2026-10-08-b3b7ed65.md
-    v: 0.0.0
-  - content: "---\npackages:\n  pip:inari:\n    type: patch\n---\n\n### Check Device Test authority before binding activation\n\nThe Agent checks installed Device authority through a separate Device Test\npermit. A previous passed test is not required for this permit. Business Device\nWork still requires its passed test and active Binding Revision.\n\nThe permit requires its graph in the current signed manifest. A withdrawn graph\ncannot use historical audit records to start a test or pass the pre-I/O check.\nAfter an upgrade from a database without manifests, install a newer signed\nauthority revision before a Device Test.\n\nWindows firmware remains `unavailable` when the spooler cannot observe it. The\nsigned Hardware Certification Matrix must contain the same value for the exact\nDevice. Missing facts and observed firmware changes continue to block admission.\n"
-    filename: 2026-10-05-015bbcb9.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Open native setup after Controller navigation\n\nThe invitation page updates its native setup link when the URL fragment changes.\nOpening an invitation from the Controller no longer requires a page reload.\nThe invitation credential remains in the fragment.\n"
-    filename: 2026-10-05-182b88f1.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Open Controller sign-in and diagnostics from browser pages\n\nController sign-in and diagnostics links now load their server routes.\nThe browser router no longer replaces these routes with a page-not-found view.\n"
-    filename: 2026-10-05-890db2ac.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Match Device authority records to the Agent contract\n\nThe Controller uses typed records for Device authority signatures and bundle\nverification. Shared conformance vectors keep its hashes and wire format aligned\nwith the Agent. Authority issuance remains a separate operation.\n"
-    filename: 2026-10-06-24681ce0.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Share the OpenBao connection and verify approved authority signatures\n\nThe Controller shares one bounded OpenBao client for Transit operations.\nAuthority signing checks the approved Ed25519 key version and public key, then\nverifies each returned signature before use.\n\nDisabled managed dispatch no longer loads OpenBao files at startup. Dormant\nconnection values do not require mounted credentials or a CA file.\n\nFor a manual Controller configuration, move OpenBao connection and authentication\nvalues to `[openbao]`. Keep the Transit encryption mount and key in\n`[managed_gateway.payload_protection]`. The Helm chart renders the new section\nfrom the existing chart values.\n"
-    filename: 2026-10-06-bfc62c87.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Pair Odoo Device Tests before Binding activation\n\nDevice Managers can pair a browser for a physical test of one draft POS Binding Revision. The test grant contains only Device Test and job-read permissions. Normal receipt pairing still requires an active Binding Revision.\n"
-    filename: 2026-10-07-26d21aec.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Read company inventory with a workload identity\n\nThe Controller supplies a complete Organization inventory to the Odoo workload\nidentity. The identity issuer assigns explicit Inari permissions. Requested\nOAuth scopes cannot grant those permissions. Provision `inari_permissions`\nbefore deploying this release.\n"
-    filename: 2026-10-07-839a14de.md
-    v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Sign approved Device authority bundles\n\nOperators can assemble and verify Device authority bundles with purpose-bound\nOpenBao keys. The command preserves Agent-signed Device Test evidence and\nrequires explicit approval of the target and signing keys.\n"
-    filename: 2026-10-07-9a60eab4.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Open browser approval from test receipts\n\nTest receipts now shows a link to Device Center and the Pairing Request ID. The dialog explains how to review the request, compare the phrase, and approve the browser on the computer connected to the printer.\n"
+    filename: 2026-10-08-bc5e29a1.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-10-05-0ee431ad.md
-      - 2026-10-05-1ef95743.md
-      - 2026-10-05-481eaa7c.md
-      - 2026-10-05-739d862a.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-921eac45.md
-      - 2026-10-05-9ad96114.md
-      - 2026-10-05-c7d12fb9.md
-      - 2026-10-06-09b8feca.md
-      - 2026-10-06-642fb9c1.md
-      - 2026-10-06-728ccbc3.md
-      - 2026-10-07-54e22b91.md
-      - 2026-10-07-9fd4b802.md
-      - 2026-10-07-bc390aa1.md
-      - 2026-10-08-12a093fc.md
-      - 2026-10-08-664ab2de.md
-      - 2026-10-08-b3b7ed65.md
+      - 2026-10-08-78a84d72.md
+      - 2026-10-08-9ed2437a.md
+      - 2026-10-08-bc5e29a1.md
     id: cargo:inari-agent-client
     updated: true
   - changelogIds:
-      - 2026-10-05-0ee431ad.md
-      - 2026-10-05-1ef95743.md
-      - 2026-10-05-481eaa7c.md
-      - 2026-10-05-739d862a.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-921eac45.md
-      - 2026-10-05-9ad96114.md
-      - 2026-10-05-c7d12fb9.md
-      - 2026-10-06-09b8feca.md
-      - 2026-10-06-642fb9c1.md
-      - 2026-10-06-728ccbc3.md
-      - 2026-10-07-54e22b91.md
-      - 2026-10-07-9fd4b802.md
-      - 2026-10-07-bc390aa1.md
-      - 2026-10-08-12a093fc.md
-      - 2026-10-08-664ab2de.md
-      - 2026-10-08-b3b7ed65.md
+      - 2026-10-08-78a84d72.md
+      - 2026-10-08-9ed2437a.md
+      - 2026-10-08-bc5e29a1.md
     id: cargo:inari-device-center
     updated: true
   - changelogIds:
-      - 2026-10-05-015bbcb9.md
-      - 2026-10-05-0ee431ad.md
-      - 2026-10-05-1ef95743.md
-      - 2026-10-05-481eaa7c.md
-      - 2026-10-05-739d862a.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-921eac45.md
-      - 2026-10-05-9ad96114.md
-      - 2026-10-05-c7d12fb9.md
-      - 2026-10-06-09b8feca.md
-      - 2026-10-06-642fb9c1.md
-      - 2026-10-06-728ccbc3.md
-      - 2026-10-07-54e22b91.md
-      - 2026-10-07-9fd4b802.md
-      - 2026-10-07-bc390aa1.md
-      - 2026-10-08-12a093fc.md
-      - 2026-10-08-664ab2de.md
-      - 2026-10-08-b3b7ed65.md
+      - 2026-10-08-78a84d72.md
+      - 2026-10-08-9ed2437a.md
+      - 2026-10-08-bc5e29a1.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-10-05-0ee431ad.md
-      - 2026-10-05-1ef95743.md
-      - 2026-10-05-481eaa7c.md
-      - 2026-10-05-739d862a.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-921eac45.md
-      - 2026-10-05-9ad96114.md
-      - 2026-10-05-c7d12fb9.md
-      - 2026-10-06-09b8feca.md
-      - 2026-10-06-642fb9c1.md
-      - 2026-10-06-728ccbc3.md
-      - 2026-10-07-54e22b91.md
-      - 2026-10-07-9fd4b802.md
-      - 2026-10-07-bc390aa1.md
-      - 2026-10-08-12a093fc.md
-      - 2026-10-08-664ab2de.md
-      - 2026-10-08-b3b7ed65.md
-    id: pip:inari-print-contracts
-    updated: true
-  - changelogIds:
-      - 2026-10-05-0ee431ad.md
-      - 2026-10-05-1ef95743.md
-      - 2026-10-05-481eaa7c.md
-      - 2026-10-05-739d862a.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-921eac45.md
-      - 2026-10-05-9ad96114.md
-      - 2026-10-05-c7d12fb9.md
-      - 2026-10-06-09b8feca.md
-      - 2026-10-06-642fb9c1.md
-      - 2026-10-06-728ccbc3.md
-      - 2026-10-07-54e22b91.md
-      - 2026-10-07-9fd4b802.md
-      - 2026-10-07-bc390aa1.md
-      - 2026-10-08-12a093fc.md
-      - 2026-10-08-664ab2de.md
-      - 2026-10-08-b3b7ed65.md
+      - 2026-10-08-78a84d72.md
+      - 2026-10-08-9ed2437a.md
+      - 2026-10-08-bc5e29a1.md
     id: pip:inari-brand
     updated: true
   - changelogIds:
-      - 2026-10-05-182b88f1.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-890db2ac.md
-      - 2026-10-06-24681ce0.md
-      - 2026-10-06-bfc62c87.md
-      - 2026-10-07-26d21aec.md
-      - 2026-10-07-839a14de.md
-      - 2026-10-07-9a60eab4.md
-    id: helm:inari
+      - 2026-10-08-78a84d72.md
+      - 2026-10-08-9ed2437a.md
+      - 2026-10-08-bc5e29a1.md
+    id: pip:inari-print-contracts
     updated: true
+  - id: helm:inari
+    updated: false
   - changelogIds:
-      - 2026-10-05-0ee431ad.md
-      - 2026-10-05-1ef95743.md
-      - 2026-10-05-481eaa7c.md
-      - 2026-10-05-739d862a.md
-      - 2026-10-05-751ddeb2.md
-      - 2026-10-05-921eac45.md
-      - 2026-10-05-9ad96114.md
-      - 2026-10-05-c7d12fb9.md
-      - 2026-10-06-09b8feca.md
-      - 2026-10-06-642fb9c1.md
-      - 2026-10-06-728ccbc3.md
-      - 2026-10-07-54e22b91.md
-      - 2026-10-07-9fd4b802.md
-      - 2026-10-07-bc390aa1.md
-      - 2026-10-08-12a093fc.md
-      - 2026-10-08-664ab2de.md
-      - 2026-10-08-b3b7ed65.md
+      - 2026-10-08-78a84d72.md
+      - 2026-10-08-9ed2437a.md
+      - 2026-10-08-bc5e29a1.md
     id: msix:inari-device-center
     updated: true
