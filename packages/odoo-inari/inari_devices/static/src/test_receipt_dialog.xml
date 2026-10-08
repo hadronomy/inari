@@ -7,7 +7,7 @@
                 <t t-if="state.printers.length">
                     <label for="inari-test-printer" class="form-label fw-bold">Printer</label>
                     <select id="inari-test-printer" class="form-select mb-3" t-on-change="selectPrinter" t-att-disabled="state.busy">
-                        <option t-foreach="state.printers" t-as="item" t-key="item.id" t-att-value="item.id" t-att-selected="String(item.id) === state.printerId"><t t-esc="item.name"/> · <t t-esc="item.company"/></option>
+                        <option t-foreach="state.printers" t-as="item" t-key="item.id" t-att-value="item.id" t-att-selected="item.id.toString() === state.printerId"><t t-esc="item.name"/> · <t t-esc="item.company"/></option>
                     </select>
                     <p t-if="printer?.channels.length === 1" class="text-muted">Point of Sale: <t t-esc="channel.label"/></p>
                     <t t-if="printer?.channels.length > 1">

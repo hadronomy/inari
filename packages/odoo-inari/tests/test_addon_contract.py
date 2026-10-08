@@ -22,6 +22,7 @@ def test_manifest_targets_odoo_19_pos_and_printer_tools():
         "inari_devices/static/src/index.js"
     )
     assert values["assets"]["web.assets_unit_tests"] == [
+        "inari_devices/static/src/test_receipt_dialog.xml",
         "inari_devices/static/tests/unit/**/*.js"
     ]
 
