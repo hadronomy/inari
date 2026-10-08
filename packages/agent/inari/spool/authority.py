@@ -201,7 +201,6 @@ class SqlActiveAuthorityGuard:
         )
         if expected_scope_digest != proof.scope_digest:
             raise SpoolAdmissionError(ProblemCode.CAPABILITY_CHANGED)
-        _check_window(binding, now, ProblemCode.CAPABILITY_CHANGED)
         _check_signer(
             connection,
             binding,

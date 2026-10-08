@@ -61,12 +61,13 @@ def installation(tmp_path):
     signed = projections.authority_state.current_revision
     key = projections.private_keys[signed.signer_key_id]
 
-    def bundle_for(manifest=manifest, number=1):
+    def bundle_for(manifest=manifest, number=1, *, expires_at=None):
         revision = replace(
             signed.revision,
             revision_id=f"authority-{number}",
             revision_number=number,
             manifest_digest=canonical_digest(manifest.model_dump(mode="json")),
+            expires_at=expires_at or signed.revision.expires_at,
         )
         return AuthorityBundle(
             revision=SignedAuthorityRevision(

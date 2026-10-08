@@ -132,6 +132,10 @@ revision and the current revision. A withdrawn record closes admission.
 The Agent migration `20261008_0019` changes the authority proof trigger to check
 manifest membership. It preserves the signed records and their installation
 provenance. Database migration creates a backup before it changes the trigger.
+The original bundle dates on a stored Binding Revision describe installation
+provenance. Admission uses the signed authority revision's validity window.
+Driver Profiles, matrix rows, Device Test evidence, and signers retain their
+own validity checks.
 
 Each revision retains its signed manifest. Device Test authorization requires
 the exact Binding Revision, Driver Profile, and certification row in the current

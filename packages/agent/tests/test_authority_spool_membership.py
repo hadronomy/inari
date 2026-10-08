@@ -76,6 +76,25 @@ def test_receipt_proof_accepts_records_reused_by_a_new_bundle(installation):
         SqlActiveAuthorityGuard().check(connection, proof, now=now)
 
 
+def test_retained_binding_uses_the_signed_bundle_expiry(installation):
+    installer, store, bundle_for, observations, target, now = installation
+    installer.install(bundle_for(expires_at=now + timedelta(seconds=10)), now=now)
+    installer.install(
+        bundle_for(number=2, expires_at=now + timedelta(minutes=5)), now=now
+    )
+    authority = DeviceCapabilityAuthority(
+        projections=SqliteDeviceAuthorityReader(store),
+        observations=observations,
+        current_agent_version="1.20.0",
+    )
+    proof = authority.check(authority.authorize(target, now=now), now=now)
+    _prepare(store, target, proof, now)
+    with store.immediate_transaction() as connection:
+        SqlActiveAuthorityGuard().check(
+            connection, proof, now=now + timedelta(seconds=20)
+        )
+
+
 @pytest.mark.parametrize(
     "withdrawn", ["bindings", "profiles", "certification_rows", "evidence"]
 )
