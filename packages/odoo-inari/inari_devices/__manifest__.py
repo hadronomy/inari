@@ -58,6 +58,7 @@
             "inari_devices/static/src/index.js",
         ],
         "web.assets_unit_tests": [
+            "inari_devices/static/src/test_receipt_dialog.xml",
             "inari_devices/static/tests/unit/**/*.js",
         ],
     },
