@@ -9,12 +9,15 @@ def manifest():
     return literal_eval((ADDON / "__manifest__.py").read_text(encoding="utf-8"))
 
 
-def test_manifest_targets_odoo_19_pos_assets_only():
+def test_manifest_targets_odoo_19_pos_and_printer_tools():
     values = manifest()
 
     assert values["version"].startswith("19.0.")
     assert "point_of_sale" in values["depends"]
-    assert "web.assets_backend" not in values["assets"]
+    assert (
+        "inari_devices/static/src/test_receipt_dialog.js"
+        in values["assets"]["web.assets_backend"]
+    )
     assert values["assets"]["point_of_sale._assets_pos"][-1] == (
         "inari_devices/static/src/index.js"
     )

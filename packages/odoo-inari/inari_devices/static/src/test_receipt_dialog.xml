@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="inari_devices.TestReceiptDialog">
+        <Dialog title="title" size="'md'">
+            <div class="inari-test-receipts" t-att-aria-busy="state.busy ? 'true' : 'false'">
+                <p>Print the verified samples through Inari. These receipts create no sale or payment.</p>
+                <t t-if="state.printers.length">
+                    <label for="inari-test-printer" class="form-label fw-bold">Printer</label>
+                    <select id="inari-test-printer" class="form-select mb-3" t-on-change="selectPrinter" t-att-disabled="state.busy">
+                        <option t-foreach="state.printers" t-as="item" t-key="item.id" t-att-value="item.id" t-att-selected="String(item.id) === state.printerId"><t t-esc="item.name"/> · <t t-esc="item.company"/></option>
+                    </select>
+                    <p t-if="printer?.channels.length === 1" class="text-muted">Point of Sale: <t t-esc="channel.label"/></p>
+                    <t t-if="printer?.channels.length > 1">
+                        <label for="inari-test-pos" class="form-label">Point of Sale</label>
+                        <select id="inari-test-pos" class="form-select mb-3" t-model="state.channelIndex" t-att-disabled="state.busy || state.rows.length">
+                            <option t-foreach="printer.channels" t-as="item" t-key="item.binding.binding_revision_id" t-att-value="item_index"><t t-esc="item.label"/></option>
+                        </select>
+                    </t>
+                    <p t-if="printer?.unavailable_reason" class="alert alert-warning" role="status" t-esc="printer.unavailable_reason"/>
+                    <fieldset t-att-disabled="state.busy || state.rows.length">
+                        <legend class="fs-6 fw-bold">Receipts to print</legend>
+                        <label class="inari-test-receipts__choice">
+                            <input class="form-check-input" type="radio" name="inari-test-kind" value="both" t-model="state.selection"/>
+                            <span><strong>Both receipts</strong><span class="d-block text-muted">One INARI check and one full MIZONA sample.</span></span>
+                        </label>
+                        <label t-foreach="receipts" t-as="receipt" t-key="receipt.id" class="inari-test-receipts__choice">
+                            <input class="form-check-input" type="radio" name="inari-test-kind" t-att-value="receipt.id" t-model="state.selection"/>
+                            <span><strong t-esc="receipt.name"/><span class="d-block text-muted" t-esc="receipt.description"/></span>
+                        </label>
+                    </fieldset>
+                    <details class="mt-3">
+                        <summary>Preview the samples</summary>
+                        <div class="inari-test-receipts__previews mt-2">
+                            <figure t-foreach="receipts" t-as="receipt" t-key="receipt.id">
+                                <figcaption class="fw-bold mb-2" t-esc="receipt.name"/>
+                                <img t-att-src="receipt.url" t-att-alt="receipt.name + ': ' + receipt.description"/>
+                            </figure>
+                        </div>
+                    </details>
+                </t>
+                <p t-else="" class="alert alert-info" role="status">No printers are available in the selected companies. Synchronize Devices first.</p>
+                <div t-if="state.pairing" class="alert alert-info mt-3" role="status">
+                    <t t-if="state.pairing.name === 'awaiting_approval'">
+                        <strong>Approve this browser in Device Center</strong>
+                        <p class="mb-1">On the Agent Host, check this phrase before you approve the Pairing Request:</p>
+                        <strong class="fs-5" t-esc="state.pairing.phrase"/>
+                    </t>
+                    <t t-else="">Connecting this browser securely…</t>
+                </div>
+                <div class="mt-3" aria-live="polite" aria-atomic="true">
+                    <p t-if="state.error" class="alert alert-danger" role="alert" t-esc="state.error"/>
+                    <ul t-if="state.rows.length" class="list-unstyled mb-0">
+                        <li t-foreach="state.rows" t-as="row" t-key="row.key" class="py-2">
+                            <strong t-esc="receiptLabel(row.name)"/>: <span t-esc="stateLabel(row.state)"/>
+                            <span t-if="row.error" class="d-block text-danger" t-esc="row.error"/>
+                        </li>
+                    </ul>
+                    <p t-if="state.rows.length" class="text-muted mt-2 mb-0">View the jobs in Device Center → Activity. If a result is unknown, check the printer before you send another copy.</p>
+                </div>
+            </div>
+            <t t-set-slot="footer">
+                <button t-if="!state.rows.length" type="button" class="btn btn-primary" t-att-disabled="!canPrint" t-on-click="print"><t t-esc="state.busy ? 'Connecting…' : printLabel"/></button>
+                <button t-else="" type="button" class="btn btn-secondary" t-att-disabled="state.busy" t-on-click="refresh">Check result</button>
+                <button type="button" class="btn btn-link" t-on-click="props.close">Close</button>
+            </t>
+        </Dialog>
+    </t>
+</templates>

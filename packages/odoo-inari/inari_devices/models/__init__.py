@@ -8,3 +8,4 @@ from . import recovery as recovery
 from . import setup as setup
 from . import inventory as inventory
 from . import work as work
+from . import test_receipts as test_receipts
