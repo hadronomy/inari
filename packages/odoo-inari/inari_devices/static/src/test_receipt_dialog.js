@@ -44,6 +44,7 @@ export class TestReceiptDialog extends Component {
                     : _t("Logo, products, tax, discount, payments, loyalty, barcode, and QR code."),
         }));
         this.title = _t("Test receipts");
+        this.connectingLabel = _t("Connecting…");
         this.state = useState({
             printers: [],
             printerId: "",
