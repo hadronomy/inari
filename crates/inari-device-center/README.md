@@ -75,6 +75,27 @@ state when it subscribes, even if the Agent connection opened before the
 window. Activity events use a separate live channel. A closed event stream
 sets the connection to Reconnecting before the next connection attempt.
 
+### Receipt history in Activity
+
+Activity includes the latest 100 content-free Print Job snapshots from the
+Agent ledger. It shows the target Device, Odoo database and POS configuration,
+current state, Print Job ID, and Output Evidence. Output Confirmed names the
+evidence level: device, spooler, or transport. Outcome Unknown asks the operator
+to check physical output before a Reprint.
+
+The loopback-only `/system/events` monitor sends `print_jobs` with its initial
+snapshot and every runtime event. It also sends a snapshot when Print Job state
+changes during a 10-second idle interval. Reconnection reads the current ledger.
+Each new window receives the retained snapshot. Receipt content, documents, and
+Driver messages do not enter this projection. Browser Client Grants cannot
+use this native monitor. Browser reconciliation retains its exact pairing scope.
+
+Diagnostic jobs and Device events remain in Activity with their existing states.
+They do not replace or duplicate receipt Print Jobs. The event contract fixture
+includes `print_jobs`; [the Print Job fixture](../../contracts/local-agent.print-job.json)
+defines one content-free receipt with spooler evidence. Python and Rust tests
+read the same fixture.
+
 ### Development environment
 
 Debug builds carry a Bench and a set of devtools. A small launcher floats at the

@@ -7,7 +7,7 @@ use inari_agent_client::{
     AgentClient, AgentClientError, AgentClientOptions, AgentClientResult, AgentConnection,
     AgentEvent, Device, DeviceId, EnrollmentPreview, IdentityStore, InvitationLink, Job,
     LocalAgentService, LocalIdentityStore, PairingDecision, PairingRequest, PairingRequestId,
-    ServiceControlResult, ServiceState, SetupSnapshot,
+    PrintJob, ServiceControlResult, ServiceState, SetupSnapshot,
 };
 #[cfg(windows)]
 use tokio::io::AsyncReadExt as _;
@@ -29,6 +29,7 @@ pub struct SetupResult {
 #[derive(Clone)]
 pub enum AgentRuntimeUpdate {
     Connection(AgentConnection),
+    PrintJobs(Arc<[PrintJob]>),
     Event(AgentEvent),
     #[cfg(windows)]
     Activation(Option<String>),
@@ -45,6 +46,8 @@ pub(crate) struct AgentRuntimeSubscription {
     connection: watch::Receiver<AgentConnection>,
     events: broadcast::Receiver<AgentRuntimeEvent>,
     initial_connection_pending: bool,
+    print_jobs: watch::Receiver<Arc<[PrintJob]>>,
+    initial_print_jobs_pending: bool,
 }
 
 impl AgentRuntimeSubscription {
@@ -52,12 +55,23 @@ impl AgentRuntimeSubscription {
         if std::mem::take(&mut self.initial_connection_pending) {
             return Ok(AgentRuntimeUpdate::Connection(*self.connection.borrow_and_update()));
         }
+        if std::mem::take(&mut self.initial_print_jobs_pending) {
+            return Ok(AgentRuntimeUpdate::PrintJobs(
+                self.print_jobs
+                    .borrow_and_update()
+                    .clone(),
+            ));
+        }
 
         tokio::select! {
             biased;
             changed = self.connection.changed() => {
                 changed.map_err(|_| broadcast::error::RecvError::Closed)?;
                 Ok(AgentRuntimeUpdate::Connection(*self.connection.borrow_and_update()))
+            }
+            changed = self.print_jobs.changed() => {
+                changed.map_err(|_| broadcast::error::RecvError::Closed)?;
+                Ok(AgentRuntimeUpdate::PrintJobs(self.print_jobs.borrow_and_update().clone()))
             }
             event = self.events.recv() => {
                 Ok(match event? {
@@ -77,6 +91,7 @@ pub struct AgentRuntime {
     service: LocalAgentService,
     cancellation: CancellationToken,
     connection: watch::Sender<AgentConnection>,
+    print_jobs: watch::Sender<Arc<[PrintJob]>>,
     updates: broadcast::Sender<AgentRuntimeEvent>,
 }
 
@@ -95,6 +110,7 @@ impl AgentRuntime {
         let client = AgentClient::new(AgentClientOptions::default(), identity_store)?;
         let (updates, _) = broadcast::channel(128);
         let (connection, _) = watch::channel(AgentConnection::Checking);
+        let (print_jobs, _) = watch::channel(Arc::default());
         let runtime = Arc::new(Self {
             runtime: Mutex::new(Some(runtime)),
             tasks: Mutex::new(Some(JoinSet::new())),
@@ -102,6 +118,7 @@ impl AgentRuntime {
             service: LocalAgentService::installed(),
             cancellation: CancellationToken::new(),
             connection,
+            print_jobs,
             updates,
         });
         Ok(runtime)
@@ -113,6 +130,8 @@ impl AgentRuntime {
             connection: self.connection.subscribe(),
             events: self.updates.subscribe(),
             initial_connection_pending: true,
+            print_jobs: self.print_jobs.subscribe(),
+            initial_print_jobs_pending: !self.print_jobs.borrow().is_empty(),
         }
     }
 
@@ -297,6 +316,7 @@ impl AgentRuntime {
         let cancellation = self.cancellation.clone();
         let updates = self.updates.clone();
         let connection = self.connection.clone();
+        let print_jobs = self.print_jobs.clone();
         self.spawn_owned(async move {
             let mut attempt = 0_u32;
             loop {
@@ -313,8 +333,17 @@ impl AgentRuntime {
                                 () = cancellation.cancelled() => return,
                                 message = stream.next() => {
                                     match message {
-                                        Ok(Some(event)) => {
-                                            let _ = updates.send(AgentRuntimeEvent::Event(event));
+                                        Ok(Some(update)) => {
+                                            print_jobs.send_if_modified(|current| {
+                                                if current.as_ref() == update.print_jobs.as_slice() {
+                                                    return false;
+                                                }
+                                                *current = update.print_jobs.into();
+                                                true
+                                            });
+                                            if let Some(event) = update.event {
+                                                let _ = updates.send(AgentRuntimeEvent::Event(event));
+                                            }
                                         },
                                         Ok(None) | Err(_) => {
                                             connection.send_replace(AgentConnection::Reconnecting);
@@ -576,6 +605,40 @@ mod tests {
             result,
             Ok(Ok(AgentRuntimeUpdate::Connection(AgentConnection::Connected)))
         ));
+    }
+
+    #[test]
+    fn receipt_history_is_retained_for_new_windows_and_replaced_by_current_state() {
+        let runtime = AgentRuntime::with_identity_store(LocalIdentityStore).unwrap();
+        let job = PrintJob {
+            id: inari_agent_client::JobId::parse("job_receipt").unwrap(),
+            intent_id: "pi_v1_receipt".into(),
+            device_id: DeviceId::parse("dev_pos80").unwrap(),
+            origin_kind: inari_agent_client::PrintOriginKind::Pos,
+            database: "odoo".into(),
+            document_kind: Some("customer_receipt".into()),
+            pos_configuration_id: Some("4".into()),
+            state: inari_agent_client::PrintJobState::Accepted,
+            state_version: 1,
+            occurred_at: chrono::DateTime::UNIX_EPOCH,
+        };
+        runtime
+            .print_jobs
+            .send_replace(vec![job].into());
+        let mut subscription = runtime.subscribe();
+        let _ = receive(&runtime, &mut subscription).unwrap();
+        assert!(matches!(receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::PrintJobs(jobs)) if jobs.len() == 1 && jobs[0].state_version == 1));
+        let mut job = runtime.print_jobs.borrow()[0].clone();
+        job.state = inari_agent_client::PrintJobState::OutputConfirmed(
+            inari_agent_client::OutputEvidence::Spooler,
+        );
+        job.state_version = 3;
+        runtime
+            .print_jobs
+            .send_replace(vec![job].into());
+        assert!(matches!(receive(&runtime, &mut subscription),
+            Ok(AgentRuntimeUpdate::PrintJobs(jobs)) if jobs.len() == 1 && jobs[0].state_version == 3));
     }
 
     #[test]

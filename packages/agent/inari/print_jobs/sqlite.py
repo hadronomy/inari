@@ -30,6 +30,25 @@ class SqlitePrintJobReader:
     def __init__(self, store: RuntimeStore) -> None:
         self._store = store
 
+    async def recent_for_native_monitor(self) -> tuple[PrintJob, ...]:
+        with self._store.connection() as connection:
+            jobs = public_print_jobs_table.c
+            rows = (
+                connection.execute(
+                    select(public_print_jobs_table)
+                    .order_by(
+                        func.coalesce(
+                            jobs.terminal_at, jobs.started_at, jobs.accepted_at
+                        ).desc(),
+                        jobs.id.desc(),
+                    )
+                    .limit(100)
+                )
+                .mappings()
+                .all()
+            )
+        return tuple(print_job_from_row(row) for row in rows)
+
     async def get(self, job_id: str, *, scope: PrintJobScope) -> PrintJob | None:
         with self._store.connection() as connection:
             row = (

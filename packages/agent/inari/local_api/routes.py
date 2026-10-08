@@ -111,6 +111,7 @@ from .device_work import (
     idempotency_key_from_request,
 )
 from .print_job_queries import PrintJobQueries
+from .schemas.system import NativePrintJobResponse
 from .problem_handlers import problem_responses
 from .pairing_routes import pairing_router
 
@@ -542,6 +543,7 @@ async def stream_native_monitor(
     event_hub: EventHubDependency,
     device_catalog: DeviceCatalogDependency,
     job_service: JobServiceDependency,
+    queries: PrintJobQueriesDependency,
 ) -> StreamingResponse:
     _require_native_monitor(authorization_service, connection)
 
@@ -549,8 +551,13 @@ async def stream_native_monitor(
         subscription = await event_hub.subscribe()
         try:
             _require_native_monitor(authorization_service, connection)
+            print_jobs = [
+                NativePrintJobResponse.from_domain(job)
+                for job in await queries.reader.recent_for_native_monitor()
+            ]
             snapshot = LiveSnapshotResponse(
-                status=build_system_status_response(device_catalog, job_service)
+                status=build_system_status_response(device_catalog, job_service),
+                print_jobs=print_jobs,
             )
             yield f"data: {snapshot.model_dump_json()}\n\n"
             while True:
@@ -559,16 +566,31 @@ async def stream_native_monitor(
                 except TimeoutError:
                     event = None
                 _require_native_monitor(authorization_service, connection)
+                current_jobs = [
+                    NativePrintJobResponse.from_domain(job)
+                    for job in await queries.reader.recent_for_native_monitor()
+                ]
                 if event is None:
-                    yield ": keep-alive\n\n"
+                    if current_jobs != print_jobs:
+                        snapshot = LiveSnapshotResponse(
+                            status=build_system_status_response(
+                                device_catalog, job_service
+                            ),
+                            print_jobs=current_jobs,
+                        )
+                        yield f"data: {snapshot.model_dump_json()}\n\n"
+                    else:
+                        yield ": keep-alive\n\n"
                 else:
                     update = LiveEventUpdateResponse(
                         status=build_system_status_response(
                             device_catalog, job_service
                         ),
                         event=RuntimeEventResponse.from_domain(event),
+                        print_jobs=current_jobs,
                     )
                     yield f"data: {update.model_dump_json()}\n\n"
+                print_jobs = current_jobs
         except AgentError:
             return
         finally:

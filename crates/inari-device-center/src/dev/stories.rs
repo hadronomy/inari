@@ -13,8 +13,8 @@ use gpui::{
 use gpui_component::{StyledExt as _, input::InputState};
 use inari_agent_client::{
     AgentConnection, AgentEvent, AgentEventKind, Device, DeviceId, DeviceKind, DeviceState,
-    EnrollmentPreview, EventResource, Job, JobId, JobState, ServiceState, SetupAccess,
-    SetupSnapshot, SetupStage,
+    EnrollmentPreview, EventResource, Job, JobId, JobState, OutputEvidence, PrintJob,
+    PrintJobState, PrintOriginKind, ServiceState, SetupAccess, SetupSnapshot, SetupStage,
 };
 
 use crate::{
@@ -283,7 +283,7 @@ story! {
     id: "screen.activity",
     name: "Activity",
     scope: Scope::Screens,
-    about: "Jobs and events, and the empty state under them.",
+    about: "Receipt outcomes, diagnostic jobs, Device events, and an empty history.",
     render: |_dial, _window, _cx| {
         let now = Utc::now();
         let events = vec![
@@ -308,9 +308,37 @@ story! {
             job("job_count", JobState::Succeeded, "dev_receiving"),
             job("job_next", JobState::Queued, "dev_front"),
         ];
+        let print_jobs = vec![
+            PrintJob {
+                id: JobId::parse("0123456789abcdef0123456789abcdef").unwrap(),
+                intent_id: "pi_v1_receipt".into(),
+                device_id: DeviceId::parse("dev_front").unwrap(),
+                origin_kind: PrintOriginKind::Pos,
+                database: "odoo".into(),
+                document_kind: Some("customer_receipt".into()),
+                pos_configuration_id: Some("4".into()),
+                state: PrintJobState::OutputConfirmed(OutputEvidence::Spooler),
+                state_version: 3,
+                occurred_at: now - Duration::minutes(1),
+            },
+            PrintJob {
+                id: JobId::parse("job_unknown_receipt").unwrap(),
+                intent_id: "pi_v1_unknown_receipt".into(),
+                device_id: DeviceId::parse("dev_front").unwrap(),
+                origin_kind: PrintOriginKind::Pos,
+                database: "odoo".into(),
+                document_kind: Some("customer_receipt".into()),
+                pos_configuration_id: Some("4".into()),
+                state: PrintJobState::OutcomeUnknown,
+                state_version: 3,
+                occurred_at: now - Duration::minutes(3),
+            },
+        ];
         page("story-activity")
-            .child(Section::new("Populated").child(ActivityView::new(&jobs, &events)))
-            .child(Section::new("Empty").child(ActivityView::new(&[], &[])))
+            .child(Section::new("Populated").child(ActivityView::new(
+                &jobs, &print_jobs, &events, &mock_devices(),
+            )))
+            .child(Section::new("Empty").child(ActivityView::new(&[], &[], &[], &[])))
             .into_any_element()
     },
 }

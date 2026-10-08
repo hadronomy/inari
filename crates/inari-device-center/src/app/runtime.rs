@@ -75,6 +75,9 @@ impl DeviceCenter {
                                             }
                                             center.refresh_operational_data(cx);
                                         },
+                                        AgentRuntimeUpdate::PrintJobs(jobs) => {
+                                            center.print_jobs = jobs;
+                                        },
                                         #[cfg(windows)]
                                         AgentRuntimeUpdate::Activation(invitation) => {
                                             match invitation {

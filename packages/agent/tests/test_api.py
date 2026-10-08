@@ -69,6 +69,7 @@ from inari.local_api.header_authorization import (
     HeaderAuthorizationRequest,
 )
 from inari.local_api.schemas import RuntimeEventResponse
+from inari.local_api.schemas.system import NativePrintJobResponse
 from inari.printing.protocols import (
     PrinterCapabilities,
     PrinterDevice,
@@ -273,6 +274,9 @@ class StubPrintJobReader:
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         self.query = query
         return self.page
+
+    async def recent_for_native_monitor(self) -> tuple[PrintJob, ...]:
+        return self.page.jobs
 
 
 @dataclass(slots=True)
@@ -537,6 +541,26 @@ async def test_native_monitor_rejects_query_credentials(mocker) -> None:
     assert response.status_code == 401
 
 
+@pytest.mark.anyio
+async def test_native_receipt_history_requires_jobs_read_before_ledger_access(
+    mocker,
+) -> None:
+    container = make_test_container(mocker=mocker)
+    read = mocker.spy(StubPrintJobReader, "recent_for_native_monitor")
+    async with async_client_for(container) as client:
+        headers = await auth_headers(
+            client,
+            requested_scopes=tuple(
+                scope.value
+                for scope in AccessScope
+                if scope is not AccessScope.JOBS_READ
+            ),
+        )
+        response = await client.get("/system/events", headers=headers)
+    assert response.status_code == 403
+    read.assert_not_called()
+
+
 async def native_monitor_response(container):
     async with async_client_for(container) as client:
         headers = await auth_headers(client)
@@ -558,6 +582,7 @@ async def native_monitor_response(container):
         container.event_hub,
         container.device_catalog,
         container.job_service,
+        container.print_job_queries,
     )
 
 
@@ -583,6 +608,72 @@ async def test_native_monitor_streams_snapshot_and_events_then_closes_on_auth_fa
     with pytest.raises(StopAsyncIteration):
         await anext(response.body_iterator)
     unsubscribe.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_native_monitor_recovers_receipts_and_refreshes_them_without_runtime_events(
+    mocker,
+) -> None:
+    container = make_test_container(mocker=mocker)
+    reader = container.print_job_queries.reader
+    assert isinstance(reader, StubPrintJobReader)
+    now = datetime(2026, 10, 8, 1, 3, 4, tzinfo=UTC)
+    job = PrintJob(
+        job_id="job_receipt",
+        intent_id="pi_v1_receipt",
+        device_id="dev_pos80",
+        origin=PosPrintOrigin(
+            organization_id="org_1",
+            site_id="site_1",
+            database="odoo",
+            paired_client_id="pairing_1",
+            pos_configuration_id="4",
+            pos_session_id="40",
+            offline_order_id="sample_1",
+            server_order_id=None,
+            document_kind="customer_receipt",
+            content_revision="sha256:receipt",
+        ),
+        state=PrintJobState.ACCEPTED,
+        state_version=1,
+        accepted_at=now,
+        expires_at=now + timedelta(minutes=5),
+        retryable=False,
+        contract_version="v1",
+    )
+    reader.page = PrintIntentPage(
+        jobs=(job,), missing_print_intent_ids=(), high_water_mark=1
+    )
+    response = await native_monitor_response(container)
+    initial = json.loads((await anext(response.body_iterator)).removeprefix("data: "))
+    assert initial["print_jobs"][0]["state"] == "accepted"
+    job = replace(
+        job,
+        state=PrintJobState.OUTPUT_CONFIRMED,
+        state_version=3,
+        started_at=now + timedelta(seconds=2),
+        terminal_at=now + timedelta(seconds=3),
+        confirmation_evidence="spooler",
+    )
+    reader.page = replace(reader.page, jobs=(job,), high_water_mark=3)
+
+    async def idle(awaitable, *, timeout):
+        assert timeout == 10
+        awaitable.close()
+        raise TimeoutError
+
+    mocker.patch("inari.local_api.routes.asyncio.wait_for", new=idle)
+    updated = json.loads((await anext(response.body_iterator)).removeprefix("data: "))
+    assert updated["kind"] == "snapshot"
+    fixture = (
+        Path(__file__).resolve().parents[3] / "contracts" / "local-agent.print-job.json"
+    )
+    expected = NativePrintJobResponse.model_validate_json(fixture.read_text())
+    assert NativePrintJobResponse.model_validate(updated["print_jobs"][0]) == expected
+    assert set(updated["print_jobs"][0]) == set(NativePrintJobResponse.model_fields)
+    assert "origin" not in updated["print_jobs"][0]
+    assert await anext(response.body_iterator) == ": keep-alive\n\n"
+    await response.body_iterator.aclose()
 
 
 @pytest.mark.anyio
@@ -1160,7 +1251,7 @@ async def test_device_work_trust_failure_keeps_browser_cors_headers(mocker) -> N
     assert response.status_code == 401
     assert response.headers["access-control-allow-origin"] == ("http://127.0.0.1:8069")
     assert response.headers["access-control-expose-headers"] == (
-        "DPoP-Nonce, Date, X-Correlation-ID, X-Inari-Event-Lease, "
+        "WWW-Authenticate, DPoP-Nonce, Date, X-Correlation-ID, X-Inari-Event-Lease, "
         "X-Inari-Event-Subscription, X-Inari-Event-Generation, X-Inari-Scale-Lease"
     )
 

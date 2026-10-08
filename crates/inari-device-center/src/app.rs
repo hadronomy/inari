@@ -8,8 +8,8 @@ use gpui::{
 };
 use gpui_component::{IconName, StyledExt as _, tooltip::Tooltip};
 use inari_agent_client::{
-    AgentConnection, AgentEvent, Device, DeviceId, DeviceState, Job, ServiceState, SetupAccess,
-    SetupSnapshot,
+    AgentConnection, AgentEvent, Device, DeviceId, DeviceState, Job, PrintJob, ServiceState,
+    SetupAccess, SetupSnapshot,
 };
 
 use crate::{
@@ -127,6 +127,7 @@ pub struct DeviceCenter {
     device_directory: Entity<DeviceDirectory>,
     client_pairing: Entity<ClientPairingView>,
     jobs: Arc<[Job]>,
+    print_jobs: Arc<[PrintJob]>,
     events: Vec<AgentEvent>,
     connection: AgentConnection,
     service_state: ServiceState,
@@ -177,6 +178,7 @@ impl DeviceCenter {
             device_directory,
             client_pairing,
             jobs: Arc::default(),
+            print_jobs: Arc::default(),
             events: Vec::new(),
             connection: AgentConnection::Checking,
             service_state: ServiceState::Checking,
@@ -321,7 +323,10 @@ impl DeviceCenter {
                 .device_directory
                 .clone()
                 .into_any_element(),
-            Destination::Activity => ActivityView::new(&self.jobs, &self.events).into_any_element(),
+            Destination::Activity => {
+                ActivityView::new(&self.jobs, &self.print_jobs, &self.events, &self.devices)
+                    .into_any_element()
+            },
             Destination::Support => SupportView::new(
                 self.agent_status(),
                 self.service_state,

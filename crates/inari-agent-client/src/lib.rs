@@ -14,6 +14,7 @@ mod model;
 #[cfg(windows)]
 mod native_pipe;
 mod pairing;
+mod print_jobs;
 mod service;
 mod transport;
 
@@ -23,11 +24,12 @@ pub use client_pairing::{
     PairingRequestState, PairingScope,
 };
 pub use error::{AgentClientError, AgentClientResult};
-pub use events::{AgentEvent, AgentEventKind, AgentEventStream, EventResource};
+pub use events::{AgentEvent, AgentEventKind, AgentEventStream, AgentMonitorUpdate, EventResource};
 pub use identity::{ClientIdentity, IdentityStore, LocalIdentityStore};
 pub use model::{
     AgentConnection, Device, DeviceId, DeviceKind, DeviceState, EnrollmentPreview, InvitationLink,
     Job, JobId, JobState, PairingRequestId, ServiceState, SetupAccess, SetupSnapshot, SetupStage,
 };
 pub use pairing::PairingMode;
+pub use print_jobs::{OutputEvidence, PrintJob, PrintJobState, PrintOriginKind};
 pub use service::{LocalAgentService, ServiceControlError, ServiceControlResult, ServiceOperation};
