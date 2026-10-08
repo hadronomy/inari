@@ -68,7 +68,7 @@
                 </div>
             </div>
             <t t-set-slot="footer">
-                <button t-if="!state.rows.length" type="button" class="btn btn-primary" t-att-disabled="!canPrint" t-on-click="print"><t t-esc="state.busy ? 'Connecting…' : printLabel"/></button>
+                <button t-if="!state.rows.length" type="button" class="btn btn-primary" t-att-disabled="!canPrint" t-on-click="print"><t t-esc="state.busy ? connectingLabel : printLabel"/></button>
                 <button t-else="" type="button" class="btn btn-secondary" t-att-disabled="state.busy" t-on-click="refresh">Check result</button>
                 <button t-if="state.rows.length" type="button" class="btn btn-primary" t-att-disabled="!canClear" t-on-click="newTest">New test</button>
                 <button type="button" class="btn btn-link" t-on-click="props.close">Close</button>

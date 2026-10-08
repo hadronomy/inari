@@ -1,6 +1,7 @@
 from odoo import fields
 from odoo.exceptions import AccessError, UserError
 from odoo.tests.common import TransactionCase, new_test_user, tagged
+from odoo.tools.translate import code_translations
 
 
 @tagged("post_install", "-at_install")
@@ -71,6 +72,26 @@ class TestPrinterReceipts(TransactionCase):
             cls.env,
             login="receipt-manager",
             groups="base.group_user,inari_devices.group_inari_manager,point_of_sale.group_pos_user",
+        )
+
+    def test_spanish_receipt_translations_reach_browser_and_python(self):
+        messages = code_translations.get_web_translations("inari_devices", "es_ES")[
+            "messages"
+        ]
+        browser = {message["id"]: message["string"] for message in messages}
+        self.assertEqual(browser.get("Test receipts"), "Recibos de prueba")
+        self.assertEqual(
+            browser.get("Pairing Request ID"), "ID de la solicitud de vinculación"
+        )
+        self.assertEqual(
+            browser.get("Open Device Center on this computer"),
+            "Abrir Device Center en este equipo",
+        )
+        self.assertEqual(browser.get("Connecting…"), "Conectando…")
+        python = code_translations.get_python_translations("inari_devices", "es_ES")
+        self.assertEqual(
+            python.get("Select a printer to print test receipts."),
+            "Seleccione una impresora para imprimir recibos de prueba.",
         )
 
     def test_unbound_printer_explains_setup_without_authorization(self):
