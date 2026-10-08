@@ -136,6 +136,36 @@ async def test_lookup_by_public_id_requires_the_exact_client_scope(
 
 
 @pytest.mark.anyio
+async def test_native_history_is_bounded_and_orders_by_latest_lifecycle_time(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    for index in range(101):
+        _seed_job(
+            store.database_path,
+            job_id=f"job_{index:03d}",
+            intent_id=f"intent_{index:03d}",
+        )
+    with sqlite3.connect(store.database_path) as connection:
+        connection.execute(
+            """UPDATE public_print_jobs SET state = 'output_confirmed', state_version = 3,
+            started_at = ?, terminal_at = ?, confirmation_evidence = 'spooler' WHERE id = 'job_000'""",
+            (
+                (NOW + timedelta(seconds=1)).isoformat(),
+                (NOW + timedelta(seconds=2)).isoformat(),
+            ),
+        )
+    reader = SqlitePrintJobReader(store)
+    jobs = await reader.recent_for_native_monitor()
+    assert len(jobs) == 100
+    assert [job.job_id for job in jobs[:3]] == ["job_000", "job_100", "job_099"]
+    assert jobs[0].state.value == "output_confirmed"
+    assert jobs[0].confirmation_evidence == "spooler"
+    assert jobs[-1].job_id == "job_002"
+    assert await reader.get("job_000", scope=_scope()) == jobs[0]
+
+
+@pytest.mark.anyio
 async def test_reconcile_returns_scoped_jobs_in_request_order(tmp_path: Path) -> None:
     store = _store(tmp_path)
     _seed_job(

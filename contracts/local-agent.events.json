@@ -11,7 +11,8 @@
       "event_type": "device.connected",
       "occurred_at": "2026-07-17T10:00:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -25,7 +26,8 @@
       "event_type": "device.disconnected",
       "occurred_at": "2026-07-17T10:01:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -39,7 +41,8 @@
       "event_type": "device.updated",
       "occurred_at": "2026-07-17T10:02:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -53,7 +56,8 @@
       "event_type": "job.queued",
       "occurred_at": "2026-07-17T10:03:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -67,7 +71,8 @@
       "event_type": "job.dispatched",
       "occurred_at": "2026-07-17T10:04:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -81,7 +86,8 @@
       "event_type": "job.running",
       "occurred_at": "2026-07-17T10:05:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -95,7 +101,8 @@
       "event_type": "job.succeeded",
       "occurred_at": "2026-07-17T10:06:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -109,7 +116,8 @@
       "event_type": "job.failed",
       "occurred_at": "2026-07-17T10:07:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -123,7 +131,8 @@
       "event_type": "job.cancelled",
       "occurred_at": "2026-07-17T10:08:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -137,7 +146,8 @@
       "event_type": "job.recovered",
       "occurred_at": "2026-07-17T10:09:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   },
   {
     "kind": "event_update",
@@ -151,6 +161,7 @@
       "event_type": "job.retry_scheduled",
       "occurred_at": "2026-07-17T10:10:00Z",
       "payload": {}
-    }
+    },
+    "print_jobs": []
   }
 ]

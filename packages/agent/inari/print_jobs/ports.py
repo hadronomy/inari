@@ -19,13 +19,16 @@ from .models import (
 
 
 class PrintJobReader(Protocol):
-    """Content-free Print Job reads with scope enforcement inside the adapter."""
+    """Content-free reads for scoped clients and the authenticated native monitor."""
 
     async def reconcile(self, query: PrintIntentQuery) -> PrintIntentPage:
         """Return exact scoped snapshots and scoped reconciliation position."""
 
     async def get(self, job_id: str, *, scope: PrintJobScope) -> PrintJob | None:
         """Return one snapshot when it belongs to the requested scope."""
+
+    async def recent_for_native_monitor(self) -> tuple[PrintJob, ...]:
+        """Return at most 100 snapshots for the authenticated host monitor only."""
 
 
 class PrintJobSubmission(Protocol):

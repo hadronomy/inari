@@ -1,0 +1,15 @@
+{
+  "print_job_id": "job_receipt",
+  "print_intent_id": "pi_v1_receipt",
+  "device_id": "dev_pos80",
+  "origin_kind": "pos",
+  "database": "odoo",
+  "document_kind": "customer_receipt",
+  "pos_configuration_id": "4",
+  "state": "output_confirmed",
+  "state_version": 3,
+  "accepted_at": "2026-10-08T01:03:04Z",
+  "started_at": "2026-10-08T01:03:06Z",
+  "terminal_at": "2026-10-08T01:03:07Z",
+  "confirmation_evidence": "spooler"
+}

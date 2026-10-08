@@ -7,7 +7,9 @@ use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 use url::Url;
 
-use crate::{AgentClientError, AgentClientResult, DeviceId, JobId};
+use crate::{
+    AgentClientError, AgentClientResult, DeviceId, JobId, PrintJob, print_jobs::WirePrintJob,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EventResource {
@@ -37,6 +39,12 @@ pub struct AgentEvent {
     pub resource: EventResource,
     pub kind: AgentEventKind,
     pub summary: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentMonitorUpdate {
+    pub print_jobs: Vec<PrintJob>,
+    pub event: Option<AgentEvent>,
 }
 
 pub struct AgentEventStream {
@@ -79,16 +87,28 @@ impl AgentEventStream {
         Ok(Self { messages })
     }
 
-    pub async fn next(&mut self) -> AgentClientResult<Option<AgentEvent>> {
-        while let Some(message) = self.messages.next().await {
+    pub async fn next(&mut self) -> AgentClientResult<Option<AgentMonitorUpdate>> {
+        if let Some(message) = self.messages.next().await {
             let message = message?;
             let payload = message.data;
-            match serde_json::from_str::<LiveMessage>(&payload)
-                .map_err(AgentClientError::invalid_response)?
-            {
-                LiveMessage::Snapshot => {},
-                LiveMessage::EventUpdate { event } => return event.try_into().map(Some),
+            let message = serde_json::from_str::<LiveMessage>(&payload)
+                .map_err(AgentClientError::invalid_response)?;
+            let (jobs, event) = match message {
+                LiveMessage::Snapshot { print_jobs } => (print_jobs, None),
+                LiveMessage::EventUpdate { event, print_jobs } => {
+                    (print_jobs, Some(event.try_into()?))
+                },
+            };
+            if jobs.len() > 100 {
+                return Err(AgentClientError::invalid_response(std::io::Error::other(
+                    "The native monitor exceeded the Print Job history limit.",
+                )));
             }
+            let print_jobs = jobs
+                .into_iter()
+                .map(PrintJob::try_from)
+                .collect::<AgentClientResult<_>>()?;
+            return Ok(Some(AgentMonitorUpdate { print_jobs, event }));
         }
         Ok(None)
     }
@@ -97,8 +117,8 @@ impl AgentEventStream {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum LiveMessage {
-    Snapshot,
-    EventUpdate { event: WireEvent },
+    Snapshot { print_jobs: Vec<WirePrintJob> },
+    EventUpdate { event: WireEvent, print_jobs: Vec<WirePrintJob> },
 }
 
 #[derive(Deserialize)]
@@ -206,9 +226,12 @@ mod tests {
             let fixture: Vec<serde_json::Value> =
                 serde_json::from_str(include_str!("../../../contracts/local-agent.events.json"))
                     .unwrap();
+            let print_job: serde_json::Value =
+                serde_json::from_str(include_str!("../../../contracts/local-agent.print-job.json"))
+                    .unwrap();
             let body = format!(
-                ": heartbeat\n\ndata: {{\"kind\":\"snapshot\"}}\n\ndata: {}\n\n",
-                fixture[0]
+                ": heartbeat\n\ndata: {{\"kind\":\"snapshot\",\"print_jobs\":[{}]}}\n\ndata: {}\n\n",
+                print_job, fixture[0]
             );
             let headers = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -229,11 +252,20 @@ mod tests {
         let mut stream = AgentEventStream::connect(&endpoint, &SecretString::from("fixture-token"))
             .await
             .unwrap();
+        let snapshot = stream.next().await.unwrap().unwrap();
+        assert_eq!(snapshot.print_jobs.len(), 1);
+        assert_eq!(
+            snapshot.print_jobs[0].state,
+            crate::PrintJobState::OutputConfirmed(crate::OutputEvidence::Spooler)
+        );
+        assert!(snapshot.event.is_none());
         assert_eq!(
             stream
                 .next()
                 .await
                 .unwrap()
+                .unwrap()
+                .event
                 .unwrap()
                 .kind,
             AgentEventKind::DeviceConnected
@@ -302,9 +334,10 @@ mod tests {
         let events = messages
             .into_iter()
             .map(|message| {
-                let LiveMessage::EventUpdate { event } = message else {
+                let LiveMessage::EventUpdate { event, print_jobs } = message else {
                     panic!("expected event update");
                 };
+                assert!(print_jobs.is_empty());
                 AgentEvent::try_from(event).expect("event maps")
             })
             .collect::<Vec<_>>();

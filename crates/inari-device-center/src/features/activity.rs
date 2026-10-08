@@ -13,7 +13,10 @@ use gpui::{
     div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{IconName, StyledExt as _};
-use inari_agent_client::{AgentEvent, EventResource, Job};
+use inari_agent_client::{
+    AgentEvent, Device, EventResource, Job, OutputEvidence, PrintJob, PrintJobState,
+    PrintOriginKind,
+};
 
 use crate::ui::{
     content::{EmptyState, PageTitle, Section, Typography as _, page, row_divider},
@@ -31,12 +34,24 @@ const VISIBLE_ENTRIES: usize = 100;
 #[derive(IntoElement)]
 pub struct ActivityView {
     jobs: Vec<Job>,
+    print_jobs: Vec<PrintJob>,
     events: Vec<AgentEvent>,
+    devices: Vec<Device>,
 }
 
 impl ActivityView {
-    pub fn new(jobs: &[Job], events: &[AgentEvent]) -> Self {
-        Self { jobs: jobs.to_vec(), events: events.to_vec() }
+    pub fn new(
+        jobs: &[Job],
+        print_jobs: &[PrintJob],
+        events: &[AgentEvent],
+        devices: &[Device],
+    ) -> Self {
+        Self {
+            jobs: jobs.to_vec(),
+            print_jobs: print_jobs.to_vec(),
+            events: events.to_vec(),
+            devices: devices.to_vec(),
+        }
     }
 }
 
@@ -44,7 +59,7 @@ impl RenderOnce for ActivityView {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let theme = cx.inari();
         let now = Utc::now();
-        let mut entries = entries(self.jobs, self.events);
+        let mut entries = entries(self.jobs, self.print_jobs, self.events, &self.devices);
         entries.sort_unstable_by_key(|entry| Reverse(entry.occurred_at));
         entries.truncate(VISIBLE_ENTRIES);
 
@@ -85,8 +100,54 @@ struct Entry {
     tone: Tone,
 }
 
-fn entries(jobs: Vec<Job>, events: Vec<AgentEvent>) -> Vec<Entry> {
-    let mut entries = Vec::with_capacity(jobs.len() + events.len());
+fn entries(
+    jobs: Vec<Job>,
+    print_jobs: Vec<PrintJob>,
+    events: Vec<AgentEvent>,
+    devices: &[Device],
+) -> Vec<Entry> {
+    let mut entries = Vec::with_capacity(jobs.len() + print_jobs.len() + events.len());
+    entries.extend(print_jobs.into_iter().map(|job| {
+        let (label, tone) = match job.state {
+            PrintJobState::Accepted => ("Accepted", Tone::Busy),
+            PrintJobState::InProgress => ("In Progress", Tone::Busy),
+            PrintJobState::OutputConfirmed(_) => ("Output Confirmed", Tone::Positive),
+            PrintJobState::Failed => ("Failed", Tone::Critical),
+            PrintJobState::OutcomeUnknown => ("Outcome Unknown", Tone::Caution),
+            PrintJobState::Expired => ("Expired", Tone::Neutral),
+            PrintJobState::Canceled => ("Canceled", Tone::Neutral),
+        };
+        let kind = match job.origin_kind {
+            PrintOriginKind::Pos if job.document_kind.as_deref() == Some("customer_receipt") => {
+                "POS receipt"
+            },
+            PrintOriginKind::Pos => "POS document",
+            PrintOriginKind::Preparation => "Preparation ticket",
+            PrintOriginKind::Report => "Report",
+        };
+        let device = devices
+            .iter()
+            .find(|device| device.id == job.device_id)
+            .map(|device| device.name.as_str())
+            .unwrap_or(job.device_id.as_str());
+        let source = match &job.pos_configuration_id {
+            Some(id) => format!("Odoo {} · POS {id}", job.database),
+            None => format!("Odoo {}", job.database),
+        };
+        let evidence = match job.state {
+            PrintJobState::OutputConfirmed(OutputEvidence::Device) => " · Device evidence",
+            PrintJobState::OutputConfirmed(OutputEvidence::Spooler) => " · Spooler evidence",
+            PrintJobState::OutputConfirmed(OutputEvidence::Transport) => " · Transport evidence",
+            PrintJobState::OutcomeUnknown => " · Check the output before a Reprint",
+            _ => "",
+        };
+        Entry {
+            occurred_at: job.occurred_at,
+            title: format!("{kind} · {label}").into(),
+            detail: format!("{device} · {source}{evidence} · Print Job {}", job.id).into(),
+            tone,
+        }
+    }));
     entries.extend(events.into_iter().map(|event| {
         Entry {
             occurred_at: event.occurred_at,
@@ -232,9 +293,54 @@ mod tests {
             created_at: at(12, 0),
         };
 
-        let entries = entries(vec![job], Vec::new());
+        let entries = entries(vec![job], Vec::new(), Vec::new(), &[]);
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].tone, Tone::Critical);
+    }
+
+    #[test]
+    fn receipt_history_names_the_odoo_source_and_preserves_evidence_and_risk() {
+        let mut job = PrintJob {
+            id: inari_agent_client::JobId::parse("job_receipt").unwrap(),
+            intent_id: "pi_v1_receipt".into(),
+            device_id: inari_agent_client::DeviceId::parse("dev_pos80").unwrap(),
+            origin_kind: PrintOriginKind::Pos,
+            database: "odoo".into(),
+            document_kind: Some("customer_receipt".into()),
+            pos_configuration_id: Some("4".into()),
+            state: PrintJobState::OutputConfirmed(OutputEvidence::Spooler),
+            state_version: 3,
+            occurred_at: at(12, 0),
+        };
+        let devices = [Device {
+            id: job.device_id.clone(),
+            name: "POS-80".into(),
+            kind: inari_agent_client::DeviceKind::Printer,
+            state: inari_agent_client::DeviceState::Online,
+        }];
+        let history = entries(Vec::new(), vec![job.clone()], Vec::new(), &devices);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].title, "POS receipt · Output Confirmed");
+        assert_eq!(history[0].tone, Tone::Positive);
+        assert!(
+            history[0]
+                .detail
+                .contains("POS-80 · Odoo odoo · POS 4 · Spooler evidence")
+        );
+        assert!(
+            history[0]
+                .detail
+                .contains("Print Job job_receipt")
+        );
+        job.state = PrintJobState::OutcomeUnknown;
+        let history = entries(Vec::new(), vec![job], Vec::new(), &devices);
+        assert_eq!(history[0].tone, Tone::Caution);
+        assert_eq!(history[0].title, "POS receipt · Outcome Unknown");
+        assert!(
+            history[0]
+                .detail
+                .contains("Check the output before a Reprint")
+        );
     }
 }
