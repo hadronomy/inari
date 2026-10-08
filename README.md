@@ -141,6 +141,7 @@ signing hierarchy.
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
+- [Connectivity redesign and implementation guide](docs/connectivity/README.md)
 - [Contributing](.github/CONTRIBUTING.md)
 - [Roadmap](ROADMAP.md)
 - [Kubernetes operations](docs/kubernetes.md)
