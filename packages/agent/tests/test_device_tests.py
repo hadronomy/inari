@@ -613,7 +613,7 @@ def test_upgrade_from_previous_schema_preserves_installed_authority(rig):
     command.downgrade(migrator._build_alembic_config(), "20261005_0017")
     result = migrator.ensure_current()
     assert result.previous_revision == "20261005_0017"
-    assert result.current_revision == "20261006_0018"
+    assert result.current_revision == "20261008_0019"
     assert result.backup_path is not None
     assert service.projections.read_authority_state() == before
     assert _count(rig, device_tests_table) == 0
