@@ -13,6 +13,7 @@ export default {
     "ROADMAP.md",
     ".github/CONTRIBUTING.md",
     "docs/*.md",
+    "docs/connectivity/*.md",
     "deploy/helm/inari/README.md",
     "deploy/kustomize/inari/README.md",
     "packages/agent/README.md",

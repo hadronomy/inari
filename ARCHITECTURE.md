@@ -1,5 +1,9 @@
 # Architecture
 
+This document describes the current implementation. The
+[connectivity redesign](docs/connectivity/README.md) defines the future target
+and its implementation criteria.
+
 Inari is a local-first device platform with an optional managed control plane.
 The architecture is built around a simple rule: hardware work belongs close to
 the hardware, while fleet policy and coordination belong in the controller.

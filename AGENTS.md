@@ -47,19 +47,33 @@ It exists to preserve the standards the project has converged on over time:
 
 Read this before making changes.
 
-## Rust Storage
+## Connectivity redesign
 
-Never download Rust crates or build Rust targets on the current drive.
+Before changing Agent connectivity, pairing, Device Center IPC, or generic
+device contracts, read [the target glossary](docs/connectivity/CONTEXT.md),
+[connectivity reference](docs/connectivity/README.md),
+[implementation stages](docs/connectivity/implementation.md), and
+[Rust craft standard](docs/connectivity/rust-craft.md).
+They record the selected local stack, required behavior, and remaining technology choices.
+Apply `hadronomy-skills:rust-craft` for Rust work and `codebase-design` for module boundaries.
+Complete implementation, validation, and craft review before starting the next stage.
+Current managed transport rules below describe the existing implementation.
+Update them with the runtime when an authorized redesign stage replaces that boundary.
 
-Use the existing Yggdrasil storage for all Cargo data and build output:
+## Rust Builds
+
+Run Cargo through `mbx`, the caching wrapper pinned in `mise.toml`. Write `mbx`
+where you would write `cargo`, and pass the same arguments:
 
 ```sh
-export CARGO_HOME=/Volumes/Yggdrasil/rust/cargo
-export CARGO_TARGET_DIR=/Volumes/Yggdrasil/rust/target/inari
+mbx test -p inari-device-center
+mbx clippy --workspace --all-targets
 ```
 
-Set both variables before every Cargo command. Do not use a repository-local
-`target` directory or the default Cargo cache.
+mbx keeps the crate cache and the build output off the internal disk and reuses
+compiled work across checkouts and worktrees. It reads those paths from its own
+configuration, so an `mbx` command needs no environment variables in front of
+it. `mbx doctor` checks the setup.
 
 ## 1. Core Standard
 
