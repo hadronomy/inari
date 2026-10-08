@@ -62,4 +62,4 @@ def test_bundle_verification_records_import_failure(tmp_path: Path) -> None:
 
 
 def test_migration_bundle_verification_runs_to_the_single_head() -> None:
-    assert verify_migration_bundle() == "20261006_0018"
+    assert verify_migration_bundle() == "20261008_0019"
