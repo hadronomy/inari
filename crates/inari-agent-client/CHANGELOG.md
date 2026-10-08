@@ -1,3 +1,19 @@
+## inari-agent-client@1.20.0-alpha.15
+
+### Show Spanish test receipt instructions
+
+Odoo now loads the Spanish test receipt dialog, browser approval instructions,
+and printer selection errors. The connection button also uses translated text.
+
+### Open the Odoo test receipt dialog
+
+The Test receipts button now opens the dialog without an Owl error. The selected
+printer stays selected when Odoo supplies numeric Device record IDs.
+
+### Open browser approval from test receipts
+
+Test receipts now shows a link to Device Center and the Pairing Request ID. The dialog explains how to review the request, compare the phrase, and approve the browser on the computer connected to the printer.
+
 ## inari-agent-client@1.20.0-alpha.14
 
 ### Preserve Windows print queue completion evidence
