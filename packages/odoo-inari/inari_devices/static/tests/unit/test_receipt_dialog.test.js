@@ -1,10 +1,12 @@
 import { expect, test } from "@odoo/hoot";
 import {
+    clearRegistry,
     contains,
     makeDialogMockEnv,
     mockService,
     mountWithCleanup,
 } from "@web/../tests/web_test_helpers";
+import { registry } from "@web/core/registry";
 import { TestReceiptDialog } from "../../src/test_receipt_dialog";
 
 class ReceiptDialog extends TestReceiptDialog {
@@ -14,6 +16,14 @@ class ReceiptDialog extends TestReceiptDialog {
 }
 
 test("test receipts render and select numeric printer IDs", async () => {
+    const services = registry.category("services");
+    clearRegistry(registry.category("main_components"));
+    const dialogServices = ["ui", "hotkey", "localization"].map((name) => [
+        name,
+        services.get(name),
+    ]);
+    clearRegistry(services);
+    for (const [name, service] of dialogServices) services.add(name, service);
     const printers = [42, 73].map((id) => ({
         id,
         name: `Printer ${id}`,
@@ -21,14 +31,14 @@ test("test receipts render and select numeric printer IDs", async () => {
         device_id: `device-${id}`,
         channels: [{ label: `POS ${id}` }],
     }));
-    mockService("orm", {
+    mockService("orm", () => ({
         async call(model, method, args) {
             expect(model).toBe("inari.device");
             expect(method).toBe("get_test_receipt_options");
             expect(args).toEqual([73]);
             return printers;
         },
-    });
+    }));
     await makeDialogMockEnv();
     const dialog = await mountWithCleanup(ReceiptDialog, {
         props: { close() {}, deviceId: 73 },
