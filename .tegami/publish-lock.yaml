@@ -1,157 +1,209 @@
 core:changelogs:
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Restore pairing between Device Center and the agent\n\nDevice Center identifies itself to the agent over the pairing pipe by the token the pipe hands back, rather than by opening its own process. The agent runs as LocalService and holds no rights over a process owned by the signed-in user, so the old check was refused before it could be answered and every installation reported the agent as unreachable while it was running normally.\n\n### Report the real Windows service state\n\nThe agent service state now comes from the Service Control Manager instead of the English words in `sc.exe` output. On a Windows installed in another language a running service read as stopped, and Support offered to start a service that had never stopped.\n\n### Build the Windows release on any signed host\n\nThe release build resolves the HLSL shader compiler from the installed Windows kits rather than depending on one hardcoded SDK version, freezes the agent against a system Python, and rejects payload binaries whose signature table points past the end of the file. Windows rejects such a package as a whole and names no file, so the build now names it first.\n"
-    filename: 2026-08-26-c2e030db.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Preserve Windows print queue completion evidence\n\nComplete Windows RAW receipt and label submissions now report confirmed spooler\nevidence. The Agent ledger and Controller preserve the reported evidence level.\nThis result means that Windows accepted the complete document into its print\nqueue. It does not prove physical output.\n\nDeploy the matching Controller image from the same Release Set with this Agent.\n\nPartial writes, failed completion calls, and worker timeouts retain an unknown\noutcome. They do not trigger another physical submission.\n"
+    filename: 2026-10-05-0ee431ad.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Polish the shell: hover, alerts, and the titlebar\n\nHovering now eases instead of snapping. Every wash the Device Center paints —\nrail items, device rows, attention rows, the health chip, and the window\ncaption buttons — fades over 150 ms, the duration the web and the desktops\naround it have trained everyone to expect. Moving the pointer fast across the\ninterface leaves no chunky trail: each wash is a pure function of the clock,\nso a dropped frame lands on the exact right position instead of losing\nmotion, and reversing mid-fade continues from wherever the pointer left it.\n\nThe alert's pixel cascade now meets the card's rounded corners the way the\ncard's own background does. The wall used to drop whole cells around the arc,\nwhich cut a second, coarser corner into the surface; it now fades each cell by\nhow much of it the corner covers, and the end rows of a full-bleed list carry\nthe card's curve so a hovered or selected row can no longer square the corners\noff the card holding it.\n\nThe brand mark in the titlebar starts on the rail's own inset on Windows and\nLinux, so it sits on the same vertical line as the navigation below it instead\nof pressing against the window edge.\n\n### Dragging no longer crashes the application\n\nDragging any window could take the whole application down. The caption press\nwas answered with a synchronous system call that started the move loop inside\nthe event dispatch; the loop then delivered a pending task into an app that\nwas mid-borrow, and the borrow won. The press is now queued for the next\nturn of the event loop, so the move starts on a clean stack. Panics also\nreach the log file now, with their message and location, instead of\nvanishing into a windowless process.\n\n### Scrollbars you can see and grab\n\nEvery scrolling surface — the five screens, the dev previews, and the\nenrollment window — now carries an overlay scrollbar: a thumb-only bar inset\nfrom the panel edge, shown while scrolling or hovering and faded after idle,\ndraggable, widening on hover, and honouring the OS auto-hide preference. The\nscroll position also survives re-renders, where before a page reset could\nlose it.\n\n### The gate: the path carries its state\n\nThe Overview gate's connectors are live wires now. While traffic passes,\ndiscrete packets of light travel the line from this computer, through the\nagent, out to the devices, flanked above and below by pixel sine traces at\ndifferent frequencies and amplitudes — an information field rippling around\nthe path, in the same staggered phase language as the alert's cascade. On\na caution tone the traffic corrupts: travelling tears cross the wire —\ncells drop into dead air, packets lurch, the flanking traces jump out of\nphase and flash the danger tone — a link that needs attention, not a\nbroken one. When the path fails, the wire goes still, the\ncross speaks the danger tone, and one last packet leaves the source and dies\nat the break: the attempt the wire made before it went down. With motion\noff, the wire reads as the same path at rest.\n\n### The credential field\n\nThe invitation field is a purpose-built instrument now, not a bordered\nrectangle. Its edge rests on the hairline, warms to the vermilion while the\nfield holds focus, and a soft accent ring arrives over the same 150 ms every\nother wash uses. A link that parses earns a quiet check on the trailing edge\n— positive feedback only, never a scolding mid-type. A submitted link that\nfails on the text hands the edge and the fill to the danger tone, eased in\nlike every other state, while the banner above carries the words; a network\nfailure with a well-formed link leaves the field alone. Enter submits from\nthe field, and the review action stays disabled while the field is empty.\n"
-    filename: 2026-08-28-e16b169.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Honor the Device selection in native Setup\n\nThe Agent publishes only the Devices selected for the current Controller.\nUnselected Devices remain available in the local catalog. New Controller Device\nactions and Managed Device Work require the current selection. Accepted retries\nretain their result after selection changes. A new invitation clears the selection.\n"
+    filename: 2026-10-05-1ef95743.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Support hands over the facts instead of displaying them\n\nSupport exists for a moment that is going badly, and the question is always\nthe same: what version, what address, what did it actually say. The screen\nused to answer those and stop there, leaving the operator to retype an\nendpoint and three lines of error text into a ticket out of a window they\ncould not select from.\n\nTechnical details is now a readout where every fact is one press from the\nclipboard, and the whole set is one more. Pointing at a row lights it and\noffers a copy; pressing it copies that value and marks the row with a tick\nthat leaves on its own. \"Copy all details\" puts the lot on the clipboard as\naligned plain text, stamped with the moment it was collected, so it pastes\ninto a ticket or a chat window already readable. The wrap points that keep a\nlong URL inside its card are painted and never copied — a link pasted into a\nbrowser resolves.\n\nTwo facts joined the ones already there. Support reports the operating system\nand architecture the build is running on, and the full path to the log folder:\nthe button beside it is the faster route for the person at the keyboard, and\nthe path is the only route for the administrator who is not.\n\nThe card itself reads as an instrument now. Labels sit in a fixed column so\nevery value starts on one edge, labels stay in the reading face while values\nare set in the technical one, and nothing is ruled between the rows — the\npointer marks the row instead.\n\n### A new technical face: Departure Mono\n\nEvery monospaced string in the application — identifiers, endpoints, paths,\nand diagnostics — is now set in Departure Mono, embedded in the application\nrather than borrowed from the system. The readouts look the same on Windows,\nmacOS, and Linux instead of inheriting three different faces.\n\nIt is a pixel face, so its size is not a free choice: the outlines sit on a\ngrid that lands on whole device pixels only at multiples of 11px, where the\nadvance measures exactly 7px and the cap exactly 8px. At that size it reads at\nthe same optical scale as the system mono it replaces, so the readouts got\nsharper rather than smaller.\n\n### Buttons that answer the pointer\n\nButtons are the application's own now. Their fill eases over the same 150 ms\nas every other surface in the window instead of snapping in one frame, they\ncarry the pointer cursor, and their label warms as the pointer arrives. The\nmaterial matches the credential field's — a fill, an edge, and a pixel of\nlight along the top lip — and the fill is the only thing that moves: no lift,\nno scale, and no shadow that a translucent window would show through as an\ninner glow.\n"
-    filename: 2026-08-29-4b1c7e9a.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Finish Agent restarts after a reset connection\n\nThe Agent limits its wait for HTTP connections during shutdown to five seconds.\nA reset Windows connection can no longer block the runtime restart indefinitely.\nThe Agent completes application cleanup before it starts the next runtime.\n"
+    filename: 2026-10-05-481eaa7c.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Buttons that change their mind, in front of you\n\nA copy button that answers with a tick was landing that tick in a single\nframe — the change was over before the eye that caused it arrived. The glyph\nand the label now cross over: the mark being replaced shrinks and fades while\nthe one arriving grows into its place, and the words leave upward and come back\nfrom below.\n\nThe control never changes size doing it. The resting label holds the width, so\n\"Copy all details\" becoming \"Copied\" leaves the two buttons beside it exactly\nwhere they were, and the glyph stays beside its own word rather than stranded\nacross the gap the shorter label would open.\n\nBoth halves run on one duration, so the button reads as one thing changing its\nmind rather than a mark and a word on separate clocks. Reversing halfway —\na second copy landing while the tick is still leaving — continues from where it\nhad got to instead of starting over.\n"
-    filename: 2026-08-29-9c3e2f71.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep the Setup review and actions reachable\n\nSetup now scrolls the full invitation review at the minimum window size.\nShort forms stay centered. The review labels identify the Controller and its\naddress before you connect this computer.\n"
+    filename: 2026-10-05-739d862a.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Connect Device Center to the Agent's HTTPS listener\n\nWindows Device Center now reads the protected Agent Endpoint before it connects.\nHTTPS requests and event subscriptions use the operating system's certificate\ntrust. Pairing secrets retain their separate, authenticated bootstrap operation.\n\nUnpackaged Windows development runs use loopback bootstrap. Non-TLS discovery\nuses the configured loopback host and port, including IPv6 listeners.\n\nBefore upgrading a Windows Agent with TLS, set `[api].endpoint` to its\ncertificate hostname and listener port. See the Windows installation guide.\n"
-    filename: 2026-10-02-61e39fa7.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n  group:controller-chart:\n    type: patch\n---\n\n### Publish selected Devices to the Controller\n\nThe Agent publishes transport and identity digests for selected Devices.\nThe Controller maintains each Agent's Device Projection from validated snapshots.\nOlder snapshots and exact retries cannot replace current Device observations.\nSeparate Agents can use the same host-local Device identifier without a collision.\nCredential retirement clears the Agent's Projection.\nDiscovery does not grant Managed Device Work capabilities.\n\nUpgrade every Agent before deploying the Controller.\nOlder Agents lack required inventory fields and cannot enroll or publish snapshots\nto the new Controller.\n\nStop old Controller replicas before the Device schema migration.\nThe Helm migration hook runs before the Deployment update.\nKeep old replicas at zero until the migration completes.\nThe migration clears derived Device rows and preserves publication history.\nA rollback requires a matching Recovery Point and Release Set.\n"
+    filename: 2026-10-05-751ddeb2.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Approve Odoo browser access in Device Center\n\nOpen an Odoo Pairing Request link or paste its ID in Client Pairing. Review the\nmatching phrase, Odoo origin, Agent Endpoint, business scope, and requested\npermissions before approving or denying access. The screen keeps the request\nvisible while it saves a decision and explains expired and completed requests.\n\nEnrollment links continue to open the separate Enrollment window. Windows\nactivation sends Client Pairing links to the review screen in the existing app.\n"
-    filename: 2026-10-03-17a4f905.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep Device Center connected to the Agent\n\nDevice Center uses the authenticated native event stream for live Device and\nDevice Work updates. The stream keeps the trusted local HTTPS connection and\nchecks authentication throughout the connection. Browser Device Streams retain\ntheir signed, scoped contract.\n"
+    filename: 2026-10-05-921eac45.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Connect Device Center to the local HTTPS Agent\n\nDevice Center uses loopback for local authentication and event streams. It keeps the Agent Endpoint hostname for TLS verification. LAN and overlay DNS no longer cause local authentication failures.\n"
-    filename: 2026-10-03-17d9ca16.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep Device Center connected after secure setup\n\nDevice Center selects its TLS provider for the local event stream and uses the\noperating system's certificate verifier. A build with multiple TLS providers\ncan connect without a process-wide provider setting.\n\nOverview no longer shows a successful setup message as an Agent connection\nerror.\n"
+    filename: 2026-10-05-9ad96114.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep Linux controls visible during transitions\n\nLinux draws control labels and icons without blur. The pinned renderer cannot\ndraw captured content, so these controls now keep their original content.\n"
-    filename: 2026-10-03-4dced3d2.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Keep small Windows icons transparent\n\nThe smallest Windows icons now keep transparent corners. Each executable icon\nsize uses the same rendering as the package assets.\n"
+    filename: 2026-10-05-c7d12fb9.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Build signed Windows candidates before release\n\nThe release workflow can build a Windows candidate from a selected branch.\nThe candidate uses the protected signing environment and includes provenance,\nchecksums, and an SBOM. It does not publish packages or change release branches.\n"
-    filename: 2026-10-03-723951ab.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Print the complete diagnostic receipt\n\nThe receipt diagnostic now prints the saved pattern with Spanish accents,\nCode 128, a QR code, feed, and partial cut. Live Controller commands reach the\nAgent without a restart. The diagnostic does not activate a Device Binding.\n\nReceipt images are centered within the print width. The print command advances\nthe complete receipt to the cutter before the partial cut.\n"
+    filename: 2026-10-06-09b8feca.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Upgrade installed Windows candidates\n\nSigned branch candidates can use a higher alpha sequence for an installed candidate upgrade. The sequence cannot precede the pending release version. Stable packages keep their independent versions.\n"
-    filename: 2026-10-03-ad450122.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Execute receipt Device Tests through the Local Agent Interface\n\nDevice Managers can send the fixed receipt pattern through an approved Device\nand Binding Revision. The Agent records one execution per Test ID and signs\nthe result after text, accents, Code 128, QR, and feed-and-cut checks.\n\nRetries return the existing result. Uncertain output and Agent restarts do not\nsend another receipt. A passed result remains separate from Binding activation.\nThe Windows Agent package includes the fixed pattern.\n\nWhen the worker cannot stop, the Device stays reserved until Agent Administrator\nrepair.\n\nThe reservation covers worker preparation, including preparation that reaches\nthe execution deadline. An expired Test cannot start Device I/O. A repeated\nexecution cannot start another worker for the same Test.\n\nTest IDs remain addressable by the query and physical-answer routes.\nBoth OpenAPI contracts declare the required `Idempotency-Key` header.\n"
+    filename: 2026-10-06-642fb9c1.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n  group:controller-chart:\n    type: patch\n---\n\n### Bind enrollment certificates to the Agent Identity\n\nEnrollment rejects Agent identifiers and certificate requests that do not match\nthe protected Ed25519 identity. Certificate issuance and renewal reject incorrect\nsubjects, missing SANs, additional names, and duplicate names.\nThe Agent validates the full certificate chain against its pinned CA root and\nstores the verified intermediate chain for mutual TLS. A CA response cannot\nreplace the pinned root.\nRoot bootstrap accepts exactly one pinned CA. Certificate requests trust only\nthat CA and require client key usage for TLS signatures. The Controller requires\na SHA-256 CA pin in step-ca mode.\n\nThe chart now keeps enrollment and Zenoh disabled by default. Provision the CA\nand exact per-Agent Router policy before enabling them.\n\nCertificate names now come from the Agent Identity. Remove\n`managedGateway.certificate.stepCa.authorizedSans` from Helm values and\n`step_ca_authorized_sans` from a Controller configuration before upgrading an\nexisting step-ca deployment.\n\nInstalled certificates now receive the same trust and identity checks before use.\nThe Agent repairs a cached CA against its pin and replaces obsolete certificate\nnames when fresh enrollment provides a one-time token. The protected key stays\nunchanged. All CA endpoints require HTTPS.\n\nManaged publication and Device Work now stop when certificate validation fails.\nThe Agent closes an existing session and reports the certificate error in setup.\nController HTTPS uses separate trust before enrollment. A new invitation replaces\ncached enrollment and old configured credentials without replacing the Agent key.\nConcurrent enrollment calls share one request and preserve newer invitations.\n\nRoot bootstrap reads Smallstep's JSON response. Issuance and renewal use the\ncanonical Smallstep endpoints and retain the complete intermediate chain.\n\nUpgrade the Agent and Controller together for gateway protocol `2026-10-03`\nbefore enabling enrollment. Enrollment no longer sends an installed certificate,\nand the Controller migration removes its unused stored certificate column.\n\nThe Controller migration removes an Agent column that old replicas still select.\nKeep managed enrollment and Zenoh disabled until all Controller replicas use the\nnew release. A binary rollback across this migration is not supported. Recover\nwith the matching database backup and Release Set.\n\n### Keep concurrent Controller documents responsive\n\nThe Controller discovers its fixed web routes once before it serves documents.\nConcurrent Router construction can no longer interrupt Resource loading in an\nactive document stream.\n"
-    filename: 2026-10-03-identity-binding.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Show the current Agent connection at startup\n\nDevice Center now shows the current Agent connection when its window opens.\nA fast local connection no longer leaves the window at Opening the local\nconnection. If the event stream closes, Device Center shows Reconnecting\nwhile it waits for the next connection attempt.\n"
+    filename: 2026-10-06-728ccbc3.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Continue setup after an Agent restart\n\nDevice Center now provides a Restart Agent action when an invitation needs a\nruntime restart. On Windows, the service host applies the saved setup through a\npackage-verified local request. Standard users need no service-control permission\nfor this action. Device Center then shows connection progress and Device selection.\nFailed restarts remain available for retry. A connection check that stops offers\nCheck again.\nNative service requests stop after ten seconds if the service does not reply.\n\nSetup keeps Device access blocked until the Agent reports completion.\nSetup completion refreshes the operations window and tray. Closing setup hides\nthe window, and the tray restores it with its current progress. Service actions\nwait for completion and reject concurrent requests from another window.\n"
-    filename: 2026-10-03-setup-service-restart.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Start isolated printer workers in the Windows package\n\nThe packaged Agent starts its printer workers through the frozen executable.\nDevice Tests and queued receipts can reach the printer without blocking the\nAgent during worker startup. Windows builds now verify this startup path with\nsynthetic content and no Device I/O permit.\n"
+    filename: 2026-10-07-54e22b91.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Explore components and inspect each window\n\nDevice Center includes the updated interface and brand assets. Debug builds\nprovide the component Bench and four inspector screens. Frame histories belong\nto each window. Story controls stay in the Bench, and the outline preference\napplies to all windows.\n"
-    filename: 2026-10-04-b6f302e1.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Pair browsers through the configured HTTPS Agent Endpoint\n\nBrowser pairing and Device Work now use the configured HTTPS hostname when\nthe local socket address is an IP. The Agent retains the Host, listener port,\nTLS scheme, and DPoP checks.\n\nOdoo can read the DPoP challenge headers and retry with the required nonce.\n"
+    filename: 2026-10-07-9fd4b802.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Consume enrollment invitations atomically\n\nThe Controller now verifies an invitation, mints the one-time CA token, stores\nthe Agent, and consumes the invitation in one database transaction. A token or\nstorage failure leaves the invitation ready for the same Agent to try again.\n\nWhen an Agent does not receive its enrollment response, it can send the same\nrequest again with the same invitation. The Controller returns a new one-time\ntoken and the original enrollment time. It does not create a second enrollment.\nA changed request returns a conflict, and another Agent cannot use the\ninvitation.\n\nThe migration marks each `claimed` invitation as `failed`. Create a new\ninvitation for each of those Agents after you upgrade. Enrollment and Zenoh stay\ndisabled by default.\n\nStatus updates mark the current enrollment invitation online. An older invitation\ncannot keep the current invitation available for certificate-token retries.\n"
-    filename: 2026-10-03-49d11a2b.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Connect the Odoo Devices list to the Controller\n\nAdministrators can connect one Odoo company to its Controller Organization and\nsynchronize its Sites, Agents, and Devices. Scheduled synchronization preserves\nthe last complete inventory if authentication or the Controller fails. Device\ndiscovery does not activate a receipt binding or replace a Device Test.\n"
+    filename: 2026-10-07-bc390aa1.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Add signed Router policy supervision\n\nThe Router Supervisor verifies a complete, short-lived Controller policy before\nit starts stock Zenoh. Agent certificates receive permissions only in their\nexact namespaces. Policy replacement closes existing links, and policy expiry\nstops the Router.\n\nThe management API requires a dedicated Controller certificate and a separate\npolicy signature. Durable generations reject older policies after restart.\nController reconciliation and deployment remain required before managed\nenrollment can enter use.\n"
-    filename: 2026-10-03-b729a1d4.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Show Odoo receipts in Device Center Activity\n\nActivity now includes receipt Print Jobs from the protected Agent queue.\nIt shows the Device, Odoo source, current state, and Output Evidence.\nReceipt history returns after reconnection and updates while the window stays open.\nOutcome Unknown asks the operator to check physical output before a Reprint.\nThe history contains no receipt content.\n\nUpgrade the Agent and Device Center together for the native monitor contract.\n"
+    filename: 2026-10-08-12a093fc.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Deploy signed Router admission\n\nThe chart connects the Controller to each Router Supervisor through dedicated\nmanagement mTLS. Each Router keeps its signed policy generation on a persistent\nvolume. Permission changes close old connections before acknowledgment.\n\nLifetime refreshes preserve connections when permissions and TLS credentials\nstay the same. Certificate rotation loads new credentials. Invalid credentials\nand certificate expiry close Router admission until the credentials recover.\n\nThe Supervisor image runs as a nonroot user with a read-only root filesystem.\nPublication requires management acknowledgment and policy expiry checks in the\nbuilt image. Published images include provenance, an SBOM, and a digest signature.\n\nManaged Controller upgrades stop old replicas before new replicas allocate\npolicy generations. Signing-key replacement requires a new fleet and retained\noffline state. Static Router ACL ConfigMaps and ephemeral policy storage are\nremoved. The chart pins matching signed Controller and Router images.\n"
-    filename: 2026-10-04-6f783c2d.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Accept receipts after a signed authority update\n\nReceipt admission now accepts unchanged signed device records that a later\nauthority bundle retains. It checks each record digest and binding activation\nagainst the signed manifest. Records withdrawn by a later bundle cannot\nauthorize receipt output.\n"
+    filename: 2026-10-08-664ab2de.md
     v: 0.0.0
-  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Require complete Router acknowledgment for managed admission\n\nThe Controller now reconciles signed Agent policies across every configured\nRouter. Enrollment, Managed Work admission, and dispatch require current\nacknowledgment. PostgreSQL allocates generations across Controller replicas and\ninvalidates admission when Agent credentials change.\n\nEnrollment managers can retire an Agent's credentials through the scoped API.\nRetirement preserves key history and returns success after every Router\nacknowledges removal. Readiness reports an unavailable or expired Router policy.\n\nConfigure dedicated management mTLS and the policy signing key before enabling\nmanaged enrollment. Deploy the Router Supervisor and matching Controller together.\n\nManagement certificate rotation replaces the client and its connection pool.\nInvalid credentials close admission until the files recover. Policies tolerate\nfive seconds of Router clock lag. Command enqueue rechecks admission in the\ndatabase transaction before commit.\n"
-    filename: 2026-10-04-75f92ce8.md
+  - content: "---\npackages:\n  group:edge:\n    type: patch\n---\n\n### Print both test receipts from Odoo\n\nDevice Managers can open Test receipts from the Devices toolbar, a printer row,\nor the printer page. Choose the INARI check, the full MIZONA sample, or both.\nThe dialog shows the target printer, secure pairing, and each job's result.\nPending jobs keep their identity when the dialog reopens. Test prints also\nappear in Device Center Activity.\nCompleted tests can be cleared to start a new test. An unknown result needs a\nphysical printer check first. Preparation printers use their authorized scope.\n"
+    filename: 2026-10-08-b3b7ed65.md
+    v: 0.0.0
+  - content: "---\npackages:\n  pip:inari:\n    type: patch\n---\n\n### Check Device Test authority before binding activation\n\nThe Agent checks installed Device authority through a separate Device Test\npermit. A previous passed test is not required for this permit. Business Device\nWork still requires its passed test and active Binding Revision.\n\nThe permit requires its graph in the current signed manifest. A withdrawn graph\ncannot use historical audit records to start a test or pass the pre-I/O check.\nAfter an upgrade from a database without manifests, install a newer signed\nauthority revision before a Device Test.\n\nWindows firmware remains `unavailable` when the spooler cannot observe it. The\nsigned Hardware Certification Matrix must contain the same value for the exact\nDevice. Missing facts and observed firmware changes continue to block admission.\n"
+    filename: 2026-10-05-015bbcb9.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Open native setup after Controller navigation\n\nThe invitation page updates its native setup link when the URL fragment changes.\nOpening an invitation from the Controller no longer requires a page reload.\nThe invitation credential remains in the fragment.\n"
+    filename: 2026-10-05-182b88f1.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Open Controller sign-in and diagnostics from browser pages\n\nController sign-in and diagnostics links now load their server routes.\nThe browser router no longer replaces these routes with a page-not-found view.\n"
+    filename: 2026-10-05-890db2ac.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Match Device authority records to the Agent contract\n\nThe Controller uses typed records for Device authority signatures and bundle\nverification. Shared conformance vectors keep its hashes and wire format aligned\nwith the Agent. Authority issuance remains a separate operation.\n"
+    filename: 2026-10-06-24681ce0.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Share the OpenBao connection and verify approved authority signatures\n\nThe Controller shares one bounded OpenBao client for Transit operations.\nAuthority signing checks the approved Ed25519 key version and public key, then\nverifies each returned signature before use.\n\nDisabled managed dispatch no longer loads OpenBao files at startup. Dormant\nconnection values do not require mounted credentials or a CA file.\n\nFor a manual Controller configuration, move OpenBao connection and authentication\nvalues to `[openbao]`. Keep the Transit encryption mount and key in\n`[managed_gateway.payload_protection]`. The Helm chart renders the new section\nfrom the existing chart values.\n"
+    filename: 2026-10-06-bfc62c87.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Pair Odoo Device Tests before Binding activation\n\nDevice Managers can pair a browser for a physical test of one draft POS Binding Revision. The test grant contains only Device Test and job-read permissions. Normal receipt pairing still requires an active Binding Revision.\n"
+    filename: 2026-10-07-26d21aec.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Read company inventory with a workload identity\n\nThe Controller supplies a complete Organization inventory to the Odoo workload\nidentity. The identity issuer assigns explicit Inari permissions. Requested\nOAuth scopes cannot grant those permissions. Provision `inari_permissions`\nbefore deploying this release.\n"
+    filename: 2026-10-07-839a14de.md
+    v: 0.0.0
+  - content: "---\npackages:\n  group:controller-chart:\n    type: patch\n---\n\n### Sign approved Device authority bundles\n\nOperators can assemble and verify Device authority bundles with purpose-bound\nOpenBao keys. The command preserves Agent-signed Device Test evidence and\nrequires explicit approval of the target and signing keys.\n"
+    filename: 2026-10-07-9a60eab4.md
     v: 0.0.0
 core:packages:
   - changelogIds:
-      - 2026-08-26-c2e030db.md
-      - 2026-08-28-e16b169.md
-      - 2026-08-29-4b1c7e9a.md
-      - 2026-08-29-9c3e2f71.md
-      - 2026-10-02-61e39fa7.md
-      - 2026-10-03-17a4f905.md
-      - 2026-10-03-17d9ca16.md
-      - 2026-10-03-4dced3d2.md
-      - 2026-10-03-723951ab.md
-      - 2026-10-03-ad450122.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-03-setup-service-restart.md
-      - 2026-10-04-b6f302e1.md
+      - 2026-10-05-0ee431ad.md
+      - 2026-10-05-1ef95743.md
+      - 2026-10-05-481eaa7c.md
+      - 2026-10-05-739d862a.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-921eac45.md
+      - 2026-10-05-9ad96114.md
+      - 2026-10-05-c7d12fb9.md
+      - 2026-10-06-09b8feca.md
+      - 2026-10-06-642fb9c1.md
+      - 2026-10-06-728ccbc3.md
+      - 2026-10-07-54e22b91.md
+      - 2026-10-07-9fd4b802.md
+      - 2026-10-07-bc390aa1.md
+      - 2026-10-08-12a093fc.md
+      - 2026-10-08-664ab2de.md
+      - 2026-10-08-b3b7ed65.md
     id: cargo:inari-agent-client
     updated: true
   - changelogIds:
-      - 2026-08-26-c2e030db.md
-      - 2026-08-28-e16b169.md
-      - 2026-08-29-4b1c7e9a.md
-      - 2026-08-29-9c3e2f71.md
-      - 2026-10-02-61e39fa7.md
-      - 2026-10-03-17a4f905.md
-      - 2026-10-03-17d9ca16.md
-      - 2026-10-03-4dced3d2.md
-      - 2026-10-03-723951ab.md
-      - 2026-10-03-ad450122.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-03-setup-service-restart.md
-      - 2026-10-04-b6f302e1.md
+      - 2026-10-05-0ee431ad.md
+      - 2026-10-05-1ef95743.md
+      - 2026-10-05-481eaa7c.md
+      - 2026-10-05-739d862a.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-921eac45.md
+      - 2026-10-05-9ad96114.md
+      - 2026-10-05-c7d12fb9.md
+      - 2026-10-06-09b8feca.md
+      - 2026-10-06-642fb9c1.md
+      - 2026-10-06-728ccbc3.md
+      - 2026-10-07-54e22b91.md
+      - 2026-10-07-9fd4b802.md
+      - 2026-10-07-bc390aa1.md
+      - 2026-10-08-12a093fc.md
+      - 2026-10-08-664ab2de.md
+      - 2026-10-08-b3b7ed65.md
     id: cargo:inari-device-center
     updated: true
   - changelogIds:
-      - 2026-08-26-c2e030db.md
-      - 2026-08-28-e16b169.md
-      - 2026-08-29-4b1c7e9a.md
-      - 2026-08-29-9c3e2f71.md
-      - 2026-10-02-61e39fa7.md
-      - 2026-10-03-17a4f905.md
-      - 2026-10-03-17d9ca16.md
-      - 2026-10-03-4dced3d2.md
-      - 2026-10-03-723951ab.md
-      - 2026-10-03-ad450122.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-03-setup-service-restart.md
-      - 2026-10-04-b6f302e1.md
+      - 2026-10-05-015bbcb9.md
+      - 2026-10-05-0ee431ad.md
+      - 2026-10-05-1ef95743.md
+      - 2026-10-05-481eaa7c.md
+      - 2026-10-05-739d862a.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-921eac45.md
+      - 2026-10-05-9ad96114.md
+      - 2026-10-05-c7d12fb9.md
+      - 2026-10-06-09b8feca.md
+      - 2026-10-06-642fb9c1.md
+      - 2026-10-06-728ccbc3.md
+      - 2026-10-07-54e22b91.md
+      - 2026-10-07-9fd4b802.md
+      - 2026-10-07-bc390aa1.md
+      - 2026-10-08-12a093fc.md
+      - 2026-10-08-664ab2de.md
+      - 2026-10-08-b3b7ed65.md
     id: pip:inari
     updated: true
   - changelogIds:
-      - 2026-08-26-c2e030db.md
-      - 2026-08-28-e16b169.md
-      - 2026-08-29-4b1c7e9a.md
-      - 2026-08-29-9c3e2f71.md
-      - 2026-10-02-61e39fa7.md
-      - 2026-10-03-17a4f905.md
-      - 2026-10-03-17d9ca16.md
-      - 2026-10-03-4dced3d2.md
-      - 2026-10-03-723951ab.md
-      - 2026-10-03-ad450122.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-03-setup-service-restart.md
-      - 2026-10-04-b6f302e1.md
-    id: pip:inari-brand
-    updated: true
-  - changelogIds:
-      - 2026-08-26-c2e030db.md
-      - 2026-08-28-e16b169.md
-      - 2026-08-29-4b1c7e9a.md
-      - 2026-08-29-9c3e2f71.md
-      - 2026-10-02-61e39fa7.md
-      - 2026-10-03-17a4f905.md
-      - 2026-10-03-17d9ca16.md
-      - 2026-10-03-4dced3d2.md
-      - 2026-10-03-723951ab.md
-      - 2026-10-03-ad450122.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-03-setup-service-restart.md
-      - 2026-10-04-b6f302e1.md
+      - 2026-10-05-0ee431ad.md
+      - 2026-10-05-1ef95743.md
+      - 2026-10-05-481eaa7c.md
+      - 2026-10-05-739d862a.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-921eac45.md
+      - 2026-10-05-9ad96114.md
+      - 2026-10-05-c7d12fb9.md
+      - 2026-10-06-09b8feca.md
+      - 2026-10-06-642fb9c1.md
+      - 2026-10-06-728ccbc3.md
+      - 2026-10-07-54e22b91.md
+      - 2026-10-07-9fd4b802.md
+      - 2026-10-07-bc390aa1.md
+      - 2026-10-08-12a093fc.md
+      - 2026-10-08-664ab2de.md
+      - 2026-10-08-b3b7ed65.md
     id: pip:inari-print-contracts
     updated: true
   - changelogIds:
-      - 2026-10-03-49d11a2b.md
-      - 2026-10-03-b729a1d4.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-04-6f783c2d.md
-      - 2026-10-04-75f92ce8.md
+      - 2026-10-05-0ee431ad.md
+      - 2026-10-05-1ef95743.md
+      - 2026-10-05-481eaa7c.md
+      - 2026-10-05-739d862a.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-921eac45.md
+      - 2026-10-05-9ad96114.md
+      - 2026-10-05-c7d12fb9.md
+      - 2026-10-06-09b8feca.md
+      - 2026-10-06-642fb9c1.md
+      - 2026-10-06-728ccbc3.md
+      - 2026-10-07-54e22b91.md
+      - 2026-10-07-9fd4b802.md
+      - 2026-10-07-bc390aa1.md
+      - 2026-10-08-12a093fc.md
+      - 2026-10-08-664ab2de.md
+      - 2026-10-08-b3b7ed65.md
+    id: pip:inari-brand
+    updated: true
+  - changelogIds:
+      - 2026-10-05-182b88f1.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-890db2ac.md
+      - 2026-10-06-24681ce0.md
+      - 2026-10-06-bfc62c87.md
+      - 2026-10-07-26d21aec.md
+      - 2026-10-07-839a14de.md
+      - 2026-10-07-9a60eab4.md
     id: helm:inari
     updated: true
   - changelogIds:
-      - 2026-08-26-c2e030db.md
-      - 2026-08-28-e16b169.md
-      - 2026-08-29-4b1c7e9a.md
-      - 2026-08-29-9c3e2f71.md
-      - 2026-10-02-61e39fa7.md
-      - 2026-10-03-17a4f905.md
-      - 2026-10-03-17d9ca16.md
-      - 2026-10-03-4dced3d2.md
-      - 2026-10-03-723951ab.md
-      - 2026-10-03-ad450122.md
-      - 2026-10-03-identity-binding.md
-      - 2026-10-03-setup-service-restart.md
-      - 2026-10-04-b6f302e1.md
+      - 2026-10-05-0ee431ad.md
+      - 2026-10-05-1ef95743.md
+      - 2026-10-05-481eaa7c.md
+      - 2026-10-05-739d862a.md
+      - 2026-10-05-751ddeb2.md
+      - 2026-10-05-921eac45.md
+      - 2026-10-05-9ad96114.md
+      - 2026-10-05-c7d12fb9.md
+      - 2026-10-06-09b8feca.md
+      - 2026-10-06-642fb9c1.md
+      - 2026-10-06-728ccbc3.md
+      - 2026-10-07-54e22b91.md
+      - 2026-10-07-9fd4b802.md
+      - 2026-10-07-bc390aa1.md
+      - 2026-10-08-12a093fc.md
+      - 2026-10-08-664ab2de.md
+      - 2026-10-08-b3b7ed65.md
     id: msix:inari-device-center
     updated: true

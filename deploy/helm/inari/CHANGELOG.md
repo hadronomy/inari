@@ -1,3 +1,72 @@
+## inari@0.3.4
+
+### Open native setup after Controller navigation
+
+The invitation page updates its native setup link when the URL fragment changes.
+Opening an invitation from the Controller no longer requires a page reload.
+The invitation credential remains in the fragment.
+
+### Publish selected Devices to the Controller
+
+The Agent publishes transport and identity digests for selected Devices.
+The Controller maintains each Agent's Device Projection from validated snapshots.
+Older snapshots and exact retries cannot replace current Device observations.
+Separate Agents can use the same host-local Device identifier without a collision.
+Credential retirement clears the Agent's Projection.
+Discovery does not grant Managed Device Work capabilities.
+
+Upgrade every Agent before deploying the Controller.
+Older Agents lack required inventory fields and cannot enroll or publish snapshots
+to the new Controller.
+
+Stop old Controller replicas before the Device schema migration.
+The Helm migration hook runs before the Deployment update.
+Keep old replicas at zero until the migration completes.
+The migration clears derived Device rows and preserves publication history.
+A rollback requires a matching Recovery Point and Release Set.
+
+### Open Controller sign-in and diagnostics from browser pages
+
+Controller sign-in and diagnostics links now load their server routes.
+The browser router no longer replaces these routes with a page-not-found view.
+
+### Match Device authority records to the Agent contract
+
+The Controller uses typed records for Device authority signatures and bundle
+verification. Shared conformance vectors keep its hashes and wire format aligned
+with the Agent. Authority issuance remains a separate operation.
+
+### Share the OpenBao connection and verify approved authority signatures
+
+The Controller shares one bounded OpenBao client for Transit operations.
+Authority signing checks the approved Ed25519 key version and public key, then
+verifies each returned signature before use.
+
+Disabled managed dispatch no longer loads OpenBao files at startup. Dormant
+connection values do not require mounted credentials or a CA file.
+
+For a manual Controller configuration, move OpenBao connection and authentication
+values to `[openbao]`. Keep the Transit encryption mount and key in
+`[managed_gateway.payload_protection]`. The Helm chart renders the new section
+from the existing chart values.
+
+### Pair Odoo Device Tests before Binding activation
+
+Device Managers can pair a browser for a physical test of one draft POS Binding Revision. The test grant contains only Device Test and job-read permissions. Normal receipt pairing still requires an active Binding Revision.
+
+### Read company inventory with a workload identity
+
+The Controller supplies a complete Organization inventory to the Odoo workload
+identity. The identity issuer assigns explicit Inari permissions. Requested
+OAuth scopes cannot grant those permissions. Provision `inari_permissions`
+before deploying this release.
+
+### Sign approved Device authority bundles
+
+Operators can assemble and verify Device authority bundles with purpose-bound
+OpenBao keys. The command preserves Agent-signed Device Test evidence and
+requires explicit approval of the target and signing keys.
+
 ## inari@0.3.3
 
 ### Consume enrollment invitations atomically
