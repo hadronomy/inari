@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy import inspect
 
 from inari.db.migrations import DatabaseMigrator
 from inari.db.schema import MANAGED_TABLE_NAMES, create_database_engine, metadata
+from inari.device_authority import canonical_digest
 
 
 NOW = "2026-08-27T10:00:00Z"
@@ -55,6 +57,37 @@ def _connect(path: Path) -> sqlite3.Connection:
 
 
 def _insert_authority_graph(connection: sqlite3.Connection) -> None:
+    manifest = {
+        "scope": {
+            "database": "odoo",
+            "organization_id": "org_1",
+            "site_id": "site_1",
+            "kind": "pos_configuration",
+            "pos_configuration_id": "pos_1",
+        },
+        "profiles": [
+            {
+                "profile": {"profile_id": "profile_1"},
+                "digest": AUTHORITY_DIGESTS["profile"].hex(),
+            }
+        ],
+        "certification_rows": [
+            {"row": {"row_id": "matrix_1"}, "digest": AUTHORITY_DIGESTS["matrix"].hex()}
+        ],
+        "bindings": [
+            {
+                "revision": {"revision_id": "binding_1"},
+                "digest": AUTHORITY_DIGESTS["binding"].hex(),
+            }
+        ],
+        "evidence": [
+            {
+                "evidence": {"evidence_id": "evidence_1"},
+                "digest": AUTHORITY_DIGESTS["evidence"].hex(),
+            }
+        ],
+        "activations": [{"revision_id": "binding_1", "evidence_id": "evidence_1"}],
+    }
     for key_id, purpose, marker in (
         ("authority_key", "authority_revision", 1),
         ("profile_key", "driver_profile", 2),
@@ -74,10 +107,17 @@ def _insert_authority_graph(connection: sqlite3.Connection) -> None:
         """
         INSERT INTO device_authority_revisions (
             revision_id, revision_number, manifest_digest, effective_at,
-            expires_at, revision_digest, signer_key_id, signature
-        ) VALUES ('authority_revision_1', 1, ?, ?, ?, ?, 'authority_key', ?)
+            expires_at, revision_digest, signer_key_id, signature, manifest
+        ) VALUES ('authority_revision_1', 1, ?, ?, ?, ?, 'authority_key', ?, ?)
         """,
-        (b"a" * 32, NOW, RETENTION, AUTHORITY_DIGESTS["revision"], b"s" * 64),
+        (
+            bytes.fromhex(canonical_digest(manifest)),
+            NOW,
+            RETENTION,
+            AUTHORITY_DIGESTS["revision"],
+            b"s" * 64,
+            json.dumps(manifest),
+        ),
     )
     connection.execute(
         """

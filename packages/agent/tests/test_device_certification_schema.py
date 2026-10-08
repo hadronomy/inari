@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from sqlalchemy import inspect
 
 from inari.db.migrations import DatabaseMigrator
 from inari.db.schema import create_database_engine, metadata
+from inari.device_authority import canonical_digest
 
 
 NOW = "2026-08-28T10:00:00Z"
@@ -66,20 +68,46 @@ def _insert_key(
 
 
 def _insert_revision(connection: sqlite3.Connection) -> None:
+    manifest = {
+        "scope": {
+            "database": "db",
+            "organization_id": "org",
+            "site_id": "site",
+            "kind": "site",
+            "pos_configuration_id": None,
+        },
+        "profiles": [
+            {"profile": {"profile_id": "profile_1"}, "digest": DIGESTS["profile"].hex()}
+        ],
+        "certification_rows": [
+            {"row": {"row_id": "matrix_1"}, "digest": DIGESTS["matrix"].hex()}
+        ],
+        "bindings": [
+            {
+                "revision": {"revision_id": "binding_revision_1"},
+                "digest": DIGESTS["binding"].hex(),
+            }
+        ],
+        "evidence": [
+            {"evidence": {"evidence_id": "test_1"}, "digest": DIGESTS["test"].hex()}
+        ],
+        "activations": [{"revision_id": "binding_revision_1", "evidence_id": "test_1"}],
+    }
     _insert_key(connection, "key_authority", "authority_revision", 1)
     connection.execute(
         """
         INSERT INTO device_authority_revisions (
             revision_id, revision_number, manifest_digest, effective_at,
-            expires_at, revision_digest, signer_key_id, signature
-        ) VALUES ('revision_1', 1, ?, ?, ?, ?, 'key_authority', ?)
+            expires_at, revision_digest, signer_key_id, signature, manifest
+        ) VALUES ('revision_1', 1, ?, ?, ?, ?, 'key_authority', ?, ?)
         """,
         (
-            DIGESTS["manifest"],
+            bytes.fromhex(canonical_digest(manifest)),
             NOW,
             LATER,
             DIGESTS["revision"],
             b"s" * 64,
+            json.dumps(manifest),
         ),
     )
 
