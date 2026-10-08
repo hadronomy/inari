@@ -293,16 +293,27 @@ export class InariAgentClient {
         if (!(jpeg instanceof Blob) || jpeg.type !== "image/jpeg") {
             throw new TypeError("receipt submission requires an image/jpeg Blob");
         }
-        const envelope = new Blob([canonicalJson(envelopeFor(context))], {
-            type: "application/json",
-        });
-        const form = new FormData();
-        form.append("envelope", envelope, "envelope.json");
-        form.append("document", jpeg, `${context.print_intent_id}.jpg`);
+        const boundary = `inari-${randomNonce(this.cryptoApi).toLowerCase()}`;
+        // FormData adds a filename to JSON Blobs; the Agent requires a plain JSON part.
+        const body = new Blob(
+            [
+                `--${boundary}\r\nContent-Disposition: form-data; name="envelope"\r\n` +
+                    "Content-Type: application/json\r\n\r\n",
+                canonicalJson(envelopeFor(context)),
+                `\r\n--${boundary}\r\nContent-Disposition: form-data; name="document"\r\n` +
+                    "Content-Type: image/jpeg\r\n\r\n",
+                jpeg,
+                `\r\n--${boundary}--\r\n`,
+            ],
+            { type: `multipart/form-data; boundary=${boundary}` },
+        );
         const response = await this.protectedRequest("/v1/device-work", {
             method: "POST",
-            headers: { "Idempotency-Key": context.print_intent_id },
-            body: form,
+            headers: {
+                "Idempotency-Key": context.print_intent_id,
+                "Content-Type": body.type,
+            },
+            body,
         });
         return response.json();
     }

@@ -17,7 +17,10 @@ class TestInariPosAssets(TransactionCase):
         manifest = literal_eval((addon / "__manifest__.py").read_text())
         scripts = {
             path: transpile_javascript("/" + path, (addon.parent / path).read_text())
-            for path in manifest["assets"]["point_of_sale._assets_pos"]
+            for path in [
+                *manifest["assets"]["point_of_sale._assets_pos"],
+                *manifest["assets"]["web.assets_backend"],
+            ]
             if path.endswith(".js")
         }
         result = subprocess.run(

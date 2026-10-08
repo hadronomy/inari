@@ -7,7 +7,7 @@
         "Connects Odoo workflows to Inari Agents through explicit bindings and "
         "content-free audit records. Controller-owned records remain projections."
     ),
-    "version": "19.0.1.2.0",
+    "version": "19.0.1.3.0",
     "category": "Operations",
     "author": "Inari",
     "license": "LGPL-3",
@@ -19,6 +19,17 @@
         "views/inari_devices_views.xml",
     ],
     "assets": {
+        "web.assets_backend": [
+            "inari_devices/static/src/submission_context.js",
+            "inari_devices/static/src/recovery_store.js",
+            "inari_devices/static/src/print_recovery.js",
+            "inari_devices/static/src/client_pairing.js",
+            "inari_devices/static/src/agent_client.js",
+            "inari_devices/static/src/test_receipt_runner.js",
+            "inari_devices/static/src/test_receipt_dialog.js",
+            "inari_devices/static/src/test_receipt_dialog.xml",
+            "inari_devices/static/src/test_receipt_dialog.scss",
+        ],
         "point_of_sale._assets_pos": [
             "inari_devices/static/src/submission_context.js",
             "inari_devices/static/src/recovery_store.js",

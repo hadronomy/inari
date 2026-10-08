@@ -150,8 +150,15 @@ describe("Odoo Inari receipt core", () => {
             fetches[0].headers.get("Idempotency-Key"),
             fetches[1].headers.get("Idempotency-Key"),
         );
-        assert.equal(fetches[0].body.get("envelope").type.startsWith("application/json"), true);
-        assert.equal(fetches[0].body.get("document").type, "image/jpeg");
+        const wire = await fetches[0].body.text();
+        const boundary = fetches[0].headers.get("Content-Type").split("boundary=")[1];
+        assert.ok(boundary);
+        assert.ok(wire.startsWith(`--${boundary}\r\n`));
+        assert.ok(wire.endsWith(`\r\n--${boundary}--\r\n`));
+        assert.ok(wire.includes('name="envelope"\r\nContent-Type: application/json\r\n\r\n'));
+        assert.ok(wire.includes('name="document"\r\nContent-Type: image/jpeg\r\n\r\njpeg'));
+        assert.ok(!wire.includes("filename="));
+        assert.equal(await fetches[0].body.text(), await fetches[1].body.text());
     });
 
     test("queries Print Jobs by stable Print Intent identity", async () => {
