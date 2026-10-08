@@ -53,6 +53,7 @@ export class TestReceiptDialog extends Component {
             rows: [],
             error: "",
             pairing: null,
+            physicallyChecked: false,
         });
         this.clients = new Map();
         this.managers = new Map();
@@ -88,6 +89,16 @@ export class TestReceiptDialog extends Component {
     get canPrint() {
         return Boolean(this.channel) && !this.state.busy && !this.state.rows.length;
     }
+    get canClear() {
+        return (
+            !this.state.busy &&
+            this.runner.canClear &&
+            (!this.runner.needsPhysicalCheck || this.state.physicallyChecked)
+        );
+    }
+    get needsPhysicalCheck() {
+        return this.runner.needsPhysicalCheck;
+    }
     get printLabel() {
         return this.state.selection === "both"
             ? _t("Print both receipts")
@@ -110,6 +121,7 @@ export class TestReceiptDialog extends Component {
         this.state.printerId = event.target.value;
         this.state.channelIndex = "0";
         this.state.error = "";
+        this.state.physicallyChecked = false;
         try {
             await this.restore();
         } catch (error) {
@@ -194,6 +206,21 @@ export class TestReceiptDialog extends Component {
         } finally {
             this.state.busy = false;
             this.scheduleRefresh();
+        }
+    }
+
+    async newTest() {
+        if (!this.canClear) return;
+        this.state.busy = true;
+        try {
+            await this.runner.clear({ physicallyChecked: this.state.physicallyChecked });
+            this.state.rows = [];
+            this.state.physicallyChecked = false;
+            this.state.error = "";
+        } catch (error) {
+            this.state.error = error.message;
+        } finally {
+            this.state.busy = false;
         }
     }
 }

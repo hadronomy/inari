@@ -34,6 +34,13 @@ saved in the browser. Reopening the dialog checks these jobs before another
 batch can print. **Check result** reconciles the original Print Intents; it does
 not submit new copies. If the result is unknown, inspect the printer first.
 
+After a confirmed or terminal result, select **New test** to clear the completed
+batch. For unknown output, confirm that you checked the printer first. This
+action preserves the old jobs and submits nothing. The next print action creates
+a deliberate new batch. Queued and active jobs cannot be cleared this way.
+
+Preparation printers use their existing preparation Binding and origin.
+
 The dialog uses native radio buttons, labeled selectors, Odoo's keyboard-aware
 Dialog, and live result announcements. Receipt previews are optional. The print
 button stays disabled while a request is pending or the setup is incomplete.

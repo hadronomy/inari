@@ -7,7 +7,7 @@ import { MemoryRecoveryStore } from "../inari_devices/static/src/recovery_store.
 
 const printer = { device_id: "printer-2", name: "Other printer" };
 const channel = {
-    binding: { device_id: "printer-2", binding_revision_id: "binding-2" },
+    binding: { device_id: "printer-2", binding_revision_id: "binding-2", purpose: "pos_receipt" },
     pos_session_id: "session-2",
 };
 
@@ -126,4 +126,72 @@ test("no receipt enters the queue for a mismatched printer", async () => {
         /exact authorized printer/,
     );
     assert.equal(submissions.length, 0);
+});
+
+test("preparation printers keep the authorized preparation origin", async () => {
+    const { runner, client, submissions } = fixture();
+    await runner.print({
+        printer,
+        channel: { ...channel, binding: { ...channel.binding, purpose: "pos_preparation" } },
+        selection: "both",
+        client,
+    });
+    for (const { context } of submissions) {
+        assert.equal(context.origin.kind, "preparation");
+        assert.equal(context.origin.document_kind, "preparation_ticket");
+        assert.equal(
+            context.origin.preparation_revision,
+            `sha256:${context.origin.content_revision}`,
+        );
+        assert.equal(context.origin.segment_kind, "new");
+        assert.equal(context.origin.segment_index, 0);
+    }
+});
+
+test("terminal failure can be resolved before a deliberate new test", async () => {
+    const { runner, client, submissions, store } = fixture();
+    client.queryPrintJobs = async (ids) => ({
+        jobs: ids.map((id) => ({
+            print_intent_id: id,
+            print_job_id: "job-1",
+            state: "failed",
+            state_version: 2,
+        })),
+        missing_print_intent_ids: [],
+        high_water_mark: 2,
+    });
+    await runner.print({ printer, channel, selection: "inari", client });
+    assert.equal(runner.canClear, false);
+    await assert.rejects(runner.clear(), /reconcile pending/);
+    await runner.refresh();
+    const firstIntent = runner.rows[0].key;
+    assert.equal(runner.canClear, true);
+    await runner.clear();
+    assert.equal((await store.list()).length, 0);
+    assert.equal((await store.getSettled(firstIntent)).resolution, "finish_without_ticket");
+    await runner.print({ printer, channel, selection: "inari", client });
+    assert.equal(submissions.length, 2);
+    assert.notEqual(submissions[1].context.print_intent_id, firstIntent);
+});
+
+test("unknown output needs explicit physical inspection before a new test", async () => {
+    const { runner, client, submissions } = fixture();
+    client.queryPrintJobs = async (ids) => ({
+        jobs: ids.map((id) => ({
+            print_intent_id: id,
+            print_job_id: "job-1",
+            state: "outcome_unknown",
+            state_version: 2,
+        })),
+        missing_print_intent_ids: [],
+        high_water_mark: 2,
+    });
+    await runner.print({ printer, channel, selection: "inari", client });
+    await runner.refresh();
+    assert.equal(runner.needsPhysicalCheck, true);
+    await assert.rejects(runner.clear(), /Check the printer/);
+    assert.equal(submissions.length, 1);
+    await runner.clear({ physicallyChecked: true });
+    assert.equal(submissions.length, 1);
+    assert.equal(runner.rows.length, 0);
 });

@@ -331,3 +331,13 @@ msgstr "La autorización guardada de la impresora no está disponible."
 msgid "The test receipt dialog was closed."
 msgstr "Se cerró el diálogo de recibos de prueba."
 
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "New test"
+msgstr "Nueva prueba"
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "I checked the printer and want to start a new test."
+msgstr "Comprobé la impresora y quiero iniciar una nueva prueba."

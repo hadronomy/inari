@@ -118,6 +118,12 @@ class TestPrinterReceipts(TransactionCase):
             devices.get_test_receipt_options(self.device.id)
 
     def test_active_binding_uses_exact_session_and_printer(self):
+        self._check_active_binding("pos_receipt")
+
+    def test_active_preparation_printer_keeps_its_authorized_purpose(self):
+        self._check_active_binding("pos_preparation")
+
+    def _check_active_binding(self, purpose):
         self.env["ir.config_parameter"].sudo().set_param(
             "web.base.url", "https://odoo.example"
         )
@@ -141,6 +147,16 @@ class TestPrinterReceipts(TransactionCase):
                 1,
             )
         )
+        pos_printer = (
+            self.env["pos.printer"].create(
+                {
+                    "name": "Preparation receipt printer",
+                    "pos_config_ids": [(4, config.id)],
+                }
+            )
+            if purpose == "pos_preparation"
+            else self.env["pos.printer"]
+        )
         binding = (
             self.env["inari.device.binding"]
             .sudo()
@@ -149,7 +165,8 @@ class TestPrinterReceipts(TransactionCase):
                     "company_id": self.company.id,
                     "site_id": self.site.id,
                     "scope_type": "pos_config",
-                    "purpose": "pos_receipt",
+                    "purpose": purpose,
+                    "pos_printer_id": pos_printer.id,
                     "pos_config_id": config.id,
                 }
             )
@@ -184,6 +201,7 @@ class TestPrinterReceipts(TransactionCase):
             .get_test_receipt_options(self.device.id)
         )
         channel = options[0]["channels"][0]
+        self.assertEqual(channel["binding"]["purpose"], purpose)
         self.assertEqual(channel["pos_session_id"], str(session.id))
         self.assertEqual(channel["binding"]["device_id"], self.device.device_id)
         self.assertEqual(

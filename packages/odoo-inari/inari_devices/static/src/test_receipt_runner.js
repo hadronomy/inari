@@ -1,7 +1,16 @@
 /** @odoo-module */
 
 import { PrintRecoveryCoordinator } from "./print_recovery";
-import { createReceiptPlan, materializeSubmissionContext } from "./submission_context";
+import { createLocalPrintPlan, materializeSubmissionContext } from "./submission_context";
+
+const CLEARABLE_STATES = new Set([
+    "output_confirmed",
+    "failed",
+    "expired",
+    "canceled",
+    "outcome_unknown",
+    "content_unavailable",
+]);
 
 export const TEST_RECEIPTS = Object.freeze([
     Object.freeze({
@@ -60,10 +69,25 @@ export class TestReceiptRunner {
                 const jpeg = await response.blob();
                 if (jpeg.type !== "image/jpeg")
                     throw new TypeError("The test receipt must be JPEG");
-                const plan = createReceiptPlan({
+                const preparation = channel.binding.purpose === "pos_preparation";
+                // oxlint-disable-next-line no-await-in-loop
+                const digest = preparation
+                    ? new Uint8Array(
+                          await this.cryptoApi.subtle.digest("SHA-256", await jpeg.arrayBuffer()),
+                      )
+                    : null;
+                const plan = createLocalPrintPlan({
                     binding: channel.binding,
                     order: { uuid: this.cryptoApi.randomUUID(), nb_print: 0 },
                     posSessionId: channel.pos_session_id,
+                    copyOrdinal: 1,
+                    documentKind: preparation ? "preparation_ticket" : "customer_receipt",
+                    originKind: preparation ? "preparation" : "pos",
+                    preparationRevision: digest
+                        ? `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`
+                        : null,
+                    segmentIndex: preparation ? 0 : null,
+                    segmentKind: preparation ? "new" : null,
                     randomUUID: () => this.cryptoApi.randomUUID(),
                 });
                 // oxlint-disable-next-line no-await-in-loop
@@ -114,6 +138,40 @@ export class TestReceiptRunner {
                 }
             }
             return this.rows;
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    get canClear() {
+        return (
+            !this.busy &&
+            this.rows.length > 0 &&
+            this.rows.every(({ state }) => CLEARABLE_STATES.has(state))
+        );
+    }
+
+    get needsPhysicalCheck() {
+        return this.rows.some(({ state }) =>
+            ["outcome_unknown", "content_unavailable"].includes(state),
+        );
+    }
+
+    async clear({ physicallyChecked = false } = {}) {
+        if (!this.canClear || (this.needsPhysicalCheck && !physicallyChecked)) {
+            throw new Error(
+                "Check the printer and reconcile pending jobs before starting another test",
+            );
+        }
+        this.busy = true;
+        try {
+            for (const { key, state } of this.rows) {
+                if (state !== "output_confirmed") {
+                    // oxlint-disable-next-line no-await-in-loop
+                    await this.recovery.act(key, "finish_without_ticket");
+                }
+            }
+            this.rows = [];
         } finally {
             this.busy = false;
         }

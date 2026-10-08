@@ -56,11 +56,16 @@
                         </li>
                     </ul>
                     <p t-if="state.rows.length" class="text-muted mt-2 mb-0">View the jobs in Device Center → Activity. If a result is unknown, check the printer before you send another copy.</p>
+                    <label t-if="needsPhysicalCheck" class="inari-test-receipts__choice">
+                        <input type="checkbox" class="form-check-input" t-model="state.physicallyChecked" t-att-disabled="state.busy"/>
+                        <span>I checked the printer and want to start a new test.</span>
+                    </label>
                 </div>
             </div>
             <t t-set-slot="footer">
                 <button t-if="!state.rows.length" type="button" class="btn btn-primary" t-att-disabled="!canPrint" t-on-click="print"><t t-esc="state.busy ? 'Connecting…' : printLabel"/></button>
                 <button t-else="" type="button" class="btn btn-secondary" t-att-disabled="state.busy" t-on-click="refresh">Check result</button>
+                <button t-if="state.rows.length" type="button" class="btn btn-primary" t-att-disabled="!canClear" t-on-click="newTest">New test</button>
                 <button type="button" class="btn btn-link" t-on-click="props.close">Close</button>
             </t>
         </Dialog>
