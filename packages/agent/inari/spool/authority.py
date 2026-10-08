@@ -167,6 +167,8 @@ class SqlActiveAuthorityGuard:
             now=now,
             code=ProblemCode.CAPABILITY_CHANGED,
         )
+        _check_manifest_membership(admitted_revision, proof)
+        _check_manifest_membership(current_revision, proof)
 
         binding = _one(
             connection,
@@ -185,7 +187,6 @@ class SqlActiveAuthorityGuard:
                 "matrix_row_id": proof.matrix_row_id,
                 "options_digest": _bytes(proof.options_digest),
                 "device_purpose": proof.purpose,
-                "authority_revision_id": proof.authority_revision_id,
             },
             ProblemCode.CAPABILITY_CHANGED,
         )
@@ -200,7 +201,6 @@ class SqlActiveAuthorityGuard:
         )
         if expected_scope_digest != proof.scope_digest:
             raise SpoolAdmissionError(ProblemCode.CAPABILITY_CHANGED)
-        _check_window(binding, now, ProblemCode.CAPABILITY_CHANGED)
         _check_signer(
             connection,
             binding,
@@ -219,7 +219,6 @@ class SqlActiveAuthorityGuard:
             profile,
             {
                 "profile_digest": _bytes(proof.driver_profile_digest),
-                "authority_revision_id": proof.authority_revision_id,
             },
             ProblemCode.CAPABILITY_CHANGED,
         )
@@ -247,7 +246,6 @@ class SqlActiveAuthorityGuard:
                 "device_identity_digest": _bytes(proof.device_identity_digest),
                 "driver_profile_digest": _bytes(proof.driver_profile_digest),
                 "capability_id": proof.capability_id,
-                "authority_revision_id": proof.authority_revision_id,
             },
             ProblemCode.CERTIFICATION_REQUIRED,
         )
@@ -277,7 +275,6 @@ class SqlActiveAuthorityGuard:
                 "matrix_row_id": proof.matrix_row_id,
                 "capability_id": proof.capability_id,
                 "result": "passed",
-                "authority_revision_id": proof.authority_revision_id,
             },
             ProblemCode.CERTIFICATION_REQUIRED,
         )
@@ -351,6 +348,68 @@ class SqlActiveAuthorityGuard:
                 digest=digest,
                 code=code,
             )
+
+
+def _check_manifest_membership(revision: RowMapping, proof: AuthorityProof) -> None:
+    try:
+        manifest = json.loads(revision["manifest"])
+        if (
+            not isinstance(manifest, dict)
+            or canonical_digest(manifest) != _digest(revision["manifest_digest"])
+            or canonical_digest(manifest["scope"]) != proof.scope_digest
+        ):
+            raise ValueError("The signed manifest differs from the proof scope.")
+        for group, body, identifier, record_id, digest in (
+            (
+                "bindings",
+                "revision",
+                "revision_id",
+                proof.binding_revision_id,
+                proof.binding_revision_digest,
+            ),
+            (
+                "profiles",
+                "profile",
+                "profile_id",
+                proof.driver_profile_id,
+                proof.driver_profile_digest,
+            ),
+            (
+                "certification_rows",
+                "row",
+                "row_id",
+                proof.matrix_row_id,
+                proof.matrix_row_digest,
+            ),
+            (
+                "evidence",
+                "evidence",
+                "evidence_id",
+                proof.test_evidence_id,
+                proof.test_evidence_digest,
+            ),
+        ):
+            if not isinstance(manifest[group], list):
+                raise ValueError("The signed manifest record set is invalid.")
+            matches = [
+                item for item in manifest[group] if item[body][identifier] == record_id
+            ]
+            if len(matches) != 1 or matches[0]["digest"] != digest:
+                raise ValueError(
+                    "The authority record is absent from the signed manifest."
+                )
+        if not isinstance(manifest["activations"], list) or (
+            manifest["activations"].count(
+                {
+                    "revision_id": proof.binding_revision_id,
+                    "evidence_id": proof.test_evidence_id,
+                }
+            )
+            != 1
+        ):
+            raise ValueError("The Binding Revision is absent from the activation set.")
+    except (KeyError, TypeError, ValueError):
+        raise SpoolAdmissionError(ProblemCode.CAPABILITY_CHANGED) from None
 
 
 def _one(

@@ -105,6 +105,53 @@ def _migrate(
     database_path = tmp_path / "agent.sqlite3"
     DatabaseMigrator(database_path).ensure_current()
     with sqlite3.connect(database_path) as connection:
+        proofs = tuple(
+            _authority_proof_for(device_id, purpose=purpose)
+            for device_id in ("device-1", "device-2", "device-3")
+        )
+        manifest = {
+            "scope": {
+                "database": "odoo",
+                "organization_id": "org-1",
+                "site_id": "site-1",
+                "kind": "pos_configuration",
+                "pos_configuration_id": "pos-1",
+            },
+            "profiles": [
+                {
+                    "profile": {"profile_id": proofs[0].driver_profile_id},
+                    "digest": proofs[0].driver_profile_digest,
+                }
+            ],
+            "bindings": [
+                {
+                    "revision": {"revision_id": proof.binding_revision_id},
+                    "digest": proof.binding_revision_digest,
+                }
+                for proof in proofs
+            ],
+            "certification_rows": [
+                {
+                    "row": {"row_id": proof.matrix_row_id},
+                    "digest": proof.matrix_row_digest,
+                }
+                for proof in proofs
+            ],
+            "evidence": [
+                {
+                    "evidence": {"evidence_id": proof.test_evidence_id},
+                    "digest": proof.test_evidence_digest,
+                }
+                for proof in proofs
+            ],
+            "activations": [
+                {
+                    "revision_id": proof.binding_revision_id,
+                    "evidence_id": proof.test_evidence_id,
+                }
+                for proof in proofs
+            ],
+        }
         for device_id in ("device-1", "device-2", "device-3"):
             connection.execute(
                 """
@@ -127,6 +174,7 @@ def _migrate(
                 connection,
                 _authority_proof_for(device_id, purpose=purpose),
                 output_evidence=output_evidence,
+                manifest=manifest,
             )
     return database_path
 
@@ -177,6 +225,7 @@ def _seed_authority_graph(
     proof: AuthorityProof,
     *,
     output_evidence: str = "transport",
+    manifest: dict,
 ) -> None:
     timestamps = (
         proof.issued_at.isoformat().replace("+00:00", "Z"),
@@ -201,16 +250,17 @@ def _seed_authority_graph(
         """
         INSERT OR IGNORE INTO device_authority_revisions (
             revision_id, revision_number, manifest_digest, effective_at,
-            expires_at, revision_digest, signer_key_id, signature
-        ) VALUES (?, ?, ?, ?, ?, ?, 'authority-key', ?)
+            expires_at, revision_digest, signer_key_id, signature, manifest
+        ) VALUES (?, ?, ?, ?, ?, ?, 'authority-key', ?, ?)
         """,
         (
             proof.authority_revision_id,
             proof.authority_revision_number,
-            b"m" * 32,
+            bytes.fromhex(canonical_digest(manifest)),
             *timestamps,
             bytes.fromhex(proof.authority_revision_digest),
             b"s" * 64,
+            json.dumps(manifest),
         ),
     )
     connection.execute(

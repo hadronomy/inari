@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from alembic import command
 from sqlalchemy import insert, select, func
 from sqlalchemy.exc import IntegrityError
 
@@ -60,12 +61,13 @@ def installation(tmp_path):
     signed = projections.authority_state.current_revision
     key = projections.private_keys[signed.signer_key_id]
 
-    def bundle_for(manifest=manifest, number=1):
+    def bundle_for(manifest=manifest, number=1, *, expires_at=None):
         revision = replace(
             signed.revision,
             revision_id=f"authority-{number}",
             revision_number=number,
             manifest_digest=canonical_digest(manifest.model_dump(mode="json")),
+            expires_at=expires_at or signed.revision.expires_at,
         )
         return AuthorityBundle(
             revision=SignedAuthorityRevision(
@@ -191,15 +193,9 @@ def test_installed_manifest_is_immutable(installation):
 def test_device_test_rejects_a_historical_revision_without_a_manifest(installation):
     installer, store, bundle_for, observations, target, now = installation
     installer.install(bundle_for(), now=now)
-    with store.connection() as connection:
-        connection.exec_driver_sql("DROP TABLE device_tests")
-        connection.exec_driver_sql(
-            "ALTER TABLE device_authority_revisions DROP COLUMN manifest"
-        )
-        connection.exec_driver_sql(
-            "UPDATE alembic_version SET version_num='20260906_0016'"
-        )
-    DatabaseMigrator(Path(store.engine.url.database)).ensure_current()
+    migrator = DatabaseMigrator(Path(store.engine.url.database))
+    command.downgrade(migrator._build_alembic_config(), "20260906_0016")
+    migrator.ensure_current()
     authority = DeviceCapabilityAuthority(
         projections=SqliteDeviceAuthorityReader(store),
         observations=observations,

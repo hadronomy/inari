@@ -122,6 +122,21 @@ revision has no effect. Older revisions, changed immutable records, and
 same-number revision replacements are rejected. Import cannot clear Agent
 Quarantine. Existing signed records remain available for audit and recovery.
 
+A later bundle can retain the exact signed Driver Profile, matrix row, Binding
+Revision, and Device Test evidence. Their storage records retain the revision
+that first installed them. Receipt admission uses membership in the signed
+manifest, including the exact record digests and binding activation. The
+publication and Device I/O checks require that membership in both the admission
+revision and the current revision. A withdrawn record closes admission.
+
+The Agent migration `20261008_0019` changes the authority proof trigger to check
+manifest membership. It preserves the signed records and their installation
+provenance. Database migration creates a backup before it changes the trigger.
+The original bundle dates on a stored Binding Revision describe installation
+provenance. Admission uses the signed authority revision's validity window.
+Driver Profiles, matrix rows, Device Test evidence, and signers retain their
+own validity checks.
+
 Each revision retains its signed manifest. Device Test authorization requires
 the exact Binding Revision, Driver Profile, and certification row in the current
 manifest. A newer manifest can withdraw a graph while its historical records
