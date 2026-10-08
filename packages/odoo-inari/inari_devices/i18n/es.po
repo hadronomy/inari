@@ -247,15 +247,6 @@ msgstr "Apruebe este navegador en Device Center"
 #: model_terms:ir.ui.view,arch_db:inari_devices.view_inari_device_tree
 #: model_terms:ir.ui.view,arch_db:inari_devices.view_inari_device_form
 #: code:addons/inari_devices/models/test_receipts.py:0
-msgid "On the Agent Host, check this phrase before you approve the Pairing Request:"
-msgstr "En el equipo del Agent, compruebe esta frase antes de aprobar la solicitud de vinculación:"
-
-#. module: inari_devices
-#: code:addons/inari_devices/static/src/test_receipt_dialog.js:0
-#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
-#: model_terms:ir.ui.view,arch_db:inari_devices.view_inari_device_tree
-#: model_terms:ir.ui.view,arch_db:inari_devices.view_inari_device_form
-#: code:addons/inari_devices/models/test_receipts.py:0
 msgid "Connecting this browser securely…"
 msgstr "Conectando este navegador de forma segura…"
 
@@ -341,3 +332,28 @@ msgstr "Nueva prueba"
 #: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
 msgid "I checked the printer and want to start a new test."
 msgstr "Comprobé la impresora y quiero iniciar una nueva prueba."
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "On the computer connected to the printer, open Device Center → Client Pairing."
+msgstr "En el equipo conectado a la impresora, abra Device Center → Client Pairing."
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "Open Device Center on this computer"
+msgstr "Abrir Device Center en este equipo"
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "Pairing Request ID"
+msgstr "ID de la solicitud de vinculación"
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "If the link does not open, or the printer uses another computer, paste this ID in Client Pairing and select Review request."
+msgstr "Si el enlace no se abre, o la impresora usa otro equipo, pegue este ID en Client Pairing y seleccione Review request."
+
+#. module: inari_devices
+#: code:addons/inari_devices/static/src/test_receipt_dialog.xml:0
+msgid "Check that every word below matches Device Center, then select Approve browser. Keep this dialog open; printing continues after approval."
+msgstr "Compruebe que todas las palabras de abajo coincidan con Device Center y seleccione Approve browser. Mantenga este diálogo abierto; la impresión continúa tras la aprobación."

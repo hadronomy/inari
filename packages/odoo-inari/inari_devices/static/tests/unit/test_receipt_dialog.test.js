@@ -15,7 +15,7 @@ class ReceiptDialog extends TestReceiptDialog {
     }
 }
 
-test("test receipts render and select numeric printer IDs", async () => {
+test("test receipts render printer selection and browser approval steps", async () => {
     const services = registry.category("services");
     clearRegistry(registry.category("main_components"));
     const dialogServices = ["ui", "hotkey", "localization"].map((name) => [
@@ -49,9 +49,19 @@ test("test receipts render and select numeric printer IDs", async () => {
     expect(dialog.printer.id).toBe(73);
     expect(dialog.channel.label).toBe("POS 73");
 
+    dialog.state.pairing = {
+        name: "awaiting_approval",
+        requestId: "req_receipt_test",
+        phrase: "maple river cloud stone",
+    };
     await contains("#inari-test-printer").select("42");
 
     expect("#inari-test-printer").toHaveValue("42");
     expect(dialog.printer.id).toBe(42);
     expect(dialog.channel.label).toBe("POS 42");
+    expect("#inari-test-pairing-request").toHaveValue("req_receipt_test");
+    expect(".inari-test-receipts a").toHaveAttribute("href", "inari://pairing/req_receipt_test");
+    expect(".inari-test-receipts").toHaveText(/Review request/);
+    expect(".inari-test-receipts").toHaveText(/Approve browser/);
+    expect(".inari-test-receipts").toHaveText(/maple river cloud stone/);
 });
