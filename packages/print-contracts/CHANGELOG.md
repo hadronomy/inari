@@ -1,3 +1,161 @@
+## inari-print-contracts@1.20.0-alpha.14
+
+### Preserve Windows print queue completion evidence
+
+Complete Windows RAW receipt and label submissions now report confirmed spooler
+evidence. The Agent ledger and Controller preserve the reported evidence level.
+This result means that Windows accepted the complete document into its print
+queue. It does not prove physical output.
+
+Deploy the matching Controller image from the same Release Set with this Agent.
+
+Partial writes, failed completion calls, and worker timeouts retain an unknown
+outcome. They do not trigger another physical submission.
+
+### Honor the Device selection in native Setup
+
+The Agent publishes only the Devices selected for the current Controller.
+Unselected Devices remain available in the local catalog. New Controller Device
+actions and Managed Device Work require the current selection. Accepted retries
+retain their result after selection changes. A new invitation clears the selection.
+
+### Finish Agent restarts after a reset connection
+
+The Agent limits its wait for HTTP connections during shutdown to five seconds.
+A reset Windows connection can no longer block the runtime restart indefinitely.
+The Agent completes application cleanup before it starts the next runtime.
+
+### Keep the Setup review and actions reachable
+
+Setup now scrolls the full invitation review at the minimum window size.
+Short forms stay centered. The review labels identify the Controller and its
+address before you connect this computer.
+
+### Publish selected Devices to the Controller
+
+The Agent publishes transport and identity digests for selected Devices.
+The Controller maintains each Agent's Device Projection from validated snapshots.
+Older snapshots and exact retries cannot replace current Device observations.
+Separate Agents can use the same host-local Device identifier without a collision.
+Credential retirement clears the Agent's Projection.
+Discovery does not grant Managed Device Work capabilities.
+
+Upgrade every Agent before deploying the Controller.
+Older Agents lack required inventory fields and cannot enroll or publish snapshots
+to the new Controller.
+
+Stop old Controller replicas before the Device schema migration.
+The Helm migration hook runs before the Deployment update.
+Keep old replicas at zero until the migration completes.
+The migration clears derived Device rows and preserves publication history.
+A rollback requires a matching Recovery Point and Release Set.
+
+### Keep Device Center connected to the Agent
+
+Device Center uses the authenticated native event stream for live Device and
+Device Work updates. The stream keeps the trusted local HTTPS connection and
+checks authentication throughout the connection. Browser Device Streams retain
+their signed, scoped contract.
+
+### Keep Device Center connected after secure setup
+
+Device Center selects its TLS provider for the local event stream and uses the
+operating system's certificate verifier. A build with multiple TLS providers
+can connect without a process-wide provider setting.
+
+Overview no longer shows a successful setup message as an Agent connection
+error.
+
+### Keep small Windows icons transparent
+
+The smallest Windows icons now keep transparent corners. Each executable icon
+size uses the same rendering as the package assets.
+
+### Print the complete diagnostic receipt
+
+The receipt diagnostic now prints the saved pattern with Spanish accents,
+Code 128, a QR code, feed, and partial cut. Live Controller commands reach the
+Agent without a restart. The diagnostic does not activate a Device Binding.
+
+Receipt images are centered within the print width. The print command advances
+the complete receipt to the cutter before the partial cut.
+
+### Execute receipt Device Tests through the Local Agent Interface
+
+Device Managers can send the fixed receipt pattern through an approved Device
+and Binding Revision. The Agent records one execution per Test ID and signs
+the result after text, accents, Code 128, QR, and feed-and-cut checks.
+
+Retries return the existing result. Uncertain output and Agent restarts do not
+send another receipt. A passed result remains separate from Binding activation.
+The Windows Agent package includes the fixed pattern.
+
+When the worker cannot stop, the Device stays reserved until Agent Administrator
+repair.
+
+The reservation covers worker preparation, including preparation that reaches
+the execution deadline. An expired Test cannot start Device I/O. A repeated
+execution cannot start another worker for the same Test.
+
+Test IDs remain addressable by the query and physical-answer routes.
+Both OpenAPI contracts declare the required `Idempotency-Key` header.
+
+### Show the current Agent connection at startup
+
+Device Center now shows the current Agent connection when its window opens.
+A fast local connection no longer leaves the window at Opening the local
+connection. If the event stream closes, Device Center shows Reconnecting
+while it waits for the next connection attempt.
+
+### Start isolated printer workers in the Windows package
+
+The packaged Agent starts its printer workers through the frozen executable.
+Device Tests and queued receipts can reach the printer without blocking the
+Agent during worker startup. Windows builds now verify this startup path with
+synthetic content and no Device I/O permit.
+
+### Pair browsers through the configured HTTPS Agent Endpoint
+
+Browser pairing and Device Work now use the configured HTTPS hostname when
+the local socket address is an IP. The Agent retains the Host, listener port,
+TLS scheme, and DPoP checks.
+
+Odoo can read the DPoP challenge headers and retry with the required nonce.
+
+### Connect the Odoo Devices list to the Controller
+
+Administrators can connect one Odoo company to its Controller Organization and
+synchronize its Sites, Agents, and Devices. Scheduled synchronization preserves
+the last complete inventory if authentication or the Controller fails. Device
+discovery does not activate a receipt binding or replace a Device Test.
+
+### Show Odoo receipts in Device Center Activity
+
+Activity now includes receipt Print Jobs from the protected Agent queue.
+It shows the Device, Odoo source, current state, and Output Evidence.
+Receipt history returns after reconnection and updates while the window stays open.
+Outcome Unknown asks the operator to check physical output before a Reprint.
+The history contains no receipt content.
+
+Upgrade the Agent and Device Center together for the native monitor contract.
+
+### Accept receipts after a signed authority update
+
+Receipt admission now accepts unchanged signed device records that a later
+authority bundle retains. It checks each record digest and binding activation
+against the signed manifest. Records withdrawn by a later bundle cannot
+authorize receipt output.
+
+### Print both test receipts from Odoo
+
+Device Managers can open Test receipts from the Devices toolbar, a printer row,
+or the printer page. Choose the INARI check, the full MIZONA sample, or both.
+The dialog shows the target printer, secure pairing, and each job's result.
+Pending jobs keep their identity when the dialog reopens. Test prints also
+appear in Device Center Activity.
+Completed tests can be cleared to start a new test. An unknown result needs a
+physical printer check first. Preparation printers use their authorized scope.
+
 ## inari-print-contracts@1.20.0-alpha.13
 
 ### Restore pairing between Device Center and the agent
