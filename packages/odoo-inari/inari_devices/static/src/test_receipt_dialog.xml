@@ -42,7 +42,12 @@
                 <div t-if="state.pairing" class="alert alert-info mt-3" role="status">
                     <t t-if="state.pairing.name === 'awaiting_approval'">
                         <strong>Approve this browser in Device Center</strong>
-                        <p class="mb-1">On the Agent Host, check this phrase before you approve the Pairing Request:</p>
+                        <p class="mb-2">On the computer connected to the printer, open Device Center → Client Pairing.</p>
+                        <a class="btn btn-secondary mb-2" t-att-href="'inari://pairing/' + state.pairing.requestId">Open Device Center on this computer</a>
+                        <label for="inari-test-pairing-request" class="form-label d-block">Pairing Request ID</label>
+                        <input id="inari-test-pairing-request" class="form-control mb-2" type="text" readonly="readonly" t-att-value="state.pairing.requestId"/>
+                        <p class="mb-2">If the link does not open, or the printer uses another computer, paste this ID in Client Pairing and select Review request.</p>
+                        <p class="mb-1">Check that every word below matches Device Center, then select Approve browser. Keep this dialog open; printing continues after approval.</p>
                         <strong class="fs-5" t-esc="state.pairing.phrase"/>
                     </t>
                     <t t-else="">Connecting this browser securely…</t>
